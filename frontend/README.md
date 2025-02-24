@@ -17,7 +17,8 @@ This is an experimental Rust-based implementation of the Meeting Minutes AI assi
 - Rust (latest stable)
 - pnpm (v8 or later)
 - macOS (for system audio capture)
-- Xcode Command Line Tools
+- [Xcode Command Line Tools 16.2](https://developer.apple.com/download/all/?q=xcode) (Released December 11, 2024)
+
 
 ## Project Structure
 
@@ -41,17 +42,12 @@ The main project structure is:
 1. Clone the main repository:
    ```bash
    git clone <repository-url>
-   cd meeting-minutes
+   cd meeting-minutes/frontend
    ```
 
-2. Clone screenpipe (required for audio capture):
-   ```bash
-   cd experiment
-   git clone https://github.com/mediar-ai/screenpipe.git
-   cd rust_based_implementation
-   ```
 
-3. Install dependencies:
+
+2. Install dependencies:
    ```bash
    pnpm install
    ```

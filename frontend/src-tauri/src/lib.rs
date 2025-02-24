@@ -415,100 +415,100 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                 let chunk_num = chunk_counter_clone.fetch_add(1, Ordering::SeqCst);
                 log_info!("Processing chunk {}", chunk_num);
                 
-                // Save mic chunk
-                if !mic_samples.is_empty() {
-                    let mic_chunk_path = debug_dir.join(format!("chunk_{}_mic.wav", chunk_num));
-                    log_info!("Saving mic chunk to {:?}", mic_chunk_path);
-                    let mic_bytes: Vec<u8> = mic_samples.iter()
-                        .flat_map(|&sample| {
-                            let clamped = sample.max(-1.0).min(1.0);
-                            clamped.to_le_bytes().to_vec()
-                        })
-                        .collect();
-                    if let Err(e) = encode_single_audio(
-                        &mic_bytes,
-                        WAV_SAMPLE_RATE,
-                        1, // Mono for mic
-                        &mic_chunk_path,
-                    ) {
-                        log_error!("Failed to save mic chunk {}: {}", chunk_num, e);
-                    } else {
-                        log_info!("Successfully saved mic chunk {} with {} samples", chunk_num, mic_samples.len());
-                    }
-                } else {
-                    log_info!("No mic samples to save for chunk {}", chunk_num);
-                }
+                // // Save mic chunk
+                // if !mic_samples.is_empty() {
+                //     let mic_chunk_path = debug_dir.join(format!("chunk_{}_mic.wav", chunk_num));
+                //     log_info!("Saving mic chunk to {:?}", mic_chunk_path);
+                //     let mic_bytes: Vec<u8> = mic_samples.iter()
+                //         .flat_map(|&sample| {
+                //             let clamped = sample.max(-1.0).min(1.0);
+                //             clamped.to_le_bytes().to_vec()
+                //         })
+                //         .collect();
+                //     if let Err(e) = encode_single_audio(
+                //         &mic_bytes,
+                //         WAV_SAMPLE_RATE,
+                //         1, // Mono for mic
+                //         &mic_chunk_path,
+                //     ) {
+                //         log_error!("Failed to save mic chunk {}: {}", chunk_num, e);
+                //     } else {
+                //         log_info!("Successfully saved mic chunk {} with {} samples", chunk_num, mic_samples.len());
+                //     }
+                // } else {
+                //     log_info!("No mic samples to save for chunk {}", chunk_num);
+                // }
 
                 // Save system chunk
-                if !system_samples.is_empty() {
-                    let system_chunk_path = debug_dir.join(format!("chunk_{}_system.wav", chunk_num));
-                    log_info!("Saving system chunk to {:?}", system_chunk_path);
-                    let system_bytes: Vec<u8> = system_samples.iter()
-                        .flat_map(|&sample| {
-                            let clamped = sample.max(-1.0).min(1.0);
-                            clamped.to_le_bytes().to_vec()
-                        })
-                        .collect();
-                    if let Err(e) = encode_single_audio(
-                        &system_bytes,
-                        WAV_SAMPLE_RATE,
-                        2, // Stereo for system
-                        &system_chunk_path,
-                    ) {
-                        log_error!("Failed to save system chunk {}: {}", chunk_num, e);
-                    } else {
-                        log_info!("Successfully saved system chunk {} with {} samples", chunk_num, system_samples.len());
-                    }
-                } else {
-                    log_info!("No system samples to save for chunk {}", chunk_num);
-                }
+                // if !system_samples.is_empty() {
+                //     let system_chunk_path = debug_dir.join(format!("chunk_{}_system.wav", chunk_num));
+                //     log_info!("Saving system chunk to {:?}", system_chunk_path);
+                //     let system_bytes: Vec<u8> = system_samples.iter()
+                //         .flat_map(|&sample| {
+                //             let clamped = sample.max(-1.0).min(1.0);
+                //             clamped.to_le_bytes().to_vec()
+                //         })
+                //         .collect();
+                //     if let Err(e) = encode_single_audio(
+                //         &system_bytes,
+                //         WAV_SAMPLE_RATE,
+                //         2, // Stereo for system
+                //         &system_chunk_path,
+                //     ) {
+                //         log_error!("Failed to save system chunk {}: {}", chunk_num, e);
+                //     } else {
+                //         log_info!("Successfully saved system chunk {} with {} samples", chunk_num, system_samples.len());
+                //     }
+                // } else {
+                //     log_info!("No system samples to save for chunk {}", chunk_num);
+                // }
                 
                 // Save mixed chunk
-                if !chunk_to_send.is_empty() {
-                    let mixed_chunk_path = debug_dir.join(format!("chunk_{}_mixed.wav", chunk_num));
-                    log_info!("Saving mixed chunk to {:?}", mixed_chunk_path);
-                    let mixed_bytes: Vec<u8> = chunk_to_send.iter()
-                        .flat_map(|&sample| {
-                            let clamped = sample.max(-1.0).min(1.0);
-                            clamped.to_le_bytes().to_vec()
-                        })
-                        .collect();
-                    match encode_single_audio(
-                        &mixed_bytes,
-                        WAV_SAMPLE_RATE,
-                        WAV_CHANNELS,
-                        &mixed_chunk_path,
-                    ) {
-                        Ok(_) => {
-                            log_info!("Successfully saved mixed chunk {} with {} samples", chunk_num, chunk_to_send.len());
-                        }
-                        Err(e) => {
-                            // Check if it's a broken pipe error
-                            if e.to_string().contains("Broken pipe") {
-                                log_debug!("Broken pipe while saving chunk {} - this is expected during cleanup", chunk_num);
-                            } else {
-                                log_error!("Failed to save mixed chunk {}: {}", chunk_num, e);
-                            }
-                        }
-                    }
-                } else {
-                    log_info!("No mixed samples to save for chunk {}", chunk_num);
-                }
+                // if !chunk_to_send.is_empty() {
+                //     let mixed_chunk_path = debug_dir.join(format!("chunk_{}_mixed.wav", chunk_num));
+                //     log_info!("Saving mixed chunk to {:?}", mixed_chunk_path);
+                //     let mixed_bytes: Vec<u8> = chunk_to_send.iter()
+                //         .flat_map(|&sample| {
+                //             let clamped = sample.max(-1.0).min(1.0);
+                //             clamped.to_le_bytes().to_vec()
+                //         })
+                //         .collect();
+                //     match encode_single_audio(
+                //         &mixed_bytes,
+                //         WAV_SAMPLE_RATE,
+                //         WAV_CHANNELS,
+                //         &mixed_chunk_path,
+                //     ) {
+                //         Ok(_) => {
+                //             log_info!("Successfully saved mixed chunk {} with {} samples", chunk_num, chunk_to_send.len());
+                //         }
+                //         Err(e) => {
+                //             // Check if it's a broken pipe error
+                //             if e.to_string().contains("Broken pipe") {
+                //                 log_debug!("Broken pipe while saving chunk {} - this is expected during cleanup", chunk_num);
+                //             } else {
+                //                 log_error!("Failed to save mixed chunk {}: {}", chunk_num, e);
+                //             }
+                //         }
+                //     }
+                // } else {
+                //     log_info!("No mixed samples to save for chunk {}", chunk_num);
+                // }
                 
                 // Keep only last 10 chunks
-                if chunk_num > 10 {
-                    if let Ok(entries) = fs::read_dir(&debug_dir) {
-                        for entry in entries.flatten() {
-                            if let Some(name) = entry.file_name().to_str() {
-                                if name.starts_with("chunk_") && 
-                                   name.ends_with(".wav") && 
-                                   !name.contains(&format!("chunk_{}", chunk_num)) {
-                                    let _ = fs::remove_file(entry.path());
-                                }
-                            }
-                        }
-                    }
-                }
+                // if chunk_num > 10 {
+                //     if let Ok(entries) = fs::read_dir(&debug_dir) {
+                //         for entry in entries.flatten() {
+                //             if let Some(name) = entry.file_name().to_str() {
+                //                 if name.starts_with("chunk_") && 
+                //                    name.ends_with(".wav") && 
+                //                    !name.contains(&format!("chunk_{}", chunk_num)) {
+                //                     let _ = fs::remove_file(entry.path());
+                //                 }
+                //             }
+                //         }
+                //     }
+                // }
                 
                 // Process chunk for Whisper API
                 let whisper_samples = if sample_rate != WHISPER_SAMPLE_RATE {
