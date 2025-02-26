@@ -262,3 +262,25 @@ class DatabaseManager:
                 (cutoff,)
             )
             await conn.commit()
+
+    async def add_meeting(self, title: str, date: str, time: Optional[str] = None, attendees: List[str] = None, tags: List[str] = None, content: str = None) -> str:
+        """Add a new meeting record"""
+        meeting_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO meetings (id, title, date, time, attendees, tags, content, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    meeting_id, title, date, time,
+                    json.dumps(attendees or []),
+                    json.dumps(tags or []),
+                    content or "",
+                    now, now
+                )
+            )
+            await conn.commit()
+        return meeting_id

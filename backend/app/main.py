@@ -756,6 +756,31 @@ async def delete_meeting(meeting_id: str):
         logger.error(f"Error deleting meeting {meeting_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to delete meeting")
 
+class AddMeetingRequest(BaseModel):
+    title: str
+    date: str
+    time: Optional[str] = None
+    attendees: List[str] = []
+    tags: List[str] = []
+    content: Optional[str] = None
+
+@app.post("/meetings")
+async def add_meeting(request: AddMeetingRequest):
+    """Add a new meeting"""
+    try:
+        meeting_id = await processor.db.add_meeting(
+            title=request.title,
+            date=request.date,
+            time=request.time,
+            attendees=request.attendees,
+            tags=request.tags,
+            content=request.content
+        )
+        return JSONResponse(status_code=201, content={"message": "Meeting added successfully", "meeting_id": meeting_id})
+    except Exception as e:
+        logger.error(f"Error adding meeting: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to add meeting")
+
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
