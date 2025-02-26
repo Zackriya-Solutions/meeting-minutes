@@ -1,7 +1,7 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { usePathname } from 'next/navigation';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface SidebarItem {
   id: string;
@@ -15,15 +15,18 @@ interface CurrentMeeting {
   title: string;
 }
 
-interface SidebarContextType {
-  currentMeeting: CurrentMeeting | null;
-  setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
-  sidebarItems: SidebarItem[];
+interface SidebarContextProps {
   isCollapsed: boolean;
   toggleCollapse: () => void;
+  expandedFolders: Set<string>;
+  toggleFolder: (folderId: string) => void;
+  sidebarItems: SidebarItem[];
+  setSidebarItems: (items: SidebarItem[]) => void;
+  currentMeeting: CurrentMeeting | null;
+  setCurrentMeeting: (meeting: CurrentMeeting) => void;
 }
 
-const SidebarContext = createContext<SidebarContextType | null>(null);
+const SidebarContext = createContext<SidebarContextProps | null>(null);
 
 export const useSidebar = () => {
   const context = useContext(SidebarContext);
@@ -34,58 +37,64 @@ export const useSidebar = () => {
 };
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const pathname = usePathname();
+  const [expandedFolders, setExpandedFolders] = useState(new Set<string>(['meetings', 'notes']));
+  const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
+  const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>(null);
+  const router = useRouter();
 
-  const baseItems: SidebarItem[] = [
-    {
-      id: 'meetings',
-      title: 'Meetings',
-      type: 'folder' as const,
-      children: [
-        { id: 'team-sync-dec-26', title: 'Team Sync - Dec 26', type: 'file' as const },
-        { id: 'product-review', title: 'Product Review', type: 'file' as const },
-      ]
-    },
-    {
-      id: 'notes',
-      title: 'Notes',
-      type: 'folder' as const,
-      children: [
-        { id: 'project-ideas', title: 'Project Ideas', type: 'file' as const },
-        { id: 'action-items', title: 'Action Items', type: 'file' as const },
-      ]
-    }
-  ];
+  useEffect(() => {
+    const fetchMeetings = async () => {
+      try {
+        const response = await fetch('/meetings');
+        if (!response.ok) throw new Error(`Failed to fetch meetings: ${response.status}`);
 
-  const sidebarItems: SidebarItem[] = baseItems.map(item => {
-    if (item.id === 'meetings' && currentMeeting) {
-      const newItem: SidebarItem = {
-        ...item,
-        children: [
-          { id: currentMeeting.id, title: currentMeeting.title, type: 'file' as const },
-          ...(item.children || []).filter(child => child.id !== currentMeeting.id)
-        ]
-      };
-      return newItem;
-    }
-    return item;
-  });
+        const meetingsData = await response.json();
+        const formattedMeetings: SidebarItem[] = meetingsData.map((meeting: any) => ({
+          id: meeting.id,
+          title: meeting.title,
+          type: 'file',
+        }));
 
-  const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
+        setSidebarItems([
+          {
+            id: 'meetings',
+            title: 'Meetings',
+            type: 'folder',
+            children: formattedMeetings,
+          },
+        ]);
+      } catch (err) {
+        console.error('Error fetching meetings:', err);
+      }
+    };
+
+    fetchMeetings();
+  }, []);
+
+  const toggleCollapse = () => setIsCollapsed((prev) => !prev);
+
+  const toggleFolder = (folderId: string) => {
+    setExpandedFolders((prev) => {
+      const newSet = new Set(prev);
+      newSet.has(folderId) ? newSet.delete(folderId) : newSet.add(folderId);
+      return newSet;
+    });
   };
 
-  // Update current meeting when on home page
-  useEffect(() => {
-    if (pathname === '/') {
-      setCurrentMeeting({ id: 'intro-call', title: 'New Call' });
-    }
-  }, [pathname]);
-
   return (
-    <SidebarContext.Provider value={{ currentMeeting, setCurrentMeeting, sidebarItems, isCollapsed, toggleCollapse }}>
+    <SidebarContext.Provider
+      value={{
+        isCollapsed,
+        toggleCollapse,
+        expandedFolders,
+        toggleFolder,
+        sidebarItems,
+        setSidebarItems,
+        currentMeeting,
+        setCurrentMeeting,
+      }}
+    >
       {children}
     </SidebarContext.Provider>
   );

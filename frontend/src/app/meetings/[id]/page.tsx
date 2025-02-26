@@ -1,209 +1,174 @@
-import React from 'react';
-import { Clock, Users, Calendar, Tag } from 'lucide-react';
+'use client';
 
-interface PageProps {
-  params: {
-    id: string;
-  };
-}
+import { useEffect, useState } from 'react';
+import { Meeting } from '../../../types';
 
-interface Meeting {
-  title: string;
-  date: string;
-  time?: string;
-  attendees?: string[];
-  tags: string[];
-  content: string;
-}
+export default function MeetingsPage({ params }: { params: { id: string } }) {
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-export function generateStaticParams() {
-  // Return all possible meeting IDs
-  return [
-    { id: 'team-sync-dec-26' },
-    { id: 'product-review' },
-    { id: 'project-ideas' },
-    { id: 'action-items' }
-  ];
-}
+  useEffect(() => {
+    fetchMeeting();
+  }, [params.id]);
 
-const MeetingPage = ({ params }: PageProps) => {
-  // This would normally come from your database
-  const sampleData: Record<string, Meeting> = {
-    'team-sync-dec-26': {
-      title: 'Team Sync - Dec 26',
-      date: '2024-12-26',
-      time: '10:00 AM - 11:00 AM',
-      attendees: ['John Doe', 'Jane Smith', 'Mike Johnson'],
-      tags: ['Team Sync', 'Weekly', 'Product'],
-      content: `
-# Meeting Summary
-Team sync discussion about Q1 2024 goals and current project status.
-
-## Agenda Items
-1. Project Status Updates
-2. Q1 2024 Planning
-3. Team Concerns & Feedback
-
-## Key Decisions
-- Prioritized mobile app development for Q1
-- Scheduled weekly design reviews
-- Added two new features to the roadmap
-
-## Action Items
-- [ ] John: Create project timeline
-- [ ] Jane: Schedule design review meetings
-- [ ] Mike: Update documentation
-
-## Notes
-- Discussed current project bottlenecks
-- Reviewed customer feedback from last release
-- Planned resource allocation for upcoming sprint
-      `
-    },
-    'product-review': {
-      title: 'Product Review',
-      date: '2024-12-26',
-      time: '2:00 PM - 3:00 PM',
-      attendees: ['Sarah Wilson', 'Tom Brown', 'Alex Chen'],
-      tags: ['Product', 'Review', 'Quarterly'],
-      content: `
-# Product Review Meeting
-
-## Current Status
-- User engagement up by 25%
-- New feature adoption rate at 80%
-- Customer satisfaction score: 4.5/5
-
-## Key Metrics
-1. Monthly Active Users: 50k
-2. Average Session Duration: 15 mins
-3. Conversion Rate: 12%
-
-## Action Items
-- [ ] Sarah: Prepare Q1 roadmap
-- [ ] Tom: Analyze user feedback
-- [ ] Alex: Update product metrics dashboard
-
-## Next Steps
-- Schedule follow-up meetings
-- Review competitor analysis
-- Plan feature prioritization workshop
-      `
-    },
-    'project-ideas': {
-      title: 'Project Ideas',
-      date: '2024-12-26',
-      time: '4:00 PM - 5:00 PM',
-      attendees: ['Emily Lee', 'David Kim', 'Olivia Taylor'],
-      tags: ['Project', 'Ideas', 'Brainstorming'],
-      content: `
-# Project Ideas Meeting
-
-## Current Status
-- Reviewed current project pipeline
-- Discussed new project ideas
-
-## Key Ideas
-1. Develop a new mobile app for customer engagement
-2. Create a machine learning model for predictive analytics
-3. Design a new website for marketing campaigns
-
-## Action Items
-- [ ] Emily: Research mobile app development frameworks
-- [ ] David: Investigate machine learning libraries
-- [ ] Olivia: Sketch new website design concepts
-
-## Next Steps
-- Schedule follow-up meetings to discuss project ideas
-- Review project proposals and prioritize projects
-- Plan project kick-off meetings
-      `
-    },
-    'action-items': {
-      title: 'Action Items Review',
-      date: '2024-12-26',
-      time: '5:00 PM - 6:00 PM',
-      attendees: ['Project Team'],
-      tags: ['Tasks', 'Review', 'Planning'],
-      content: `
-# Action Items Review Meeting
-
-## Progress Review
-- Reviewed completed tasks from last week
-- Discussed blockers and challenges
-- Updated task priorities
-
-## Key Decisions
-1. Prioritized security fixes for immediate deployment
-2. Scheduled dependency updates for next sprint
-3. Assigned new tasks to team members
-
-## Next Steps
-- Daily progress updates
-- Weekly review meetings
-- Monthly planning sessions
-      `
+  const fetchMeeting = async () => {
+    try {
+      const response = await fetch(`http://localhost:5167/meetings/${params.id}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch meeting');
+      }
+      const data = await response.json();
+      setMeeting(data);
+    } catch (error) {
+      console.error('Error fetching meeting:', error);
+      setError('Failed to load meeting details');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const meeting = sampleData[params.id as keyof typeof sampleData];
+  // Unified function for saving meeting changes
+  const saveMeeting = async (content: string) => {
+    if (!meeting) return;
+    const updatedMeeting = { ...meeting, content };
+    setMeeting(updatedMeeting);
 
-  if (!meeting) {
-    return <div className="p-8">Meeting not found</div>;
+    try {
+      const response = await fetch(`http://localhost:5167/meetings/${params.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedMeeting),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to save changes');
+      }
+    } catch (error) {
+      console.error('Error saving meeting:', error);
+      setToastMessage('Failed to save changes');
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
+  // Auto-save triggered on text area changes
+  const handleContentChange = (newContent: string) => {
+    saveMeeting(newContent);
+  };
+
+  // Manual save via button
+  const handleManualSave = () => {
+    if (meeting) {
+      saveMeeting(meeting.content);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      const response = await fetch(`http://localhost:5167/meetings/${params.id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to delete meeting');
+      }
+      window.location.href = '/meetings'; // Redirect after deletion
+    } catch (error) {
+      console.error('Error deleting meeting:', error);
+      setError('Failed to delete meeting');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-xl font-semibold animate-pulse">Loading meeting details...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-md mx-auto my-10 p-6 bg-red-50 border border-red-200 rounded-md shadow">
+        <h3 className="text-lg font-bold text-red-800">Error</h3>
+        <p className="mt-2 text-red-600">{error}</p>
+      </div>
+    );
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-4">{meeting.title}</h1>
-        
-        <div className="flex flex-wrap gap-4 text-gray-600">
-          {meeting.date && (
-            <div className="flex items-center gap-1">
-              <Calendar className="w-4 h-4" />
-              <span>{meeting.date}</span>
-            </div>
-          )}
-          
-          {meeting.time && (
-            <div className="flex items-center gap-1">
-              <Clock className="w-4 h-4" />
-              <span>{meeting.time}</span>
-            </div>
-          )}
-          
-          {meeting.attendees && (
-            <div className="flex items-center gap-1">
-              <Users className="w-4 h-4" />
-              <span>{meeting.attendees.join(', ')}</span>
-            </div>
-          )}
+    <div className="min-h-screen bg-gray-50 relative">
+      {/* Unobtrusive Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-5 right-5 bg-red-600 text-white px-4 py-2 rounded shadow">
+          {toastMessage}
         </div>
+      )}
 
-        <div className="flex gap-2 mt-4">
-          {meeting.tags.map((tag) => (
-            <div key={tag} className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm">
-              <Tag className="w-3 h-3" />
-              {tag}
-            </div>
-          ))}
+      {/* Hero Header */}
+      <header className="bg-gradient-to-r from-indigo-600 to-blue-500 py-10">
+        <div className="container mx-auto px-4 text-center">
+          <h1 className="text-4xl font-extrabold text-white">
+            {meeting?.title || 'Meeting Details'}
+          </h1>
+          <p className="mt-2 text-lg text-indigo-200">
+            Manage and review your meeting details seamlessly
+          </p>
         </div>
-      </div>
+      </header>
 
-      <div className="prose prose-blue max-w-none">
-        <div dangerouslySetInnerHTML={{ __html: meeting.content.split('\n').map(line => {
-          if (line.startsWith('# ')) {
-            return `<h1>${line.slice(2)}</h1>`;
-          } else if (line.startsWith('## ')) {
-            return `<h2>${line.slice(3)}</h2>`;
-          } else if (line.startsWith('- ')) {
-            return `<li>${line.slice(2)}</li>`;
-          }
-          return line;
-        }).join('\n') }} />
-      </div>
+      {/* Main Content */}
+      <main className="container mx-auto px-4 py-10">
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="mb-6">
+            <label htmlFor="meetingContent" className="block text-sm font-medium text-gray-700">
+              Meeting Notes
+            </label>
+            <textarea
+              id="meetingContent"
+              value={meeting?.content || ''}
+              onChange={(e) => handleContentChange(e.target.value)}
+              rows={10}
+              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              placeholder="Enter meeting notes..."
+            />
+            {/* Manual Save Button */}
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={handleManualSave}
+                className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md shadow hover:bg-green-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-opacity-50"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-6 border-t pt-6">
+            <h2 className="text-xl font-semibold text-gray-800 mb-3">Preview</h2>
+            <div className="p-4 bg-gray-100 rounded-md">
+              {meeting?.content ? (
+                <p className="text-gray-700 leading-relaxed whitespace-pre-line">
+                  {meeting.content}
+                </p>
+              ) : (
+                <p className="text-gray-500 italic">No content available yet.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-4 border-t pt-6">
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="px-6 py-2 bg-red-600 text-white font-semibold rounded-md shadow hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-opacity-50"
+            >
+              Delete Meeting
+            </button>
+          </div>
+        </div>
+      </main>
     </div>
   );
-};
-
-export default MeetingPage;
+}

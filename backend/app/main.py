@@ -1,23 +1,28 @@
+# Standard library imports
+import asyncio
+import json
+import logging
+import os
+import uuid
+from datetime import datetime
+from functools import partial
+from threading import Lock
+from typing import Optional, Dict, Any, List
+
+# Third-party imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
-from typing import Optional, Dict, Any, List
-import logging
-from datetime import datetime
-import os
 from dotenv import load_dotenv
+
+# Local application/library-specific imports
 from db import DatabaseManager
-import asyncio
-from functools import partial
-import json
-from threading import Lock
 from Process_transcrip import (
-    TranscriptProcessor, MeetingSummarizer, SummaryResponse,
+    TranscriptProcessor, MeetingSummarizer, Summary,
     SYSTEM_PROMPT, Agent, RunContext, Section, Block
 )
-import uuid
 
 # Load environment variables
 load_dotenv()
@@ -64,6 +69,17 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
+
+class Meeting(BaseModel):
+    id: str
+    title: str
+    date: str
+    time: Optional[str] = None
+    attendees: List[str] = []
+    tags: List[str] = []
+    content: str
+    created_at: str
+    updated_at: str
 
 class TranscriptRequest(BaseModel):
     """Request model for transcript text"""
@@ -379,7 +395,7 @@ async def save_final_summary_result(ctx: RunContext) -> str:
         # Convert to JSON using Pydantic's json() method which handles nested models
         json_data = summary.model_dump_json(indent=2)
 
-        self.final_summary_result = json_data
+        final_summary_result = json_data
         
         # Save to file with error handling
         try:
@@ -395,7 +411,7 @@ async def save_final_summary_result(ctx: RunContext) -> str:
         return f"Error processing summary: {str(e)}"
 
 @processor.agent.tool
-async def get_final_summary(ctx: RunContext) -> SummaryResponse:
+async def get_final_summary(ctx: RunContext) -> Summary:
     """Get the final meeting summary result"""
     try:
         logger.info("Generating final summary")
@@ -703,6 +719,71 @@ async def shutdown_event():
         logger.info("Successfully cleaned up resources")
     except Exception as e:
         logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
+
+@app.get("/meetings", response_model=List[Meeting])
+async def get_meetings():
+    """Get all meetings"""
+    try:
+        meetings = await processor.db.get_meetings()
+        return meetings
+    except Exception as e:
+        logger.error(f"Error getting meetings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch meetings")
+
+@app.get("/meetings/{meeting_id}", response_model=Meeting)
+async def get_meeting(meeting_id: str):
+    """Get a specific meeting"""
+    try:
+        meeting = await processor.db.get_meeting(meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        return meeting
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting meeting {meeting_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch meeting")
+
+@app.delete("/meetings/{meeting_id}")
+async def delete_meeting(meeting_id: str):
+    """Delete a meeting"""
+    try:
+        meeting = await processor.db.get_meeting(meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        await processor.db.delete_meeting(meeting_id)
+        return {"message": "Meeting deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting meeting {meeting_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete meeting")
+
+class AddMeetingRequest(BaseModel):
+    title: str
+    date: str
+    time: Optional[str] = None
+    attendees: List[str] = []
+    tags: List[str] = []
+    content: Optional[str] = None
+
+@app.post("/meetings")
+async def add_meeting(request: AddMeetingRequest):
+    """Add a new meeting"""
+    try:
+        meeting_id = await processor.db.add_meeting(
+            title=request.title,
+            date=request.date,
+            time=request.time,
+            attendees=request.attendees,
+            tags=request.tags,
+            content=request.content
+        )
+        return JSONResponse(status_code=201, content={"message": "Meeting added successfully", "meeting_id": meeting_id})
+    except Exception as e:
+        logger.error(f"Error adding meeting: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to add meeting")
 
 if __name__ == "__main__":
     import multiprocessing
