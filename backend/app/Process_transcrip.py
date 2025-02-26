@@ -1,22 +1,23 @@
-from chromadb import Client as ChromaClient, Settings
-from groq import file_from_path
-from pydantic import BaseModel
-from typing import List, Dict, Optional, Any
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.ollama import OllamaModel
-from pydantic_ai.models.groq import GroqModel
+import argparse
 import json
 import logging
-import uuid
 import os
-import argparse
+import uuid
+from typing import Any, Dict, List, Optional
+
+from chromadb import Client as ChromaClient, Settings
 from dotenv import load_dotenv
+from groq import file_from_path
+from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.groq import GroqModel
+from pydantic_ai.models.ollama import OllamaModel
 
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,8 @@ class MeetingMinutes(BaseModel):
 
 class Transcript(BaseModel):
     text: str
-    model: str = "claude"
-    model_name: str = "claude-3-5-sonnet-latest"
+    model: str
+    model_name: str
     chunk_size: int = 5000
     overlap: int = 1000
 
@@ -128,11 +129,12 @@ class TranscriptProcessor:
             # Clear any existing collection
             if self.collection:
                 try:
-                    self.collection.delete(ids=self.collection.get()['ids'])
+                    existing_data = self.collection.get()
+                    if 'ids' in existing_data and existing_data['ids']:
+                        self.collection.delete(ids=existing_data['ids'])
                 except Exception as e:
-                    logger.error(f"Error clearing collection: {e}")
+                    logger.error(f"Error clearing collection: {e}", exc_info=True)
             
-            # If transcript_path is a string that is a path name, use it, else if transcript is plain text, use it
             if isinstance(transcript_path, str):
                 if os.path.exists(transcript_path):
                     with open(transcript_path, 'r') as f:

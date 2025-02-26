@@ -13,27 +13,26 @@ const sourceSans3 = Source_Sans_3({
 
 export { metadata } from './metadata'
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <meta charSet="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="Meeting Dashboard" />
+        <title>Meeting Dashboard</title>
+      </head>
       <body className={`${sourceSans3.variable} font-sans`}>
         <SidebarProvider>
-          <div className="titlebar h-8 w-full fixed top-0 left-0 bg-transparent" />
           <div className="flex">
             <Sidebar />
-            <div className="flex flex-col w-full">
+            <div className="flex flex-col w-full min-h-screen">
               <MainNav title="Dashboard" />
-              <MainContent>
-                {children}
-              </MainContent>
+              <MainContent>{children}</MainContent>
             </div>
           </div>
         </SidebarProvider>
       </body>
     </html>
-  )
+  );
 }
