@@ -10,7 +10,6 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
-import { listenerCount } from 'process';
 import { invoke } from '@tauri-apps/api/core';
 
 interface TranscriptUpdate {
