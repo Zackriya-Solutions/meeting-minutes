@@ -509,6 +509,31 @@ async def process_transcript_background(process_id: str, transcript: TranscriptR
         logger.error(f"Error in background processing for {process_id}: {error_msg}")
         await processor.db.update_process(process_id, status="failed", error=error_msg)
 
+class UpdateMeetingRequest(BaseModel):
+    title: str
+    date: str
+    time: Optional[str] = None
+    attendees: List[str] = []
+    tags: List[str] = []
+    content: Optional[str] = None
+
+@app.put("/meetings/{meeting_id}")
+async def update_meeting(
+    meeting_id: str,
+    request: UpdateMeetingRequest,
+    background_tasks: BackgroundTasks
+):
+    await processor.db.update_meeting(
+        meeting_id=meeting_id,
+        title=request.title,
+        date=request.date,
+        time=request.time,
+        attendees=request.attendees,
+        tags=request.tags,
+        content=request.content
+    )
+    return {"message": "Meeting updated successfully"}
+
 @app.post("/process-transcript")
 async def process_transcript_api(
     transcript: TranscriptRequest,
