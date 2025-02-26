@@ -395,7 +395,7 @@ async def save_final_summary_result(ctx: RunContext) -> str:
         # Convert to JSON using Pydantic's json() method which handles nested models
         json_data = summary.model_dump_json(indent=2)
 
-        self.final_summary_result = json_data
+        final_summary_result = json_data
         
         # Save to file with error handling
         try:
