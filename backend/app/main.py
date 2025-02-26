@@ -1,24 +1,28 @@
+# Standard library imports
+import asyncio
+import json
+import logging
+import os
+import uuid
+from datetime import datetime
+from functools import partial
+from threading import Lock
+from typing import Optional, Dict, Any, List
+
+# Third-party imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List
 import uvicorn
-from typing import Optional, Dict, Any, List
-import logging
-from datetime import datetime
-import os
 from dotenv import load_dotenv
+
+# Local application/library-specific imports
 from db import DatabaseManager
-import asyncio
-from functools import partial
-import json
-from threading import Lock
 from Process_transcrip import (
     TranscriptProcessor, MeetingSummarizer, Summary,
     SYSTEM_PROMPT, Agent, RunContext, Section, Block
 )
-import uuid
 
 # Load environment variables
 load_dotenv()

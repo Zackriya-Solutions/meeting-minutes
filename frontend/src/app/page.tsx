@@ -679,6 +679,36 @@ export default function Home() {
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
+  const [showAddMeetingForm, setShowAddMeetingForm] = useState(false);
+
+  const handleAddMeeting = async (meetingData: any) => {
+    try {
+      // Convert comma-separated strings to lists
+      meetingData.attendees = meetingData.attendees ? meetingData.attendees.split(',').map((item: string) => item.trim()) : [];
+      meetingData.tags = meetingData.tags ? meetingData.tags.split(',').map((item: string) => item.trim()) : [];
+
+      const response = await fetch('http://localhost:5167/meetings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(meetingData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add meeting');
+      }
+
+      const data = await response.json();
+      console.log('Meeting added successfully:', data);
+      setShowAddMeetingForm(false);
+      // Optionally, refresh meetings list or update state
+    } catch (error) {
+      console.error('Error adding meeting:', error);
+      alert('Failed to add meeting. Please try again.');
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <div className="flex flex-1 overflow-hidden">
@@ -687,7 +717,7 @@ export default function Home() {
           {/* Title area */}
           <div className="p-4 border-b border-gray-200">
             <div className="flex flex-col space-y-3">
-              <div className="flex items-center">
+              <div className="flex items-center justify-between">
                 <EditableTitle
                   title={meetingTitle}
                   isEditing={isEditingTitle}
@@ -695,7 +725,59 @@ export default function Home() {
                   onFinishEditing={() => setIsEditingTitle(false)}
                   onChange={handleTitleChange}
                 />
+                <button
+                  onClick={() => setShowAddMeetingForm(true)}
+                  className="px-3 py-2 border rounded-md bg-blue-500 text-white hover:bg-blue-600"
+                >
+                  Add Meeting
+                </button>
               </div>
+              {/* Add Meeting Form Modal */}
+              {showAddMeetingForm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Add New Meeting</h3>
+                    {/* Form fields for meeting details */}
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      const formData = new FormData(e.target as HTMLFormElement);
+                      const meetingData = Object.fromEntries(formData.entries());
+                      handleAddMeeting(meetingData);
+                    }}>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                          <input type="text" name="title" required className="w-full px-3 py-2 border rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                          <input type="date" name="date" required className="w-full px-3 py-2 border rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                          <input type="time" name="time" className="w-full px-3 py-2 border rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Attendees</label>
+                          <input type="text" name="attendees" placeholder="Comma-separated" className="w-full px-3 py-2 border rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
+                          <input type="text" name="tags" placeholder="Comma-separated" className="w-full px-3 py-2 border rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Content</label>
+                          <textarea name="content" className="w-full px-3 py-2 border rounded-md"></textarea>
+                        </div>
+                      </div>
+                      <div className="mt-6 flex justify-end">
+                        <button type="button" onClick={() => setShowAddMeetingForm(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 mr-2">Cancel</button>
+                        <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">Add Meeting</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleCopyTranscript}
