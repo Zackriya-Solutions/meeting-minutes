@@ -1,9 +1,21 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
+
+interface Meeting {
+  id: string;
+  title: string;
+  date: string;
+  time?: string;
+  attendees: string[];
+  tags: string[];
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
 
 interface SidebarItem {
   id: string;
@@ -16,6 +28,58 @@ const Sidebar: React.FC = () => {
   const router = useRouter();
   const { sidebarItems, isCollapsed, toggleCollapse } = useSidebar();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings', 'notes']));
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dynamicSidebarItems, setDynamicSidebarItems] = useState<SidebarItem[]>([]);
+
+  useEffect(() => {
+    const fetchMeetings = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('http://localhost:5167/meetings');
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch meetings: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        setMeetings(data);
+        
+        // Transform meetings into sidebar items format
+        const meetingItems: SidebarItem[] = data.map((meeting: Meeting) => ({
+          id: meeting.id,
+          title: meeting.title,
+          type: 'file'
+        }));
+        
+        // Create the meetings folder with children
+        const meetingsFolder: SidebarItem = {
+          id: 'meetings',
+          title: 'Meetings',
+          type: 'folder',
+          children: meetingItems
+        };
+        
+        // Keep the notes folder from original sidebarItems
+        const notesFolder = sidebarItems.find(item => item.id === 'notes');
+        
+        // Set the dynamic sidebar items
+        setDynamicSidebarItems([meetingsFolder, ...(notesFolder ? [notesFolder] : [])]);
+        
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching meetings:', err);
+        setError('Failed to load meetings');
+        // Fallback to original sidebar items
+        setDynamicSidebarItems(sidebarItems);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMeetings();
+  }, [sidebarItems]);
 
   const toggleFolder = (folderId: string) => {
     const newExpanded = new Set(expandedFolders);
@@ -141,8 +205,14 @@ const Sidebar: React.FC = () => {
 
         {/* Main content */}
         <div className="flex-1 overflow-y-auto">
+          {isLoading && !isCollapsed && (
+            <div className="p-4 text-sm text-gray-500">Loading meetings...</div>
+          )}
+          {error && !isCollapsed && (
+            <div className="p-4 text-sm text-red-500">{error}</div>
+          )}
           {renderCollapsedIcons()}
-          {sidebarItems.map(item => renderItem(item))}
+          {dynamicSidebarItems.map(item => renderItem(item))}
         </div>
 
         {/* Footer */}

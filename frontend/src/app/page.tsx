@@ -1,7 +1,7 @@
 'use client';
-
 import { useState, useEffect, useContext, useCallback } from 'react';
-import { Transcript, Summary, SummaryResponse } from '@/types';
+import { Block, Section, Message, Transcript } from '@/types/index';
+import { Summary, SummaryResponse } from '@/types/summary';
 import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
 import { RecordingControls } from '@/components/RecordingControls';
@@ -43,10 +43,18 @@ export default function Home() {
   const [meetingTitle, setMeetingTitle] = useState('New Call');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>({
-    key_points: { title: "Key Points", blocks: [] },
-    action_items: { title: "Action Items", blocks: [] },
-    decisions: { title: "Decisions", blocks: [] },
-    main_topics: { title: "Main Topics", blocks: [] }
+    MeetingName: "",
+    SectionSummary: { blocks: [] },
+    CriticalDeadlines: { title: "Critical Deadlines", blocks: [] },
+    KeyItemsDecisions: { title: "Key Items & Decisions", blocks: [] },
+    ImmediateActionItems: { title: "Immediate Action Items", blocks: [] },
+    NextSteps: { title: "Next Steps", blocks: [] },
+    OtherImportantPoints: { title: "Other Important Points", blocks: [] },
+    ClosingRemarks: { title: "Closing Remarks", blocks: [] },
+    KeyPoints: { title: "Key Points", blocks: [] },
+    ActionItems: { title: "Action Items", blocks: [] },
+    Decisions: { title: "Decisions", blocks: [] },
+    MainTopics: { title: "Main Topics", blocks: [] },
   });
   const [summaryResponse, setSummaryResponse] = useState<SummaryResponse | null>(null);
 
@@ -886,7 +894,7 @@ export default function Home() {
                     <div className="bg-white p-4 rounded-lg shadow-sm">
                       <h4 className="font-medium mb-1">Key Points</h4>
                       <ul className="list-disc pl-4">
-                        {summaryResponse.summary.key_points.blocks.map((block, i) => (
+                        {summaryResponse.summary?.key_points_section?.blocks.map((block, i) => (
                           <li key={i} className="text-sm">{block.content}</li>
                         ))}
                       </ul>
@@ -894,7 +902,7 @@ export default function Home() {
                     <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
                       <h4 className="font-medium mb-1">Action Items</h4>
                       <ul className="list-disc pl-4">
-                        {summaryResponse.summary.action_items.blocks.map((block, i) => (
+                        {summaryResponse.summary?.action_items_section?.blocks.map((block, i) => (
                           <li key={i} className="text-sm">{block.content}</li>
                         ))}
                       </ul>
@@ -902,17 +910,17 @@ export default function Home() {
                     <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
                       <h4 className="font-medium mb-1">Decisions</h4>
                       <ul className="list-disc pl-4">
-                        {summaryResponse.summary.decisions.blocks.map((block, i) => (
+                        {summaryResponse.summary?.key_points_section?.blocks.map((block, i) => (
                           <li key={i} className="text-sm">{block.content}</li>
-                        ))}
+                      ))}
                       </ul>
                     </div>
                     <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
                       <h4 className="font-medium mb-1">Main Topics</h4>
                       <ul className="list-disc pl-4">
-                        {summaryResponse.summary.main_topics.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
+                      {summaryResponse.summary?.key_points_section?.blocks.map((block, i) => (
+                        <li key={i} className="text-sm">{block.content}</li>
+                      ))}
                       </ul>
                     </div>
                   </div>

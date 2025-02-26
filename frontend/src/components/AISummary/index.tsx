@@ -1,7 +1,5 @@
-'use client';
-
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Summary, Block } from '@/types';
+import { Summary, Block } from '@/types/summary'; 
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
 import { ExclamationTriangleIcon, CheckCircleIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
@@ -23,9 +21,9 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     const updatedSummary = { ...summary };
     
     Object.entries(updatedSummary).forEach(([sectionKey, section]) => {
-      section.blocks = section.blocks.map(block => ({
+      section.blocks = section.blocks.map((block: Block) => ({
         ...block,
-        id: block.id.includes(sectionKey) ? block.id : generateUniqueId(sectionKey)
+        id: block.id ? (block.id.includes(sectionKey) ? block.id : generateUniqueId(sectionKey)) : generateUniqueId(sectionKey)
       }));
     });
     
@@ -87,8 +85,8 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   const getAllBlocks = () => {
     const allBlocks: { id: string; sectionKey: string }[] = [];
     Object.entries(currentSummary).forEach(([sectionKey, section]) => {
-      section.blocks.forEach(block => {
-        allBlocks.push({ id: block.id, sectionKey });
+      section.blocks.forEach((block: Block) => {
+        allBlocks.push({ id: block.id || '', sectionKey });
       });
     });
     return allBlocks;
@@ -96,7 +94,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
 
   const findBlockAndSection = (blockId: string) => {
     for (const [sectionKey, section] of Object.entries(currentSummary)) {
-      const block = section.blocks.find(b => b.id === blockId);
+      const block = section.blocks.find((b: Block) => b.id === blockId);
       if (block) {
         return { block, sectionKey };
       }
@@ -166,7 +164,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       ...currentSummary,
       [sectionKey]: {
         ...currentSummary[sectionKey],
-        blocks: currentSummary[sectionKey].blocks.map(block => 
+        blocks: currentSummary[sectionKey].blocks.map((block: Block) => 
           block.id === blockId ? { ...block, content: newContent } : block
         )
       }
@@ -177,7 +175,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     // Find the section key for this block
     let blockSectionKey: string | null = null;
     for (const [sectionKey, section] of Object.entries(currentSummary)) {
-      if (section.blocks.some(b => b.id === blockId)) {
+      if (section.blocks.some((b: Block) => b.id === blockId)) {
         blockSectionKey = sectionKey;
         break;
       }
@@ -189,7 +187,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       ...currentSummary,
       [blockSectionKey]: {
         ...currentSummary[blockSectionKey],
-        blocks: currentSummary[blockSectionKey].blocks.map(block => 
+        blocks: currentSummary[blockSectionKey].blocks.map((block: Block) => 
           block.id === blockId ? { ...block, type: newType } : block
         )
       }
@@ -215,7 +213,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     let currentBlockIndex = -1;
     
     for (const [sectionKey, section] of Object.entries(currentSummary)) {
-      currentBlockIndex = section.blocks.findIndex(b => b.id === blockId);
+      currentBlockIndex = section.blocks.findIndex((b: Block) => b.id === blockId);
       if (currentBlockIndex !== -1) {
         blockSectionKey = sectionKey;
         break;
@@ -289,7 +287,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     let currentBlockIndex = -1;
 
     for (const [sectionKey, section] of Object.entries(currentSummary)) {
-      currentBlockIndex = section.blocks.findIndex(b => b.id === blockId);
+      currentBlockIndex = section.blocks.findIndex((b: Block) => b.id === blockId);
       if (currentBlockIndex !== -1) {
         blockSectionKey = sectionKey;
         break;
@@ -363,7 +361,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     return selectedBlocks
       .map(blockId => {
         for (const [sectionKey, section] of Object.entries(currentSummary)) {
-          const block = section.blocks.find(b => b.id === blockId);
+          const block = section.blocks.find((b: Block)   => b.id === blockId);
           if (block) {
             return block.content;
           }
@@ -399,7 +397,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         } else if (e.key === 'c') {
           const blockContents = selectedBlocks.map(blockId => {
             for (const [sectionKey, section] of Object.entries(currentSummary)) {
-              const block = section.blocks.find(b => b.id === blockId);
+              const block = section.blocks.find((b: Block) => b.id === blockId);
               if (block) {
                 return block.content;
               }
@@ -428,7 +426,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     const blocksBySection = new Map<string, string[]>();
     selectedBlocks.forEach(blockId => {
       Object.entries(currentSummary).forEach(([sectionKey, section]) => {
-        if (section.blocks.some(b => b.id === blockId)) {
+        if (section.blocks.some((b: Block) => b.id === blockId)) {
           const blocks = blocksBySection.get(sectionKey) || [];
           blocks.push(blockId);
           blocksBySection.set(sectionKey, blocks);
@@ -441,7 +439,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     blocksBySection.forEach((blockIds, sectionKey) => {
       newSummary[sectionKey] = {
         ...newSummary[sectionKey],
-        blocks: newSummary[sectionKey].blocks.filter(b => !blockIds.includes(b.id))
+        blocks: newSummary[sectionKey].blocks.filter((b: Block) => !blockIds.includes(b.id || ''))
       };
     });
 
@@ -522,7 +520,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         markdown = `# ${section.title || 'AI Enhanced Summary'}\n\n`;
       } else {
         markdown += `## ${section.title || key}\n\n`;
-        section.blocks.forEach(block => {
+        section.blocks.forEach((block: Block) => {
           switch (block.type) {
             case 'heading1':
               markdown += `### ${block.content}\n\n`;
@@ -539,7 +537,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           }
         });
         // Add an extra newline after bullet lists
-        if (section.blocks.some(block => block.type === 'bullet')) {
+        if (section.blocks.some((block: Block) => block.type === 'bullet')) {
           markdown += '\n';
         }
       }

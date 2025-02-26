@@ -2,7 +2,7 @@ import aiosqlite
 import json
 from datetime import datetime, timedelta
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, List, Dict, Any
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -47,6 +47,22 @@ class DatabaseManager:
                     FOREIGN KEY (process_id) REFERENCES summary_processes(id)
                 )
             """)
+
+            # Add meetings table if it does not exist
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS meetings (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                date TEXT NOT NULL,
+                time TEXT,
+                attendees TEXT,  -- JSON array of attendees
+                tags TEXT,       -- JSON array of tags
+                content TEXT,    -- Meeting content/summary
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT  -- Soft delete support
+            )
+        """)
             conn.commit()
 
     @asynccontextmanager
@@ -57,6 +73,71 @@ class DatabaseManager:
             yield conn
         finally:
             await conn.close()
+
+    async def create_meeting(self, title: str, date: str, time: Optional[str] = None, 
+                           attendees: List[str] = None, tags: List[str] = None, 
+                           content: str = None) -> str:
+        """Create a new meeting record"""
+        meeting_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        
+        async with self._get_connection() as conn:
+            await conn.execute("""
+                INSERT INTO meetings (id, title, date, time, attendees, tags, content, 
+                                    created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                meeting_id, title, date, time,
+                json.dumps(attendees or []),
+                json.dumps(tags or []),
+                content or "",
+                now, now
+            ))
+            await conn.commit()
+        return meeting_id
+
+    async def get_meetings(self):
+        """Get all non-deleted meetings"""
+        async with self._get_connection() as conn:
+            async with conn.execute(
+                "SELECT * FROM meetings WHERE deleted_at IS NULL ORDER BY date DESC"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                columns = [col[0] for col in cursor.description]
+                return [
+                    {
+                        **dict(zip(columns, row)),
+                        'attendees': json.loads(row[4]) if row[4] else [],
+                        'tags': json.loads(row[5]) if row[5] else []
+                    }
+                    for row in rows
+                ]
+
+    async def get_meeting(self, meeting_id: str):
+        """Get a specific meeting by ID"""
+        async with self._get_connection() as conn:
+            async with conn.execute(
+                "SELECT * FROM meetings WHERE id = ? AND deleted_at IS NULL",
+                (meeting_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    columns = [col[0] for col in cursor.description]
+                    result = dict(zip(columns, row))
+                    result['attendees'] = json.loads(result['attendees']) if result['attendees'] else []
+                    result['tags'] = json.loads(result['tags']) if result['tags'] else []
+                    return result
+                return None
+
+    async def delete_meeting(self, meeting_id: str):
+        """Soft delete a meeting"""
+        now = datetime.utcnow().isoformat()
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "UPDATE meetings SET deleted_at = ? WHERE id = ?",
+                (now, meeting_id)
+            )
+            await conn.commit()
 
     async def create_process(self) -> str:
         """Create a new process entry and return its ID"""
