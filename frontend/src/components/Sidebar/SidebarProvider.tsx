@@ -46,7 +46,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const fetchMeetings = async () => {
       try {
-        const response = await fetch('/meetings');
+        const response = await fetch('http://localhost:5167/meetings'); // Add full backend URL
         if (!response.ok) throw new Error(`Failed to fetch meetings: ${response.status}`);
 
         const meetingsData = await response.json();

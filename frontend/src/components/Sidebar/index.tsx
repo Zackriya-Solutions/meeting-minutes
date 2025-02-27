@@ -18,8 +18,7 @@ const Sidebar: React.FC = () => {
     const fetchMeetings = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch('/meetings');
-        
+        const response = await fetch('http://localhost:5167/meetings');
         if (!response.ok) {
           throw new Error(`Failed to fetch meetings: ${response.status}`);
         }

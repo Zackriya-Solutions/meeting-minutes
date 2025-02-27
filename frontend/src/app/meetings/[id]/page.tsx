@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Meeting } from '../../../types';
 
 export default function MeetingsPage({ params }: { params: { id: string } }) {
@@ -9,13 +9,12 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchMeeting();
-  }, [params.id]);
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5167';
 
-  const fetchMeeting = async () => {
+  const fetchMeeting = useCallback(async () => {
+    setLoading(true);
     try {
-      const response = await fetch(`http://localhost:5167/meetings/${params.id}`);
+      const response = await fetch(`${API_BASE_URL}/meetings/${params.id}`);
       if (!response.ok) {
         throw new Error('Failed to fetch meeting');
       }
@@ -27,47 +26,51 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_BASE_URL, params.id]);
 
-  // Unified function for saving meeting changes
-  const saveMeeting = async (content: string) => {
-    if (!meeting) return;
-    const updatedMeeting = { ...meeting, content };
-    setMeeting(updatedMeeting);
+  useEffect(() => {
+    fetchMeeting();
+  }, [fetchMeeting]);
 
-    try {
-      const response = await fetch(`http://localhost:5167/meetings/${params.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedMeeting),
-      });
-      if (!response.ok) {
-        throw new Error('Failed to save changes');
+  const saveMeeting = useCallback(
+    async (content: string) => {
+      if (!meeting || meeting.content === content) return; // Avoid unnecessary API calls
+
+      const updatedMeeting = { ...meeting, content };
+      setMeeting(updatedMeeting);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/meetings/${params.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedMeeting),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to save changes');
+        }
+
+        setToastMessage('Meeting saved successfully');
+        setTimeout(() => setToastMessage(null), 3000);
+      } catch (error) {
+        console.error('Error saving meeting:', error);
+        setToastMessage('Failed to save changes');
       }
-    } catch (error) {
-      console.error('Error saving meeting:', error);
-      setToastMessage('Failed to save changes');
-      setTimeout(() => setToastMessage(null), 3000);
-    }
-  };
+    },
+    [meeting, API_BASE_URL, params.id]
+  );
 
-  // Auto-save triggered on text area changes
   const handleContentChange = (newContent: string) => {
-    saveMeeting(newContent);
+    debounce(() => saveMeeting(newContent), 500)();
   };
 
-  // Manual save via button
   const handleManualSave = () => {
-    if (meeting) {
-      saveMeeting(meeting.content);
-    }
+    if (meeting) saveMeeting(meeting.content);
   };
 
   const handleDelete = async () => {
     try {
-      const response = await fetch(`http://localhost:5167/meetings/${params.id}`, {
+      const response = await fetch(`${API_BASE_URL}/meetings/${params.id}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -99,26 +102,19 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="min-h-screen bg-gray-50 relative">
-      {/* Unobtrusive Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 bg-red-600 text-white px-4 py-2 rounded shadow">
+        <div className="fixed top-5 right-5 bg-green-600 text-white px-4 py-2 rounded shadow">
           {toastMessage}
         </div>
       )}
 
-      {/* Hero Header */}
       <header className="bg-gradient-to-r from-indigo-600 to-blue-500 py-10">
         <div className="container mx-auto px-4 text-center">
-          <h1 className="text-4xl font-extrabold text-white">
-            {meeting?.title || 'Meeting Details'}
-          </h1>
-          <p className="mt-2 text-lg text-indigo-200">
-            Manage and review your meeting details seamlessly
-          </p>
+          <h1 className="text-4xl font-extrabold text-white">{meeting?.title || 'Meeting Details'}</h1>
+          <p className="mt-2 text-lg text-indigo-200">Manage and review your meeting details seamlessly</p>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="container mx-auto px-4 py-10">
         <div className="bg-white rounded-lg shadow-lg p-6">
           <div className="mb-6">
@@ -133,7 +129,6 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
               className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 resize-none"
               placeholder="Enter meeting notes..."
             />
-            {/* Manual Save Button */}
             <div className="mt-4">
               <button
                 type="button"
@@ -149,9 +144,7 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
             <h2 className="text-xl font-semibold text-gray-800 mb-3">Preview</h2>
             <div className="p-4 bg-gray-100 rounded-md">
               {meeting?.content ? (
-                <p className="text-gray-700 leading-relaxed whitespace-pre-line">
-                  {meeting.content}
-                </p>
+                <p className="text-gray-700 leading-relaxed whitespace-pre-line">{meeting.content}</p>
               ) : (
                 <p className="text-gray-500 italic">No content available yet.</p>
               )}
@@ -172,3 +165,12 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
     </div>
   );
 }
+
+// Debounce function to prevent excessive API calls
+const debounce = (func: Function, delay: number) => {
+  let timer: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => func(...args), delay);
+  };
+};
