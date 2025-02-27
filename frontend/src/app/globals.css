@@ -57,6 +57,10 @@
     @apply bg-background text-foreground;
   }
 
+  body {
+    @apply bg-gray-50 text-black; /* Similar to Notion’s neutral background */
+  }
+
   /* Make the window draggable */
   .titlebar {
     -webkit-app-region: drag;

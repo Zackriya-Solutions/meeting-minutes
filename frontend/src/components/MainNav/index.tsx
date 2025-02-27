@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 
 interface MainNavProps {
   title: string;
@@ -9,14 +8,10 @@ interface MainNavProps {
 
 const MainNav: React.FC<MainNavProps> = ({ title }) => {
   return (
-    <div className="h-auto flex items-center border-b py-2">
-      <div className="max-w-5xl mx-auto w-full px-8">
-      <Link href="/">
-        <h1 className="text-2xl font-semibold cursor-pointer hover:text-gray-600 transition-colors">
-          {title}
-        </h1>
-      </Link>
-      </div>
+    <div className="h-12 px-4 flex items-center border-b bg-white">
+      <h1 className="text-lg font-semibold text-gray-800">
+        {title}
+      </h1>
     </div>
   );
 };

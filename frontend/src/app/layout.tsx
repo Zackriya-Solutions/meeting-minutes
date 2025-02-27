@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SidebarProvider>
           <div className="flex">
             <Sidebar />
-            <div className="flex flex-col w-full min-h-screen">
+              <div className="flex-1 w-full max-w-3xl mx-auto px-6 py-10 bg-white rounded-lg shadow">
               <MainNav title="Dashboard" />
               <MainContent>{children}</MainContent>
             </div>

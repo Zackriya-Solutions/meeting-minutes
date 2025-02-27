@@ -108,12 +108,14 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      <header className="bg-gradient-to-r from-indigo-600 to-blue-500 py-10">
-        <div className="container mx-auto px-4 text-center">
-          <h1 className="text-4xl font-extrabold text-white">{meeting?.title || 'Meeting Details'}</h1>
-          <p className="mt-2 text-lg text-indigo-200">Manage and review your meeting details seamlessly</p>
-        </div>
-      </header>
+    <header className="py-10 bg-white border-b border-gray-200">
+      <div className="container mx-auto px-4">
+        <h1 className="text-3xl font-bold text-gray-800">
+          {meeting?.title || 'Meeting Details'}
+        </h1>
+        <p className="mt-1 text-gray-500 text-sm">Manage and review your meeting details.</p>
+      </div>
+    </header>
 
       <main className="container mx-auto px-4 py-10">
         <div className="bg-white rounded-lg shadow-lg p-6">
