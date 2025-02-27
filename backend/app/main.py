@@ -520,18 +520,18 @@ class UpdateMeetingRequest(BaseModel):
 @app.put("/meetings/{meeting_id}")
 async def update_meeting(
     meeting_id: str,
-    request: UpdateMeetingRequest,
-    background_tasks: BackgroundTasks
+    request: UpdateMeetingRequest
 ):
-    await processor.db.update_meeting(
-        meeting_id=meeting_id,
-        title=request.title,
-        date=request.date,
-        time=request.time,
-        attendees=request.attendees,
-        tags=request.tags,
-        content=request.content
-    )
+    updated_meeting = {
+        "id": meeting_id,
+        "title": request.title,
+        "date": request.date,
+        "time": request.time,
+        "attendees": request.attendees,
+        "tags": request.tags,
+        "content": request.content,
+    }
+    await processor.db.update_meeting(updated_meeting)
     return {"message": "Meeting updated successfully"}
 
 @app.post("/process-transcript")

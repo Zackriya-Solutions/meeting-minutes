@@ -77,7 +77,7 @@ const Sidebar: React.FC = () => {
 
               {item.type === 'folder' && expandedFolders.has(item.id) && item.children && (
                 <div>{item.children.map(child => (
-                  <div key={child.id} className="pl-6 flex items-center py-1 cursor-pointer text-sm hover:bg-gray-100" onClick={() => router.push(`/${child.id}`)}>
+                  <div key={child.id} className="pl-6 flex items-center py-1 cursor-pointer text-sm hover:bg-gray-100" onClick={() => router.push(`/meetings/${child.id}`)}>
                     <File className="w-4 h-4 mr-1" />
                     {child.title}
                   </div>
