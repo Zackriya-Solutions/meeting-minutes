@@ -3,6 +3,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Meeting } from '../../../types';
 
+// Debounce function to prevent excessive API calls
+const debounce = (func: Function, delay: number) => {
+  let timer: ReturnType<typeof setTimeout>;
+  return (...args: any[]) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => func(...args), delay);
+  };
+};
+
 export default function MeetingsPage({ params }: { params: { id: string } }) {
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,8 +69,14 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
     [meeting, API_BASE_URL, params.id]
   );
 
+  // Create a debounced version of saveMeeting that persists across renders.
+  const debouncedSaveMeeting = useCallback(
+    debounce((content: string) => saveMeeting(content), 3000),
+    [saveMeeting]
+  );
+
   const handleContentChange = (newContent: string) => {
-    debounce(() => saveMeeting(newContent), 500)();
+    debouncedSaveMeeting(newContent);
   };
 
   const handleManualSave = () => {
@@ -108,14 +123,14 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-    <header className="py-10 bg-white border-b border-gray-200">
-      <div className="container mx-auto px-4">
-        <h1 className="text-3xl font-bold text-gray-800">
-          {meeting?.title || 'Meeting Details'}
-        </h1>
-        <p className="mt-1 text-gray-500 text-sm">Manage and review your meeting details.</p>
-      </div>
-    </header>
+      <header className="py-10 bg-white border-b border-gray-200">
+        <div className="container mx-auto px-4">
+          <h1 className="text-3xl font-bold text-gray-800">
+            {meeting?.title || 'Meeting Details'}
+          </h1>
+          <p className="mt-1 text-gray-500 text-sm">Manage and review your meeting details.</p>
+        </div>
+      </header>
 
       <main className="container mx-auto px-4 py-10">
         <div className="bg-white rounded-lg shadow-lg p-6">
@@ -167,12 +182,3 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
     </div>
   );
 }
-
-// Debounce function to prevent excessive API calls
-const debounce = (func: Function, delay: number) => {
-  let timer: NodeJS.Timeout;
-  return (...args: any[]) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => func(...args), delay);
-  };
-};
