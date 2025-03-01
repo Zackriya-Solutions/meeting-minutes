@@ -1,94 +1,96 @@
 'use client';
-
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Meeting } from '../../../types';
 
-// Debounce function to prevent excessive API calls
-const debounce = (func: Function, delay: number) => {
-  let timer: ReturnType<typeof setTimeout>;
-  return (...args: any[]) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => func(...args), delay);
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<T>) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
   };
-};
+}
 
 export default function MeetingsPage({ params }: { params: { id: string } }) {
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [localContent, setLocalContent] = useState<string>(''); // separate local state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5167';
 
-  const fetchMeeting = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/meetings/${params.id}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch meeting');
+  // 1) On mount, load meeting details
+  useEffect(() => {
+    const fetchMeeting = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/meetings/${params.id}`);
+        if (!res.ok) {
+          throw new Error('Failed to fetch meeting');
+        }
+        const data: Meeting = await res.json();
+        setMeeting(data);
+        setLocalContent(data.content); // fill local text
+      } catch (err) {
+        console.error(err);
+        setError('Failed to load meeting details');
+      } finally {
+        setLoading(false);
       }
-      const data = await response.json();
-      setMeeting(data);
-    } catch (error) {
-      console.error('Error fetching meeting:', error);
-      setError('Failed to load meeting details');
-    } finally {
-      setLoading(false);
-    }
+    };
+    fetchMeeting();
   }, [API_BASE_URL, params.id]);
 
-  useEffect(() => {
-    fetchMeeting();
-  }, [fetchMeeting]);
-
+  // 2) The real "save" function
   const saveMeeting = useCallback(
-    async (content: string) => {
-      if (!meeting || meeting.content === content) return; // Avoid unnecessary API calls
+    async (contentToSave: string) => {
+      if (!meeting) return;
+      // No need to send if unchanged
+      if (meeting.content === contentToSave) return;
 
-      const updatedMeeting = { ...meeting, content };
-      setMeeting(updatedMeeting);
+      const updated = { ...meeting, content: contentToSave };
+      // You can optimistically update state if you want:
+      setMeeting(updated);
 
       try {
-        const response = await fetch(`${API_BASE_URL}/meetings/${params.id}`, {
+        const res = await fetch(`${API_BASE_URL}/meetings/${params.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedMeeting),
+          body: JSON.stringify(updated),
         });
-
-        if (!response.ok) {
+        if (!res.ok) {
           throw new Error('Failed to save changes');
         }
-
         setToastMessage('Meeting saved successfully');
         setTimeout(() => setToastMessage(null), 3000);
-      } catch (error) {
-        console.error('Error saving meeting:', error);
+      } catch (err) {
+        console.error('Error saving meeting:', err);
         setToastMessage('Failed to save changes');
       }
     },
     [meeting, API_BASE_URL, params.id]
   );
 
-  const debouncedSaveMeeting = useCallback(
-    debounce((content: string) => saveMeeting(content), 1000),
-    [saveMeeting]
-  );
-  
+  // 3) Debounce the real save function. Keep it in a ref so we don’t break the timer on each render.
+  const saveMeetingRef = useRef(saveMeeting);
   useEffect(() => {
-    return () => {
-      // Flush pending saves when component unmounts
-      if (meeting?.content) {
-        saveMeeting(meeting.content);
-      }
-    };
-  }, [meeting?.content, saveMeeting]);
+    saveMeetingRef.current = saveMeeting;
+  }, [saveMeeting]);
 
-  const handleContentChange = (newContent: string) => {
-    debouncedSaveMeeting(newContent);
+  const debouncedSaveRef = useRef(
+    debounce((content: string) => {
+      saveMeetingRef.current(content);
+    }, 3000)
+  );
+
+  // 4) When the local text changes, call the debounced saver
+  const handleContentChange = (newValue: string) => {
+    setLocalContent(newValue);
+    debouncedSaveRef.current(newValue);
   };
 
   const handleManualSave = () => {
-    if (meeting) saveMeeting(meeting.content);
+    debouncedSaveRef.current(localContent);
   };
 
   const handleDelete = async () => {
@@ -99,9 +101,9 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
       if (!response.ok) {
         throw new Error('Failed to delete meeting');
       }
-      window.location.href = '/meetings'; // Redirect after deletion
-    } catch (error) {
-      console.error('Error deleting meeting:', error);
+      window.location.href = '/meetings';
+    } catch (err) {
+      console.error('Error deleting meeting:', err);
       setError('Failed to delete meeting');
     }
   };
@@ -113,7 +115,6 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
       </div>
     );
   }
-
   if (error) {
     return (
       <div className="max-w-md mx-auto my-10 p-6 bg-red-50 border border-red-200 rounded-md shadow">
@@ -130,16 +131,12 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
           {toastMessage}
         </div>
       )}
-
       <header className="py-10 bg-white border-b border-gray-200">
         <div className="container mx-auto px-4">
-          <h1 className="text-3xl font-bold text-gray-800">
-            {meeting?.title || 'Meeting Details'}
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-800">{meeting?.title || 'Meeting Details'}</h1>
           <p className="mt-1 text-gray-500 text-sm">Manage and review your meeting details.</p>
         </div>
       </header>
-
       <main className="container mx-auto px-4 py-10">
         <div className="bg-white rounded-lg shadow-lg p-6">
           <div className="mb-6">
@@ -148,39 +145,42 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
             </label>
             <textarea
               id="meetingContent"
-              value={meeting?.content || ''}
+              value={localContent}
               onChange={(e) => handleContentChange(e.target.value)}
               rows={10}
-              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm 
+                         focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 resize-none"
               placeholder="Enter meeting notes..."
             />
             <div className="mt-4">
               <button
                 type="button"
                 onClick={handleManualSave}
-                className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md shadow hover:bg-green-500 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-opacity-50"
+                className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md shadow 
+                           hover:bg-green-500 focus:outline-none focus:ring-2 
+                           focus:ring-green-600 focus:ring-opacity-50"
               >
                 Save
               </button>
             </div>
           </div>
-
           <div className="mb-6 border-t pt-6">
             <h2 className="text-xl font-semibold text-gray-800 mb-3">Preview</h2>
             <div className="p-4 bg-gray-100 rounded-md">
-              {meeting?.content ? (
-                <p className="text-gray-700 leading-relaxed whitespace-pre-line">{meeting.content}</p>
+              {localContent ? (
+                <p className="text-gray-700 leading-relaxed whitespace-pre-line">{localContent}</p>
               ) : (
                 <p className="text-gray-500 italic">No content available yet.</p>
               )}
             </div>
           </div>
-
           <div className="flex justify-end space-x-4 border-t pt-6">
             <button
               type="button"
               onClick={handleDelete}
-              className="px-6 py-2 bg-red-600 text-white font-semibold rounded-md shadow hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-opacity-50"
+              className="px-6 py-2 bg-red-600 text-white font-semibold rounded-md shadow 
+                         hover:bg-red-500 focus:outline-none focus:ring-2 
+                         focus:ring-red-600 focus:ring-opacity-50"
             >
               Delete Meeting
             </button>
