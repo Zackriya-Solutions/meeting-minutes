@@ -69,11 +69,19 @@ export default function MeetingsPage({ params }: { params: { id: string } }) {
     [meeting, API_BASE_URL, params.id]
   );
 
-  // Create a debounced version of saveMeeting that persists across renders.
   const debouncedSaveMeeting = useCallback(
-    debounce((content: string) => saveMeeting(content), 3000),
+    debounce((content: string) => saveMeeting(content), 1000),
     [saveMeeting]
   );
+  
+  useEffect(() => {
+    return () => {
+      // Flush pending saves when component unmounts
+      if (meeting?.content) {
+        saveMeeting(meeting.content);
+      }
+    };
+  }, [meeting?.content, saveMeeting]);
 
   const handleContentChange = (newContent: string) => {
     debouncedSaveMeeting(newContent);
