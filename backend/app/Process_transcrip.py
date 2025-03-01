@@ -1,39 +1,37 @@
-from chromadb import Client as ChromaClient, Settings
-from groq import file_from_path
-from pydantic import BaseModel
-from typing import List, Dict, Optional
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.ollama import OllamaModel
-from pydantic_ai.models.groq import GroqModel
+import argparse
 import json
 import logging
-import uuid
 import os
-import argparse
+import uuid
+from typing import Any, Dict, List, Optional
+
+from chromadb import Client as ChromaClient, Settings
 from dotenv import load_dotenv
+from groq import file_from_path
+from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.groq import GroqModel
+from pydantic_ai.models.ollama import OllamaModel
 
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 load_dotenv()  # Load environment variables from .env file
 
 class Block(BaseModel):
-    """Represents a block of content in a section
-    Blcks are the basic blocks in this structure. one block contains only one item"""
     id: str
     type: str
     content: str
-    color: str
+    color: Optional[str] = None
+    timestamp: Optional[str] = None
+    speaker: Optional[str] = None
 
 class Section(BaseModel):
-    """Represents a section in the meeting summary
-    One section can have multiple blogs related to the title
-    """
     title: str
     blocks: List[Block]
 
@@ -42,10 +40,9 @@ class ActionItem(BaseModel):
     title: str
     content: str
 
-class SummaryResponse(BaseModel):
-    """Represents the meeting summary response based on a section of the transcript"""
-    MeetingName : str
-    SectionSummary : Section
+class Summary(BaseModel):
+    MeetingName: str
+    SectionSummary: Dict[str, List[Block]]
     CriticalDeadlines: Section
     KeyItemsDecisions: Section
     ImmediateActionItems: Section
@@ -62,14 +59,12 @@ class MeetingMinutes(BaseModel):
     Section3 : Section
     Section4 : Section
 
-class OverallSummary(BaseModel):
-    """Represents the complete meeting summary"""
-    Agenda : str
-    CriticalDeadlines: Section
-    KeyItemsDecisions: Section
-    ImmediateActionItems: Section
-    NextSteps: Section
-    ClosingRemarks: Section
+class Transcript(BaseModel):
+    text: str
+    model: str
+    model_name: str
+    chunk_size: int = 5000
+    overlap: int = 1000
 
 class TranscriptProcessor:
     """Handles the processing and storage of meeting transcripts"""
@@ -134,11 +129,12 @@ class TranscriptProcessor:
             # Clear any existing collection
             if self.collection:
                 try:
-                    self.collection.delete(ids=self.collection.get()['ids'])
+                    existing_data = self.collection.get()
+                    if 'ids' in existing_data and existing_data['ids']:
+                        self.collection.delete(ids=existing_data['ids'])
                 except Exception as e:
-                    logger.error(f"Error clearing collection: {e}")
+                    logger.error(f"Error clearing collection: {e}", exc_info=True)
             
-            # If transcript_path is a string that is a path name, use it, else if transcript is plain text, use it
             if isinstance(transcript_path, str):
                 if os.path.exists(transcript_path):
                     with open(transcript_path, 'r') as f:
@@ -163,7 +159,7 @@ class TranscriptProcessor:
                 model = AnthropicModel(model_name, api_key=api_key)
                 agent = Agent(
                     model, 
-                    result_type=SummaryResponse, 
+                    result_type=Summary, 
                     result_retries=15, 
                 )
             elif model == "ollama":
@@ -173,7 +169,7 @@ class TranscriptProcessor:
                 model = OllamaModel(model_name)
                 agent = Agent(
                     model,
-                    result_type=SummaryResponse,
+                    result_type=Summary,
                     result_retries=15,
                 )
             elif model == "groq":
@@ -181,7 +177,7 @@ class TranscriptProcessor:
                 model = GroqModel(model_name, api_key=api_key)
                 agent = Agent(
                     model, 
-                    result_type=SummaryResponse, 
+                    result_type=Summary, 
                     result_retries=15, 
                 )
             else:
@@ -210,7 +206,7 @@ class TranscriptProcessor:
                     pretty_print_json(summary)
                     final_summary = summary
                 
-                # Convert the final_summary which is in <class '__main__.SummaryResponse'> to json
+                # Convert the final_summary which is in <class '__main__.Summary'> to json
                 total_summary_in_pydantic = final_summary
 
 
@@ -271,26 +267,35 @@ class MeetingSummarizer:
         """Add an action item to the summary"""
         block = self.create_block(title, content, "action")
         self.ActionItems.blocks.append(block)
-        return f"Successfully added action item: {block.id}"
+        return f"Successfully added action item: {block.title}"
         
     def add_agenda_item(self, ctx: RunContext, title: str, content: str):
         """Add an agenda item to the summary"""
         block = self.create_block(title, content, "agenda")
         self.Agenda.blocks.append(block)
-        return f"Successfully added agenda item: {block.id}"
+        return f"Successfully added agenda item: {block.title}"
         
     def add_decision(self, ctx: RunContext, title: str, content: str):
         """Add a decision to the summary"""
         block = self.create_block(title, content, "decision")
         self.Decisions.blocks.append(block)
-        return f"Successfully added decision: {block.id}"
+        return f"Successfully added decision: {block.title}"
         
-    def generate_summary(self, ctx: RunContext) -> SummaryResponse:
+    def generate_summary(self, ctx: RunContext) -> Summary:
         """Generate the final summary response"""
-        return SummaryResponse(
-            Agenda=self.Agenda,
-            Decisions=self.Decisions,
-            ActionItems=self.ActionItems,
+        return Summary(
+            MeetingName="",
+            SectionSummary={
+                "Agenda": self.Agenda.blocks,
+                "Decisions": self.Decisions.blocks,
+                "ActionItems": self.ActionItems.blocks,
+                "ClosingRemarks": self.ClosingRemarks.blocks
+            },
+            CriticalDeadlines=self.Decisions,
+            KeyItemsDecisions=self.ActionItems,
+            ImmediateActionItems=self.ActionItems,
+            NextSteps=self.ActionItems,
+            OtherImportantPoints=self.ActionItems,
             ClosingRemarks=self.ClosingRemarks
         )
 
@@ -339,7 +344,7 @@ processor = TranscriptProcessor()
 # Create an agent first
 agent = Agent(
     summarizer.model, 
-    result_type=SummaryResponse, 
+    result_type=Summary, 
     result_retries=15, 
     system_prompt=SYSTEM_PROMPT
 )
@@ -444,10 +449,15 @@ async def save_final_summary_result(ctx: RunContext) -> str:
         
         # Validate summary has content
         if not any([
-            summary.Agenda.blocks,
-            summary.Decisions.blocks,
-            summary.ActionItems.blocks,
-            summary.ClosingRemarks.blocks
+            len(summary.SectionSummary["Agenda"]),
+            len(summary.SectionSummary["Decisions"]),
+            len(summary.SectionSummary["ActionItems"]),
+            len(summary.SectionSummary["ClosingRemarks"]),
+            len(summary.CriticalDeadlines),
+            len(summary.KeyItemsDecisions),
+            len(summary.ImmediateActionItems),
+            len(summary.NextSteps),
+            len(summary.OtherImportantPoints)
         ]):
             return "Error: No content found in summary. Please add some items first."
 
@@ -468,7 +478,7 @@ async def save_final_summary_result(ctx: RunContext) -> str:
         return f"Error processing summary: {str(e)}"
 
 @agent.tool
-async def get_final_summary(ctx: RunContext) -> SummaryResponse:
+async def get_final_summary(ctx: RunContext) -> Summary:
     """Get the final meeting summary result"""
     return summarizer.generate_summary(ctx)
 

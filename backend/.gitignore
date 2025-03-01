@@ -7,7 +7,7 @@ instance/*
 .webassets-cache
 .env
 transcripts/
-chroma/
+chroma/*
 models/
 whisper.cpp/
 whisper-server*
