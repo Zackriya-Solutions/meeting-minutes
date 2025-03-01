@@ -41,7 +41,7 @@ function AppContainer({ children }: { children: React.ReactNode }) {
         `}
       >
         <MainNav title="Dashboard" />
-        <div className="max-w-3xl mx-auto px-6 py-10 bg-white rounded-lg shadow">
+        <div className="w-full px-6 py-10 bg-white rounded-lg shadow">
           <MainContent>{children}</MainContent>
         </div>
       </div>
