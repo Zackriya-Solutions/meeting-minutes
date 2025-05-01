@@ -39,7 +39,7 @@ graph TD
     AI --> Backend
     API --> VDB
     API --> Backend
-</div>
+```
 
 ## Component Details
 
