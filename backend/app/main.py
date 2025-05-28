@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -165,7 +165,7 @@ async def get_meetings():
         return [{"id": meeting["id"], "title": meeting["title"]} for meeting in meetings]
     except Exception as e:
         logger.error(f"Error getting meetings: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(status_code=500, content=format_error_response(str(e)))
 
 @app.get("/get-meeting/{meeting_id}", response_model=MeetingDetailsResponse)
 async def get_meeting(meeting_id: str):
@@ -173,13 +173,11 @@ async def get_meeting(meeting_id: str):
     try:
         meeting = await db.get_meeting(meeting_id)
         if not meeting:
-            raise HTTPException(status_code=404, detail="Meeting not found")
+            return JSONResponse(status_code=404, content=format_error_response("Meeting not found", meeting_id=meeting_id))
         return meeting
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error getting meeting: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(status_code=500, content=format_error_response(str(e), meeting_id=meeting_id))
 
 @app.post("/save-meeting-title")
 async def save_meeting_title(data: MeetingTitleUpdate):
@@ -189,7 +187,7 @@ async def save_meeting_title(data: MeetingTitleUpdate):
         return {"message": "Meeting title saved successfully"}
     except Exception as e:
         logger.error(f"Error saving meeting title: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(status_code=500, content=format_error_response(str(e), meeting_id=data.meeting_id))
 
 @app.post("/delete-meeting")
 async def delete_meeting(data: DeleteMeetingRequest):
@@ -199,10 +197,10 @@ async def delete_meeting(data: DeleteMeetingRequest):
         if success:
             return {"message": "Meeting deleted successfully"}
         else:
-            raise HTTPException(status_code=500, detail="Failed to delete meeting")
+            return JSONResponse(status_code=500, content=format_error_response("Failed to delete meeting", meeting_id=data.meeting_id))
     except Exception as e:
         logger.error(f"Error deleting meeting: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(status_code=500, content=format_error_response(str(e), meeting_id=data.meeting_id))
 
 async def process_transcript_background(process_id: str, transcript: TranscriptRequest):
     """Background task to process transcript"""
@@ -272,10 +270,7 @@ async def process_transcript_api(
 ):
     """Process a transcript text with background processing"""
     try:
-        # Create new process linked to meeting_id
         process_id = await processor.db.create_process(transcript.meeting_id)
-
-        # Save transcript data associated with meeting_id
         await processor.db.save_transcript(
             transcript.meeting_id,
             transcript.text,
@@ -284,22 +279,18 @@ async def process_transcript_api(
             transcript.chunk_size,
             transcript.overlap
         )
-
-        # Start background processing
         background_tasks.add_task(
             process_transcript_background,
             process_id,
             transcript
         )
-
         return JSONResponse({
             "message": "Processing started",
             "process_id": process_id
         })
-
     except Exception as e:
         logger.error(f"Error in process_transcript_api: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(status_code=500, content=format_error_response(str(e), process_id=None, meeting_id=transcript.meeting_id))
 
 @app.get("/get-summary/{meeting_id}")
 async def get_summary(meeting_id: str):
@@ -422,7 +413,7 @@ async def save_transcript(request: SaveTranscriptRequest):
         return {"status": "success", "message": "Transcript saved successfully", "meeting_id": meeting_id}
     except Exception as e:
         logger.error(f"Error saving transcript: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(status_code=500, content=format_error_response(str(e)))
 
 @app.get("/get-model-config")
 async def get_model_config():
@@ -449,8 +440,36 @@ async def get_api_key(request: GetApiKeyRequest):
     """Get the API key for a given provider"""
     return await db.get_api_key(request.provider)
 
+def format_error_response(error_message: str, process_id: str = None, meeting_id: str = None, start: str = None, end: str = None):
+    return {
+        "status": "error",
+        "meetingName": None,
+        "process_id": process_id,
+        "meeting_id": meeting_id,
+        "data": None,
+        "start": start,
+        "end": end,
+        "error": error_message
+    }
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    process_id = request.path_params.get("process_id") if hasattr(request, 'path_params') else None
+    meeting_id = request.path_params.get("meeting_id") if hasattr(request, 'path_params') else None
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=format_error_response(str(exc.detail), process_id=process_id, meeting_id=meeting_id)
+    )
 
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    process_id = request.path_params.get("process_id") if hasattr(request, 'path_params') else None
+    meeting_id = request.path_params.get("meeting_id") if hasattr(request, 'path_params') else None
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content=format_error_response(f"Internal server error: {str(exc)}", process_id=process_id, meeting_id=meeting_id)
+    )
 
 @app.on_event("shutdown")
 async def shutdown_event():
