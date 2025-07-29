@@ -215,8 +215,8 @@ fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
     }
     
     // Add PulseAudio monitor sources for system audio
-    if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Pulse) {
-        for device in pulse_host.input_devices()? {
+    if let Ok(alsa_host) = cpal::host_from_id(cpal::HostId::Alsa) {
+        for device in alsa_host.input_devices()? {
             if let Ok(name) = device.name() {
                 // Check if it's a monitor source
                 if name.contains("monitor") {
@@ -860,9 +860,10 @@ pub async fn get_device_and_config(
 
                 #[cfg(target_os = "linux")]
                 {
-                    // For Linux, we use PulseAudio monitor sources for system audio
-                    if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Pulse) {
-                        for device in pulse_host.input_devices()? {
+                    // For Linux, we use PulseAudio monitor sources for system audio but cpal has
+                    // -alsa flag for linux
+                    if let Ok(alsa_host) = cpal::host_from_id(cpal::HostId::Alsa) {
+                        for device in alsa_host.input_devices()? {
                             if let Ok(name) = device.name() {
                                 if name == audio_device.name {
                                     let default_config = device
