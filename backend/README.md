@@ -83,7 +83,44 @@ FastAPI backend for meeting transcription and analysis
    - Pull required models: `ollama pull mistral` (or your preferred model)
    - Verify installation: `ollama list`
 
+#### For Linux:
+Distro-specific commands are provided for Debian/Ubuntu, Fedora, and Arch-based systems.
 
+1.  **Python 3.9+ & Pip:**
+    * **Debian/Ubuntu**: `sudo apt update && sudo apt install -y python3 python3-pip python3-venv`
+    * **Fedora**: `sudo dnf install -y python3 python3-pip`
+    * **Arch**: `sudo pacman -S --needed --noconfirm python python-pip`
+    * Verify: `python3 --version`
+
+2.  **FFmpeg**:
+    * **Debian/Ubuntu**: `sudo apt install -y ffmpeg`
+    * **Fedora**: `sudo dnf install -y ffmpeg`
+    * **Arch**: `sudo pacman -S --needed --noconfirm ffmpeg`
+    * Verify: `ffmpeg -version`
+
+3.  **C++ Compiler & Build Tools**:
+    * **Debian/Ubuntu**: `sudo apt install -y build-essential`
+    * **Fedora**: `sudo dnf groupinstall -y "Development Tools"`
+    * **Arch**: `sudo pacman -S --needed --noconfirm base-devel`
+    * Verify: `g++ --version`
+
+4.  **CMake**:
+    * **Debian/Ubuntu**: `sudo apt install -y cmake`
+    * **Fedora**: `sudo dnf install -y cmake`
+    * **Arch**: `sudo pacman -S --needed --noconfirm cmake`
+    * Verify: `cmake --version`
+
+5.  **Git**:
+    * **Debian/Ubuntu**: `sudo apt install -y git`
+    * **Fedora**: `sudo dnf install -y git`
+    * **Arch**: `sudo pacman -S --needed --noconfirm git`
+    * Verify: `git --version`
+
+6.  **Ollama**:
+    * Install via the official script: `curl -fsSL https://ollama.com/install.sh | sh`
+    * (Arch users can also use `sudo pacman -S ollama`)
+    * Pull a model: `ollama pull mistral`
+    * Verify: `ollama list`
 
 ### 2. Python Dependencies
 Install Python dependencies:
@@ -99,7 +136,14 @@ python -m pip install -r requirements.txt
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
-
+#### For Linux:
+It is highly recommended to use a Python virtual environment.
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 ### 3. Build Whisper Server
 
 #### For Windows:
@@ -125,7 +169,12 @@ If you encounter permission issues, make the script executable:
 chmod +x build_whisper.sh
 ./build_whisper.sh
 ```
-
+#### For Linux:
+The build script will automatically install `cmake`, `llvm` and `openmp`.
+```bash
+chmod +x build_whisper.sh
+./build_whisper.sh
+```
 ### 4. Running the Server
 
 #### For Windows:
@@ -165,6 +214,11 @@ To stop all services on macOS, press Ctrl+C in the terminal or use:
 pkill -f "whisper-server"
 pkill -f "uvicorn main:app"
 ```
+#### For Linux:
+```bash
+chmod +x clean_start_backend.sh
+./clean_start_backend.sh
+```
 
 ## API Documentation
 Access Swagger UI at `http://localhost:5167/docs`
@@ -192,6 +246,16 @@ The backend runs two services:
   ```
 - To check running services: `ps aux | grep -E "whisper-server|uvicorn"`
 - To view logs: `tail -f whisper.log` or `tail -f backend.log`
+
+### Linux
+- The Linux scripts run all services in the foreground of a single terminal.
+- `clean_start_backend.sh` will handle process cleanup on startup.
+- To check running services: `ps aux | grep -E "whisper-server|uvicorn"`
+- To stop all services on Linux, press Ctrl+C in the terminal or use:
+```
+pkill -f "whisper-server"
+pkill -f "uvicorn main:app"
+```
 
 ## Troubleshooting
 
@@ -225,6 +289,15 @@ The backend runs two services:
   xcode-select --install
   ```
 - For M1/M2 Macs, ensure you're using ARM-compatible versions of software
+
+### Common Issues on Linux
+- If scripts fail with "Permission denied", run `chmod +x script_name.sh` to make them executable.
+- If building Whisper fails with compiler errors, ensure you have installed the correct build tools for your distribution (`build-essential`, `base-devel`, etc.).
+- For "Port already in use" errors, find and kill the process using:
+  ```bash
+  sudo lsof -i :5167  # For backend port
+  sudo lsof -i :8178  # For Whisper server port
+  sudo kill -9 PID    # Replace PID with the actual process ID
 
 ### General Troubleshooting
 - If services fail to start, the script will automatically clean up processes

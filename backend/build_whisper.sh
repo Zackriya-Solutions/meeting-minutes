@@ -63,8 +63,43 @@ ls "examples/server/" || handle_error "Failed to list server files"
 
 log_section "Building Whisper Server"
 log_info "Installing required dependencies..."
-brew install libomp llvm cmake || handle_error "Failed to install dependencies"
 
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    echo "Detected macOS, using Homebrew..."
+    brew install libomp llvm cmake || handle_error "Failed to install dependencies on macOS"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux - Dağıtımı kontrol et
+    echo "Detected Linux, checking distribution..."
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            ubuntu|debian)
+                echo "Found Ubuntu/Debian. Using apt..."
+                sudo apt-get update
+                sudo apt-get install -y cmake llvm libomp-dev build-essential || handle_error "Failed to install dependencies on Ubuntu/Debian"
+                ;;
+            fedora)
+                echo "Found Fedora. Using dnf..."
+                sudo dnf install -y cmake llvm libomp-devel || handle_error "Failed to install dependencies on Fedora"
+                ;;
+            arch|cachyos)
+                echo "Found Arch Linux. Using pacman..."
+                sudo pacman -S --needed --noconfirm cmake llvm openmp || handle_error "Failed to install dependencies on Arch"
+                ;;
+            *)
+                echo "Unsupported Linux distribution: $ID. Please install cmake, llvm, and openmp development packages manually."
+                exit 1
+                ;;
+        esac
+    else
+        echo "Cannot determine Linux distribution. /etc/os-release not found."
+        exit 1
+    fi
+else
+    echo "Unsupported operating system: $OSTYPE"
+    exit 1
+fi
 log_info "Building whisper.cpp..."
 rm -rf build
 mkdir build && cd build || handle_error "Failed to create build directory"
