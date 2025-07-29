@@ -1,0 +1,52 @@
+name: Build Intel macOS App
+
+on:
+  workflow_dispatch: # Allow manual triggering
+  push:
+    branches: [ main ]
+
+jobs:
+  build-intel-macos:
+    runs-on: macos-12 # Use older macOS runner for Intel compatibility
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-apple-darwin
+        
+    - name: Install Rust dependencies
+      run: |
+        cargo install tauri-cli --version "^1.0"
+        
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: |
+        npm install
+        
+    - name: Build for Intel macOS
+      working-directory: ./frontend
+      run: |
+        npm run tauri build -- --target x86_64-apple-darwin
+        
+    - name: Create DMG
+      working-directory: ./frontend
+      run: |
+        # Package the app into a DMG
+        mkdir -p dist
+        cp -r src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app dist/
+        
+    - name: Upload Intel Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: meetily-intel-macos
+        path: frontend/dist/
+        retention-days: 30
