@@ -26,6 +26,13 @@ A modern desktop application for recording, transcribing, and analyzing meetings
 - Visual Studio Build Tools with C++ development tools
 - Windows 10 or later
 
+### For Linux:
+- Node.js (v18 or later)
+- Rust (latest stable)
+- pnpm (v8 or later)
+- **Debian/Ubuntu**: `sudo apt install -y libwebkit2gtk-4.1-dev libasound2-dev librsvg2-dev`
+- **Fedora**: `sudo dnf install -y webkit2gtk4.1-devel alsa-lib-devel librsvg2-devel`
+- **Arch**: `sudo pacman -S --needed --noconfirm webkit2gtk-4.1 alsa-lib librsvg`
 
 ## Project Structure
 
@@ -94,6 +101,35 @@ A modern desktop application for recording, transcribing, and analyzing meetings
    pnpm install
    ```
 
+### For Linux:
+
+1. Install prerequisites:
+   ```bash
+   # Install Node.js (v18 or later) using nvm (recommended)
+   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+   # Follow instructions to add nvm to your shell's startup file, then restart your terminal or source the file (e.g., source ~/.bashrc)
+   nvm install 18
+   nvm use 18
+   
+   # Install Rust
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   # Follow instructions to add cargo to your PATH
+   
+   # Install pnpm
+   npm install -g pnpm
+   ```
+
+2. Clone the repository and navigate to the frontend directory:
+   ```bash
+   git clone https://github.com/Zackriya-Solutions/meeting-minutes
+   cd meeting-minutes/frontend
+   ```
+
+3. Install dependencies:
+   ```bash
+   pnpm install
+   ```
+
 ## Running the App
 
 ### For macOS:
@@ -123,6 +159,23 @@ clean_run_windows.bat
 To build a production version:
 ```cmd
 clean_build_windows.bat
+```
+
+### For Linux:
+
+Use the provided script to run the app in development mode:
+```bash
+./clean_run.sh
+```
+
+To build a production version:
+```bash
+./clean_build.sh
+```
+
+You can specify the log level (info, debug, trace):
+```bash
+./clean_run.sh debug
 ```
 
 ## Whisper Transcription Server
