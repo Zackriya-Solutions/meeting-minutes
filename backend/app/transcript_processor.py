@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Tuple
+from typing import List, Tuple, Literal
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.groq import GroqModel
@@ -32,11 +32,22 @@ load_dotenv()  # Load environment variables from .env file
 db = DatabaseManager()
 
 class Block(BaseModel):
-    """Represents a block of content in a section"""
+    """Represents a block of content in a section.
+    
+    Block types must align with frontend rendering capabilities:
+    - 'text': Plain text content
+    - 'bullet': Bulleted list item
+    - 'heading1': Large section heading
+    - 'heading2': Medium section heading
+    
+    Colors currently supported:
+    - 'gray': Gray text color
+    - '' or any other value: Default text color
+    """
     id: str
-    type: str
+    type: Literal['bullet', 'heading1', 'heading2', 'text']
     content: str
-    color: str
+    color: str  # Frontend currently only uses 'gray' or default
 
 class Section(BaseModel):
     """Represents a section in the meeting summary"""
@@ -162,6 +173,14 @@ class TranscriptProcessor:
                         summary_result = await agent.run(
                             f"""Given the following meeting transcript chunk, extract the relevant information according to the required JSON structure. If a specific section (like Critical Deadlines) has no relevant information in this chunk, return an empty list for its 'blocks'. Ensure the output is only the JSON data.
 
+                            IMPORTANT: Block types must be one of: 'text', 'bullet', 'heading1', 'heading2'
+                            - Use 'text' for regular paragraphs
+                            - Use 'bullet' for list items
+                            - Use 'heading1' for major headings
+                            - Use 'heading2' for subheadings
+                            
+                            For the color field, use 'gray' for less important content or '' (empty string) for default.
+
                             Transcript Chunk:
                             ---
                         {chunk}
@@ -215,7 +234,7 @@ class TranscriptProcessor:
     
     async def chat_ollama_model(self, model_name: str, transcript: str, custom_prompt: str):
         message = {
-        'role': 'user',
+        'role': 'system',
         'content': f'''
         Given the following meeting transcript chunk, extract the relevant information according to the required JSON structure. If a specific section (like Critical Deadlines) has no relevant information in this chunk, return an empty list for its 'blocks'. Ensure the output is only the JSON data.
 
@@ -223,13 +242,15 @@ class TranscriptProcessor:
             ---
             {transcript}
             ---
-            Please capture all relevant action items. Transcription can have spelling mistakes. correct it if required. context is important.
+        Please capture all relevant action items. Transcription can have spelling mistakes. correct it if required. context is important.
         
         While generating the summary, please add the following context:
         ---
         {custom_prompt}
         ---
+
         Make sure the output is only the JSON data.
+    
         ''',
         }
 
