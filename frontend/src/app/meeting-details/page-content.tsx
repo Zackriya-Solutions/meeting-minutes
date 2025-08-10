@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from 'react';
-import { debounce } from 'lodash';
+import { debounce, invoke } from 'lodash';
 import { Transcript, Summary, SummaryResponse } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
@@ -19,6 +19,7 @@ import {
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { MessageToast } from '@/components/MessageToast';
 import Analytics from '@/lib/analytics';
+import { invoke as invokeTauri } from '@tauri-apps/api/core';
 
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
@@ -71,6 +72,26 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       model: 'llama3.2:latest',
       whisperModel: 'large-v3'
     });
+    const fetchModelConfig = async () => {
+      try {
+        const data = await invokeTauri('api_get_model_config', {}) as any;
+        if (data && data.provider !== null) {
+          setModelConfig(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch model config:', error);
+      }
+    };
+
+    fetchModelConfig();
+  }, [serverAddress]);
+
+  useEffect(() => {
+    console.log('Model config:', modelConfig);
+  }, [modelConfig]);
+
+  useEffect(() => {
+
     setTranscriptModelConfig({
       provider: 'localWhisper',
       model: 'large-v3',
@@ -84,32 +105,9 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       }
       
       try {
-        // Fetch both configurations in parallel
-        const [modelConfigResponse, transcriptConfigResponse] = await Promise.allSettled([
-          fetch(`${serverAddress}/get-model-config`),
-          fetch(`${serverAddress}/get-transcript-config`)
-        ]);
-
-        // Handle model config response
-        if (modelConfigResponse.status === 'fulfilled' && modelConfigResponse.value.ok) {
-          const modelData = await modelConfigResponse.value.json();
-          if (modelData.provider !== null) {
-            setModelConfig(modelData);
-            console.log('Model config:', modelData);
-          }
-        } else {
-          console.error('Failed to fetch model config');
-        }
-
-        // Handle transcript config response
-        if (transcriptConfigResponse.status === 'fulfilled' && transcriptConfigResponse.value.ok) {
-          const transcriptData = await transcriptConfigResponse.value.json();
-          if (transcriptData.provider !== null) {
-            setTranscriptModelConfig(transcriptData);
-            console.log('Transcript settings:', transcriptData);
-          }
-        } else {
-          console.error('Failed to fetch transcript settings');
+        const data = await invokeTauri('api_get_transcript_config', {}) as any;
+        if (data && data.provider !== null) {
+          setTranscriptModelConfig(data);
         }
       } catch (error) {
         console.error('Failed to fetch configurations:', error);
@@ -158,55 +156,25 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       
       // Process transcript and get process_id
       console.log('Processing transcript...');
-      const response = await fetch(`${serverAddress}/process-transcript`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: fullTranscript,
-          model: modelConfig.provider,
-          model_name: modelConfig.model,
-          meeting_id: meeting.id,
-          chunk_size: 40000,
-          overlap: 1000,
-          custom_prompt: customPrompt
-        }),
-      });
+      const result = await invokeTauri('api_process_transcript', {
+        text: fullTranscript,
+        model: modelConfig.provider,
+        modelName: modelConfig.model,
+        meetingId: meeting.id,
+        chunkSize: 40000,
+        overlap: 1000,
+        customPrompt: customPrompt,
+      }) as any;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Process transcript failed:', errorData);
-        setSummaryError(errorData.error || 'Failed to process transcript');
-        setSummaryStatus('error');
-        return;
-      }
-
-      const { process_id } = await response.json();
+      const process_id = result.process_id;
       console.log('Process ID:', process_id);
 
       // Poll for summary status
       const pollInterval = setInterval(async () => {
         try {
-          const statusResponse = await fetch(`${serverAddress}/get-summary/${process_id}`);
-
-          if (!statusResponse.ok) {
-            const errorData = await statusResponse.json();
-            console.error('Get summary failed:', errorData);
-            setSummaryError(errorData.error || 'Unknown error');
-            setSummaryStatus('error');
-            clearInterval(pollInterval);
-            
-            // Track summary generation error
-            await Analytics.trackSummaryGenerationCompleted(
-              modelConfig.provider,
-              modelConfig.model,
-              false,
-              undefined,
-              errorData.error || 'Unknown error'
-            );
-            return;
-          }
-
-          const result = await statusResponse.json();
+          const result = await invokeTauri('api_get_summary', {
+            meetingId: process_id,
+          }) as any;
           console.log('Summary status:', result);
 
           if (result.status === 'error') {
@@ -262,15 +230,17 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
             
             // Format the summary data with consistent styling
             const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              acc[key] = {
-                title: section.title,
-                blocks: section.blocks.map((block: any) => ({
-                  ...block,
-                  type: 'bullet',
-                  color: 'default',
-                  content: block.content.trim() // Remove trailing newlines
-                }))
-              };
+              if (section && section.title) {
+                acc[key] = {
+                  title: section.title,
+                  blocks: (section.blocks || []).map((block: any) => ({
+                    ...block,
+                    // type: 'bullet',
+                    color: 'default',
+                    content: block?.content?.trim() || '' // Remove trailing newlines and handle null content
+                  }))
+                };
+              }
               return acc;
             }, {} as Summary);
 
@@ -346,27 +316,17 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       };
       
       const payload = {
-        meeting_id: meeting.id,
+        meetingId: meeting.id,
         summary: formattedSummary
       };
       console.log('Saving meeting summary with payload:', payload);
       
-      const response = await fetch(`${serverAddress}/save-meeting-summary`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
+      await invokeTauri('api_save_meeting_summary', {
+        meetingId: payload.meetingId,
+        summary: payload.summary,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Save meeting summary failed:', errorData);
-        throw new Error(errorData.error || 'Failed to save meeting summary');
-      }
-      
-      const responseData = await response.json();
-      console.log('Save meeting summary success:', responseData);
+      console.log('Save meeting summary success');
     } catch (error) {
       console.error('Failed to save meeting summary:', error);
       if (error instanceof Error) {
@@ -435,39 +395,24 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       
       // Process transcript and get process_id
       console.log('Processing transcript...');
-      const response = await fetch(`${serverAddress}/process-transcript`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: originalTranscript,
-          model: modelConfig.provider,
-          model_name: modelConfig.model,
-          meeting_id: meeting.id,
-          chunk_size: 40000,
-          overlap: 1000
-        })
-      });
+      const result = await invokeTauri('api_process_transcript', {
+        text: originalTranscript,
+        model: modelConfig.provider,
+        modelName: modelConfig.model,
+        meetingId: meeting.id,
+        chunkSize: 40000,
+        overlap: 1000,
+      }) as any;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Process transcript failed:', errorData);
-        throw new Error(errorData.error || 'Failed to process transcript');
-      }
-
-      const { process_id } = await response.json();
+      const process_id = result.process_id;
       console.log('Process ID:', process_id);
 
       // Poll for summary status
       const pollInterval = setInterval(async () => {
         try {
-          const statusResponse = await fetch(`${serverAddress}/get-summary/${process_id}`);
-          if (!statusResponse.ok) {
-            const errorData = await statusResponse.json();
-            console.error('Get summary failed:', errorData);
-            throw new Error(errorData.error || 'Failed to get summary status');
-          }
-
-          const result = await statusResponse.json();
+          const result = await invokeTauri('api_get_summary', {
+            meetingId: process_id,
+          }) as any;
           console.log('Summary status:', result);
 
           if (result.status === 'error') {
@@ -496,15 +441,17 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
 
             // Format the summary data with consistent styling
             const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              acc[key] = {
-                title: section.title,
-                blocks: section.blocks.map((block: any) => ({
-                  ...block,
-                  type: 'bullet',
-                  color: 'default',
-                  content: block.content.trim()
-                }))
-              };
+              if (section && section.title) {
+                acc[key] = {
+                  title: section.title,
+                  blocks: (section.blocks || []).map((block: any) => ({
+                    ...block,
+                    // type: 'bullet',
+                    color: 'default',
+                    content: block?.content?.trim() || '' // Handle null content
+                  }))
+                };
+              }
               return acc;
             }, {} as Summary);
 
@@ -604,28 +551,18 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
   const handleSaveMeetingTitle = async () => {
     try {
       const payload = {
-        meeting_id: meeting.id,
+        meetingId: meeting.id,
         title: meetingTitle
       };
       console.log('Saving meeting title with payload:', payload);
       
-      const response = await fetch(`${serverAddress}/save-meeting-title`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
+      await invokeTauri('api_save_meeting_title', {
+        meetingId: meeting.id,
+        title: meetingTitle,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Save meeting title failed:', errorData);
-        console.error('Response status:', response.status);
-        throw new Error(errorData.error || 'Failed to save meeting title');
-      }
-      
-      const responseData = await response.json();
-      console.log('Save meeting title success:', responseData);
+      console.log('Save meeting title success');
+
       
       // Update meetings with new title
       const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) => 
@@ -701,23 +638,14 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
         );
       }
       
-      const response = await fetch(`${serverAddress}/save-model-config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
+      await invokeTauri('api_save_model_config', {
+        provider: payload.provider,
+        model: payload.model,
+        whisperModel: payload.whisperModel,
+        apiKey: payload.apiKey,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Save model config failed:', errorData);
-        console.error('Response status:', response.status);
-        throw new Error(errorData.error || 'Failed to save model config');
-      }
-
-      const responseData = await response.json();
-      console.log('Save model config success:', responseData);
+      console.log('Save model config success');
       setSettingsSaveSuccess(true);
       setModelConfig(payload);
 
@@ -745,23 +673,15 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       };
       console.log('Saving transcript config with payload:', payload);
       
-      const response = await fetch(`${serverAddress}/save-transcript-config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
+      
+      await invokeTauri('api_save_transcript_config', {
+        provider: payload.provider,
+        model: payload.model,
+        api_key: payload.apiKey,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Save transcript config failed:', errorData);
-        console.error('Response status:', response.status);
-        throw new Error(errorData.error || 'Failed to save transcript config');
-      }
-
-      const responseData = await response.json();
-      console.log('Save transcript config success:', responseData);
+      
+      console.log('Save transcript config success');
       setSettingsSaveSuccess(true);
       const transcriptConfigToSave = updatedConfig || transcriptModelConfig;
       await Analytics.trackSettingsChanged('transcript_config', `${transcriptConfigToSave.provider}_${transcriptConfigToSave.model}`);
@@ -854,7 +774,9 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                           </svg>
                         </button>
                       </DialogTrigger>
-                      <DialogContent>
+                      <DialogContent
+                      aria-describedby={undefined}
+                      >
                         <VisuallyHidden>
                           <DialogTitle>Model Settings</DialogTitle>
                         </VisuallyHidden>

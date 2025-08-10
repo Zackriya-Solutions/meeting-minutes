@@ -16,6 +16,10 @@ whisper-server-package/
 *.json
 *.bin
 
+config/
+data/
+.docker-preferences
+
 meeting_minutes.db*
 
 

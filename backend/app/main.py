@@ -382,7 +382,7 @@ async def get_summary(meeting_id: str):
                 status = "failed"
                 result["error"] = f"Error processing summary data: {str(e)}"
 
-        # Transform summary data into frontend format if available
+        # Transform summary data into frontend format if available - PRESERVE ORDER
         transformed_data = {}
         if isinstance(summary_data, dict) and status == "completed":
             # Add MeetingName to transformed data
@@ -403,15 +403,32 @@ async def get_summary(meeting_id: str):
                 if backend_key in summary_data and isinstance(summary_data[backend_key], dict):
                     transformed_data[frontend_key] = summary_data[backend_key]
             
-            # Add meeting notes sections if available
+            # Add meeting notes sections if available - PRESERVE ORDER AND HANDLE DUPLICATES
             if "MeetingNotes" in summary_data and isinstance(summary_data["MeetingNotes"], dict):
                 meeting_notes = summary_data["MeetingNotes"]
                 if isinstance(meeting_notes.get("sections"), list):
-                    for section in meeting_notes["sections"]:
+                    # Add section order array to maintain order
+                    transformed_data["_section_order"] = []
+                    used_keys = set()
+                    
+                    for index, section in enumerate(meeting_notes["sections"]):
                         if isinstance(section, dict) and "title" in section and "blocks" in section:
+                            # Ensure blocks is a list to prevent frontend errors
+                            if not isinstance(section.get("blocks"), list):
+                                section["blocks"] = []
+                                
                             # Convert title to snake_case key
-                            key = section["title"].lower().replace(" & ", "_").replace(" ", "_")
+                            base_key = section["title"].lower().replace(" & ", "_").replace(" ", "_")
+                            
+                            # Handle duplicate section names by adding index
+                            key = base_key
+                            if key in used_keys:
+                                key = f"{base_key}_{index}"
+                            
+                            used_keys.add(key)
                             transformed_data[key] = section
+                            # Only add to _section_order if the section was successfully added
+                            transformed_data["_section_order"].append(key)
 
         response = {
             "status": "processing" if status in ["processing", "pending", "started"] else status,

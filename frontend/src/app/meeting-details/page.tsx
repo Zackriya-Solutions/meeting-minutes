@@ -5,6 +5,7 @@ import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
 import { useRouter } from "next/navigation";
 import Analytics from "@/lib/analytics";
+import { invoke } from "@tauri-apps/api/core";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -28,118 +29,99 @@ export default function MeetingDetails() {
   const [meetingSummary, setMeetingSummary] = useState<Summary|null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Combined effect to handle meeting data fetching and state management
+  // Reset states when currentMeeting changes
   useEffect(() => {
-    // Reset states when currentMeeting changes
     setMeetingDetails(null);
     setMeetingSummary(null);
     setError(null);
+  }, [currentMeeting?.id]);
 
+  useEffect(() => {
     if (!currentMeeting?.id || currentMeeting.id === 'intro-call') {
       setError("No meeting selected");
       Analytics.trackPageView('meeting_details');
       return;
     }
 
-    // Create AbortController for request cancellation
-    const abortController = new AbortController();
-    let isActive = true;
+    setMeetingDetails(null);
+    setMeetingSummary(null);
+    setError(null);
 
-    const fetchMeetingData = async () => {
-      let detailsResponse: PromiseSettledResult<Response> | undefined;
-      let summaryResponse: PromiseSettledResult<Response> | undefined;
-      
+    const fetchMeetingDetails = async () => {
       try {
-        // Fetch meeting details
-        [detailsResponse, summaryResponse] = await Promise.allSettled([
-          fetch(`${serverAddress}/get-meeting/${currentMeeting.id}`, {
-            cache: 'no-store',
-            signal: abortController.signal
-          }),
-          fetch(`${serverAddress}/get-summary/${currentMeeting.id}`, {
-            cache: 'no-store',
-            signal: abortController.signal
-          })
-        ]);
-
-        // Handle meeting details response
-        if (detailsResponse.status === 'fulfilled' && detailsResponse.value.ok) {
-          const data = await detailsResponse.value.json();
-          if (isActive) {
-            console.log('Meeting details:', data);
-            setMeetingDetails(data);
-          }
-        } else if (detailsResponse.status === 'fulfilled') {
-          throw new Error('Failed to fetch meeting details');
-        }
-
-        // Handle summary response
-        if (summaryResponse.status === 'fulfilled') {
-          if (summaryResponse.value.ok) {
-            const summary = await summaryResponse.value.json();
-            if (isActive) {
-              const summaryData = summary.data || {};
-              const { MeetingName, ...restSummaryData } = summaryData;
-              const formattedSummary = Object.entries(restSummaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-                acc[key] = {
-                  title: section?.title || key,
-                  blocks: (section?.blocks || []).map((block: any) => ({
-                    ...block,
-                    type: 'bullet',
-                    color: 'default',
-                    content: block.content.trim()
-                  }))
-                };
-                return acc;
-              }, {} as Summary);
-              setMeetingSummary(formattedSummary);
-            }
-          } else if (summaryResponse.value.status === 404) {
-            // Summary not found in database - this is expected for meetings without summaries
-            console.log(`No summary found for meeting ${currentMeeting.id} - summary not generated yet`);
-            if (isActive) {
-              setMeetingSummary(sampleSummary);
-            }
-          } else {
-            // Other HTTP errors
-            console.log(`Failed to fetch summary for meeting ${currentMeeting.id}: ${summaryResponse.value.status}`);
-            if (isActive) {
-              setMeetingSummary(sampleSummary);
-            }
-          }
-        } else {
-          // Network or other fetch errors
-          console.log(`Summary fetch rejected for meeting ${currentMeeting.id}:`, summaryResponse.reason);
-          if (isActive) {
-            setMeetingSummary(sampleSummary);
-          }
-        }
+        const data = await invoke('api_get_meeting', {
+          meetingId: currentMeeting.id,
+        }) as any;
+        console.log('Meeting details:', data);
+        setMeetingDetails(data);
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          console.log('Request aborted');
-          return;
-        }
-        console.error('Error fetching meeting data:', error);
-        if (isActive) {
-          // Only set error for critical failures (meeting details), not summary failures
-          if (detailsResponse && (detailsResponse.status === 'rejected' || 
-              (detailsResponse.status === 'fulfilled' && !detailsResponse.value.ok))) {
-            setError("Failed to load meeting details");
-          } else {
-            // Meeting details loaded successfully, just log summary issue
-            console.log('Meeting details loaded, but summary fetch failed - this is acceptable');
-          }
-        }
+        console.error('Error fetching meeting details:', error);
+        setError("Failed to load meeting details");
       }
     };
 
-    fetchMeetingData();
-
-    // Cleanup function
-    return () => {
-      isActive = false;
-      abortController.abort();
+    const fetchMeetingSummary = async () => {
+      try {
+        const summary = await invoke('api_get_summary', {
+          meetingId: currentMeeting.id,
+        }) as any;
+        const summaryData = summary.data || {};
+        const { MeetingName, _section_order, ...restSummaryData } = summaryData;
+        
+        // Format the summary data with consistent styling - PRESERVE ORDER
+        const formattedSummary: Summary = {};
+        
+        // Use section order if available to maintain exact order and handle duplicates
+        const sectionKeys = _section_order || Object.keys(restSummaryData);
+        
+        for (const key of sectionKeys) {
+          try {
+            const section = restSummaryData[key];
+            // Comprehensive null checks to prevent the error
+            if (section && 
+                typeof section === 'object' && 
+                'title' in section && 
+                'blocks' in section) {
+              
+              const typedSection = section as { title?: string; blocks?: any[] };
+              
+              // Ensure blocks is an array before mapping
+              if (Array.isArray(typedSection.blocks)) {
+                formattedSummary[key] = {
+                  title: typedSection.title || key,
+                  blocks: typedSection.blocks.map((block: any) => ({
+                    ...block,
+                    // type: 'bullet',
+                    color: 'default',
+                    content: block?.content?.trim() || ''
+                  }))
+                };
+              } else {
+                // Handle case where blocks is not an array
+                console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
+                formattedSummary[key] = {
+                  title: typedSection.title || key,
+                  blocks: []
+                };
+              }
+            } else {
+              console.warn(`Skipping invalid section ${key}:`, section);
+            }
+          } catch (error) {
+            console.warn(`Error processing section ${key}:`, error);
+            // Continue processing other sections
+          }
+        }
+        setMeetingSummary(formattedSummary);
+      } catch (error) {
+        console.error('Error fetching meeting summary:', error);
+        // Don't set error state for summary fetch failure, just use sample summary
+        setMeetingSummary(sampleSummary);
+      }
     };
+
+    fetchMeetingDetails();
+    fetchMeetingSummary();
   }, [currentMeeting?.id, serverAddress]);
 
   // if (error) {

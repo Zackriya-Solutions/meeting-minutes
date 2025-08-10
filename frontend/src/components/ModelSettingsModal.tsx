@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai';
@@ -33,40 +34,29 @@ export function ModelSettingsModal({
   const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
   const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
   const { serverAddress } = useSidebar();
-  // useEffect(() => {
-  //   // if (showModelSettings) {
-  //     const fetchModelConfig = async () => {
-  //       try {
-  //         const response = await fetch(`${serverAddress}/get-model-config`);
-  //         const data = await response.json();
-  //         if (data.provider !== null) {
-  //           setModelConfig(data);
-  //           setApiKey(data.apiKey || null);
-  //         }
-  //       } catch (error) {
-  //         console.error('Failed to fetch model config:', error);
-  //       }
-  //     };
+  useEffect(() => {
+    // if (showModelSettings) {
+      const fetchModelConfig = async () => {
+        try {
+        const data = await invoke('api_get_model_config') as any;
+        if (data && data.provider !== null) {
 
-  //     fetchModelConfig();
-  //   // }
-  // }, []);
+          setModelConfig(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch model config:', error);
+      }
+      };
+
+      fetchModelConfig();
+    // }
+  }, []);
 
   const fetchApiKey = async (provider: string) => {
     try {
-      const response = await fetch(`${serverAddress}/get-api-key`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ provider }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await invoke('api_get_api_key', {
+        provider,
+      }) as string;
       setApiKey(data || '');
     } catch (err) {
       console.error('Error fetching API key:', err);
@@ -110,24 +100,7 @@ export function ModelSettingsModal({
   useEffect(() => {
     const loadModels = async () => {
       try {
-        const response = await fetch('http://localhost:11434/api/tags', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const modelList = data.models.map((model: any) => ({
-          name: model.name,
-          id: model.model,
-          size: formatSize(model.size),
-          modified: model.modified_at
-        }));
+        const modelList = await invoke('get_ollama_models') as OllamaModel[];
         setModels(modelList);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load Ollama models');

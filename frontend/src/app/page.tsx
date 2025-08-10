@@ -64,6 +64,10 @@ export default function Home() {
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showChunkDropWarning, setShowChunkDropWarning] = useState(false);
+  const [chunkDropMessage, setChunkDropMessage] = useState('');
+  const [isSavingTranscript, setIsSavingTranscript] = useState(false);
+  const [isRecordingDisabled, setIsRecordingDisabled] = useState(false);
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording , serverAddress} = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -71,6 +75,14 @@ export default function Home() {
   
   // Ref for final buffer flush functionality
   const finalFlushRef = useRef<(() => void) | null>(null);
+  
+  // Ref to avoid stale closure issues with transcripts
+  const transcriptsRef = useRef<Transcript[]>(transcripts);
+  
+  // Keep ref updated with current transcripts
+  useEffect(() => {
+    transcriptsRef.current = transcripts;
+  }, [transcripts]);
 
   const modelOptions = {
     ollama: models.map(model => model.name),
@@ -349,6 +361,39 @@ export default function Home() {
     };
   }, []);
 
+  // Set up chunk drop warning listener
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupChunkDropListener = async () => {
+      try {
+        console.log('Setting up chunk-drop-warning listener...');
+        unlistenFn = await listen<string>('chunk-drop-warning', (event) => {
+          console.log('Chunk drop warning received:', event.payload);
+          setChunkDropMessage(event.payload);
+          setShowChunkDropWarning(true);
+          
+          // // Auto-dismiss after 8 seconds
+          // setTimeout(() => {
+          //   setShowChunkDropWarning(false);
+          // }, 8000);
+        });
+        console.log('Chunk drop warning listener setup complete');
+      } catch (error) {
+        console.error('Failed to setup chunk drop warning listener:', error);
+      }
+    };
+
+    setupChunkDropListener();
+
+    return () => {
+      console.log('Cleaning up chunk drop warning listener...');
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const loadModels = async () => {
       try {
@@ -498,6 +543,7 @@ export default function Home() {
   };
 
   const handleRecordingStop2 = async (isCallApi: boolean) => {
+    setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
     try {
       console.log('Stopping recording (new implementation)...', {
@@ -615,45 +661,36 @@ export default function Home() {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Save to SQLite
-      if (isCallApi) {
-        // Get the most current transcript data from state
-        const currentTranscripts = await new Promise<typeof transcripts>((resolve) => {
-          setTranscripts(prev => {
-            resolve(prev);
-            return prev;
-          });
+      if (isCallApi && transcriptionComplete == true) {
+
+        // await new Promise(resolve => setTimeout(resolve, 5000));
+        setIsSavingTranscript(true);
+
+        // Fix stale closure issue: Use ref to get fresh transcript state
+        console.log('🔄 Solving stale closure - getting fresh transcript state at save time...');
+        
+        // // Force final buffer flush to capture any remaining transcripts
+        // if (finalFlushRef.current) {
+        //   finalFlushRef.current();
+        // }
+        
+        // // Wait a moment for any final state updates to propagate
+        // await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Get fresh transcript state using ref (avoids stale closure)
+        const freshTranscripts = [...transcriptsRef.current];
+        
+        console.log('💾 Saving transcript to database with fresh state...', {
+          fresh_transcript_count: freshTranscripts.length,
+          sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
+          last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none'
         });
         
-        console.log('Saving transcript to database...');
-        console.log('Current transcript count:', currentTranscripts.length);
-        console.log('Transcript data:', currentTranscripts);
-        
-        if (currentTranscripts.length === 0) {
-          console.warn('No transcripts to save! This might indicate a timing issue.');
-          console.warn('Original transcripts var:', transcripts);
-        }
-        
-        const response = await fetch(`${serverAddress}/save-transcript`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            meeting_title: meetingTitle,
-            transcripts: currentTranscripts
-          })
-        });
+        const responseData = await invoke('api_save_transcript', {
+          meetingTitle: meetingTitle,
+          transcripts: freshTranscripts, // Use fresh state, not stale closure
+        }) as any;
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Save transcript failed:', response.status, errorText);
-          setIsRecordingState(false);
-          throw new Error(`Failed to save transcript to database: ${response.status} ${errorText}`);
-        }
-
-        const responseData = await response.json();
-        console.log('Save transcript response:', responseData);
-        
         const meetingId = responseData.meeting_id;
         if (!meetingId) {
           console.error('No meeting_id in response:', responseData);
@@ -675,6 +712,7 @@ export default function Home() {
       }
       setIsMeetingActive(false);
       setIsRecordingState(false);
+      setIsRecordingDisabled(false);
       // Show summary button if we have transcript content
       if (transcripts.length > 0) {
         setShowSummary(true);
@@ -685,6 +723,8 @@ export default function Home() {
       console.error('Error in handleRecordingStop2:', error);
       setIsRecordingState(false);
       setSummaryStatus('idle');
+      setIsSavingTranscript(false);
+      setIsRecordingDisabled(false);
     }
   };
 
@@ -747,46 +787,25 @@ export default function Home() {
       
       // Process transcript and get process_id
       console.log('Processing transcript...');
-      const response = await fetch(`${serverAddress}/process-transcript`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: fullTranscript,
-          model: modelConfig.provider,
-          model_name: modelConfig.model,
-          chunk_size: 40000,
-          overlap: 1000,
-          custom_prompt: prompt,
-        }),
-      });
+      const result = await invoke('api_process_transcript', {
+        text: fullTranscript,
+        model: modelConfig.provider,
+        modelName: modelConfig.model,
+        chunkSize: 40000,
+        overlap: 1000,
+        customPrompt: prompt,
+      }) as any;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Process transcript failed:', errorData);
-        setSummaryError(errorData.error || 'Failed to process transcript');
-        setSummaryStatus('error');
-        return;
-      }
-
-      const { process_id } = await response.json();
+      const process_id = result.process_id;
       console.log('Process ID:', process_id);
    
 
       // Poll for summary status
       const pollInterval = setInterval(async () => {
         try {
-          const statusResponse = await fetch(`${serverAddress}/get-summary/${process_id}`);
-          
-          if (!statusResponse.ok) {
-            const errorData = await statusResponse.json();
-            console.error('Get summary failed:', errorData);
-            setSummaryError(errorData.error || 'Unknown error');
-            setSummaryStatus('error');
-            clearInterval(pollInterval);
-            return;
-          }
-
-          const result = await statusResponse.json();
+          const result = await invoke('api_get_summary', {
+            meetingId: process_id,
+          }) as any;
           console.log('Summary status:', result);
 
           if (result.status === 'error') {
@@ -813,7 +832,7 @@ export default function Home() {
                 title: section.title,
                 blocks: section.blocks.map((block: any) => ({
                   ...block,
-                  type: 'bullet',
+                  // type: 'bullet',
                   color: 'default',
                   content: block.content.trim() // Remove trailing newlines
                 }))
@@ -949,39 +968,23 @@ export default function Home() {
       
       // Process transcript and get process_id
       console.log('Processing transcript...');
-      const response = await fetch(`${serverAddress}/process-transcript`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: originalTranscript,
-          model: modelConfig.provider,
-          model_name: modelConfig.model,
-          chunk_size: 40000,
-          overlap: 1000
-        })
-      });
+      const result = await invoke('api_process_transcript', {
+        text: originalTranscript,
+        model: modelConfig.provider,
+        modelName: modelConfig.model,
+        chunkSize: 40000,
+        overlap: 1000,
+      }) as any;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Process transcript failed:', errorData);
-        throw new Error(errorData.error || 'Failed to process transcript');
-      }
-
-      const { process_id } = await response.json();
+      const process_id = result.process_id;
       console.log('Process ID:', process_id);
 
       // Poll for summary status
       const pollInterval = setInterval(async () => {
         try {
-          const statusResponse = await fetch(`${serverAddress}/get-summary/${process_id}`);
-          
-          if (!statusResponse.ok) {
-            const errorData = await statusResponse.json();
-            console.error('Get summary failed:', errorData);
-            throw new Error(errorData.error || 'Failed to get summary status');
-          }
-
-          const result = await statusResponse.json();
+          const result = await invoke('api_get_summary', {
+            meetingId: process_id,
+          }) as any;
           console.log('Summary status:', result);
 
           if (result.status === 'error') {
@@ -1008,7 +1011,7 @@ export default function Home() {
                 title: section.title,
                 blocks: section.blocks.map((block: any) => ({
                   ...block,
-                  type: 'bullet',
+                  // type: 'bullet',
                   color: 'default',
                   content: block.content.trim()
                 }))
@@ -1093,6 +1096,22 @@ export default function Home() {
           </Alert>
         </div>
       )}
+      {showChunkDropWarning && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Alert className="max-w-lg mx-4 border-yellow-200 bg-white shadow-xl">
+            <AlertTitle className="text-yellow-800">Transcription Performance Warning</AlertTitle>
+            <AlertDescription className="text-yellow-700">
+              {chunkDropMessage}
+              <button
+                onClick={() => setShowChunkDropWarning(false)}
+                className="ml-2 text-yellow-600 hover:text-yellow-800 underline"
+              >
+                Dismiss
+              </button>
+            </AlertDescription>
+          </Alert>
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
         <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-white flex flex-col relative">
@@ -1117,7 +1136,7 @@ export default function Home() {
                     </svg>
                     <span className="text-sm">Copy Transcript</span>
                   </button>
-                  {showSummary && !isRecording && (
+                  {/* {showSummary && !isRecording && (
                     <>
                       <button
                         onClick={handleGenerateSummary}
@@ -1165,10 +1184,10 @@ export default function Home() {
                         </svg>
                       </button>
                     </>
-                  )}
+                  )} */}
                 </div>
 
-                {showSummary && !isRecording && (
+                {/* {showSummary && !isRecording && (
                   <>
                     <button
                       onClick={handleGenerateSummary}
@@ -1216,7 +1235,7 @@ export default function Home() {
                       </svg>
                     </button>
                   </>
-                )}
+                )} */}
               </div>
             </div>
           </div>
@@ -1227,7 +1246,7 @@ export default function Home() {
           </div>
           
           {/* Custom prompt input at bottom of transcript section */}
-          {!isRecording && transcripts.length > 0 && !isMeetingActive && (
+          {/* {!isRecording && transcripts.length > 0 && !isMeetingActive && (
             <div className="p-4 border-t border-gray-200">
               <textarea
                 placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
@@ -1237,7 +1256,7 @@ export default function Home() {
                 disabled={summaryStatus === 'processing'}
               />
             </div>
-          )}
+          )} */}
 
           {/* Recording controls */}
           <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
@@ -1252,6 +1271,7 @@ export default function Home() {
                   setErrorMessage(message);
                   setShowErrorAlert(true);
                 }}
+                isRecordingDisabled={isRecordingDisabled}
               />
             </div>
           </div>
@@ -1261,6 +1281,12 @@ export default function Home() {
             <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
               <span className="text-sm text-gray-700">Finalizing transcription...</span>
+            </div>
+          )}
+          {isSavingTranscript && (
+            <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+              <span className="text-sm text-gray-700">Saving transcript...</span>
             </div>
           )}
 
@@ -1369,7 +1395,7 @@ export default function Home() {
               />
             </div>
           </div>
-          {isSummaryLoading ? (
+          {/* {isSummaryLoading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
@@ -1442,7 +1468,7 @@ export default function Home() {
                 </div>
               )}
             </div>
-          )}
+          )} */}
         </div>
       </div>
     </div>

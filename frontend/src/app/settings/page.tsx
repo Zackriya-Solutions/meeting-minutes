@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { Bell, User, Lock, Database, Palette, ArrowLeft } from 'lucide-react';
+import { Bell, User, Lock, Database, Palette, ArrowLeft, Terminal } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { ConsoleToggle } from '@/components/ConsoleToggle';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -32,6 +33,11 @@ export default function SettingsPage() {
       title: 'Appearance',
       icon: <Palette className="w-5 h-5" />,
       items: ['Theme', 'Font Size', 'Language']
+    },
+    {
+      title: 'Developer',
+      icon: <Terminal className="w-5 h-5" />,
+      items: ['Console']
     }
   ];
 
@@ -57,9 +63,15 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-4">
               {section.items.map((item) => (
-                <div key={item} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-md cursor-pointer">
-                  <span>{item}</span>
-                  <button className="text-blue-600 hover:text-blue-800">Configure</button>
+                <div key={item} className="p-3 hover:bg-gray-50 rounded-md">
+                  {item === 'Console' ? (
+                    <ConsoleToggle />
+                  ) : (
+                    <div className="flex items-center justify-between cursor-pointer">
+                      <span>{item}</span>
+                      <button className="text-blue-600 hover:text-blue-800">Configure</button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { load } from '@tauri-apps/plugin-store';
 import Analytics from '@/lib/analytics';
+import { invoke } from '@tauri-apps/api/core';
 
 
 interface SidebarItem {
@@ -46,6 +47,7 @@ interface SidebarContextType {
   serverAddress: string;
   transcriptServerAddress: string;
   setTranscriptServerAddress: (address: string) => void;
+  debugStoreContents: () => Promise<void>;
 }
 
 const SidebarContext = createContext<SidebarContextType | null>(null);
@@ -78,16 +80,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     const fetchMeetings = async () => {
         if (serverAddress) {
           try {
-        const response = await fetch(`${serverAddress}/get-meetings`, {
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          }
-        });
-        const data = await response.json();
-        const transformedMeetings = data.map((meeting: any) => ({
+        const meetings = await invoke('api_get_meetings') as Array<{id: string, title: string}>;
+        const transformedMeetings = meetings.map((meeting: any) => ({
             id: meeting.id,
             title: meeting.title
         }));
@@ -129,15 +123,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const baseItems: SidebarItem[] = [
-    ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const })),
-    // {
-    //   id: 'meetings',
-    //   title: 'Meetings',
-    //   type: 'folder' as const,
-    //   children: [
-    //     ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
-    //   ]
-    // },
+    {
+      id: 'meetings',
+      title: 'Meeting Notes',
+      type: 'folder' as const,
+      children: [
+        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
+      ]
+    },
   ];
 
  
@@ -181,19 +174,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     
     try {
       setIsSearching(true);
-      const response = await fetch(`${serverAddress}/search-transcripts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query }),
-      });
       
-      if (!response.ok) {
-        throw new Error('Failed to search transcripts');
-      }
       
-      const results = await response.json();
+      const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
       setSearchResults(results);
       
       // Track search performed
@@ -203,6 +186,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setSearchResults([]);
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const debugStoreContents = async () => {
+    try {
+      const result = await invoke('debug_store_contents') as string;
+      console.log('Store debug info:', result);
+    } catch (error) {
+      console.error('Error debugging store:', error);
     }
   };
 
@@ -226,7 +218,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setServerAddress,
       serverAddress,
       transcriptServerAddress,
-      setTranscriptServerAddress
+      setTranscriptServerAddress,
+      debugStoreContents
     }}>
       {children}
     </SidebarContext.Provider>

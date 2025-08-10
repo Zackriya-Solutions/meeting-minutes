@@ -10,7 +10,7 @@ import {  ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
-
+import { invoke } from '@tauri-apps/api/core';
 
 import {
   Dialog,
@@ -22,6 +22,8 @@ import {
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 
 import { MessageToast } from '../MessageToast';
+import Logo from '../Logo';
+import Info from '../Info';
 
 interface SidebarItem {
   id: string;
@@ -48,7 +50,7 @@ const Sidebar: React.FC = () => {
     setMeetings,
     serverAddress
   } = useSidebar();
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings', 'notes']));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
@@ -97,12 +99,9 @@ const Sidebar: React.FC = () => {
       }
       
       try {
-        const response = await fetch(`${serverAddress}/get-model-config`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        if (data.provider !== null) {
+        const data = await invoke('api_get_model_config') as any;
+        if (data && data.provider !== null) {
+
           setModelConfig(data);
         }
       } catch (error) {
@@ -127,12 +126,8 @@ const Sidebar: React.FC = () => {
       }
       
       try {
-        const response = await fetch(`${serverAddress}/get-transcript-config`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        if (data.provider !== null) {
+        const data = await invoke('api_get_transcript_config') as any;
+        if (data && data.provider !== null) {
           setTranscriptModelConfig(data);
         }
       } catch (error) {
@@ -147,17 +142,12 @@ const Sidebar: React.FC = () => {
   // Handle model config save
   const handleSaveModelConfig = async (config: ModelConfig) => {
     try {
-      const response = await fetch(`${serverAddress}/save-model-config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(config),
+      await invoke('api_save_model_config', { 
+        provider: config.provider,
+        model: config.model,
+        whisperModel: config.whisperModel,
+        apiKey: config.apiKey,
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
 
       setModelConfig(config);
       console.log('Model config saved successfully');
@@ -181,23 +171,13 @@ const Sidebar: React.FC = () => {
       };
       console.log('Saving transcript config with payload:', payload);
       
-      const response = await fetch(`${serverAddress}/save-transcript-config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
+      await invoke('api_save_transcript_config', {
+        provider: payload.provider,
+        model: payload.model,
+        apiKey: payload.apiKey,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Save transcript config failed:', errorData);
-        console.error('Response status:', response.status);
-        throw new Error(errorData.error || 'Failed to save transcript config');
-      }
-
-      const responseData = await response.json();
-      console.log('Save transcript config success:', responseData);
+      
       setSettingsSaveSuccess(true);
       
       // Track settings change
@@ -293,19 +273,14 @@ const Sidebar: React.FC = () => {
   const handleDelete = async (itemId: string) => {
     console.log('Deleting item:', itemId);
     const payload = {
-      meeting_id: itemId
+      meetingId: itemId
     };
     
-    const response = await fetch(`${serverAddress}/delete-meeting`, {
-      cache: 'no-store',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (response.ok) {
+    try{
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('api_delete_meeting', {
+        meetingId: itemId,
+      });
       console.log('Meeting deleted successfully');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
       setMeetings(updatedMeetings);
@@ -318,8 +293,8 @@ const Sidebar: React.FC = () => {
         setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
         router.push('/');
       }
-    } else {
-      console.error('Failed to delete meeting');
+    } catch (error) {
+      console.error('Failed to delete meeting:', error);
     }
   };
   
@@ -331,16 +306,7 @@ const Sidebar: React.FC = () => {
   };
 
   const toggleFolder = (folderId: string) => {
-    // Prevent 'meetings' folder from being closed
-    if (folderId === 'meetings') {
-      // Only allow adding 'meetings' to expanded folders, never removing
-      const newExpanded = new Set(expandedFolders);
-      newExpanded.add(folderId);
-      setExpandedFolders(newExpanded);
-      return;
-    }
-    
-    // Normal toggle behavior for other folders
+    // Normal toggle behavior for all folders
     const newExpanded = new Set(expandedFolders);
     if (newExpanded.has(folderId)) {
       newExpanded.delete(folderId);
@@ -356,9 +322,11 @@ const Sidebar: React.FC = () => {
     return (
       <div className="flex flex-col items-center space-y-4 mt-4">
         {/* New Call button for collapsed sidebar */}
-        <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
-          <span className='m-3'>Me</span>
-        </span>
+            {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
+              <span className='m-3'>Me</span>
+            </span> */}
+            <Logo isCollapsed={isCollapsed} />
+            {/* <Logo isCollapsed={isCollapsed} /> */}
         <button
           onClick={handleRecordingToggle}
           disabled={isRecording}
@@ -385,8 +353,8 @@ const Sidebar: React.FC = () => {
             if (isCollapsed) toggleCollapse();
             toggleFolder('meetings');
           }}
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-          title="Meetings"
+          className="p-3 hover:bg-gray-100 rounded-md transition-colors"
+          title="Meeting Notes"
         >
           <StickyNote className="w-5 h-5 text-gray-600" />
         </button>
@@ -406,7 +374,7 @@ const Sidebar: React.FC = () => {
               <Settings className="w-5 h-5 text-gray-600" />
             </button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent aria-describedby={undefined}>
             <VisuallyHidden>
               <DialogTitle>Settings</DialogTitle>
             </VisuallyHidden>
@@ -442,6 +410,7 @@ const Sidebar: React.FC = () => {
         >
           <StickyNote className="w-5 h-5 text-gray-600" />
         </button> */}
+        <Info isCollapsed={isCollapsed} />
       </div>
     );
   };
@@ -468,13 +437,17 @@ const Sidebar: React.FC = () => {
     return (
       <div key={item.id}>
         <div
-          className={`flex items-center px-3 py-2 my-0.5 rounded-md transition-all duration-150 text-sm group ${
-            isActive ? 'bg-blue-50 text-blue-700 font-medium shadow-sm' : 
-            hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
-          } ${
-            isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+          className={`flex items-center transition-all duration-150 group ${
+            item.type === 'folder' && depth === 0 
+              ? 'p-3 text-lg font-semibold hover:bg-gray-100 h-10 mx-3 mt-3 rounded-lg cursor-pointer'
+              : `px-3 py-2 my-0.5 rounded-md text-sm ${
+                  isActive ? 'bg-blue-50 text-blue-700 font-medium shadow-sm' : 
+                  hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
+                } ${
+                  isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                }`
           }`}
-          style={{ paddingLeft }}
+          style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
           onClick={() => {
             if (item.type === 'folder') {
               toggleFolder(item.id);
@@ -492,29 +465,29 @@ const Sidebar: React.FC = () => {
         >
           {item.type === 'folder' ? (
             <>
-              <div className="flex items-center bg-gray-50 p-1 rounded mr-2">
-                {item.id === 'meetings' ? (
-                  <Calendar className="w-4 h-4 text-gray-700" />
-                ) : item.id === 'notes' ? (
-                  <StickyNote className="w-4 h-4 text-gray-700" />
-                ) : null}
+              {item.id === 'meetings' ? (
+                <StickyNote className="w-4 h-4 mr-2" />
+              ) : item.id === 'notes' ? (
+                <StickyNote className="w-4 h-4 mr-2" />
+              ) : null}
+              <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
+              <div className="ml-auto">
+                {isExpanded ? (
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-500" />
+                )}
               </div>
-              {isExpanded ? (
-                <ChevronDown className="w-4 h-4 mr-1 text-gray-500" />
-              ) : (
-                <ChevronRight className="w-4 h-4 mr-1 text-gray-500" />
-              )}
-              <span className="font-medium">{item.title}</span>
               {searchQuery && item.id === 'meetings' && isSearching && (
                 <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
               )}
             </>
           ) : (
             <div className="flex flex-col w-full">
-              <div className="flex items-start justify-between w-full">
-                <div className="flex items-start">
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center">
                   {isMeetingItem ? (
-                    <div className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 mt-0.5 ${
+                    <div className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 ${
                       isDisabled ? 'bg-gray-100' : 
                       hasTranscriptMatch ? 'bg-yellow-100' : 'bg-blue-100'}`}>
                       <File className={`w-3.5 h-3.5 ${
@@ -522,11 +495,11 @@ const Sidebar: React.FC = () => {
                         hasTranscriptMatch ? 'text-yellow-600' : 'text-blue-600'}`} />
                     </div>
                   ) : (
-                    <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 mt-0.5 bg-green-100">
+                    <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-green-100">
                       <Plus className="w-3.5 h-3.5 text-green-600" />
                     </div>
                   )}
-                  <span className={`break-words pr-6 leading-tight ${isDisabled ? 'text-gray-400' : ''}`}>{item.title}</span>
+                  <span className={`break-words pr-6 ${isDisabled ? 'text-gray-400' : ''}`}>{item.title}</span>
                 </div>
                 {isMeetingItem && !isDisabled && (
                   <button
@@ -552,7 +525,7 @@ const Sidebar: React.FC = () => {
           )}
         </div>
         {item.type === 'folder' && isExpanded && item.children && (
-          <div className="ml-1 border-l border-gray-100">
+          <div className="ml-1">
             {item.children.map(child => renderItem(child, depth + 1))}
           </div>
         )}
@@ -581,7 +554,7 @@ const Sidebar: React.FC = () => {
         }`}
       >
         {/* Header with traffic light spacing */}
-        <div className="h-22 flex items-center border-b">
+        <div className="flex-shrink-0 h-22 flex items-center border-b">
         
           {/* Title container */}
           
@@ -590,9 +563,10 @@ const Sidebar: React.FC = () => {
           <div className="flex-1">
             {!isCollapsed && (
               <div className="p-3">
-                <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
+                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
                   <span>Meetily</span>
-                </span>
+                </span> */}
+                <Logo isCollapsed={isCollapsed} />
                 
                 <div className="relative mb-1">
               <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
@@ -620,23 +594,70 @@ const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Main content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {!isCollapsed && (
-            <div className="p-3 mb-3 text-lg font-semibold items-center">
-              Meeting Notes
-            </div>
-          )}
-          {renderCollapsedIcons()}
-          <div className="px-2">
-            {filteredSidebarItems.map(item => renderItem(item))}
+        {/* Main content - scrollable area */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Fixed navigation items */}
+          <div className="flex-shrink-0">
+            {!isCollapsed && (
+              <div 
+                onClick={() => router.push('/')}
+                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+              >
+                <Home className="w-4 h-4 mr-2" />
+                <span>Home</span>
+              </div>
+            )}
+          </div>
+          
+          {/* Content area */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {renderCollapsedIcons()}
+            {/* Meeting Notes folder header - fixed */}
+            {!isCollapsed && (
+              <div className="flex-shrink-0">
+                {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
+                  <div key={item.id}>
+                    <div
+                      className="flex items-center  transition-all duration-150 group p-3 text-lg font-semibold hover:bg-gray-100 h-10 mx-3 mt-3 rounded-lg cursor-pointer"
+                      onClick={() => toggleFolder(item.id)}
+                    >
+                      <StickyNote className="w-4 h-4 mr-2" />
+                      <span>{item.title}</span>
+                      {/* <div className="ml-auto">
+                        {expandedFolders.has(item.id) ? (
+                          <ChevronDown className="w-4 h-4 text-gray-500" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-gray-500" />
+                        )}
+                      </div> */}
+                      {searchQuery && item.id === 'meetings' && isSearching && (
+                        <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {/* Scrollable meeting items */}
+            {!isCollapsed && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
+                {filteredSidebarItems
+                  .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
+                  .map(item => (
+                    <div key={`${item.id}-children`} className="mx-3">
+                      {item.children!.map(child => renderItem(child, 1))}
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Footer */}
         {!isCollapsed && (
           
-          <div className="p-2 border-t border-gray-100">
+          <div className="flex-shrink-0 p-2 border-t border-gray-100">
             <button
                 onClick={handleRecordingToggle}
                 disabled={isRecording}
@@ -665,7 +686,7 @@ const Sidebar: React.FC = () => {
                     <span>Settings</span>
                   </button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent aria-describedby={undefined}>
                   <VisuallyHidden>
                     <DialogTitle>Settings</DialogTitle>
                   </VisuallyHidden>
@@ -692,6 +713,7 @@ const Sidebar: React.FC = () => {
                 </DialogContent>
 
               </Dialog>
+              <Info isCollapsed={isCollapsed} />
               <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
               v0.0.5 - Pre Release
             </div>

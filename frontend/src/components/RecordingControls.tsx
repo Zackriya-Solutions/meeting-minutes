@@ -16,6 +16,7 @@ interface RecordingControlsProps {
   onRecordingStart: () => void;
   onTranscriptReceived: (summary: SummaryResponse) => void;
   onTranscriptionError?: (message: string) => void;
+  isRecordingDisabled: boolean;
 }
 
 export const RecordingControls: React.FC<RecordingControlsProps> = ({
@@ -25,6 +26,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   onRecordingStart,
   onTranscriptReceived,
   onTranscriptionError,
+  isRecordingDisabled,
 }) => {
   const [showPlayback, setShowPlayback] = useState(false);
   const [recordingPath, setRecordingPath] = useState<string | null>(null);
@@ -244,7 +246,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                       handleStartRecording();
                     }
                   }}
-                  disabled={isStarting || isProcessing || isStopping}
+                  disabled={isStarting || isProcessing || isStopping || isRecordingDisabled}
                   className={`w-12 h-12 flex items-center justify-center ${
                     isStarting || isProcessing || isStopping ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
                   } rounded-full text-white transition-colors relative`}

@@ -44,34 +44,26 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
       {transcripts?.map((transcript, index) => (
         <div 
           key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`} 
-          className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${
-            transcript.is_partial 
-              ? 'bg-blue-50 border-l-4 border-blue-200' 
-              : 'bg-gray-50 border-l-4 border-gray-200'
-          }`}
+          className={`mb-3 p-3 rounded-lg transition-colors duration-200 bg-gray-50 border-l-4 border-gray-200`}
         >
           <div className="flex justify-between items-center mb-1">
             <span className="text-xs text-gray-500">
-              {transcript.chunk_start_time !== undefined 
-                ? `${transcript.chunk_start_time.toFixed(1)}s` 
-                : transcript.timestamp}
+              {transcript.timestamp}
             </span>
             <div className="flex items-center space-x-2">
-              {transcript.is_partial && (
+              {/* {transcript.is_partial && (
                 <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
                   Partial
                 </span>
-              )}
-              {transcript.sequence_id && (
+              )} */}
+              {/* {transcript.sequence_id && (
                 <span className="text-xs text-gray-400 font-mono">
                   #{transcript.sequence_id}
                 </span>
-              )}
+              )} */}
             </div>
           </div>
-          <p className={`text-sm ${
-            transcript.is_partial ? 'text-blue-800' : 'text-gray-800'
-          }`}>
+          <p className={`text-sm text-gray-800`}>
             {transcript.text}
           </p>
         </div>

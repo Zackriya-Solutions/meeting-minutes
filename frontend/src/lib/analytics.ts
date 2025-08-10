@@ -45,6 +45,18 @@ export class Analytics {
     }
   }
 
+  static async disable(): Promise<void> {
+    try {
+      await invoke('disable_analytics');
+      this.initialized = false;
+      this.currentUserId = null;
+      this.initializationPromise = null;
+      console.log('Analytics disabled successfully');
+    } catch (error) {
+      console.error('Failed to disable analytics:', error);
+    }
+  }
+
   static async isEnabled(): Promise<boolean> {
     try {
       return await invoke('is_analytics_enabled');

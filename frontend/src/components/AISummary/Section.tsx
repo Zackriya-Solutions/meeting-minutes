@@ -86,7 +86,7 @@ export const Section: React.FC<SectionProps> = ({
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.2 }}
       >
-        {section.blocks.map((block, index) => (
+        {(section.blocks || []).map((block, index) => (
           <motion.div
             key={block.id}
             initial={{ opacity: 0, x: -20 }}

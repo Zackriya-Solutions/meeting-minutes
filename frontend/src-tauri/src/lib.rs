@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 pub mod audio;
 pub mod ollama;
 pub mod analytics;
+pub mod api;
+pub mod utils;
+pub mod console_utils;
 
 use audio::{
     default_input_device, default_output_device, AudioStream,
@@ -15,6 +18,7 @@ use audio::{
 };
 use ollama::{OllamaModel};
 use analytics::{AnalyticsClient, AnalyticsConfig};
+use utils::format_timestamp;
 use tauri::{Runtime, AppHandle, Emitter};
 use tauri_plugin_store::StoreExt;
 use log::{info as log_info, error as log_error, debug as log_debug};
@@ -24,6 +28,7 @@ use tokio::sync::mpsc;
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 static CHUNK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+static DROPPED_CHUNK_COUNTER: AtomicU64 = AtomicU64::new(0);
 static mut MIC_BUFFER: Option<Arc<Mutex<Vec<f32>>>> = None;
 static mut SYSTEM_BUFFER: Option<Arc<Mutex<Vec<f32>>>> = None;
 static mut AUDIO_CHUNK_QUEUE: Option<Arc<Mutex<VecDeque<AudioChunk>>>> = None;
@@ -197,7 +202,7 @@ impl TranscriptAccumulator {
             
             let update = TranscriptUpdate {
                 text: sentence.trim().to_string(),
-                timestamp: format!("{:.1}s - {:.1}s", start_elapsed, end_elapsed),
+                timestamp: format!("{}", format_timestamp(start_elapsed)),
                 source: "Mixed Audio".to_string(),
                 sequence_id,
                 chunk_start_time: self.current_chunk_start_time,
@@ -231,7 +236,7 @@ impl TranscriptAccumulator {
             
             let update = TranscriptUpdate {
                 text: sentence.trim().to_string(),
-                timestamp: format!("{:.1}s - {:.1}s", start_elapsed, end_elapsed),
+                timestamp: format!("{}", format_timestamp(start_elapsed)),
                 source: "Mixed Audio".to_string(),
                 sequence_id,
                 chunk_start_time: self.current_chunk_start_time,
@@ -244,12 +249,13 @@ impl TranscriptAccumulator {
     }
 }
 
-async fn audio_collection_task(
+async fn audio_collection_task<R: Runtime>(
     mic_stream: Arc<AudioStream>,
     system_stream: Arc<AudioStream>,
     is_running: Arc<AtomicBool>,
     sample_rate: u32,
     recording_start_time: std::time::Instant,
+    app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     log_info!("Audio collection task started");
     
@@ -325,7 +331,19 @@ async fn audio_collection_task(
                         // Remove oldest chunks if queue is full
                         while queue_guard.len() >= MAX_AUDIO_QUEUE_SIZE {
                             if let Some(dropped_chunk) = queue_guard.pop_front() {
-                                log_info!("Dropped old audio chunk {} due to queue overflow", dropped_chunk.chunk_id);
+                                let drop_count = DROPPED_CHUNK_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+                                log_info!("Dropped old audio chunk {} due to queue overflow (total drops: {})", dropped_chunk.chunk_id, drop_count);
+                                
+                                // // Emit warning event every 10th drop
+                                // if drop_count % 10 == 0 {
+                                if drop_count == 1 {
+                                    let warning_message = format!("Transcription process is very slow. Audio chunk {} was dropped. Please choose a smaller model, or run whisper natively.", dropped_chunk.chunk_id);
+                                    log_info!("Emitting chunk-drop-warning event: {}", warning_message);
+                                    
+                                    if let Err(e) = app_handle.emit("chunk-drop-warning", &warning_message) {
+                                        log_error!("Failed to emit chunk-drop-warning event: {}", e);
+                                    }
+                                }
                             }
                         }
                         queue_guard.push_back(audio_chunk);
@@ -490,8 +508,8 @@ async fn transcription_worker<R: Runtime>(
                              worker_id, response.segments.len(), chunk.chunk_id);
                     
                     for segment in response.segments {
-                        log_info!("Worker {}: Processing segment: {} ({:.1}s - {:.1}s)", 
-                                 worker_id, segment.text.trim(), segment.t0, segment.t1);
+                        log_info!("Worker {}: Processing segment: {} ({} - {})", 
+                                 worker_id, segment.text.trim(), format_timestamp(segment.t0 as f64), format_timestamp(segment.t1 as f64));
                         
                         // Add segment to accumulator and check for complete sentence
                         if let Some(update) = accumulator.add_segment(&segment) {
@@ -548,6 +566,40 @@ async fn transcription_worker<R: Runtime>(
                             }
                             ERROR_COUNT = 0;
                             LAST_ERROR_TIME = None;
+                            
+                            // Clean up audio streams when stopping due to errors
+                            tokio::spawn(async {
+                                unsafe {
+                                    // Stop mic stream if it exists
+                                    if let Some(mic_stream) = &MIC_STREAM {
+                                        log_info!("Cleaning up microphone stream after transcription error...");
+                                        if let Err(e) = mic_stream.stop().await {
+                                            log_error!("Error stopping mic stream: {}", e);
+                                        } else {
+                                            log_info!("Microphone stream cleaned up successfully");
+                                        }
+                                    }
+                                    
+                                    // Stop system stream if it exists
+                                    if let Some(system_stream) = &SYSTEM_STREAM {
+                                        log_info!("Cleaning up system stream after transcription error...");
+                                        if let Err(e) = system_stream.stop().await {
+                                            log_error!("Error stopping system stream: {}", e);
+                                        } else {
+                                            log_info!("System stream cleaned up successfully");
+                                        }
+                                    }
+                                    
+                                    // Clear the stream references
+                                    MIC_STREAM = None;
+                                    SYSTEM_STREAM = None;
+                                    IS_RUNNING = None;
+                                    TRANSCRIPTION_TASK = None;
+                                    AUDIO_COLLECTION_TASK = None;
+                                    AUDIO_CHUNK_QUEUE = None;
+                                }
+                            });
+                            
                             return;
                         }
                     }
@@ -575,9 +627,7 @@ async fn transcription_worker<R: Runtime>(
         let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
         let update = TranscriptUpdate {
             text: accumulator.current_sentence.trim().to_string(),
-            timestamp: format!("{:.1}s - {:.1}s", 
-                accumulator.current_chunk_start_time + (accumulator.sentence_start_time as f64 / 1000.0),
-                accumulator.current_chunk_start_time + (accumulator.sentence_start_time as f64 / 1000.0) + 1.0),
+            timestamp: format!("{}", format_timestamp(accumulator.current_chunk_start_time + (accumulator.sentence_start_time as f64 / 1000.0))),
             source: "Mixed Audio".to_string(),
             sequence_id,
             chunk_start_time: accumulator.current_chunk_start_time,
@@ -633,6 +683,10 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         log_error!("Recording already in progress");
         return Err("Recording already in progress".to_string());
     }
+
+    // Reset dropped chunk counter for new recording session
+    DROPPED_CHUNK_COUNTER.store(0, Ordering::SeqCst);
+    log_info!("Reset dropped chunk counter for new recording session");
 
     // Stop any existing tasks first
     unsafe {
@@ -740,6 +794,7 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         let mic_stream_clone = mic_stream.clone();
         let system_stream_clone = system_stream.clone();
         let is_running_clone = is_running.clone();
+        let app_handle_clone = app.clone();
         tokio::spawn(async move {
             if let Err(e) = audio_collection_task(
                 mic_stream_clone,
@@ -747,6 +802,7 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                 is_running_clone,
                 sample_rate,
                 recording_start_time,
+                app_handle_clone,
             ).await {
                 log_error!("Audio collection task error: {}", e);
             }
@@ -1130,6 +1186,15 @@ async fn init_analytics() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn disable_analytics() -> Result<(), String> {
+    unsafe {
+        ANALYTICS_CLIENT = None;
+    }
+    Ok(())
+}
+
+
+#[tauri::command]
 async fn track_event(event_name: String, properties: Option<std::collections::HashMap<String, String>>) -> Result<(), String> {
     unsafe {
         if let Some(client) = &ANALYTICS_CLIENT {
@@ -1387,6 +1452,7 @@ pub fn run() {
             read_audio_file,
             save_transcript,
             init_analytics,
+            disable_analytics,
             track_event,
             identify_user,
             track_meeting_started,
@@ -1407,6 +1473,32 @@ pub fn run() {
             track_summary_regenerated,
             track_model_changed,
             track_custom_prompt_used,
+            ollama::get_ollama_models,
+            api::api_get_meetings,
+            api::api_search_transcripts,
+            api::api_get_profile,
+            api::api_save_profile,
+            api::api_update_profile,
+            api::api_get_model_config,
+            api::api_save_model_config,
+            api::api_get_api_key,
+            api::api_get_transcript_config,
+            api::api_save_transcript_config,
+            api::api_get_transcript_api_key,
+            api::api_delete_meeting,
+            api::api_get_meeting,
+            api::api_save_meeting_title,
+            api::api_save_meeting_summary,
+            api::api_get_summary,
+            api::api_save_transcript,
+            api::api_process_transcript,
+            api::debug_store_contents,
+            api::test_backend_connection,
+            api::debug_backend_connection,
+            api::open_external_url,
+            console_utils::show_console,
+            console_utils::hide_console,
+            console_utils::toggle_console,
         ])
         .plugin(tauri_plugin_store::Builder::new().build())
         .run(tauri::generate_context!())

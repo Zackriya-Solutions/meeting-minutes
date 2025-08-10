@@ -1,0 +1,92 @@
+# Multi-stage build for Whisper Server (CPU-only)
+# This version provides maximum compatibility across all systems
+
+FROM ubuntu:22.04 AS builder
+
+# Set build arguments
+ARG WHISPER_VERSION=master
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    pkg-config \
+    libsdl2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /app
+
+# Copy source code (exclude build directory to avoid cache conflicts)
+COPY whisper.cpp/ ./whisper.cpp/
+RUN rm -rf ./whisper.cpp/build
+
+# Build whisper server with CPU-only optimizations
+WORKDIR /app/whisper.cpp
+RUN cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DWHISPER_BUILD_SERVER=ON \
+    -DWHISPER_BUILD_EXAMPLES=ON \
+    -DWHISPER_BUILD_TESTS=OFF \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DGGML_STATIC=ON \
+    -DGGML_NATIVE=OFF \
+    -DGGML_CUDA=OFF \
+    -DGGML_METAL=OFF \
+    -DGGML_OPENCL=OFF \
+    -DGGML_ACCELERATE=OFF
+
+RUN cmake --build build --config Release --target whisper-server -j$(nproc)
+
+# Runtime stage - minimal image
+FROM ubuntu:22.04 AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ffmpeg \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN useradd -m -u 1000 whisper && \
+    mkdir -p /app/models /app/uploads /app/public && \
+    chown -R whisper:whisper /app
+
+# Copy server binary and web interface
+COPY --from=builder /app/whisper.cpp/build/bin/whisper-server /app/
+COPY --from=builder /app/whisper.cpp/examples/server/public/ /app/public/
+
+# Copy entrypoint script
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && \
+    sed -i 's/\r$//' /app/entrypoint.sh
+
+# Set ownership
+RUN chown -R whisper:whisper /app
+
+# Switch to non-root user
+USER whisper
+WORKDIR /app
+
+# Expose server port
+EXPOSE 8178
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8178/ || exit 1
+
+# Default environment variables
+ENV WHISPER_MODEL=models/ggml-base.en.bin
+ENV WHISPER_HOST=0.0.0.0
+ENV WHISPER_PORT=8178
+ENV WHISPER_THREADS=0
+ENV WHISPER_USE_GPU=true
+
+# Set entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["server"]

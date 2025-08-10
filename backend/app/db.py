@@ -1,20 +1,49 @@
 import aiosqlite
 import json
+import os
 from datetime import datetime
 from typing import Optional, Dict
 import logging
 from contextlib import asynccontextmanager
 import sqlite3
+try:
+    from .schema_validator import SchemaValidator
+except ImportError:
+    # Handle case when running as script directly
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from schema_validator import SchemaValidator
 
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "meeting_minutes.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            db_path = os.getenv('DATABASE_PATH', 'meeting_minutes.db')
         self.db_path = db_path
+        self.schema_validator = SchemaValidator(self.db_path)
         self._init_db()
 
     def _init_db(self):
-        """Initialize the database with required tables"""
+        """Initialize the database with legacy approach"""
+        try:
+            # Run legacy initialization (handles all table creation)
+            logger.info("Initializing database tables...")
+            self._legacy_init_db()
+            
+            # Validate schema integrity
+            logger.info("Validating schema integrity...")
+            self.schema_validator.validate_schema()
+            
+        except Exception as e:
+            logger.error(f"Database initialization failed: {str(e)}")
+            raise
+
+
+
+    def _legacy_init_db(self):
+        """Legacy database initialization (for backward compatibility)"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -638,6 +667,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error updating meeting summary: {str(e)}")
             raise
-            
+
+
    
 

@@ -105,10 +105,11 @@ class TranscriptProcessor:
                 llm = AnthropicModel(model_name, provider=AnthropicProvider(api_key=api_key))
                 logger.info(f"Using Claude model: {model_name}")
             elif model == "ollama":
-                # Assumes Ollama server is running locally at default address
-                # You might need host/port configuration if it's elsewhere
+                # Use environment variable for Ollama host configuration
+                ollama_host = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
+                ollama_base_url = f"{ollama_host}/v1"
                 ollama_model = OpenAIModel(
-                    model_name=model_name, provider=OpenAIProvider(base_url='http://localhost:11434/v1')
+                    model_name=model_name, provider=OpenAIProvider(base_url=ollama_base_url)
                 )
                 llm = ollama_model
                 if model_name.lower().startswith("phi4") or model_name.lower().startswith("llama"):
@@ -233,7 +234,8 @@ class TranscriptProcessor:
         }
 
         # Create a client and track it for cleanup
-        client = AsyncClient()
+        ollama_host = os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434')
+        client = AsyncClient(host=ollama_host)
         self.active_clients.append(client)
         
         try:
@@ -269,8 +271,8 @@ class TranscriptProcessor:
         try:
             # Close database connections if any
             if hasattr(self, 'db') and self.db is not None:
-                self.db.close()
-                logger.info("Database connection closed")
+                # self.db.close()
+                logger.info("Database connection cleanup (using context managers)")
                 
             # Cancel any active Ollama client sessions
             if hasattr(self, 'active_clients') and self.active_clients:

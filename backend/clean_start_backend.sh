@@ -270,7 +270,7 @@ if ! pip show fastapi >/dev/null 2>&1; then
     handle_error "FastAPI not found. Please run build_whisper.sh to install dependencies"
 fi
 
-python app/main.py &
+source venv/bin/activate && python app/main.py &
 PYTHON_PID=$!
 
 # Wait for backend to start and check if it's running

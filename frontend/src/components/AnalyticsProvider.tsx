@@ -1,13 +1,26 @@
 'use client';
 
-import React, { useEffect, ReactNode, useRef } from 'react';
+import React, { useEffect, ReactNode, useRef, useState, createContext } from 'react';
 import Analytics from '@/lib/analytics';
+import { load } from '@tauri-apps/plugin-store';
+
 
 interface AnalyticsProviderProps {
   children: ReactNode;
 }
 
+interface AnalyticsContextType {
+  isAnalyticsOptedIn: boolean;
+  setIsAnalyticsOptedIn: (optedIn: boolean) => void;
+}
+
+export const AnalyticsContext = createContext<AnalyticsContextType>({
+  isAnalyticsOptedIn: true,
+  setIsAnalyticsOptedIn: () => {},
+});
+
 export default function AnalyticsProvider({ children }: AnalyticsProviderProps) {
+  const [isAnalyticsOptedIn, setIsAnalyticsOptedIn] = useState(true);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -17,6 +30,19 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     }
 
     const initAnalytics = async () => {
+      const store = await load('analytics.json', { autoSave: false });
+      if (!(await store.has('analyticsOptedIn'))) {
+        await store.set('analyticsOptedIn', true);
+      }
+      const analyticsOptedIn = await store.get('analyticsOptedIn')
+      
+      setIsAnalyticsOptedIn(analyticsOptedIn as boolean);
+      if (analyticsOptedIn && isAnalyticsOptedIn) {
+        initAnalytics2();
+      }
+    }
+
+    const initAnalytics2 = async () => {
       
         // Mark as initialized to prevent duplicates
         initialized.current = true;
@@ -64,7 +90,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     };
 
     initAnalytics().catch(console.error);
-  }, []);
+  }, [isAnalyticsOptedIn]);
 
-  return <>{children}</>;
+  return <AnalyticsContext.Provider value={{ isAnalyticsOptedIn, setIsAnalyticsOptedIn }}>{children}</AnalyticsContext.Provider>;
 } 
