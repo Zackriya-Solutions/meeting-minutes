@@ -240,21 +240,50 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
               setCurrentMeeting({ id: meeting.id, title: MeetingName });
             }
             
-            // Format the summary data with consistent styling
-            const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              if (section && section.title) {
-                acc[key] = {
-                  title: section.title,
-                  blocks: (section.blocks || []).map((block: any) => ({
-                    ...block,
-                    // type: 'bullet',
-                    color: 'default',
-                    content: block?.content?.trim() || '' // Remove trailing newlines and handle null content
-                  }))
-                };
+            // Format the summary data with consistent styling - PRESERVE ORDER
+            const formattedSummary: Summary = {};
+            
+            // Use section order if available to maintain exact order and handle duplicates
+            const sectionKeys = result.data._section_order || Object.keys(summaryData);
+            
+            for (const key of sectionKeys) {
+              try {
+                const section = summaryData[key];
+                // Comprehensive null checks to prevent errors
+                if (section && 
+                    typeof section === 'object' && 
+                    'title' in section && 
+                    'blocks' in section) {
+                  
+                  const typedSection = section as { title?: string; blocks?: any[] };
+                  
+                  // Ensure blocks is an array before mapping
+                  if (Array.isArray(typedSection.blocks)) {
+                    formattedSummary[key] = {
+                      title: typedSection.title || key,
+                      blocks: typedSection.blocks.map((block: any) => ({
+                        ...block,
+                        // type: 'bullet',
+                        color: 'default',
+                        content: block?.content?.trim() || '' // Remove trailing newlines and handle null content
+                      }))
+                    };
+                  } else {
+                    // Handle case where blocks is not an array
+                    console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
+                    formattedSummary[key] = {
+                      title: typedSection.title || key,
+                      blocks: []
+                    };
+                  }
+                } else {
+                  console.warn(`Skipping invalid section ${key}:`, section);
+                }
+              } catch (error) {
+                console.warn(`Error processing section ${key}:`, error);
+                // Continue processing other sections
               }
-              return acc;
-            }, {} as Summary);
+            }
 
             setAiSummary(formattedSummary);
             setSummaryStatus('completed');
@@ -450,21 +479,50 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
               setCurrentMeeting({ id: meeting.id, title: MeetingName });
             }
 
-            // Format the summary data with consistent styling
-            const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              if (section && section.title) {
-                acc[key] = {
-                  title: section.title,
-                  blocks: (section.blocks || []).map((block: any) => ({
-                    ...block,
-                    // type: 'bullet',
-                    color: 'default',
-                    content: block?.content?.trim() || '' // Handle null content
-                  }))
-                };
+            // Format the summary data with consistent styling - PRESERVE ORDER
+            const formattedSummary: Summary = {};
+            
+            // Use section order if available to maintain exact order and handle duplicates
+            const sectionKeys = result.data._section_order || Object.keys(summaryData);
+            
+            for (const key of sectionKeys) {
+              try {
+                const section = summaryData[key];
+                // Comprehensive null checks to prevent errors
+                if (section && 
+                    typeof section === 'object' && 
+                    'title' in section && 
+                    'blocks' in section) {
+                  
+                  const typedSection = section as { title?: string; blocks?: any[] };
+                  
+                  // Ensure blocks is an array before mapping
+                  if (Array.isArray(typedSection.blocks)) {
+                    formattedSummary[key] = {
+                      title: typedSection.title || key,
+                      blocks: typedSection.blocks.map((block: any) => ({
+                        ...block,
+                        // type: 'bullet',
+                        color: 'default',
+                        content: block?.content?.trim() || '' // Handle null content
+                      }))
+                    };
+                  } else {
+                    // Handle case where blocks is not an array
+                    console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
+                    formattedSummary[key] = {
+                      title: typedSection.title || key,
+                      blocks: []
+                    };
+                  }
+                } else {
+                  console.warn(`Skipping invalid section ${key}:`, section);
+                }
+              } catch (error) {
+                console.warn(`Error processing section ${key}:`, error);
+                // Continue processing other sections
               }
-              return acc;
-            }, {} as Summary);
+            }
 
             setAiSummary(formattedSummary);
             setSummaryStatus('completed');

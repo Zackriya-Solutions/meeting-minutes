@@ -67,9 +67,12 @@ export function ModelSettingsModal({
   const modelOptions = {
     ollama: models.map(model => model.name),
     // claude: ['claude-3-5-sonnet-latest'],
-    claude: ['claude-3-5-sonnet-latest','claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-20240620'],
+    claude: ['claude-3-7-sonnet-latest','claude-3-5-sonnet-latest','claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-20240620'],
     groq: ['llama-3.3-70b-versatile'],
     openai: [
+      'gpt-5',
+      'gpt-5-nano',
+      'gpt-5-mini',
       'gpt-4o',
       'gpt-4.1',
       'gpt-4-turbo',
