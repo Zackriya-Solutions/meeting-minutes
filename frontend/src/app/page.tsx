@@ -1078,6 +1078,18 @@ export default function Home() {
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
+  // Expose recordingStop2 function to rust 
+  useEffect(() => {
+    (window as any).handleRecordingStop = (callApi: boolean = true) => {
+      handleRecordingStop2(callApi);
+    };
+
+    // Cleanup on unmount
+    return () => {
+      delete (window as any).handleRecordingStop;
+    };
+  }, []);
+  
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {showErrorAlert && (

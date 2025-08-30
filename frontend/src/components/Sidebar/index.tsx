@@ -316,6 +316,18 @@ const Sidebar: React.FC = () => {
     setExpandedFolders(newExpanded);
   };
 
+  // Expose setShowModelSettings to window for Rust tray to call
+  useEffect(() => {
+    (window as any).openSettings = () => {
+      setShowModelSettings(true);
+    };
+
+    // Cleanup on unmount
+    return () => {
+      delete (window as any).openSettings;
+    };
+  }, []);
+
   const renderCollapsedIcons = () => {
     if (!isCollapsed) return null;
 
@@ -365,7 +377,7 @@ const Sidebar: React.FC = () => {
         >
           <Settings className="w-5 h-5 text-gray-600" />
         </button> */}
-        <Dialog>
+        <Dialog open={showModelSettings} onOpenChange={setShowModelSettings}>
           <DialogTrigger asChild>
             <button
               className="p-2 rounded-lg hover:bg-gray-100 transition-colors"

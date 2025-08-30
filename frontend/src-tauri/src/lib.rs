@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::time::Duration;
 use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use tauri_plugin_notification::NotificationExt;
 
 // Declare audio module
 pub mod audio;
@@ -11,6 +12,7 @@ pub mod analytics;
 pub mod api;
 pub mod utils;
 pub mod console_utils;
+pub mod tray;
 
 use audio::{
     default_input_device, default_output_device, AudioStream,
@@ -837,12 +839,20 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
             TRANSCRIPTION_TASK = Some(first_worker);
         }
     }
+
+    let _ = app
+    .notification()
+    .builder()
+    .title("Meetily")
+    .body("Recording has started. Please inform others in the meeting.")
+    .icon("icon.png")
+    .show();
     
     Ok(())
 }
 
 #[tauri::command]
-async fn stop_recording(args: RecordingArgs) -> Result<(), String> {
+async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> Result<(), String> {
     log_info!("Attempting to stop recording...");
     
     // Only check recording state if we haven't already started stopping
@@ -1095,7 +1105,10 @@ async fn stop_recording(args: RecordingArgs) -> Result<(), String> {
         AUDIO_COLLECTION_TASK = None;
         AUDIO_CHUNK_QUEUE = None;
     }
-    
+
+    // Send a system notification indicating recording has stopped
+    let _ = app.notification().builder().title("Meetily").body("Recording stopped").show();
+
     Ok(())
 }
 
@@ -1433,8 +1446,14 @@ pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
     
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|_app| {
             log::info!("Application setup complete");
+            
+            // Initialize system tray
+            if let Err(e) = tray::create_tray(_app.handle()) {
+                log::error!("Failed to create system tray: {}", e);
+            }
 
             // Trigger microphone permission request on startup
             if let Err(e) = audio::core::trigger_audio_permission() {

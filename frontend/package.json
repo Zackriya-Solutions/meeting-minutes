@@ -32,6 +32,7 @@
         "@remirror/react": "^3.0.1",
         "@tauri-apps/api": "^2.6.0",
         "@tauri-apps/plugin-fs": "^2.4.0",
+        "@tauri-apps/plugin-notification": "~2.3.1",
         "@tauri-apps/plugin-store": "^2.3.0",
         "@tiptap/pm": "^2.10.4",
         "@tiptap/react": "^2.10.4",
