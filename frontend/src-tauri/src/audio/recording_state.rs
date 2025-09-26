@@ -1,0 +1,282 @@
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use tokio::sync::mpsc;
+use anyhow::Result;
+
+use super::core::AudioDevice;
+
+/// Audio chunk with metadata for processing
+#[derive(Debug, Clone)]
+pub struct AudioChunk {
+    pub data: Vec<f32>,
+    pub sample_rate: u32,
+    pub timestamp: f64,
+    pub chunk_id: u64,
+}
+
+/// Comprehensive error types for audio system
+#[derive(Debug, Clone)]
+pub enum AudioError {
+    DeviceDisconnected,
+    StreamFailed,
+    ProcessingFailed,
+    TranscriptionFailed,
+    ChannelClosed,
+    InitializationFailed,
+    ConfigurationError,
+    PermissionDenied,
+    BufferOverflow,
+    SampleRateUnsupported,
+}
+
+impl AudioError {
+    /// Check if error is recoverable
+    pub fn is_recoverable(&self) -> bool {
+        match self {
+            AudioError::DeviceDisconnected => false,
+            AudioError::StreamFailed => true,
+            AudioError::ProcessingFailed => true,
+            AudioError::TranscriptionFailed => true,
+            AudioError::ChannelClosed => false,
+            AudioError::InitializationFailed => false,
+            AudioError::ConfigurationError => false,
+            AudioError::PermissionDenied => false,
+            AudioError::BufferOverflow => true,
+            AudioError::SampleRateUnsupported => false,
+        }
+    }
+
+    /// Get user-friendly error message
+    pub fn user_message(&self) -> &'static str {
+        match self {
+            AudioError::DeviceDisconnected => "Audio device was disconnected",
+            AudioError::StreamFailed => "Audio stream encountered an error",
+            AudioError::ProcessingFailed => "Audio processing failed",
+            AudioError::TranscriptionFailed => "Speech transcription failed",
+            AudioError::ChannelClosed => "Audio channel was closed unexpectedly",
+            AudioError::InitializationFailed => "Failed to initialize audio system",
+            AudioError::ConfigurationError => "Audio configuration error",
+            AudioError::PermissionDenied => "Microphone permission denied",
+            AudioError::BufferOverflow => "Audio buffer overflow",
+            AudioError::SampleRateUnsupported => "Audio sample rate not supported",
+        }
+    }
+}
+
+/// Recording statistics
+#[derive(Debug, Default)]
+pub struct RecordingStats {
+    pub chunks_processed: u64,
+    pub total_duration: f64,
+    pub last_activity: Option<Instant>,
+}
+
+/// Unified state management for audio recording
+pub struct RecordingState {
+    // Core recording state
+    is_recording: AtomicBool,
+
+    // Audio devices
+    microphone_device: Mutex<Option<Arc<AudioDevice>>>,
+    system_device: Mutex<Option<Arc<AudioDevice>>>,
+
+    // Audio pipeline
+    audio_sender: Mutex<Option<mpsc::UnboundedSender<AudioChunk>>>,
+
+    // Error handling
+    error_count: AtomicU32,
+    recoverable_error_count: AtomicU32,
+    last_error: Mutex<Option<AudioError>>,
+    error_callback: Mutex<Option<Box<dyn Fn(&AudioError) + Send + Sync>>>,
+
+    // Statistics
+    stats: Mutex<RecordingStats>,
+
+    // Recording start time for accurate timestamps
+    recording_start: Mutex<Option<Instant>>,
+}
+
+impl RecordingState {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            is_recording: AtomicBool::new(false),
+            microphone_device: Mutex::new(None),
+            system_device: Mutex::new(None),
+            audio_sender: Mutex::new(None),
+            error_count: AtomicU32::new(0),
+            recoverable_error_count: AtomicU32::new(0),
+            last_error: Mutex::new(None),
+            error_callback: Mutex::new(None),
+            stats: Mutex::new(RecordingStats::default()),
+            recording_start: Mutex::new(None),
+        })
+    }
+
+    // Recording control
+    pub fn start_recording(&self) -> Result<()> {
+        self.is_recording.store(true, Ordering::SeqCst);
+        *self.recording_start.lock().unwrap() = Some(Instant::now());
+        self.error_count.store(0, Ordering::SeqCst);
+        self.recoverable_error_count.store(0, Ordering::SeqCst);
+        *self.last_error.lock().unwrap() = None;
+        Ok(())
+    }
+
+    pub fn stop_recording(&self) {
+        self.is_recording.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.is_recording.load(Ordering::SeqCst)
+    }
+
+    // Device management
+    pub fn set_microphone_device(&self, device: Arc<AudioDevice>) {
+        *self.microphone_device.lock().unwrap() = Some(device);
+    }
+
+    pub fn set_system_device(&self, device: Arc<AudioDevice>) {
+        *self.system_device.lock().unwrap() = Some(device);
+    }
+
+    pub fn get_microphone_device(&self) -> Option<Arc<AudioDevice>> {
+        self.microphone_device.lock().unwrap().clone()
+    }
+
+    pub fn get_system_device(&self) -> Option<Arc<AudioDevice>> {
+        self.system_device.lock().unwrap().clone()
+    }
+
+    // Audio pipeline management
+    pub fn set_audio_sender(&self, sender: mpsc::UnboundedSender<AudioChunk>) {
+        *self.audio_sender.lock().unwrap() = Some(sender);
+    }
+
+    pub fn send_audio_chunk(&self, chunk: AudioChunk) -> Result<()> {
+        if let Some(sender) = self.audio_sender.lock().unwrap().as_ref() {
+            sender.send(chunk).map_err(|_| anyhow::anyhow!("Failed to send audio chunk"))?;
+
+            // Update statistics
+            let mut stats = self.stats.lock().unwrap();
+            stats.chunks_processed += 1;
+            stats.last_activity = Some(Instant::now());
+        }
+        Ok(())
+    }
+
+    // Error handling
+    pub fn set_error_callback<F>(&self, callback: F)
+    where
+        F: Fn(&AudioError) + Send + Sync + 'static,
+    {
+        *self.error_callback.lock().unwrap() = Some(Box::new(callback));
+    }
+
+    pub fn report_error(&self, error: AudioError) {
+        let count = self.error_count.fetch_add(1, Ordering::SeqCst) + 1;
+
+        // Track recoverable vs non-recoverable errors separately
+        if error.is_recoverable() {
+            let recoverable_count = self.recoverable_error_count.fetch_add(1, Ordering::SeqCst) + 1;
+            log::warn!("Recoverable audio error ({}): {:?}", recoverable_count, error);
+
+            // Allow more recoverable errors before stopping
+            if recoverable_count >= 10 {
+                log::error!("Too many recoverable errors ({}), stopping recording", recoverable_count);
+                self.stop_recording();
+            }
+        } else {
+            log::error!("Non-recoverable audio error: {:?}", error);
+            // Stop immediately for non-recoverable errors
+            self.stop_recording();
+        }
+
+        *self.last_error.lock().unwrap() = Some(error.clone());
+
+        // Call error callback if set
+        if let Some(callback) = self.error_callback.lock().unwrap().as_ref() {
+            callback(&error);
+        }
+
+        // Fallback: stop recording after too many total errors
+        if count >= 15 {
+            log::error!("Too many total audio errors ({}), stopping recording", count);
+            self.stop_recording();
+        }
+    }
+
+    pub fn get_error_count(&self) -> u32 {
+        self.error_count.load(Ordering::SeqCst)
+    }
+
+    pub fn get_recoverable_error_count(&self) -> u32 {
+        self.recoverable_error_count.load(Ordering::SeqCst)
+    }
+
+    pub fn get_last_error(&self) -> Option<AudioError> {
+        self.last_error.lock().unwrap().clone()
+    }
+
+    pub fn has_fatal_error(&self) -> bool {
+        if let Some(error) = &*self.last_error.lock().unwrap() {
+            !error.is_recoverable() && self.error_count.load(Ordering::SeqCst) > 0
+        } else {
+            false
+        }
+    }
+
+    // Statistics
+    pub fn get_stats(&self) -> RecordingStats {
+        self.stats.lock().unwrap().clone()
+    }
+
+    pub fn get_recording_duration(&self) -> Option<f64> {
+        self.recording_start
+            .lock()
+            .unwrap()
+            .map(|start| start.elapsed().as_secs_f64())
+    }
+
+    // Cleanup
+    pub fn cleanup(&self) {
+        self.stop_recording();
+        *self.microphone_device.lock().unwrap() = None;
+        *self.system_device.lock().unwrap() = None;
+        *self.audio_sender.lock().unwrap() = None;
+        *self.last_error.lock().unwrap() = None;
+        *self.error_callback.lock().unwrap() = None;
+        *self.stats.lock().unwrap() = RecordingStats::default();
+        *self.recording_start.lock().unwrap() = None;
+        self.error_count.store(0, Ordering::SeqCst);
+        self.recoverable_error_count.store(0, Ordering::SeqCst);
+    }
+}
+
+impl Default for RecordingState {
+    fn default() -> Self {
+        Self {
+            is_recording: AtomicBool::new(false),
+            microphone_device: Mutex::new(None),
+            system_device: Mutex::new(None),
+            audio_sender: Mutex::new(None),
+            error_count: AtomicU32::new(0),
+            recoverable_error_count: AtomicU32::new(0),
+            last_error: Mutex::new(None),
+            error_callback: Mutex::new(None),
+            stats: Mutex::new(RecordingStats::default()),
+            recording_start: Mutex::new(None),
+        }
+    }
+}
+
+// Thread-safe cloning for RecordingStats
+impl Clone for RecordingStats {
+    fn clone(&self) -> Self {
+        Self {
+            chunks_processed: self.chunks_processed,
+            total_duration: self.total_duration,
+            last_activity: self.last_activity,
+        }
+    }
+}

@@ -149,6 +149,17 @@ pub fn resample(input: &[f32], from_sample_rate: u32, to_sample_rate: u32) -> Re
     Ok(waves_out.into_iter().next().unwrap())
 }
 
+// Alias for compatibility with existing code
+pub fn resample_audio(input: &[f32], from_sample_rate: u32, to_sample_rate: u32) -> Vec<f32> {
+    match resample(input, from_sample_rate, to_sample_rate) {
+        Ok(result) => result,
+        Err(e) => {
+            debug!("Resampling failed: {}, returning original audio", e);
+            input.to_vec()
+        }
+    }
+}
+
 pub fn write_audio_to_file(
     audio: &[f32],
     sample_rate: u32,

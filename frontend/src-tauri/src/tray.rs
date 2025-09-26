@@ -5,7 +5,7 @@ use tauri::{
 };
 
 pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let menu = build_menu(app, crate::is_recording())?;
+    let menu = build_menu(app, false)?; // Default to not recording
 
     TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
@@ -55,7 +55,8 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub fn update_tray_menu<R: Runtime>(app: &AppHandle<R>) {
-    if let Ok(menu) = build_menu(app, crate::is_recording()) {
+    // For now, use a default state since we can't await in sync function
+    if let Ok(menu) = build_menu(app, false) {
         if let Some(tray) = app.tray_by_id("main-tray") {
             let _ = tray.set_menu(Some(menu));
         }

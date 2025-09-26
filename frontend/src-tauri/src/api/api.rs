@@ -541,7 +541,7 @@ pub async fn api_get_summary<R: Runtime>(
     let result = make_api_request::<R, SummaryResponse>(&app, &format!("/get-summary/{}", meeting_id), "GET", None, None, auth_token).await;
     
     match &result {
-        Ok(summary) => log_debug!("✓ api_get_summary successful"),
+        Ok(_summary) => log_debug!("✓ api_get_summary successful"),
         Err(e) => log_error!("✗ api_get_summary failed: {}", e),
     }
     
