@@ -398,7 +398,7 @@ impl AudioStream {
         is_running: Arc<AtomicBool>,
     ) -> Result<Self> {
         info!("Initializing audio stream for device: {}", device.to_string());
-        let (tx, _) = broadcast::channel::<Vec<f32>>(1000);
+        let (tx, _rx) = broadcast::channel::<Vec<f32>>(1000);
         let tx_clone = tx.clone();
         
         // Get device and config with improved error handling
@@ -458,6 +458,12 @@ impl AudioStream {
         let config_clone = config.clone();
         let (stream_control_tx, stream_control_rx) = mpsc::channel();
 
+        // Individual error flags for each callback to prevent deadlocks
+        let channel_error_logged_f32 = Arc::new(AtomicBool::new(false));
+        let channel_error_logged_i16 = Arc::new(AtomicBool::new(false));
+        let channel_error_logged_i32 = Arc::new(AtomicBool::new(false));
+        let channel_error_logged_i8 = Arc::new(AtomicBool::new(false));
+
         let is_disconnected_clone = is_disconnected.clone();
         let stream_control_tx_clone = stream_control_tx.clone();
         let stream_thread = Arc::new(tokio::sync::Mutex::new(Some(thread::spawn(move || {
@@ -468,6 +474,8 @@ impl AudioStream {
             info!("Starting audio stream thread for device: {}", device_name);
             let is_running_weak_for_error = is_running_weak_2.clone();
             let is_running_weak_for_data = is_running_weak_2.clone();
+            let is_running_weak_for_channel_error = is_running_weak_2.clone();
+            let channel_error_logged_f32_clone = channel_error_logged_f32.clone();
             let error_callback = move |err: StreamError| {
                 if err
                     .to_string()
@@ -517,7 +525,21 @@ impl AudioStream {
                             let mono = audio_to_mono(data, channels);
                             debug!("Received audio chunk: {} samples", mono.len());
                             if let Err(e) = tx.send(mono) {
-                                error!("Failed to send audio data: {}", e);
+                                // Check if it's a channel closure error
+                                if tx.receiver_count() == 0 {
+                                    // Only log this critical error once
+                                    if !channel_error_logged_f32_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                        error!("Audio channel closed - no receivers remaining (F32). Stopping stream.");
+                                        // Stop the recording by setting is_running to false
+                                        if let Some(arc) = is_running_weak_for_channel_error.upgrade() {
+                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                    }
+                                    return;
+                                } else {
+                                    // Non-critical send error, just log it occasionally
+                                    debug!("Failed to send audio data (F32): {} - {} receivers active", e, tx.receiver_count());
+                                }
                             }
                         },
                         error_callback.clone(),
@@ -531,6 +553,8 @@ impl AudioStream {
                     }
                 }
                 cpal::SampleFormat::I16 => {
+                    let channel_error_logged_i16_clone = channel_error_logged_i16.clone();
+                    let is_running_weak_for_channel_error_i16 = is_running_weak_2.clone();
                     match cpal_audio_device.build_input_stream(
                         &config.into(),
                         move |data: &[i16], _: &_| {
@@ -547,7 +571,21 @@ impl AudioStream {
                             let mono = audio_to_mono(bytemuck::cast_slice(data), channels);
                             debug!("Received audio chunk: {} samples", mono.len());
                             if let Err(e) = tx.send(mono) {
-                                error!("Failed to send audio data: {}", e);
+                                // Check if it's a channel closure error
+                                if tx.receiver_count() == 0 {
+                                    // Only log this critical error once
+                                    if !channel_error_logged_i16_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                        error!("Audio channel closed - no receivers remaining (I16). Stopping stream.");
+                                        // Stop the recording by setting is_running to false
+                                        if let Some(arc) = is_running_weak_for_channel_error_i16.upgrade() {
+                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                    }
+                                    return;
+                                } else {
+                                    // Non-critical send error, just log it occasionally
+                                    debug!("Failed to send audio data (I16): {} - {} receivers active", e, tx.receiver_count());
+                                }
                             }
                         },
                         error_callback.clone(),
@@ -561,6 +599,8 @@ impl AudioStream {
                     }
                 }
                 cpal::SampleFormat::I32 => {
+                    let channel_error_logged_i32_clone = channel_error_logged_i32.clone();
+                    let is_running_weak_for_channel_error_i32 = is_running_weak_2.clone();
                     match cpal_audio_device.build_input_stream(
                         &config.into(),
                         move |data: &[i32], _: &_| {
@@ -577,7 +617,21 @@ impl AudioStream {
                             let mono = audio_to_mono(bytemuck::cast_slice(data), channels);
                             debug!("Received audio chunk: {} samples", mono.len());
                             if let Err(e) = tx.send(mono) {
-                                error!("Failed to send audio data: {}", e);
+                                // Check if it's a channel closure error
+                                if tx.receiver_count() == 0 {
+                                    // Only log this critical error once
+                                    if !channel_error_logged_i32_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                        error!("Audio channel closed - no receivers remaining (I32). Stopping stream.");
+                                        // Stop the recording by setting is_running to false
+                                        if let Some(arc) = is_running_weak_for_channel_error_i32.upgrade() {
+                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                    }
+                                    return;
+                                } else {
+                                    // Non-critical send error, just log it occasionally
+                                    debug!("Failed to send audio data (I32): {} - {} receivers active", e, tx.receiver_count());
+                                }
                             }
                         },
                         error_callback.clone(),
@@ -591,6 +645,8 @@ impl AudioStream {
                     }
                 }
                 cpal::SampleFormat::I8 => {
+                    let channel_error_logged_i8_clone = channel_error_logged_i8.clone();
+                    let is_running_weak_for_channel_error_i8 = is_running_weak_2.clone();
                     match cpal_audio_device.build_input_stream(
                         &config.into(),
                         move |data: &[i8], _: &_| {
@@ -607,7 +663,21 @@ impl AudioStream {
                             let mono = audio_to_mono(bytemuck::cast_slice(data), channels);
                             debug!("Received audio chunk: {} samples", mono.len());
                             if let Err(e) = tx.send(mono) {
-                                error!("Failed to send audio data: {}", e);
+                                // Check if it's a channel closure error
+                                if tx.receiver_count() == 0 {
+                                    // Only log this critical error once
+                                    if !channel_error_logged_i8_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                        error!("Audio channel closed - no receivers remaining (I8). Stopping stream.");
+                                        // Stop the recording by setting is_running to false
+                                        if let Some(arc) = is_running_weak_for_channel_error_i8.upgrade() {
+                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                    }
+                                    return;
+                                } else {
+                                    // Non-critical send error, just log it occasionally
+                                    debug!("Failed to send audio data (I8): {} - {} receivers active", e, tx.receiver_count());
+                                }
                             }
                         },
                         error_callback.clone(),

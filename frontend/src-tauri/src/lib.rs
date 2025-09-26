@@ -321,10 +321,16 @@ async fn audio_collection_task<R: Runtime>(
                 log_info!("🔄 Attempting to reconnect system audio stream...");
                 last_reconnection_attempt = now;
 
-                let new_receiver = system_stream.as_ref().unwrap().subscribe().await;
-                system_receiver = Some(new_receiver);
-                system_audio_failure_count = 0;
-                log_info!("✅ System audio reconnected successfully");
+                // Create new receiver while ensuring we don't drop all receivers simultaneously
+                // This prevents the broadcast channel from closing due to no active receivers
+                if let Some(stream) = system_stream.as_ref() {
+                    let new_receiver = stream.subscribe().await;
+                    system_receiver = Some(new_receiver);
+                    system_audio_failure_count = 0;
+                    log_info!("✅ System audio reconnected successfully");
+                } else {
+                    log_error!("❌ System stream reference is None during reconnection");
+                }
 
                 if let Err(e) = app_handle.emit(
                     "system-audio-reconnected",
@@ -372,6 +378,8 @@ async fn audio_collection_task<R: Runtime>(
                     LAST_MIC_RECOVERY_ATTEMPT = current_time;
                     log_info!("🔄 Attempting microphone stream recovery...");
 
+                    // Create new receiver while ensuring we don't drop all receivers simultaneously
+                    // This prevents the broadcast channel from closing due to no active receivers
                     let new_receiver = mic_stream.subscribe().await;
                     mic_receiver = new_receiver;
 
@@ -702,7 +710,21 @@ async fn audio_collection_task<R: Runtime>(
         tokio::time::sleep(Duration::from_millis(10)).await;
 
     }
-    
+
+    // Check if recording stopped due to audio channel closure
+    if RECORDING_FLAG.load(Ordering::SeqCst) {
+        log_error!("⚠️ Audio collection stopped unexpectedly while recording flag is still active!");
+        log_error!("This is likely due to audio channel closure after extended operation on Windows.");
+
+        // Emit error to frontend to inform user
+        if let Err(e) = app_handle.emit("recording-error", "Audio stream disconnected after extended operation. This is a known Windows issue. Please restart recording.".to_string()) {
+            log_error!("Failed to emit recording error: {}", e);
+        }
+
+        // Set recording flag to false to stop showing false recording activity
+        RECORDING_FLAG.store(false, Ordering::SeqCst);
+    }
+
     log_info!("Audio collection task ended");
     Ok(())
 }
