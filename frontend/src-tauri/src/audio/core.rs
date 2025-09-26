@@ -464,6 +464,9 @@ impl AudioStream {
         let channel_error_logged_i32 = Arc::new(AtomicBool::new(false));
         let channel_error_logged_i8 = Arc::new(AtomicBool::new(false));
 
+        // Startup time to prevent false positives during initialization
+        let stream_start_time = std::time::Instant::now();
+
         let is_disconnected_clone = is_disconnected.clone();
         let stream_control_tx_clone = stream_control_tx.clone();
         let stream_thread = Arc::new(tokio::sync::Mutex::new(Some(thread::spawn(move || {
@@ -476,6 +479,7 @@ impl AudioStream {
             let is_running_weak_for_data = is_running_weak_2.clone();
             let is_running_weak_for_channel_error = is_running_weak_2.clone();
             let channel_error_logged_f32_clone = channel_error_logged_f32.clone();
+            let stream_start_time_clone = stream_start_time;
             let error_callback = move |err: StreamError| {
                 if err
                     .to_string()
@@ -527,15 +531,21 @@ impl AudioStream {
                             if let Err(e) = tx.send(mono) {
                                 // Check if it's a channel closure error
                                 if tx.receiver_count() == 0 {
-                                    // Only log this critical error once
-                                    if !channel_error_logged_f32_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                                        error!("Audio channel closed - no receivers remaining (F32). Stopping stream.");
-                                        // Stop the recording by setting is_running to false
-                                        if let Some(arc) = is_running_weak_for_channel_error.upgrade() {
-                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    // Only trigger error after startup grace period (5 seconds)
+                                    if stream_start_time_clone.elapsed().as_secs() > 5 {
+                                        // Only log this critical error once
+                                        if !channel_error_logged_f32_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                            error!("Audio channel closed - no receivers remaining (F32). Stopping stream.");
+                                            // Stop the recording by setting is_running to false
+                                            if let Some(arc) = is_running_weak_for_channel_error.upgrade() {
+                                                arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                            }
                                         }
+                                        return;
+                                    } else {
+                                        // During startup grace period, just log at debug level
+                                        debug!("No receivers during startup grace period (F32) - this is normal");
                                     }
-                                    return;
                                 } else {
                                     // Non-critical send error, just log it occasionally
                                     debug!("Failed to send audio data (F32): {} - {} receivers active", e, tx.receiver_count());
@@ -555,6 +565,7 @@ impl AudioStream {
                 cpal::SampleFormat::I16 => {
                     let channel_error_logged_i16_clone = channel_error_logged_i16.clone();
                     let is_running_weak_for_channel_error_i16 = is_running_weak_2.clone();
+                    let stream_start_time_i16 = stream_start_time;
                     match cpal_audio_device.build_input_stream(
                         &config.into(),
                         move |data: &[i16], _: &_| {
@@ -573,15 +584,21 @@ impl AudioStream {
                             if let Err(e) = tx.send(mono) {
                                 // Check if it's a channel closure error
                                 if tx.receiver_count() == 0 {
-                                    // Only log this critical error once
-                                    if !channel_error_logged_i16_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                                        error!("Audio channel closed - no receivers remaining (I16). Stopping stream.");
-                                        // Stop the recording by setting is_running to false
-                                        if let Some(arc) = is_running_weak_for_channel_error_i16.upgrade() {
-                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    // Only trigger error after startup grace period (5 seconds)
+                                    if stream_start_time_i16.elapsed().as_secs() > 5 {
+                                        // Only log this critical error once
+                                        if !channel_error_logged_i16_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                            error!("Audio channel closed - no receivers remaining (I16). Stopping stream.");
+                                            // Stop the recording by setting is_running to false
+                                            if let Some(arc) = is_running_weak_for_channel_error_i16.upgrade() {
+                                                arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                            }
                                         }
+                                        return;
+                                    } else {
+                                        // During startup grace period, just log at debug level
+                                        debug!("No receivers during startup grace period (I16) - this is normal");
                                     }
-                                    return;
                                 } else {
                                     // Non-critical send error, just log it occasionally
                                     debug!("Failed to send audio data (I16): {} - {} receivers active", e, tx.receiver_count());
@@ -601,6 +618,7 @@ impl AudioStream {
                 cpal::SampleFormat::I32 => {
                     let channel_error_logged_i32_clone = channel_error_logged_i32.clone();
                     let is_running_weak_for_channel_error_i32 = is_running_weak_2.clone();
+                    let stream_start_time_i32 = stream_start_time;
                     match cpal_audio_device.build_input_stream(
                         &config.into(),
                         move |data: &[i32], _: &_| {
@@ -619,15 +637,21 @@ impl AudioStream {
                             if let Err(e) = tx.send(mono) {
                                 // Check if it's a channel closure error
                                 if tx.receiver_count() == 0 {
-                                    // Only log this critical error once
-                                    if !channel_error_logged_i32_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                                        error!("Audio channel closed - no receivers remaining (I32). Stopping stream.");
-                                        // Stop the recording by setting is_running to false
-                                        if let Some(arc) = is_running_weak_for_channel_error_i32.upgrade() {
-                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    // Only trigger error after startup grace period (5 seconds)
+                                    if stream_start_time_i32.elapsed().as_secs() > 5 {
+                                        // Only log this critical error once
+                                        if !channel_error_logged_i32_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                            error!("Audio channel closed - no receivers remaining (I32). Stopping stream.");
+                                            // Stop the recording by setting is_running to false
+                                            if let Some(arc) = is_running_weak_for_channel_error_i32.upgrade() {
+                                                arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                            }
                                         }
+                                        return;
+                                    } else {
+                                        // During startup grace period, just log at debug level
+                                        debug!("No receivers during startup grace period (I32) - this is normal");
                                     }
-                                    return;
                                 } else {
                                     // Non-critical send error, just log it occasionally
                                     debug!("Failed to send audio data (I32): {} - {} receivers active", e, tx.receiver_count());
@@ -647,6 +671,7 @@ impl AudioStream {
                 cpal::SampleFormat::I8 => {
                     let channel_error_logged_i8_clone = channel_error_logged_i8.clone();
                     let is_running_weak_for_channel_error_i8 = is_running_weak_2.clone();
+                    let stream_start_time_i8 = stream_start_time;
                     match cpal_audio_device.build_input_stream(
                         &config.into(),
                         move |data: &[i8], _: &_| {
@@ -665,15 +690,21 @@ impl AudioStream {
                             if let Err(e) = tx.send(mono) {
                                 // Check if it's a channel closure error
                                 if tx.receiver_count() == 0 {
-                                    // Only log this critical error once
-                                    if !channel_error_logged_i8_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                                        error!("Audio channel closed - no receivers remaining (I8). Stopping stream.");
-                                        // Stop the recording by setting is_running to false
-                                        if let Some(arc) = is_running_weak_for_channel_error_i8.upgrade() {
-                                            arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    // Only trigger error after startup grace period (5 seconds)
+                                    if stream_start_time_i8.elapsed().as_secs() > 5 {
+                                        // Only log this critical error once
+                                        if !channel_error_logged_i8_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                            error!("Audio channel closed - no receivers remaining (I8). Stopping stream.");
+                                            // Stop the recording by setting is_running to false
+                                            if let Some(arc) = is_running_weak_for_channel_error_i8.upgrade() {
+                                                arc.store(false, std::sync::atomic::Ordering::Relaxed);
+                                            }
                                         }
+                                        return;
+                                    } else {
+                                        // During startup grace period, just log at debug level
+                                        debug!("No receivers during startup grace period (I8) - this is normal");
                                     }
-                                    return;
                                 } else {
                                     // Non-critical send error, just log it occasionally
                                     debug!("Failed to send audio data (I8): {} - {} receivers active", e, tx.receiver_count());

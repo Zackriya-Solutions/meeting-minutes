@@ -714,10 +714,10 @@ async fn audio_collection_task<R: Runtime>(
     // Check if recording stopped due to audio channel closure
     if RECORDING_FLAG.load(Ordering::SeqCst) {
         log_error!("⚠️ Audio collection stopped unexpectedly while recording flag is still active!");
-        log_error!("This is likely due to audio channel closure after extended operation on Windows.");
+        log_error!("This is likely due to audio channel closure after extended operation.");
 
         // Emit error to frontend to inform user
-        if let Err(e) = app_handle.emit("recording-error", "Audio stream disconnected after extended operation. This is a known Windows issue. Please restart recording.".to_string()) {
+        if let Err(e) = app_handle.emit("recording-error", "Audio stream disconnected after extended operation. Please restart recording.".to_string()) {
             log_error!("Failed to emit recording error: {}", e);
         }
 
