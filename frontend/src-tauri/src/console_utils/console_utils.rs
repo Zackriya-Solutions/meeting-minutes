@@ -1,13 +1,15 @@
 #[cfg(target_os = "windows")]
 use std::ptr;
-use std::process::Command;
 #[cfg(target_os = "windows")]
 use env_logger;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 #[cfg(target_os = "windows")]
 #[link(name = "kernel32")]
 extern "system" {
     fn AllocConsole() -> i32;
+    #[allow(dead_code)]
     fn FreeConsole() -> i32;
     fn GetConsoleWindow() -> *mut std::ffi::c_void;
     fn ShowWindow(hwnd: *mut std::ffi::c_void, n_cmd_show: i32) -> i32;

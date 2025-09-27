@@ -184,12 +184,13 @@ pub struct Profile {
 }
 
 // Helper function to get auth token from store (optional)
+#[allow(dead_code)]
 async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     let store = match app.store("store.json") {
         Ok(store) => store,
         Err(_) => return None,
     };
-    
+
     match store.get("authToken") {
         Some(token) => {
             if let Some(token_str) = token.as_str() {

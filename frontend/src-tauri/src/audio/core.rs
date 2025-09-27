@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Duration;
 use std::{fmt, thread};
 use tokio::sync::{broadcast, oneshot};
 lazy_static! {
@@ -234,7 +233,7 @@ fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
 
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
-    let mut devices = Vec::new();
+    let mut devices;
 
     // Platform-specific device enumeration
     #[cfg(target_os = "windows")]
@@ -832,7 +831,7 @@ fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, cpal:
                                 
                                 // Try to find a supported configuration
                                 if let Ok(supported_configs) = device.supported_input_configs() {
-                                    let mut configs: Vec<_> = supported_configs.collect();
+                                    let configs: Vec<_> = supported_configs.collect();
                                     if configs.is_empty() {
                                         warn!("No supported input configurations found for device: {}", name);
                                     } else {
@@ -897,7 +896,7 @@ fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, cpal:
                         
                         // For output devices, we want to use them in loopback mode
                         if let Ok(supported_configs) = device.supported_output_configs() {
-                            let mut configs: Vec<_> = supported_configs.collect();
+                            let configs: Vec<_> = supported_configs.collect();
                             if configs.is_empty() {
                                 warn!("No supported output configurations found for device: {}", name);
                             } else {

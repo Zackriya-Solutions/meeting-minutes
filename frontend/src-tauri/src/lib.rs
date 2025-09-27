@@ -13,9 +13,8 @@ pub mod tray;
 pub mod whisper_engine;
 pub mod openrouter;
 
-use audio::{AudioDevice, default_input_device, default_output_device, list_audio_devices};
-use utils::format_timestamp;
-use tauri::{Runtime, AppHandle, Emitter};
+use audio::{AudioDevice, list_audio_devices};
+use tauri::{Runtime, AppHandle};
 use log::{info as log_info, error as log_error};
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
@@ -39,21 +38,26 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         return Err("Recording already in progress".to_string());
     }
 
-    RECORDING_FLAG.store(true, Ordering::SeqCst);
-    tray::update_tray_menu(&app);
+    // Call the actual audio recording system
+    match audio::recording_commands::start_recording(app.clone()).await {
+        Ok(_) => {
+            RECORDING_FLAG.store(true, Ordering::SeqCst);
+            tray::update_tray_menu(&app);
 
-    app.emit("recording-started", serde_json::json!({
-        "message": "Recording started successfully"
-    })).ok();
+            log_info!("Recording started successfully");
 
-    log_info!("Recording started successfully");
+            let _ = app.notification().builder()
+                .title("Meetily")
+                .body("Recording has started.")
+                .show();
 
-    let _ = app.notification().builder()
-        .title("Meetily")
-        .body("Recording has started.")
-        .show();
-
-    Ok(())
+            Ok(())
+        }
+        Err(e) => {
+            log_error!("Failed to start audio recording: {}", e);
+            Err(format!("Failed to start recording: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -65,25 +69,39 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
         return Ok(());
     }
 
-    RECORDING_FLAG.store(false, Ordering::SeqCst);
-    tray::update_tray_menu(&app);
+    // Call the actual audio recording system to stop
+    match audio::recording_commands::stop_recording(app.clone(), audio::recording_commands::RecordingArgs {
+        save_path: args.save_path.clone(),
+    }).await {
+        Ok(_) => {
+            RECORDING_FLAG.store(false, Ordering::SeqCst);
+            tray::update_tray_menu(&app);
 
-    // Create the save directory if it doesn't exist
-    if let Some(parent) = std::path::Path::new(&args.save_path).parent() {
-        if !parent.exists() {
-            log_info!("Creating directory: {:?}", parent);
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                let err_msg = format!("Failed to create save directory: {}", e);
-                log_error!("{}", err_msg);
-                return Err(err_msg);
+            // Create the save directory if it doesn't exist
+            if let Some(parent) = std::path::Path::new(&args.save_path).parent() {
+                if !parent.exists() {
+                    log_info!("Creating directory: {:?}", parent);
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        let err_msg = format!("Failed to create save directory: {}", e);
+                        log_error!("{}", err_msg);
+                        return Err(err_msg);
+                    }
+                }
             }
+
+            // Send a system notification indicating recording has stopped
+            let _ = app.notification().builder().title("Meetily").body("Recording stopped").show();
+
+            Ok(())
+        }
+        Err(e) => {
+            log_error!("Failed to stop audio recording: {}", e);
+            // Still update the flag even if stopping failed
+            RECORDING_FLAG.store(false, Ordering::SeqCst);
+            tray::update_tray_menu(&app);
+            Err(format!("Failed to stop recording: {}", e))
         }
     }
-
-    // Send a system notification indicating recording has stopped
-    let _ = app.notification().builder().title("Meetily").body("Recording stopped").show();
-
-    Ok(())
 }
 
 #[tauri::command]
@@ -241,6 +259,12 @@ pub fn run() {
             api::open_external_url,
 
             openrouter::get_openrouter_models,
+
+            audio::recording_preferences::get_recording_preferences,
+            audio::recording_preferences::set_recording_preferences,
+            audio::recording_preferences::get_default_recordings_folder_path,
+            audio::recording_preferences::open_recordings_folder,
+            audio::recording_preferences::select_recording_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

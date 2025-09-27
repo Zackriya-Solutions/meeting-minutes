@@ -1,8 +1,8 @@
 use std::path::{PathBuf};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use whisper_rs::{WhisperContext, WhisperContextParameters, WhisperState, FullParams, SamplingStrategy};
+use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use reqwest::Client;
@@ -33,6 +33,9 @@ pub struct WhisperEngine {
     current_context: Arc<RwLock<Option<WhisperContext>>>,
     current_model: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
+    // State tracking for smart logging
+    last_transcription_was_short: Arc<RwLock<bool>>,
+    short_audio_warning_logged: Arc<RwLock<bool>>,
 }
 
 impl WhisperEngine {
@@ -74,6 +77,9 @@ impl WhisperEngine {
             current_context: Arc::new(RwLock::new(None)),
             current_model: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
+            // Initialize state tracking
+            last_transcription_was_short: Arc::new(RwLock::new(false)),
+            short_audio_warning_logged: Arc::new(RwLock::new(false)),
         };
         
         Ok(engine)
@@ -132,11 +138,11 @@ impl WhisperEngine {
             ModelStatus::Available => {
                 log::info!("Loading model: {}", model_name);
                 
-                // Create context parameters with hardware acceleration (following owhisper pattern)
+                // Create context parameters optimized for streaming accuracy
                 let context_param = WhisperContextParameters {
                     use_gpu: true,
                     gpu_device: 0,
-                    flash_attn: false, // Disabled on macOS due to potential crashes
+                    flash_attn: false, // Disabled due to potential crashes in streaming
                     ..Default::default()
                 };
                 
@@ -184,48 +190,284 @@ impl WhisperEngine {
         self.current_context.read().await.is_some()
     }
     
+    // Enhanced function to clean repetitive text patterns and meaningless outputs
+    fn clean_repetitive_text(text: &str) -> String {
+        if text.is_empty() {
+            return String::new();
+        }
+
+        // Check for obviously meaningless patterns first
+        if Self::is_meaningless_output(text) {
+            log::info!("Detected meaningless output, returning empty: '{}'", text);
+            return String::new();
+        }
+
+        let words: Vec<&str> = text.split_whitespace().collect();
+        if words.len() < 3 {
+            return text.to_string();
+        }
+
+        // Enhanced repetition detection with sliding window
+        let cleaned_words = Self::remove_word_repetitions(&words);
+
+        // Remove phrase repetitions with more sophisticated detection
+        let cleaned_words = Self::remove_phrase_repetitions(&cleaned_words);
+
+        // Check for overall repetition ratio
+        let final_text = cleaned_words.join(" ");
+        if Self::calculate_repetition_ratio(&final_text) > 0.7 {
+            log::info!("High repetition ratio detected, filtering out: '{}'", final_text);
+            return String::new();
+        }
+
+        final_text
+    }
+
+    // Check for obviously meaningless patterns
+    fn is_meaningless_output(text: &str) -> bool {
+        let text_lower = text.to_lowercase();
+
+        // Check for common meaningless patterns
+        let meaningless_patterns = [
+            "thank you for watching",
+            "thanks for watching",
+            "like and subscribe",
+            "music playing",
+            "applause",
+            "laughter",
+            "um um um",
+            "uh uh uh",
+            "ah ah ah",
+        ];
+
+        for pattern in &meaningless_patterns {
+            if text_lower.contains(pattern) {
+                return true;
+            }
+        }
+
+        // Check if text is mostly the same character or very short repetitive patterns
+        let unique_chars: HashSet<char> = text.chars().collect();
+        if unique_chars.len() <= 3 && text.len() > 10 {
+            return true;
+        }
+
+        false
+    }
+
+    // Enhanced word repetition removal
+    fn remove_word_repetitions<'a>(words: &'a [&'a str]) -> Vec<&'a str> {
+        let mut cleaned_words = Vec::new();
+        let mut i = 0;
+
+        while i < words.len() {
+            let current_word = words[i];
+            let mut repeat_count = 1;
+
+            // Count consecutive repetitions of the same word
+            while i + repeat_count < words.len() && words[i + repeat_count] == current_word {
+                repeat_count += 1;
+            }
+
+            // Be more aggressive: if word is repeated 2+ times, only keep one instance
+            if repeat_count >= 2 {
+                cleaned_words.push(current_word);
+                i += repeat_count;
+            } else {
+                cleaned_words.push(current_word);
+                i += 1;
+            }
+        }
+
+        cleaned_words
+    }
+
+    // Enhanced phrase repetition removal with variable length detection
+    fn remove_phrase_repetitions<'a>(words: &'a [&'a str]) -> Vec<&'a str> {
+        if words.len() < 4 {
+            return words.to_vec();
+        }
+
+        let mut final_words = Vec::new();
+        let mut i = 0;
+
+        while i < words.len() {
+            let mut phrase_found = false;
+
+            // Check for 2-word to 5-word phrase repetitions
+            for phrase_len in 2..=std::cmp::min(5, (words.len() - i) / 2) {
+                if i + phrase_len * 2 <= words.len() {
+                    let phrase1 = &words[i..i + phrase_len];
+                    let phrase2 = &words[i + phrase_len..i + phrase_len * 2];
+
+                    if phrase1 == phrase2 {
+                        // Add the phrase once and skip the repetition
+                        final_words.extend_from_slice(phrase1);
+                        i += phrase_len * 2;
+                        phrase_found = true;
+                        break;
+                    }
+                }
+            }
+
+            if !phrase_found {
+                final_words.push(words[i]);
+                i += 1;
+            }
+        }
+
+        final_words
+    }
+
+    // Calculate repetition ratio in text
+    fn calculate_repetition_ratio(text: &str) -> f32 {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        if words.len() < 4 {
+            return 0.0;
+        }
+
+        let mut word_counts = HashMap::new();
+        for word in &words {
+            *word_counts.entry(word.to_lowercase()).or_insert(0) += 1;
+        }
+
+        let total_words = words.len() as f32;
+        let repeated_words: usize = word_counts.values().map(|&count| if count > 1 { count - 1 } else { 0 }).sum();
+
+        repeated_words as f32 / total_words
+    }
+    
     pub async fn transcribe_audio(&self, audio_data: Vec<f32>) -> Result<String> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
-        
-        // Create transcription parameters
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        
-        // Configure for high quality transcription
+
+        // Optimize parameters for streaming accuracy based on research
+        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+            beam_size: 5,      // Increased beam size for better accuracy
+            patience: 1.0      // Balance between speed and accuracy
+        });
+
+        // Configure for maximum streaming accuracy
         params.set_language(Some("en"));
         params.set_translate(false);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        
-        // Run transcription
-        log::info!("Starting transcription of {} samples", audio_data.len());
+
+        // Enhanced settings for better accuracy and anti-repetition
+        params.set_suppress_blank(true);         // Suppress blank outputs
+        params.set_suppress_nst(true);           // Suppress non-speech tokens
+        params.set_temperature(0.4);             // Increased from 0.2 to 0.4 for better diversity and less repetition
+        params.set_max_initial_ts(1.0);          // Allow for better initial timestamp detection
+        params.set_entropy_thold(2.4);           // Entropy threshold for segment detection
+        params.set_logprob_thold(-1.0);          // Stricter threshold (was -2.0) to filter low-confidence outputs
+        params.set_no_speech_thold(0.6);         // Stricter threshold (was 0.2) to better detect silence
+
+        // Anti-repetition settings to prevent infinite loops
+        params.set_max_len(224);                 // Shorter maximum sequence length to prevent repetition
+        params.set_single_segment(false);        // Allow multiple segments but controlled
+
+        // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
+        // This would help detect repetitive outputs: params.set_compression_ratio_threshold(2.4);
+
+        // Duration-based optimization is handled by beam search parameters
+        let duration_seconds = audio_data.len() as f64 / 16000.0; // Assuming 16kHz
+        let is_short_audio = duration_seconds < 1.0;
+
+        // Smart logging based on audio duration and previous states
+        let mut should_log_transcription = true;
+        let mut should_log_short_warning = false;
+
+        if is_short_audio {
+            let last_was_short = *self.last_transcription_was_short.read().await;
+            let warning_logged = *self.short_audio_warning_logged.read().await;
+
+            if !warning_logged {
+                should_log_short_warning = true;
+                *self.short_audio_warning_logged.write().await = true;
+            }
+
+            // Only log transcription start if it's the first short audio or previous wasn't short
+            should_log_transcription = !last_was_short;
+
+            *self.last_transcription_was_short.write().await = true;
+        } else {
+            let last_was_short = *self.last_transcription_was_short.read().await;
+
+            // Always log when transitioning from short to normal audio
+            if last_was_short {
+                log::info!("Audio duration normalized, resuming transcription");
+                *self.short_audio_warning_logged.write().await = false;
+            }
+
+            *self.last_transcription_was_short.write().await = false;
+        }
+
+        if should_log_short_warning {
+            log::warn!("Audio duration is short ({:.1}s < 1.0s). Consider padding the input audio with silence. Further short audio warnings will be suppressed.", duration_seconds);
+        }
+
+        if should_log_transcription {
+            log::info!("Starting optimized transcription of {} samples ({:.1}s duration)",
+                      audio_data.len(), duration_seconds);
+        }
         let mut state = ctx.create_state()?;
         state.full(params, &audio_data)?;
-        
-        // Extract text
+
+        // Extract text with improved segment handling
         let num_segments = state.full_n_segments()?;
-        log::info!("Transcription completed with {} segments", num_segments);
+
+        // Only log segment completion for longer audio or when something meaningful was detected
+        if should_log_transcription || num_segments > 0 {
+            log::debug!("Transcription completed with {} segments", num_segments);
+        }
         let mut result = String::new();
-        
+
         for i in 0..num_segments {
             let segment_text = state.full_get_segment_text(i)?;
-            log::info!("Segment {}: '{}'", i, segment_text);
-            result.push_str(&segment_text);
-            if i < num_segments - 1 {
-                result.push(' ');
+
+            // Get segment timestamps for debugging
+            if let (Ok(start_time), Ok(end_time)) = (
+                state.full_get_segment_t0(i),
+                state.full_get_segment_t1(i)
+            ) {
+                log::debug!("Segment {} ({:.2}s-{:.2}s): '{}'",
+                          i, start_time as f64 / 100.0, end_time as f64 / 100.0, segment_text);
+            } else {
+                log::debug!("Segment {}: '{}'", i, segment_text);
+            }
+
+            // Clean and append segment text
+            let cleaned_text = segment_text.trim();
+            if !cleaned_text.is_empty() {
+                if !result.is_empty() {
+                    result.push(' ');
+                }
+                result.push_str(cleaned_text);
             }
         }
-        
-        if result.trim().is_empty() {
-            log::info!("Transcription result is empty - no speech detected");
+
+        let final_result = result.trim().to_string();
+
+        // Check for repetition loops and clean them up
+        let cleaned_result = Self::clean_repetitive_text(&final_result);
+
+        // Smart logging for transcription results
+        if cleaned_result.is_empty() {
+            if should_log_transcription {
+                log::debug!("Transcription result is empty - no speech detected");
+            }
         } else {
-            log::info!("Final transcription result: '{}'", result);
+            if cleaned_result != final_result {
+                log::info!("Cleaned repetitive transcription: '{}' -> '{}'", final_result, cleaned_result);
+            }
+            // Always log successful transcriptions with meaningful results
+            log::info!("Final transcription result: '{}'", cleaned_result);
         }
-        
-        Ok(result.trim().to_string())
+
+        Ok(cleaned_result)
     }
     
     pub async fn get_models_directory(&self) -> PathBuf {

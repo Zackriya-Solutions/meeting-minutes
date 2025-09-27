@@ -5,8 +5,9 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 
 use super::core::AudioDevice;
-use super::recording_state::{AudioChunk, AudioError, RecordingState};
+use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::audio_to_mono;
+use super::vad::{ContinuousVadProcessor};
 
 /// Simplified audio capture without broadcast channels
 #[derive(Clone)]
@@ -16,6 +17,10 @@ pub struct AudioCapture {
     sample_rate: u32,
     channels: u16,
     chunk_counter: Arc<std::sync::atomic::AtomicU64>,
+    device_type: DeviceType,
+    recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Stream-specific timing
+    samples_processed: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AudioCapture {
@@ -24,6 +29,8 @@ impl AudioCapture {
         state: Arc<RecordingState>,
         sample_rate: u32,
         channels: u16,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     ) -> Self {
         Self {
             device,
@@ -31,6 +38,10 @@ impl AudioCapture {
             sample_rate,
             channels,
             chunk_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            device_type,
+            recording_sender,
+            // Initialize stream-specific timing
+            samples_processed: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -48,19 +59,37 @@ impl AudioCapture {
             data.to_vec()
         };
 
-        // Create audio chunk
+        // Create audio chunk with stream-specific timestamp
         let chunk_id = self.chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
+
+        // Calculate accurate timestamp based on samples processed by this stream
+        let samples_before = self.samples_processed.fetch_add(mono_data.len() as u64, std::sync::atomic::Ordering::SeqCst);
+        let stream_timestamp = samples_before as f64 / self.sample_rate as f64;
 
         let chunk = AudioChunk {
-            data: mono_data,
+            data: mono_data.clone(),
             sample_rate: self.sample_rate,
-            timestamp,
+            timestamp: stream_timestamp, // Use stream-specific timing!
             chunk_id,
+            device_type: self.device_type.clone(),
         };
 
-        // Send directly to processing pipeline
+        // Send raw audio chunk directly to recording saver (bypasses VAD filtering)
+        if let Some(recording_sender) = &self.recording_sender {
+            if let Err(e) = recording_sender.send(chunk.clone()) {
+                warn!("Failed to send chunk to recording saver: {}", e);
+            }
+        }
+
+        // Send to processing pipeline for transcription
         if let Err(e) = self.state.send_audio_chunk(chunk) {
+            // Check if this is the "pipeline not ready" error
+            if e.to_string().contains("Audio pipeline not ready") {
+                // This is expected during initialization, just log it as debug
+                debug!("Audio pipeline not ready yet, skipping chunk {}", chunk_id);
+                return;
+            }
+
             warn!("Failed to send audio chunk: {}", e);
             // More specific error handling based on failure reason
             let error = if e.to_string().contains("channel closed") {
@@ -94,13 +123,19 @@ impl AudioCapture {
     }
 }
 
-/// Audio processing pipeline
+/// Optimized audio processing pipeline using VAD-driven chunking
 pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
     transcription_sender: mpsc::UnboundedSender<AudioChunk>,
     state: Arc<RecordingState>,
-    buffer: Vec<f32>,
-    target_chunk_size: usize,
+    vad_processor: ContinuousVadProcessor,
+    sample_rate: u32,
+    chunk_id_counter: u64,
+    min_chunk_duration_ms: u32,   // Minimum duration before sending to transcription
+    max_chunk_duration_ms: u32,   // Maximum duration before forcing transcription
+    accumulated_speech: Vec<f32>, // Accumulate speech segments for larger chunks
+    last_transcription_time: std::time::Instant,
+    accumulated_start_timestamp: f64,
 }
 
 impl AudioPipeline {
@@ -111,54 +146,70 @@ impl AudioPipeline {
         target_chunk_duration_ms: u32,
         sample_rate: u32,
     ) -> Self {
-        let target_chunk_size = (sample_rate as f32 * (target_chunk_duration_ms as f32 / 1000.0)) as usize;
+        // Create VAD processor with longer redemption time for better speech accumulation
+        // The VAD processor now handles 48kHz->16kHz resampling internally
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 800) {
+            Ok(processor) => {
+                info!("VAD processor created successfully");
+                processor
+            }
+            Err(e) => {
+                error!("Failed to create VAD processor: {}", e);
+                panic!("VAD processor creation failed: {}", e);
+            }
+        };
+
+        // Use chunk-based approach like the old implementation
+        // - 30 seconds per chunk for better sentence processing (like old code)
+        // - This allows proper VAD processing on complete chunks
+        let min_chunk_duration_ms = if target_chunk_duration_ms == 0 {
+            30000 // 30 seconds like old implementation
+        } else {
+            std::cmp::max(30000, target_chunk_duration_ms)
+        };
+        let max_chunk_duration_ms = if target_chunk_duration_ms == 0 {
+            30000 // Same as min for consistent chunking
+        } else {
+            target_chunk_duration_ms
+        };
 
         Self {
             receiver,
             transcription_sender,
             state,
-            buffer: Vec::with_capacity(target_chunk_size * 2),
-            target_chunk_size,
+            vad_processor,
+            sample_rate,
+            chunk_id_counter: 0,
+            min_chunk_duration_ms,
+            max_chunk_duration_ms,
+            accumulated_speech: Vec::new(),
+            last_transcription_time: std::time::Instant::now(),
+            accumulated_start_timestamp: 0.0,
         }
     }
 
-    /// Run the audio processing pipeline
+    /// Run the VAD-driven audio processing pipeline
     pub async fn run(mut self) -> Result<()> {
-        info!("Audio pipeline started");
-        let mut chunk_id = 0u64;
+        info!("VAD-driven audio pipeline started with {}-{}ms chunk durations",
+              self.min_chunk_duration_ms, self.max_chunk_duration_ms);
 
         while self.state.is_recording() {
             // Receive audio chunks with timeout
             match tokio::time::timeout(
-                std::time::Duration::from_millis(100),
+                std::time::Duration::from_millis(50), // Shorter timeout for responsiveness
                 self.receiver.recv()
             ).await {
                 Ok(Some(chunk)) => {
                     debug!("Pipeline received chunk {} with {} samples", chunk.chunk_id, chunk.data.len());
-                    self.buffer.extend_from_slice(&chunk.data);
 
-                    // If buffer is large enough, create transcription chunk
-                    if self.buffer.len() >= self.target_chunk_size {
-                        let transcription_chunk = AudioChunk {
-                            data: self.buffer.drain(..self.target_chunk_size).collect(),
-                            sample_rate: chunk.sample_rate,
-                            timestamp: chunk.timestamp,
-                            chunk_id,
-                        };
-
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                            warn!("Failed to send to transcription: {}", e);
-                            // More specific error based on transcription failure
-                            let error = if e.to_string().contains("closed") {
-                                AudioError::ChannelClosed
-                            } else {
-                                AudioError::TranscriptionFailed
-                            };
-                            self.state.report_error(error);
-                        } else {
-                            info!("Sent chunk {} for transcription ({} samples)", chunk_id, self.target_chunk_size);
-                            chunk_id += 1;
-                        }
+                    // Use chunk-based approach like old implementation
+                    // Accumulate audio in larger chunks before processing
+                    self.accumulate_speech(&chunk.data, chunk.timestamp)?;
+                    
+                    // Check if we should send accumulated speech for transcription
+                    // Only check every 10 chunks to allow proper accumulation (like old code)
+                    if chunk.chunk_id % 10 == 0 {
+                        self.check_and_send_transcription_chunk(chunk.sample_rate)?;
                     }
                 }
                 Ok(None) => {
@@ -166,30 +217,139 @@ impl AudioPipeline {
                     break;
                 }
                 Err(_) => {
-                    // Timeout - continue loop to check recording state
+                    // Timeout - check for forced transcription due to time limit
+                    if self.should_force_transcription() {
+                        self.send_accumulated_speech(self.sample_rate)?;
+                    }
                     continue;
                 }
             }
         }
 
-        // Process any remaining audio in buffer
-        if !self.buffer.is_empty() {
-            info!("Processing final buffer with {} samples", self.buffer.len());
-            let final_chunk = AudioChunk {
-                data: self.buffer.clone(),
-                sample_rate: 48000, // Default sample rate
-                timestamp: self.state.get_recording_duration().unwrap_or(0.0),
-                chunk_id,
-            };
+        // Process any remaining speech segments and accumulated audio
+        self.flush_remaining_audio()?;
 
-            if let Err(e) = self.transcription_sender.send(final_chunk) {
-                warn!("Failed to send final chunk: {}", e);
+        info!("VAD-driven audio pipeline ended");
+        Ok(())
+    }
+
+
+    fn accumulate_speech(&mut self, samples: &[f32], timestamp: f64) -> Result<()> {
+        if self.accumulated_speech.is_empty() {
+            self.accumulated_start_timestamp = timestamp;
+        }
+        self.accumulated_speech.extend_from_slice(samples);
+        Ok(())
+    }
+
+    fn check_and_send_transcription_chunk(&mut self, sample_rate: u32) -> Result<()> {
+        if self.accumulated_speech.is_empty() {
+            return Ok(());
+        }
+
+        let accumulated_duration_ms = (self.accumulated_speech.len() as f64 / sample_rate as f64) * 1000.0;
+        let time_since_last = self.last_transcription_time.elapsed().as_millis() as u32;
+
+        // Send if we have enough speech or if too much time has passed
+        let should_send = accumulated_duration_ms >= self.min_chunk_duration_ms as f64 ||
+                         time_since_last >= self.max_chunk_duration_ms;
+
+        if should_send {
+            self.send_accumulated_speech(sample_rate)?;
+        }
+
+        Ok(())
+    }
+
+    fn should_force_transcription(&self) -> bool {
+        !self.accumulated_speech.is_empty() &&
+        self.last_transcription_time.elapsed().as_millis() as u32 >= self.max_chunk_duration_ms
+    }
+
+    fn send_accumulated_speech(&mut self, sample_rate: u32) -> Result<()> {
+        if self.accumulated_speech.is_empty() {
+            return Ok(());
+        }
+
+        let accumulated_samples = std::mem::take(&mut self.accumulated_speech);
+        let duration_ms = (accumulated_samples.len() as f64 / sample_rate as f64) * 1000.0;
+        
+        info!("Processing accumulated speech: {} samples ({:.1}ms)", 
+              accumulated_samples.len(), duration_ms);
+
+        // Use old implementation's VAD approach: apply VAD to the complete chunk
+        let speech_samples = match crate::audio::vad::extract_speech_16k(&accumulated_samples) {
+            Ok(speech) if !speech.is_empty() => {
+                info!("VAD extracted {} speech samples from {} total samples", 
+                      speech.len(), accumulated_samples.len());
+                speech
+            }
+            Ok(_) => {
+                // VAD detected no speech, apply stricter threshold for audio content
+                let avg_level = accumulated_samples.iter().map(|&x| x.abs()).sum::<f32>() / accumulated_samples.len() as f32;
+                if avg_level > 0.01 { // Increased from 0.003 to 0.01 for better silence filtering
+                    info!("VAD detected no speech but significant audio present ({:.6}), including audio", avg_level);
+                    accumulated_samples
+                } else {
+                    info!("VAD detected genuine silence or low-quality audio ({:.6}), skipping", avg_level);
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                warn!("VAD error: {}, using original samples", e);
+                accumulated_samples
+            }
+        };
+
+        let transcription_chunk = AudioChunk {
+            data: speech_samples,
+            sample_rate,
+            timestamp: self.accumulated_start_timestamp,
+            chunk_id: self.chunk_id_counter,
+            device_type: DeviceType::Microphone, // Mixed audio for transcription
+        };
+
+        info!("🎤 Sending VAD-optimized chunk {} for transcription: {:.1}ms duration, {} samples",
+              self.chunk_id_counter, duration_ms, transcription_chunk.data.len());
+
+        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+            warn!("Failed to send transcription chunk: {}", e);
+            let error = if e.to_string().contains("closed") {
+                AudioError::ChannelClosed
+            } else {
+                AudioError::TranscriptionFailed
+            };
+            self.state.report_error(error);
+        } else {
+            self.chunk_id_counter += 1;
+            self.last_transcription_time = std::time::Instant::now();
+        }
+
+        Ok(())
+    }
+
+    fn flush_remaining_audio(&mut self) -> Result<()> {
+        // Flush any remaining audio from VAD processor
+        match self.vad_processor.flush() {
+            Ok(final_segments) => {
+                for segment in final_segments {
+                    self.accumulated_speech.extend_from_slice(&segment.samples);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to flush VAD processor: {}", e);
             }
         }
 
-        info!("Audio pipeline ended");
+        // Send any remaining accumulated speech
+        if !self.accumulated_speech.is_empty() {
+            info!("Flushing final accumulated speech: {} samples", self.accumulated_speech.len());
+            self.send_accumulated_speech(self.sample_rate)?;
+        }
+
         Ok(())
     }
+
 }
 
 /// Simple audio pipeline manager

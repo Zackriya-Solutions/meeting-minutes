@@ -11,6 +11,8 @@ pub mod pipeline;
 pub mod stream;
 pub mod recording_manager;
 pub mod recording_commands;
+pub mod recording_preferences;
+pub mod recording_saver;
 
 pub use core::{
     default_input_device, default_output_device, get_device_and_config, list_audio_devices,
@@ -25,9 +27,13 @@ pub use pipeline::{AudioPipelineManager};
 pub use stream::{AudioStreamManager};
 pub use recording_manager::{RecordingManager};
 pub use recording_commands::{
-    start_recording, start_recording_with_devices, stop_recording, 
+    start_recording, start_recording_with_devices, stop_recording,
     is_recording, get_transcription_status, RecordingArgs, TranscriptionStatus, TranscriptUpdate
 };
+pub use recording_preferences::{
+    RecordingPreferences, get_default_recordings_folder
+};
+pub use recording_saver::RecordingSaver;
 pub use encode::{
     encode_single_audio, AudioInput
 };

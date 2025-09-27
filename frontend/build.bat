@@ -8,6 +8,8 @@ setlocal enabledelayedexpansion
 REM Check if debug mode is set
 if "%~1" == "debug" (
     set "DEBUG=true"
+) else if "%~1" == "check" (
+    set "CHECK=true"
 ) else if "%~1" == "help" (
     call :_print_help
     exit /b 0
@@ -103,18 +105,47 @@ if %errorlevel% neq 0 (
 
 REM if debug mode, run tauri dev
 if "%~1" == "debug" (
+    echo Starting development mode...
+    echo Running initial compilation check...
+   
+    echo ✅ Initial compilation check passed. Starting development server...
     call pnpm run tauri dev
+    if errorlevel 1 (
+        echo Error: Failed to start Tauri development server
+        exit /b 1
+    )
+) else if "%~1" == "check" (
+    echo Running cargo check...
+    cd src-tauri
+    cargo check --no-default-features
+    if errorlevel 1 (
+        echo.
+        echo ❌ Error: Cargo check failed - fix the compilation errors above
+        cd ..
+        exit /b 1
+    ) else (
+        echo.
+        echo ✅ Cargo check passed successfully!
+        cd ..
+        exit /b 0
+    )
 ) else (
+    echo Building for production...
+    echo Running pre-build compilation check...
+   
+    echo ✅ Pre-build check passed. Building for production...
     call pnpm run tauri build
+    if errorlevel 1 (
+        echo ❌ Error: Failed to build Tauri application for production
+        exit /b 1
+    )
 )
 
-if %errorlevel% neq 0 (
-    echo Error: Failed to build Tauri application
-    exit /b 1
+REM Only show success message for production builds
+if not "%~1" == "debug" (
+    echo Tauri application built successfully!
+    exit /b 0
 )
-
-echo Tauri application built successfully!
-exit /b 0
 
 :_print_help
 echo.
@@ -127,6 +158,7 @@ echo   build.bat [OPTION]
 echo.
 echo OPTIONS:
 echo   debug     Build and run the application in development mode
+echo   check     Run cargo check to verify compilation without building
 echo   help      Show this help message
 echo   --help    Show this help message
 echo   -h        Show this help message

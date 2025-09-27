@@ -1,25 +1,31 @@
 use std::sync::Arc;
 use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Device, Stream, SupportedStreamConfig};
 use log::{error, info, warn};
+use tokio::sync::mpsc;
 
-use super::core::{AudioDevice, DeviceType, get_device_and_config};
+use super::core::{AudioDevice, get_device_and_config};
 use super::pipeline::AudioCapture;
-use super::recording_state::RecordingState;
+use super::recording_state::{RecordingState, DeviceType};
 
 /// Simplified audio stream wrapper
 pub struct AudioStream {
     device: Arc<AudioDevice>,
     stream: Stream,
-    capture: AudioCapture,
 }
+
+// SAFETY: While Stream doesn't implement Send, we ensure it's only accessed
+// from the same thread context by using spawn_blocking for operations that cross thread boundaries
+unsafe impl Send for AudioStream {}
 
 impl AudioStream {
     /// Create a new audio stream for the given device
     pub async fn create(
         device: Arc<AudioDevice>,
         state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
     ) -> Result<Self> {
         info!("Creating audio stream for device: {}", device.name);
 
@@ -35,6 +41,8 @@ impl AudioStream {
             state.clone(),
             config.sample_rate().0,
             config.channels(),
+            device_type,
+            recording_sender,
         );
 
         // Build the appropriate stream based on sample format
@@ -47,7 +55,6 @@ impl AudioStream {
         Ok(Self {
             device,
             stream,
-            capture,
         })
     }
 
@@ -149,6 +156,9 @@ pub struct AudioStreamManager {
     state: Arc<RecordingState>,
 }
 
+// SAFETY: AudioStreamManager contains AudioStream which we've marked as Send
+unsafe impl Send for AudioStreamManager {}
+
 impl AudioStreamManager {
     pub fn new(state: Arc<RecordingState>) -> Self {
         Self {
@@ -163,12 +173,13 @@ impl AudioStreamManager {
         &mut self,
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
     ) -> Result<()> {
         info!("Starting audio streams");
 
         // Start microphone stream
         if let Some(mic_device) = microphone_device {
-            match AudioStream::create(mic_device.clone(), self.state.clone()).await {
+            match AudioStream::create(mic_device.clone(), self.state.clone(), DeviceType::Microphone, recording_sender.clone()).await {
                 Ok(stream) => {
                     self.state.set_microphone_device(mic_device);
                     self.microphone_stream = Some(stream);
@@ -183,7 +194,7 @@ impl AudioStreamManager {
 
         // Start system audio stream
         if let Some(sys_device) = system_device {
-            match AudioStream::create(sys_device.clone(), self.state.clone()).await {
+            match AudioStream::create(sys_device.clone(), self.state.clone(), DeviceType::System, recording_sender.clone()).await {
                 Ok(stream) => {
                     self.state.set_system_device(sys_device);
                     self.system_stream = Some(stream);

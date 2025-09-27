@@ -6,6 +6,13 @@ use anyhow::Result;
 
 use super::core::AudioDevice;
 
+/// Device type for audio chunks
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeviceType {
+    Microphone,
+    System,
+}
+
 /// Audio chunk with metadata for processing
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
@@ -13,6 +20,7 @@ pub struct AudioChunk {
     pub sample_rate: u32,
     pub timestamp: f64,
     pub chunk_id: u64,
+    pub device_type: DeviceType,
 }
 
 /// Comprehensive error types for audio system
@@ -161,8 +169,11 @@ impl RecordingState {
             let mut stats = self.stats.lock().unwrap();
             stats.chunks_processed += 1;
             stats.last_activity = Some(Instant::now());
+            Ok(())
+        } else {
+            // Return an error when no sender is available (pipeline not ready)
+            Err(anyhow::anyhow!("Audio pipeline not ready - no sender available"))
         }
-        Ok(())
     }
 
     // Error handling
