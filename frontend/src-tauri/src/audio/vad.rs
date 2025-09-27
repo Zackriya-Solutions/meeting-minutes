@@ -37,7 +37,7 @@ impl ContinuousVadProcessor {
         let mut config = VadConfig::default();
         config.sample_rate = VAD_SAMPLE_RATE as usize;
 
-        // Optimized settings based on hyprnote best practices for better speech quality
+        // Optimized settings based best practices for better speech quality
         let safe_redemption_time = std::cmp::min(redemption_time_ms, 400); // Optimized redemption time
         config.redemption_time = Duration::from_millis(safe_redemption_time as u64);
         config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
