@@ -19,8 +19,7 @@ pub struct AudioCapture {
     chunk_counter: Arc<std::sync::atomic::AtomicU64>,
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
-    // Stream-specific timing
-    samples_processed: Arc<std::sync::atomic::AtomicU64>,
+    // Note: Using global recording timestamp for synchronization
 }
 
 impl AudioCapture {
@@ -40,8 +39,7 @@ impl AudioCapture {
             chunk_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             device_type,
             recording_sender,
-            // Initialize stream-specific timing
-            samples_processed: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            // Using global recording time for sync
         }
     }
 
@@ -62,14 +60,13 @@ impl AudioCapture {
         // Create audio chunk with stream-specific timestamp
         let chunk_id = self.chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        // Calculate accurate timestamp based on samples processed by this stream
-        let samples_before = self.samples_processed.fetch_add(mono_data.len() as u64, std::sync::atomic::Ordering::SeqCst);
-        let stream_timestamp = samples_before as f64 / self.sample_rate as f64;
+        // Use global recording timestamp for proper synchronization
+        let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
 
         let chunk = AudioChunk {
             data: mono_data.clone(),
             sample_rate: self.sample_rate,
-            timestamp: stream_timestamp, // Use stream-specific timing!
+            timestamp, // Use global recording time for both streams
             chunk_id,
             device_type: self.device_type.clone(),
         };

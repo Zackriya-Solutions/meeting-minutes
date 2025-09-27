@@ -11,19 +11,29 @@ use super::recording_preferences::{
 
 // Removed unused constant - we now preserve original sample rates
 
-/// Resample audio from one sample rate to another - exact copy from old implementation
+/// Resample audio with linear interpolation to prevent stretching artifacts
 fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if from_rate == to_rate {
         return samples.to_vec();
     }
 
-    let ratio = to_rate as f32 / from_rate as f32;
-    let new_len = (samples.len() as f32 * ratio) as usize;
+    let ratio = from_rate as f64 / to_rate as f64;
+    let new_len = (samples.len() as f64 / ratio) as usize;
     let mut resampled = Vec::with_capacity(new_len);
 
     for i in 0..new_len {
-        let src_idx = (i as f32 / ratio) as usize;
-        if src_idx < samples.len() {
+        let src_pos = i as f64 * ratio;
+        let src_idx = src_pos as usize;
+        let fraction = src_pos - src_idx as f64;
+
+        if src_idx + 1 < samples.len() {
+            // Linear interpolation between adjacent samples
+            let sample1 = samples[src_idx];
+            let sample2 = samples[src_idx + 1];
+            let interpolated = sample1 + (sample2 - sample1) * fraction as f32;
+            resampled.push(interpolated);
+        } else if src_idx < samples.len() {
+            // Use the last sample if we're at the end
             resampled.push(samples[src_idx]);
         }
     }
@@ -31,22 +41,21 @@ fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     resampled
 }
 
-// Timestamped audio chunks for proper synchronization
+// Audio chunks with sample rate tracking (timestamp removed for simple concatenation)
 #[derive(Debug, Clone)]
-struct TimestampedAudio {
+struct AudioData {
     data: Vec<f32>,
-    timestamp: f64,
     sample_rate: u32,
 }
 
-// Raw audio buffers with timestamped chunks for proper synchronization
-static mut MIC_CHUNKS: Option<Arc<Mutex<Vec<TimestampedAudio>>>> = None;
-static mut SYSTEM_CHUNKS: Option<Arc<Mutex<Vec<TimestampedAudio>>>> = None;
+// Raw audio buffers with sample rate tracking
+static mut MIC_CHUNKS: Option<Arc<Mutex<Vec<AudioData>>>> = None;
+static mut SYSTEM_CHUNKS: Option<Arc<Mutex<Vec<AudioData>>>> = None;
 
 // Helper functions to safely access static buffers
 fn with_mic_chunks<F, R>(f: F) -> Option<R>
 where
-    F: FnOnce(&Arc<Mutex<Vec<TimestampedAudio>>>) -> R,
+    F: FnOnce(&Arc<Mutex<Vec<AudioData>>>) -> R,
 {
     unsafe {
         let ptr = std::ptr::addr_of!(MIC_CHUNKS);
@@ -56,7 +65,7 @@ where
 
 fn with_system_chunks<F, R>(f: F) -> Option<R>
 where
-    F: FnOnce(&Arc<Mutex<Vec<TimestampedAudio>>>) -> R,
+    F: FnOnce(&Arc<Mutex<Vec<AudioData>>>) -> R,
 {
     unsafe {
         let ptr = std::ptr::addr_of!(SYSTEM_CHUNKS);
@@ -111,29 +120,27 @@ impl RecordingSaver {
                         break;
                     }
 
-                    // Store timestamped audio chunks for proper synchronization
+                    // Store audio chunks with sample rate info
                     match chunk.device_type {
                         DeviceType::Microphone => {
-                            let timestamped_chunk = TimestampedAudio {
+                            let audio_data = AudioData {
                                 data: chunk.data,
-                                timestamp: chunk.timestamp,
                                 sample_rate: chunk.sample_rate,
                             };
                             with_mic_chunks(|chunks| {
                                 if let Ok(mut mic_chunks) = chunks.lock() {
-                                    mic_chunks.push(timestamped_chunk);
+                                    mic_chunks.push(audio_data);
                                 }
                             });
                         }
                         DeviceType::System => {
-                            let timestamped_chunk = TimestampedAudio {
+                            let audio_data = AudioData {
                                 data: chunk.data,
-                                timestamp: chunk.timestamp,
                                 sample_rate: chunk.sample_rate,
                             };
                             with_system_chunks(|chunks| {
                                 if let Ok(mut system_chunks) = chunks.lock() {
-                                    system_chunks.push(timestamped_chunk);
+                                    system_chunks.push(audio_data);
                                 }
                             });
                         }
@@ -220,12 +227,24 @@ impl RecordingSaver {
         // Use the higher sample rate for better quality
         let target_sample_rate = mic_sample_rate.max(system_sample_rate);
 
-        // Convert timestamped chunks to synchronized audio streams
-        let (mic_resampled, system_resampled) = Self::synchronize_audio_streams(
-            &mic_chunks,
-            &system_chunks,
-            target_sample_rate
-        )?;
+        // Extract and resample audio data using simple concatenation (fixes timing issues)
+        let mic_data: Vec<f32> = mic_chunks.iter().flat_map(|chunk| &chunk.data).cloned().collect();
+        let system_data: Vec<f32> = system_chunks.iter().flat_map(|chunk| &chunk.data).cloned().collect();
+
+        // Resample to common rate if needed
+        let mic_resampled = if mic_sample_rate != target_sample_rate && !mic_data.is_empty() {
+            info!("Resampling mic audio from {}Hz to {}Hz", mic_sample_rate, target_sample_rate);
+            resample_audio(&mic_data, mic_sample_rate, target_sample_rate)
+        } else {
+            mic_data
+        };
+
+        let system_resampled = if system_sample_rate != target_sample_rate && !system_data.is_empty() {
+            info!("Resampling system audio from {}Hz to {}Hz", system_sample_rate, target_sample_rate);
+            resample_audio(&system_data, system_sample_rate, target_sample_rate)
+        } else {
+            system_data
+        };
 
         // Improved audio mixing with level balancing
         let max_len = mic_resampled.len().max(system_resampled.len());
@@ -244,9 +263,9 @@ impl RecordingSaver {
             0.0
         };
 
-        // Boost microphone if it's significantly quieter than system audio
-        let mic_boost = if mic_rms > 0.0 && system_rms > 0.0 && mic_rms < system_rms * 0.1 {
-            (system_rms / mic_rms * 0.5).min(5.0) // Max 5x boost
+        // Improved mic boost logic - boost when mic is 2x quieter (more realistic)
+        let mic_boost = if mic_rms > 0.0 && system_rms > 0.0 && mic_rms < system_rms * 0.5 {
+            (system_rms / mic_rms * 0.3).min(3.0) // Max 3x boost, more conservative
         } else {
             1.0
         };
@@ -266,25 +285,13 @@ impl RecordingSaver {
                 0.0
             };
 
-            // Better mixing: don't just average, but blend intelligently
-            let mixed_sample = if mic_sample.abs() > 0.01 || system_sample.abs() > 0.01 {
-                // When there's actual audio, blend proportionally
-                mic_sample * 0.7 + system_sample * 0.6
-            } else {
-                // For silence, just use average
-                (mic_sample + system_sample) * 0.5
-            };
+            // Fixed mixing levels: 60% mic + 40% system = 100% max (no over-driving)
+            let mixed_sample = mic_sample * 0.6 + system_sample * 0.4;
 
-            // Soft limiter to prevent clipping
-            let limited_sample = if mixed_sample > 1.0 {
-                1.0 - (mixed_sample - 1.0) * 0.1
-            } else if mixed_sample < -1.0 {
-                -1.0 + (-mixed_sample - 1.0) * 0.1
-            } else {
-                mixed_sample
-            };
+            // Simple hard clipping instead of aggressive soft limiting
+            let clipped_sample = mixed_sample.max(-1.0).min(1.0);
 
-            mixed_data.push(limited_sample);
+            mixed_data.push(clipped_sample);
         }
 
         if mixed_data.is_empty() {
@@ -296,7 +303,20 @@ impl RecordingSaver {
             return Err("No audio data captured".to_string());
         }
 
-        info!("Mixed {} audio samples at {}Hz", mixed_data.len(), target_sample_rate);
+        // Automatic gain control - normalize to target level (-12dB = 0.25 peak)
+        let target_level = 0.25f32;
+        let current_peak = mixed_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+
+        if current_peak > 0.0 {
+            let gain_factor = (target_level / current_peak).min(2.0); // Max 2x gain
+            info!("Applying AGC: peak={:.3}, gain={:.2}x", current_peak, gain_factor);
+
+            for sample in &mut mixed_data {
+                *sample *= gain_factor;
+            }
+        }
+
+        info!("Mixed and normalized {} audio samples at {}Hz", mixed_data.len(), target_sample_rate);
 
         // DO NOT resample for saving! Keep original quality for the WAV file
         // Only resample for transcription, not for the saved recording
@@ -401,72 +421,7 @@ impl RecordingSaver {
         }
     }
 
-    /// Synchronize audio streams by timestamp - this is the key fix for overlapping audio
-    fn synchronize_audio_streams(
-        mic_chunks: &[TimestampedAudio],
-        system_chunks: &[TimestampedAudio],
-        target_sample_rate: u32,
-    ) -> Result<(Vec<f32>, Vec<f32>), String> {
-        // Find total duration
-        let mic_end_time = mic_chunks.iter()
-            .map(|chunk| chunk.timestamp + (chunk.data.len() as f64 / chunk.sample_rate as f64))
-            .fold(0.0, f64::max);
-        let system_end_time = system_chunks.iter()
-            .map(|chunk| chunk.timestamp + (chunk.data.len() as f64 / chunk.sample_rate as f64))
-            .fold(0.0, f64::max);
-
-        let total_duration = mic_end_time.max(system_end_time);
-        let total_samples = (total_duration * target_sample_rate as f64) as usize;
-
-        info!("Synchronizing audio streams - Total duration: {:.2}s, {} samples", total_duration, total_samples);
-
-        // Create synchronized arrays
-        let mut mic_sync = vec![0.0f32; total_samples];
-        let mut system_sync = vec![0.0f32; total_samples];
-
-        // Fill mic data at correct timestamps
-        for chunk in mic_chunks {
-            let start_sample = (chunk.timestamp * target_sample_rate as f64) as usize;
-
-            // Resample chunk if needed
-            let chunk_data = if chunk.sample_rate != target_sample_rate {
-                resample_audio(&chunk.data, chunk.sample_rate, target_sample_rate)
-            } else {
-                chunk.data.clone()
-            };
-
-            // Copy data to synchronized position
-            for (i, &sample) in chunk_data.iter().enumerate() {
-                let target_idx = start_sample + i;
-                if target_idx < mic_sync.len() {
-                    mic_sync[target_idx] += sample; // Add in case of overlapping chunks
-                }
-            }
-        }
-
-        // Fill system data at correct timestamps
-        for chunk in system_chunks {
-            let start_sample = (chunk.timestamp * target_sample_rate as f64) as usize;
-
-            // Resample chunk if needed
-            let chunk_data = if chunk.sample_rate != target_sample_rate {
-                resample_audio(&chunk.data, chunk.sample_rate, target_sample_rate)
-            } else {
-                chunk.data.clone()
-            };
-
-            // Copy data to synchronized position
-            for (i, &sample) in chunk_data.iter().enumerate() {
-                let target_idx = start_sample + i;
-                if target_idx < system_sync.len() {
-                    system_sync[target_idx] += sample; // Add in case of overlapping chunks
-                }
-            }
-        }
-
-        info!("Synchronized {} mic samples and {} system samples", mic_sync.len(), system_sync.len());
-        Ok((mic_sync, system_sync))
-    }
+    // Removed complex timestamp synchronization - using simple concatenation for reliability
 
     /// Get current accumulated audio stats
     pub fn get_stats(&self) -> (usize, u32) {
