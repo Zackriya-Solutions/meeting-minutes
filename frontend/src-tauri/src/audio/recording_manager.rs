@@ -136,7 +136,50 @@ impl RecordingManager {
         self.start_recording(microphone_device, system_device).await
     }
 
-    /// Stop recording and save audio
+    /// Stop recording streams without saving (for use when waiting for transcription)
+    pub async fn stop_streams_only(&mut self) -> Result<()> {
+        info!("Stopping recording streams only");
+
+        // Stop recording state first
+        self.state.stop_recording();
+
+        // Stop audio streams
+        if let Err(e) = self.stream_manager.stop_streams() {
+            error!("Error stopping audio streams: {}", e);
+        }
+
+        // Stop audio pipeline
+        if let Err(e) = self.pipeline_manager.stop().await {
+            error!("Error stopping audio pipeline: {}", e);
+        }
+
+        info!("Recording streams stopped");
+        Ok(())
+    }
+
+    /// Save recording after transcription is complete
+    pub async fn save_recording_only<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
+        info!("Saving recording with transcript chunks");
+
+        // Save the recording
+        match self.recording_saver.stop_and_save(app).await {
+            Ok(Some(file_path)) => {
+                info!("Recording saved successfully to: {}", file_path);
+            }
+            Ok(None) => {
+                info!("Recording not saved (auto-save disabled or no audio data)");
+            }
+            Err(e) => {
+                error!("Failed to save recording: {}", e);
+                // Don't fail the stop operation if saving fails
+            }
+        }
+
+        info!("Recording saved");
+        Ok(())
+    }
+
+    /// Stop recording and save audio (legacy method)
     pub async fn stop_recording<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
         info!("Stopping recording manager");
 

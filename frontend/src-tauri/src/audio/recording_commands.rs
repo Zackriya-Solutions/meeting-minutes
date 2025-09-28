@@ -217,7 +217,7 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
         return Ok(());
     }
 
-    // Stop the recording manager in a blocking task to avoid Send issues
+    // Step 1: Stop the recording manager using the old approach (stop everything at once)
     let app_clone = app.clone();
     let stop_result = tokio::task::spawn_blocking(move || {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -230,7 +230,7 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
         }
     }).await.map_err(|e| format!("Task join error: {}", e))?;
 
-    // Wait for transcription task to complete all pending chunks
+    // Step 2: Wait for transcription task to complete all pending chunks
     let transcription_task = {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         global_task.take()
@@ -272,11 +272,11 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
         let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE.lock().unwrap();
         engine_guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine_clone {
         let current_model = engine.get_current_model().await.unwrap_or_else(|| "unknown".to_string());
         info!("Current model before unload: '{}'", current_model);
-        
+
         if engine.unload_model().await {
             info!("✅ Model '{}' unloaded successfully", current_model);
         } else {
@@ -373,6 +373,8 @@ fn start_transcription_task<R: Runtime>(
                         } else {
                             info!("Successfully emitted transcript-update with sequence_id: {}", sequence_id);
                         }
+
+                        // Note: Transcript saving happens in the recording saver during stop_and_save
                     }
                 }
                 Err(e) => {
@@ -583,6 +585,7 @@ pub async fn get_or_init_whisper<R: Runtime>(app: &AppHandle<R>) -> Result<Arc<c
 
     Ok(engine)
 }
+
 
 /// Format current timestamp
 fn format_current_timestamp() -> String {

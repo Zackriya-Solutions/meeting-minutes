@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
 import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 
 export interface RecordingPreferences {
   save_folder: string;
   auto_save: boolean;
   file_format: string;
+  preferred_mic_device: string | null;
+  preferred_system_device: string | null;
 }
 
 interface RecordingSettingsProps {
@@ -18,7 +20,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
-    file_format: 'wav'
+    file_format: 'wav',
+    preferred_mic_device: null,
+    preferred_system_device: null
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -48,6 +52,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
     const newPreferences = { ...preferences, auto_save: enabled };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences);
+  };
+
+  const handleDeviceChange = async (devices: SelectedDevices) => {
+    const newPreferences = {
+      ...preferences,
+      preferred_mic_device: devices.micDevice,
+      preferred_system_device: devices.systemDevice
+    };
     setPreferences(newPreferences);
     await savePreferences(newPreferences);
   };
@@ -115,15 +129,13 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             <div className="text-sm text-gray-600 mb-3 break-all">
               {preferences.save_folder || 'Default folder'}
             </div>
-            <Button
-              variant="outline"
-              size="sm"
+            <button
               onClick={handleOpenFolder}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Open Folder
-            </Button>
+            </button>
           </div>
 
           <div className="p-4 border rounded-lg bg-blue-50">
@@ -145,6 +157,27 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           </div>
         </div>
       )}
+
+      {/* Device Preferences */}
+      <div className="space-y-4">
+        <div className="border-t pt-6">
+          <h4 className="text-base font-medium text-gray-900 mb-4">Default Audio Devices</h4>
+          <p className="text-sm text-gray-600 mb-4">
+            Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
+          </p>
+
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <DeviceSelection
+              selectedDevices={{
+                micDevice: preferences.preferred_mic_device,
+                systemDevice: preferences.preferred_system_device
+              }}
+              onDeviceChange={handleDeviceChange}
+              disabled={saving}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

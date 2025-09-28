@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use super::encode::encode_single_audio; // Correct path to encode module
 
 /// Sanitize a filename to be safe for filesystem use
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
@@ -266,7 +266,7 @@ pub fn write_transcript_to_file(
         output_path.clone()
     };
 
-    let file_path = final_output_path.join(format!("transcript_{}.text", timestamp));
+    let file_path = final_output_path.join(format!("transcript_{}.txt", timestamp));
 
     // Write transcript to file
     std::fs::write(&file_path, transcript_text)?;

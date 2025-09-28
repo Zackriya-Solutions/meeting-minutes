@@ -31,15 +31,21 @@ struct TranscriptionStatus {
 }
 
 #[tauri::command]
-async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    log_info!("Attempting to start recording...");
+async fn start_recording<R: Runtime>(
+    app: AppHandle<R>,
+    mic_device_name: Option<String>,
+    system_device_name: Option<String>,
+    meeting_name: Option<String>
+) -> Result<(), String> {
+    log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
+    log_info!("📋 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}", mic_device_name, system_device_name, meeting_name);
 
     if is_recording() {
         return Err("Recording already in progress".to_string());
     }
 
-    // Call the actual audio recording system
-    match audio::recording_commands::start_recording(app.clone()).await {
+    // Call the actual audio recording system with meeting name
+    match audio::recording_commands::start_recording_with_devices_and_meeting(app.clone(), mic_device_name, system_device_name, meeting_name).await {
         Ok(_) => {
             RECORDING_FLAG.store(true, Ordering::SeqCst);
             tray::update_tray_menu(&app);
@@ -171,7 +177,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("Starting recording with specific devices - Mic: {:?}, System: {:?}, Meeting: {:?}",
+    log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
 
     // Call the recording module functions that support meeting names

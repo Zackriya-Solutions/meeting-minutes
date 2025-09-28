@@ -6,6 +6,7 @@ import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
 import { RecordingControls } from '@/components/RecordingControls';
 import { AISummary } from '@/components/AISummary';
+import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
@@ -68,6 +69,11 @@ export default function Home() {
   const [chunkDropMessage, setChunkDropMessage] = useState('');
   const [isSavingTranscript, setIsSavingTranscript] = useState(false);
   const [isRecordingDisabled, setIsRecordingDisabled] = useState(false);
+  const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
+    micDevice: null,
+    systemDevice: null
+  });
+  const [showDeviceSettings, setShowDeviceSettings] = useState(false);
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording , serverAddress} = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -443,6 +449,13 @@ export default function Home() {
       console.log('Starting recording...');
       const { invoke } = await import('@tauri-apps/api/core');
       
+      // Only check if we're already recording, but don't try to stop it first
+      const isCurrentlyRecording = await invoke('is_recording');
+      if (isCurrentlyRecording) {
+        console.log('Already recording, cannot start a new recording');
+        return; // Just return without starting a new recording
+      }
+
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -452,19 +465,12 @@ export default function Home() {
       const seconds = String(now.getSeconds()).padStart(2, '0');
       const randomTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
       setMeetingTitle(randomTitle);
-      
-      // Only check if we're already recording, but don't try to stop it first
-      const isCurrentlyRecording = await invoke('is_recording');
-      if (isCurrentlyRecording) {
-        console.log('Already recording, cannot start a new recording');
-        return; // Just return without starting a new recording
-      }
 
-      // Start new recording with whisper model
-      await invoke('start_recording', {
-        args: {
-          whisper_model: modelConfig.whisperModel
-        }
+      // Start new recording with selected devices and meeting name
+      await invoke('start_recording_with_devices_and_meeting', {
+        mic_device_name: selectedDevices.micDevice,
+        system_device_name: selectedDevices.systemDevice,
+        meeting_name: randomTitle
       });
       console.log('Recording started successfully');
       setIsRecordingState(true); // This will also update the sidebar via the useEffect
@@ -1127,6 +1133,25 @@ export default function Home() {
     fetchModelConfig();
   }, []);
 
+  // Load device preferences on startup
+  useEffect(() => {
+    const loadDevicePreferences = async () => {
+      try {
+        const prefs = await invoke('get_recording_preferences') as any;
+        if (prefs && (prefs.preferred_mic_device || prefs.preferred_system_device)) {
+          setSelectedDevices({
+            micDevice: prefs.preferred_mic_device,
+            systemDevice: prefs.preferred_system_device
+          });
+          console.log('Loaded device preferences:', prefs);
+        }
+      } catch (error) {
+        console.log('No device preferences found or failed to load:', error);
+      }
+    };
+    loadDevicePreferences();
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {showErrorAlert && (
@@ -1184,6 +1209,19 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 3v3.75a.75.75 0 0 0 .75.75H18" />
                     </svg>
                     <span className="text-sm">Copy Transcript</span>
+                  </button>
+                  <button
+                    onClick={() => setShowDeviceSettings(true)}
+                    className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
+                    title="Audio Device Settings"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                      <line x1="12" y1="19" x2="12" y2="23"/>
+                      <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                    <span className="text-sm">Devices</span>
                   </button>
                   {/* {showSummary && !isRecording && (
                     <>
@@ -1403,7 +1441,7 @@ export default function Home() {
                       )}
                       <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
                         {models.map((model) => (
-                          <div 
+                          <div
                             key={model.id}
                             className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${
                               modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
@@ -1423,6 +1461,40 @@ export default function Home() {
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setShowModelSettings(false)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Device Settings Modal */}
+          {showDeviceSettings && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Audio Device Settings</h3>
+                  <button
+                    onClick={() => setShowDeviceSettings(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <DeviceSelection
+                  selectedDevices={selectedDevices}
+                  onDeviceChange={setSelectedDevices}
+                  disabled={isRecording}
+                />
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setShowDeviceSettings(false)}
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   >
                     Done
