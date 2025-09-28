@@ -1,3 +1,5 @@
+// Commit name to recover the serial whisper engine processing for smaller meetings [Slower processing but dooes not fail] - "before parallel processing implementation"
+
 use std::path::{PathBuf};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
