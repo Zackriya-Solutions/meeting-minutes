@@ -58,6 +58,7 @@ export function ModelSettingsModal({
   const { serverAddress } = useSidebar();
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [openRouterError, setOpenRouterError] = useState<string>('');
+  const [isLoadingOpenRouter, setIsLoadingOpenRouter] = useState<boolean>(false);
 
   const fetchApiKey = async (provider: string) => {
     try {
@@ -140,22 +141,23 @@ export function ModelSettingsModal({
     loadModels();
   }, []);
 
-  useEffect(() => {
-    const loadOpenRouterModels = async () => {
-      try {
-        setOpenRouterError('');
-        const data = (await invoke('get_openrouter_models')) as OpenRouterModel[];
-        setOpenRouterModels(data);
-      } catch (err) {
-        console.error('Error loading OpenRouter models:', err);
-        setOpenRouterError(
-          err instanceof Error ? err.message : 'Failed to load OpenRouter models'
-        );
-      }
-    };
-
-    loadOpenRouterModels();
-  }, []);
+  const loadOpenRouterModels = async () => {
+    if (openRouterModels.length > 0) return; // Already loaded
+    
+    try {
+      setIsLoadingOpenRouter(true);
+      setOpenRouterError('');
+      const data = (await invoke('get_openrouter_models')) as OpenRouterModel[];
+      setOpenRouterModels(data);
+    } catch (err) {
+      console.error('Error loading OpenRouter models:', err);
+      setOpenRouterError(
+        err instanceof Error ? err.message : 'Failed to load OpenRouter models'
+      );
+    } finally {
+      setIsLoadingOpenRouter(false);
+    }
+  };
 
   const handleSave = () => {
     const updatedConfig = {
@@ -194,6 +196,11 @@ export function ModelSettingsModal({
                   model: modelOptions[provider][0],
                 });
                 fetchApiKey(provider);
+                
+                // Load OpenRouter models only when OpenRouter is selected
+                if (provider === 'openrouter') {
+                  loadOpenRouterModels();
+                }
               }}
             >
               <SelectTrigger>
@@ -218,11 +225,17 @@ export function ModelSettingsModal({
                 <SelectValue placeholder="Select model" />
               </SelectTrigger>
               <SelectContent className="max-h-48 overflow-y-auto">
-                {modelOptions[modelConfig.provider].map((model) => (
-                  <SelectItem key={model} value={model}>
-                    {model}
+                {modelConfig.provider === 'openrouter' && isLoadingOpenRouter ? (
+                  <SelectItem value="loading" disabled>
+                    Loading models...
                   </SelectItem>
-                ))}
+                ) : (
+                  modelOptions[modelConfig.provider].map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>
