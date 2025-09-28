@@ -65,6 +65,14 @@ export default function MeetingDetails() {
         const summary = await invoke('api_get_summary', {
           meetingId: currentMeeting.id,
         }) as any;
+        
+        // Check if the summary request failed with 404 or error status
+        if (summary.status === 'error' || summary.error) {
+          console.warn('Meeting summary not found or error occurred:', summary.error);
+          setMeetingSummary(sampleSummary);
+          return;
+        }
+        
         const summaryData = summary.data || {};
         const { MeetingName, _section_order, ...restSummaryData } = summaryData;
         
