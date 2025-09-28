@@ -233,7 +233,7 @@ fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
 
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
-    let mut devices;
+    let mut devices: Vec<AudioDevice> = Vec::new();
 
     // Platform-specific device enumeration
     #[cfg(target_os = "windows")]

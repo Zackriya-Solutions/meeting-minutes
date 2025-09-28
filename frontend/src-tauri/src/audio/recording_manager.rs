@@ -214,6 +214,16 @@ impl RecordingManager {
         self.state.has_fatal_error()
     }
 
+    /// Set the meeting name for this recording session
+    pub fn set_meeting_name(&mut self, name: Option<String>) {
+        self.recording_saver.set_meeting_name(name);
+    }
+
+    /// Add a transcript chunk to be saved later
+    pub fn add_transcript_chunk(&self, text: String) {
+        self.recording_saver.add_transcript_chunk(text);
+    }
+
     /// Cleanup all resources without saving
     pub async fn cleanup_without_save(&mut self) {
         if self.is_recording() {

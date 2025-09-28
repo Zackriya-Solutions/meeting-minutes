@@ -156,14 +156,49 @@ async fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
 }
 
 #[tauri::command]
-async fn start_recording_with_devices(
+async fn start_recording_with_devices<R: Runtime>(
+    app: AppHandle<R>,
     mic_device_name: Option<String>,
     system_device_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("Starting recording with specific devices - Mic: {:?}, System: {:?}",
-             mic_device_name, system_device_name);
-    // This is a placeholder - in a real implementation you'd use the specified devices
-    Ok(())
+    start_recording_with_devices_and_meeting(app, mic_device_name, system_device_name, None).await
+}
+
+#[tauri::command]
+async fn start_recording_with_devices_and_meeting<R: Runtime>(
+    app: AppHandle<R>,
+    mic_device_name: Option<String>,
+    system_device_name: Option<String>,
+    meeting_name: Option<String>,
+) -> Result<(), String> {
+    log_info!("Starting recording with specific devices - Mic: {:?}, System: {:?}, Meeting: {:?}",
+             mic_device_name, system_device_name, meeting_name);
+
+    // Call the recording module functions that support meeting names
+    let recording_result = match (mic_device_name.clone(), system_device_name.clone()) {
+        (None, None) => {
+            log_info!("No devices specified, starting with defaults and meeting: {:?}", meeting_name);
+            audio::recording_commands::start_recording_with_meeting_name(app.clone(), meeting_name).await
+        }
+        _ => {
+            log_info!("Starting with specified devices: mic={:?}, system={:?}, meeting={:?}",
+                     mic_device_name, system_device_name, meeting_name);
+            audio::recording_commands::start_recording_with_devices_and_meeting(
+                app.clone(), mic_device_name, system_device_name, meeting_name
+            ).await
+        }
+    };
+
+    match recording_result {
+        Ok(_) => {
+            log_info!("Recording started successfully via tauri command");
+            Ok(())
+        }
+        Err(e) => {
+            log_error!("Failed to start recording via tauri command: {}", e);
+            Err(e)
+        }
+    }
 }
 
 pub fn run() {
@@ -230,6 +265,7 @@ pub fn run() {
 
             get_audio_devices,
             start_recording_with_devices,
+            start_recording_with_devices_and_meeting,
 
             console_utils::show_console,
             console_utils::hide_console,

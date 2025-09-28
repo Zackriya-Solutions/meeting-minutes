@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Utc;
-use log::debug;
+use log::{debug, warn};
 use realfft::num_complex::{Complex32, ComplexFloat};
 use realfft::RealFftPlanner;
 use rubato::{
@@ -9,6 +9,19 @@ use rubato::{
 use std::path::PathBuf;
 
 use super::encode::encode_single_audio; // Correct path to encode module
+
+/// Sanitize a filename to be safe for filesystem use
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
 
 pub fn normalize_v2(audio: &[f32]) -> Vec<f32> {
     let rms = (audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
@@ -52,13 +65,29 @@ pub fn normalize_v2(audio: &[f32]) -> Vec<f32> {
 pub fn spectral_subtraction(audio: &[f32], d: f32) -> Result<Vec<f32>> {
     let mut real_planner = RealFftPlanner::<f32>::new();
     let window_size = 1600; // 16k sample rate - 100ms
-    let r2c = real_planner.plan_fft_forward(window_size);
 
+    // CRITICAL FIX: Handle cases where audio is longer than window size
+    if audio.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // If audio is longer than window size, truncate to prevent overflow
+    let processed_audio = if audio.len() > window_size {
+        warn!("Audio length {} exceeds window size {}, truncating", audio.len(), window_size);
+        &audio[..window_size]
+    } else {
+        audio
+    };
+
+    let r2c = real_planner.plan_fft_forward(window_size);
     let mut y = r2c.make_output_vec();
 
-    let mut padded_audio = audio.to_vec();
-
-    padded_audio.append(&mut vec![0.0f32; window_size - audio.len()]);
+    // Safe padding: only pad if audio is shorter than window size
+    let mut padded_audio = processed_audio.to_vec();
+    if processed_audio.len() < window_size {
+        let padding_needed = window_size - processed_audio.len();
+        padded_audio.extend(vec![0.0f32; padding_needed]);
+    }
 
     let mut indata = padded_audio;
     r2c.process(&mut indata, &mut y)?;
@@ -167,10 +196,37 @@ pub fn write_audio_to_file(
     device: &str,
     skip_encoding: bool,
 ) -> Result<String> {
-    let new_file_name = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    write_audio_to_file_with_meeting_name(audio, sample_rate, output_path, device, skip_encoding, None)
+}
+
+pub fn write_audio_to_file_with_meeting_name(
+    audio: &[f32],
+    sample_rate: u32,
+    output_path: &PathBuf,
+    device: &str,
+    skip_encoding: bool,
+    meeting_name: Option<&str>,
+) -> Result<String> {
+    let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let sanitized_device_name = device.replace(['/', '\\'], "_");
-    let file_path = PathBuf::from(output_path)
-        .join(format!("{}_{}.mp4", sanitized_device_name, new_file_name))
+
+    // Create meeting folder if meeting name is provided
+    let final_output_path = if let Some(name) = meeting_name {
+        let sanitized_meeting_name = sanitize_filename(name);
+        let meeting_folder = output_path.join(&sanitized_meeting_name);
+
+        // Create the meeting folder if it doesn't exist
+        if !meeting_folder.exists() {
+            std::fs::create_dir_all(&meeting_folder)?;
+        }
+
+        meeting_folder
+    } else {
+        output_path.clone()
+    };
+
+    let file_path = final_output_path
+        .join(format!("{}_{}.mp4", sanitized_device_name, timestamp))
         .to_str()
         .expect("Failed to create valid path")
         .to_string();
@@ -185,4 +241,35 @@ pub fn write_audio_to_file(
         )?;
     }
     Ok(file_path_clone)
+}
+
+/// Write transcript text to a file alongside the recording
+pub fn write_transcript_to_file(
+    transcript_text: &str,
+    output_path: &PathBuf,
+    meeting_name: Option<&str>,
+) -> Result<String> {
+    let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+
+    // Create meeting folder if meeting name is provided (same logic as audio)
+    let final_output_path = if let Some(name) = meeting_name {
+        let sanitized_meeting_name = sanitize_filename(name);
+        let meeting_folder = output_path.join(&sanitized_meeting_name);
+
+        // Create the meeting folder if it doesn't exist
+        if !meeting_folder.exists() {
+            std::fs::create_dir_all(&meeting_folder)?;
+        }
+
+        meeting_folder
+    } else {
+        output_path.clone()
+    };
+
+    let file_path = final_output_path.join(format!("transcript_{}.text", timestamp));
+
+    // Write transcript to file
+    std::fs::write(&file_path, transcript_text)?;
+
+    Ok(file_path.to_string_lossy().to_string())
 }

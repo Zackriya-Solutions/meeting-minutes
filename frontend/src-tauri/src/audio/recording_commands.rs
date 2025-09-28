@@ -44,7 +44,15 @@ pub struct TranscriptUpdate {
 
 /// Start recording with default devices
 pub async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    info!("Starting recording with default devices");
+    start_recording_with_meeting_name(app, None).await
+}
+
+/// Start recording with default devices and optional meeting name
+pub async fn start_recording_with_meeting_name<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_name: Option<String>
+) -> Result<(), String> {
+    info!("Starting recording with default devices, meeting: {:?}", meeting_name);
 
     // Check if already recording
     if IS_RECORDING.load(Ordering::SeqCst) {
@@ -53,10 +61,16 @@ pub async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String
 
     // Spawn the recording task in a separate thread to avoid Send issues
     let app_clone = app.clone();
+    let meeting_name_clone = meeting_name.clone();
     tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
             // Create new recording manager
             let mut manager = RecordingManager::new();
+
+            // Set meeting name if provided
+            if let Some(name) = meeting_name_clone {
+                manager.set_meeting_name(Some(name));
+            }
 
             // Set up error callback
             let app_for_error = app_clone.clone();
@@ -104,8 +118,18 @@ pub async fn start_recording_with_devices<R: Runtime>(
     mic_device_name: Option<String>,
     system_device_name: Option<String>
 ) -> Result<(), String> {
-    info!("Starting recording with specific devices: mic={:?}, system={:?}", 
-          mic_device_name, system_device_name);
+    start_recording_with_devices_and_meeting(app, mic_device_name, system_device_name, None).await
+}
+
+/// Start recording with specific devices and optional meeting name
+pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
+    app: AppHandle<R>,
+    mic_device_name: Option<String>,
+    system_device_name: Option<String>,
+    meeting_name: Option<String>
+) -> Result<(), String> {
+    info!("Starting recording with specific devices: mic={:?}, system={:?}, meeting={:?}",
+          mic_device_name, system_device_name, meeting_name);
 
     // Check if already recording
     if IS_RECORDING.load(Ordering::SeqCst) {
@@ -129,10 +153,16 @@ pub async fn start_recording_with_devices<R: Runtime>(
 
     // Spawn the recording task in a separate thread to avoid Send issues
     let app_clone = app.clone();
+    let meeting_name_clone = meeting_name.clone();
     tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
             // Create new recording manager
             let mut manager = RecordingManager::new();
+
+            // Set meeting name if provided
+            if let Some(name) = meeting_name_clone {
+                manager.set_meeting_name(Some(name));
+            }
 
             // Set up error callback
             let app_for_error = app_clone.clone();
@@ -318,6 +348,14 @@ fn start_transcription_task<R: Runtime>(
                 Ok(transcript) => {
                     if !transcript.trim().is_empty() {
                         info!("Transcription result: {}", transcript);
+
+                        // Save transcript chunk to recording manager
+                        {
+                            let global_manager = RECORDING_MANAGER.lock().unwrap();
+                            if let Some(manager) = global_manager.as_ref() {
+                                manager.add_transcript_chunk(transcript.clone());
+                            }
+                        }
 
                         // Emit transcript update
                         let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);

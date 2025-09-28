@@ -21,9 +21,19 @@ pub fn encode_single_audio(
     channels: u16,
     output_path: &PathBuf,
 ) -> anyhow::Result<()> {
-    debug!("Starting FFmpeg process");
+    debug!("Starting FFmpeg process for {} bytes of audio data", data.len());
 
-    let mut command = Command::new(find_ffmpeg_path().unwrap());
+    if data.is_empty() {
+        return Err(anyhow::anyhow!("No audio data provided for encoding"));
+    }
+
+    let ffmpeg_path = find_ffmpeg_path().ok_or_else(|| {
+        anyhow::anyhow!("FFmpeg not found. Please install FFmpeg to save recordings.")
+    })?;
+
+    debug!("Using FFmpeg at: {:?}", ffmpeg_path);
+
+    let mut command = Command::new(ffmpeg_path);
     command
         .args([
             "-f",
