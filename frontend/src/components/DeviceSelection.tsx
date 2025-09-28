@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw, Mic, Speakers } from 'lucide-react';
+import { RefreshCw, Mic, Speaker } from 'lucide-react';
 
 export interface AudioDevice {
   name: string;
@@ -134,7 +134,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
         {/* System Audio Selection */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Speakers className="h-4 w-4 text-gray-600" />
+            <Speaker className="h-4 w-4 text-gray-600" />
             <label className="text-sm font-medium text-gray-700">
               System Audio
             </label>

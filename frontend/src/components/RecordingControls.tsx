@@ -18,6 +18,11 @@ interface RecordingControlsProps {
   onTranscriptionError?: (message: string) => void;
   isRecordingDisabled: boolean;
   isParentProcessing: boolean;
+  selectedDevices?: {
+    micDevice: string | null;
+    systemDevice: string | null;
+  };
+  meetingName?: string;
 }
 
 export const RecordingControls: React.FC<RecordingControlsProps> = ({
@@ -29,6 +34,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   onTranscriptionError,
   isRecordingDisabled,
   isParentProcessing,
+  selectedDevices,
+  meetingName,
 }) => {
   const [showPlayback, setShowPlayback] = useState(false);
   const [recordingPath, setRecordingPath] = useState<string | null>(null);
@@ -67,14 +74,43 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const handleStartRecording = useCallback(async () => {
     if (isStarting) return;
     console.log('Starting recording...');
+    console.log('Selected devices:', selectedDevices);
+    console.log('Meeting name:', meetingName);
     setIsStarting(true);
     setShowPlayback(false);
     setTranscript(''); // Clear any previous transcript
     
     try {
-      await invoke('start_recording');
+      // Generate meeting title here to ensure it's available for the backend call
+      const now = new Date();
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = String(now.getFullYear()).slice(-2);
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+      
+      // Use the correct command with device parameters
+      if (selectedDevices || meetingName || generatedMeetingTitle) {
+        console.log('Using start_recording_with_devices_and_meeting with:', {
+          mic_device_name: selectedDevices?.micDevice || null,
+          system_device_name: selectedDevices?.systemDevice || null,
+          meeting_name: meetingName || generatedMeetingTitle
+        });
+        await invoke('start_recording_with_devices_and_meeting', {
+          mic_device_name: selectedDevices?.micDevice || null,
+          system_device_name: selectedDevices?.systemDevice || null,
+          meeting_name: meetingName || generatedMeetingTitle
+        });
+      } else {
+        console.log('Using start_recording (no devices/meeting specified)');
+        await invoke('start_recording');
+      }
       console.log('Recording started successfully');
       setIsProcessing(false);
+      
+      // Call onRecordingStart after successful recording start
       onRecordingStart();
     } catch (error) {
       console.error('Failed to start recording:', error);
@@ -82,7 +118,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     } finally {
       setIsStarting(false);
     }
-  }, [onRecordingStart, isStarting]);
+  }, [onRecordingStart, isStarting, selectedDevices, meetingName]);
 
   const stopRecordingAction = useCallback(async () => {
     console.log('Executing stop recording...');

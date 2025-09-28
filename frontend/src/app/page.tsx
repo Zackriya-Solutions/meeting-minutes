@@ -150,10 +150,15 @@ export default function Home() {
   }, [meetingTitle, setCurrentMeeting]);
 
   useEffect(() => {
+    console.log('Setting up recording state check effect, current isRecording:', isRecording);
+    
     const checkRecordingState = async () => {
       try {
+        console.log('checkRecordingState called');
         const { invoke } = await import('@tauri-apps/api/core');
+        console.log('About to call is_recording command');
         const isCurrentlyRecording = await invoke('is_recording');
+        console.log('checkRecordingState: backend recording =', isCurrentlyRecording, 'UI recording =', isRecording);
         
         if (isCurrentlyRecording && !isRecording) {
           console.log('Recording is active in backend but not in UI, synchronizing state...');
@@ -168,12 +173,22 @@ export default function Home() {
       }
     };
 
-    checkRecordingState();
-    
-    // Set up a polling interval to periodically check recording state
-    const interval = setInterval(checkRecordingState, 1000); // Check every 1 second
-    
-    return () => clearInterval(interval);
+    // Test if Tauri is available
+    console.log('Testing Tauri availability...');
+    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+      console.log('Tauri is available, starting state check');
+      checkRecordingState();
+      
+      // Set up a polling interval to periodically check recording state
+      const interval = setInterval(checkRecordingState, 1000); // Check every 1 second
+      
+      return () => {
+        console.log('Cleaning up recording state check interval');
+        clearInterval(interval);
+      };
+    } else {
+      console.log('Tauri is not available, skipping state check');
+    }
   }, [isRecording, setIsMeetingActive]);
   
 
@@ -446,16 +461,8 @@ export default function Home() {
 
   const handleRecordingStart = async () => {
     try {
-      console.log('Starting recording...');
-      const { invoke } = await import('@tauri-apps/api/core');
+      console.log('handleRecordingStart called - setting up meeting title and state');
       
-      // Only check if we're already recording, but don't try to stop it first
-      const isCurrentlyRecording = await invoke('is_recording');
-      if (isCurrentlyRecording) {
-        console.log('Already recording, cannot start a new recording');
-        return; // Just return without starting a new recording
-      }
-
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -466,13 +473,7 @@ export default function Home() {
       const randomTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
       setMeetingTitle(randomTitle);
 
-      // Start new recording with selected devices and meeting name
-      await invoke('start_recording_with_devices_and_meeting', {
-        mic_device_name: selectedDevices.micDevice,
-        system_device_name: selectedDevices.systemDevice,
-        meeting_name: randomTitle
-      });
-      console.log('Recording started successfully');
+      // Update state - the actual recording is already started by RecordingControls
       setIsRecordingState(true); // This will also update the sidebar via the useEffect
       setTranscripts([]); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
@@ -1360,6 +1361,8 @@ export default function Home() {
                 }}
                 isRecordingDisabled={isRecordingDisabled}
                 isParentProcessing={isProcessingStop}
+                selectedDevices={selectedDevices}
+                meetingName={meetingTitle}
               />
             </div>
           </div>
