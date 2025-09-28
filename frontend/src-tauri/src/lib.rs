@@ -40,7 +40,7 @@ async fn start_recording<R: Runtime>(
     log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
     log_info!("📋 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}", mic_device_name, system_device_name, meeting_name);
 
-    if is_recording() {
+    if is_recording().await {
         return Err("Recording already in progress".to_string());
     }
 
@@ -70,7 +70,8 @@ async fn start_recording<R: Runtime>(
 async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> Result<(), String> {
     log_info!("Attempting to stop recording...");
 
-    if !RECORDING_FLAG.load(Ordering::SeqCst) {
+    // Check the actual audio recording system state instead of the flag
+    if !audio::recording_commands::is_recording().await {
         log_info!("Recording is already stopped");
         return Ok(());
     }
@@ -111,8 +112,8 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
 }
 
 #[tauri::command]
-fn is_recording() -> bool {
-    RECORDING_FLAG.load(Ordering::SeqCst)
+async fn is_recording() -> bool {
+    audio::recording_commands::is_recording().await
 }
 
 #[tauri::command]

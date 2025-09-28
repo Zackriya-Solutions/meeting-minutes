@@ -55,7 +55,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     info!("Starting recording with default devices, meeting: {:?}", meeting_name);
 
     // Check if already recording
-    if IS_RECORDING.load(Ordering::SeqCst) {
+    let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
+    info!("🔍 IS_RECORDING state check: {}", current_recording_state);
+    if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
 
@@ -89,6 +91,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
             }
 
             // Set recording flag
+            info!("🔍 Setting IS_RECORDING to true");
             IS_RECORDING.store(true, Ordering::SeqCst);
 
             // Start transcription task and store handle
@@ -132,7 +135,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
           mic_device_name, system_device_name, meeting_name);
 
     // Check if already recording
-    if IS_RECORDING.load(Ordering::SeqCst) {
+    let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
+    info!("🔍 IS_RECORDING state check: {}", current_recording_state);
+    if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
 
@@ -181,6 +186,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             }
 
             // Set recording flag
+            info!("🔍 Setting IS_RECORDING to true");
             IS_RECORDING.store(true, Ordering::SeqCst);
 
             // Start transcription task and store handle
@@ -287,6 +293,7 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
     }
 
     // Set recording flag to false
+    info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
 
     // Emit stop event

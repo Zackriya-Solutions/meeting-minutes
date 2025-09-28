@@ -189,7 +189,7 @@ export default function Home() {
     } else {
       console.log('Tauri is not available, skipping state check');
     }
-  }, [isRecording, setIsMeetingActive]);
+  }, [setIsMeetingActive]);
   
 
 
@@ -474,6 +474,7 @@ export default function Home() {
       setMeetingTitle(randomTitle);
 
       // Update state - the actual recording is already started by RecordingControls
+      console.log('Setting isRecordingState to true');
       setIsRecordingState(true); // This will also update the sidebar via the useEffect
       setTranscripts([]); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
@@ -494,13 +495,46 @@ export default function Home() {
         if (shouldAutoStart === 'true' && !isRecording && !isMeetingActive) {
           console.log('Auto-starting recording from navigation...');
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
-          await handleRecordingStart();
+          
+          // Start the actual backend recording
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            
+            // Generate meeting title
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = String(now.getFullYear()).slice(-2);
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+            
+            console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
+            const result = await invoke('start_recording_with_devices_and_meeting', {
+              mic_device_name: selectedDevices?.micDevice || null,
+              system_device_name: selectedDevices?.systemDevice || null,
+              meeting_name: generatedMeetingTitle
+            });
+            console.log('Auto-start backend recording result:', result);
+            
+            // Update UI state after successful backend start
+            setMeetingTitle(generatedMeetingTitle);
+            setIsRecordingState(true);
+            setTranscripts([]);
+            setIsMeetingActive(true);
+            Analytics.trackButtonClick('start_recording', 'sidebar_auto');
+          } catch (error) {
+            console.error('Failed to auto-start recording:', error);
+            alert('Failed to start recording. Check console for details.');
+            Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
+          }
         }
       }
     };
     
     checkAutoStartRecording();
-  }, [isRecording, isMeetingActive]);
+  }, [isRecording, isMeetingActive, selectedDevices]);
 
   const handleRecordingStop = async () => {
     try {

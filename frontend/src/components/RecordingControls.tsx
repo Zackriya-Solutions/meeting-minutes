@@ -76,6 +76,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     console.log('Starting recording...');
     console.log('Selected devices:', selectedDevices);
     console.log('Meeting name:', meetingName);
+    console.log('Current isRecording state:', isRecording);
     setIsStarting(true);
     setShowPlayback(false);
     setTranscript(''); // Clear any previous transcript
@@ -98,14 +99,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           system_device_name: selectedDevices?.systemDevice || null,
           meeting_name: meetingName || generatedMeetingTitle
         });
-        await invoke('start_recording_with_devices_and_meeting', {
+        const result = await invoke('start_recording_with_devices_and_meeting', {
           mic_device_name: selectedDevices?.micDevice || null,
           system_device_name: selectedDevices?.systemDevice || null,
           meeting_name: meetingName || generatedMeetingTitle
         });
+        console.log('Backend recording start result:', result);
       } else {
         console.log('Using start_recording (no devices/meeting specified)');
-        await invoke('start_recording');
+        const result = await invoke('start_recording');
+        console.log('Backend recording start result:', result);
       }
       console.log('Recording started successfully');
       setIsProcessing(false);
@@ -114,6 +117,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       onRecordingStart();
     } catch (error) {
       console.error('Failed to start recording:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : 'Unknown',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       alert('Failed to start recording. Please check the console for details.');
     } finally {
       setIsStarting(false);
@@ -129,11 +137,13 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       const savePath = `${dataDir}/recording-${timestamp}.wav`;
       
       console.log('Saving recording to:', savePath);
+      console.log('About to call stop_recording command');
       const result = await invoke('stop_recording', { 
         args: {
           save_path: savePath
         }
       });
+      console.log('stop_recording command completed successfully:', result);
       
       setRecordingPath(savePath);
       // setShowPlayback(true);
@@ -169,7 +179,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [onRecordingStop]);
 
   const handleStopRecording = useCallback(async () => {
-    if (!isRecording || isStarting || isStopping) return;
+    console.log('handleStopRecording called - isRecording:', isRecording, 'isStarting:', isStarting, 'isStopping:', isStopping);
+    if (!isRecording || isStarting || isStopping) {
+      console.log('Early return from handleStopRecording due to state check');
+      return;
+    }
     
     console.log('Stopping recording...');
     setIsStopping(true);

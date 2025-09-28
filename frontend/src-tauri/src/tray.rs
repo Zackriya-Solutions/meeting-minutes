@@ -34,7 +34,7 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
     focus_main_window(app);
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        if crate::is_recording() {
+        if crate::is_recording().await {
             log::info!("Emitting stop recording event from tray");
 
             let _ = app_clone
