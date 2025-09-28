@@ -217,6 +217,9 @@ impl AudioPipeline {
                     // Timeout - check for forced transcription due to time limit
                     if self.should_force_transcription() {
                         self.send_accumulated_speech(self.sample_rate)?;
+                    } else if self.state.is_paused() && !self.accumulated_speech.is_empty() {
+                        debug!("Audio pipeline: paused with {} accumulated samples - waiting",
+                               self.accumulated_speech.len());
                     }
                     continue;
                 }
@@ -260,6 +263,7 @@ impl AudioPipeline {
 
     fn should_force_transcription(&self) -> bool {
         !self.accumulated_speech.is_empty() &&
+        !self.state.is_paused() && // Don't force transcription when paused
         self.last_transcription_time.elapsed().as_millis() as u32 >= self.max_chunk_duration_ms
     }
 
@@ -268,10 +272,17 @@ impl AudioPipeline {
             return Ok(());
         }
 
+        // Don't process accumulated speech when recording is paused
+        if self.state.is_paused() {
+            info!("Skipping accumulated speech processing while paused ({} samples)",
+                  self.accumulated_speech.len());
+            return Ok(());
+        }
+
         let accumulated_samples = std::mem::take(&mut self.accumulated_speech);
         let duration_ms = (accumulated_samples.len() as f64 / sample_rate as f64) * 1000.0;
-        
-        info!("Processing accumulated speech: {} samples ({:.1}ms)", 
+
+        info!("Processing accumulated speech: {} samples ({:.1}ms)",
               accumulated_samples.len(), duration_ms);
 
         // Use old implementation's VAD approach: apply VAD to the complete chunk

@@ -107,6 +107,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                 "devices": ["Default Microphone", "Default System Audio"]
             })).map_err(|e| e.to_string())?;
 
+            // Update tray menu to reflect recording state
+            crate::tray::update_tray_menu(&app_clone);
+
             info!("Recording started successfully");
             Ok::<(), String>(())
         })
@@ -205,6 +208,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                 ]
             })).map_err(|e| e.to_string())?;
 
+            // Update tray menu to reflect recording state
+            crate::tray::update_tray_menu(&app_clone);
+
             info!("Recording started with custom devices");
             Ok::<(), String>(())
         })
@@ -301,6 +307,9 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
         "message": "Recording stopped"
     })).map_err(|e| e.to_string())?;
 
+    // Update tray menu to reflect stopped state
+    crate::tray::update_tray_menu(&app);
+
     info!("Recording stopped successfully");
     Ok(())
 }
@@ -316,6 +325,106 @@ pub async fn get_transcription_status() -> TranscriptionStatus {
         chunks_in_queue: 0,
         is_processing: IS_RECORDING.load(Ordering::SeqCst),
         last_activity_ms: 0,
+    }
+}
+
+/// Pause the current recording
+#[tauri::command]
+pub async fn pause_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    info!("Pausing recording");
+
+    // Check if currently recording
+    if !IS_RECORDING.load(Ordering::SeqCst) {
+        return Err("No recording is currently active".to_string());
+    }
+
+    // Access the recording manager and pause it
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    if let Some(manager) = manager_guard.as_ref() {
+        manager.pause_recording().map_err(|e| e.to_string())?;
+
+        // Emit pause event to frontend
+        app.emit("recording-paused", serde_json::json!({
+            "message": "Recording paused"
+        })).map_err(|e| e.to_string())?;
+
+        // Update tray menu to reflect paused state
+        crate::tray::update_tray_menu(&app);
+
+        info!("Recording paused successfully");
+        Ok(())
+    } else {
+        Err("No recording manager found".to_string())
+    }
+}
+
+/// Resume the current recording
+#[tauri::command]
+pub async fn resume_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    info!("Resuming recording");
+
+    // Check if currently recording
+    if !IS_RECORDING.load(Ordering::SeqCst) {
+        return Err("No recording is currently active".to_string());
+    }
+
+    // Access the recording manager and resume it
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    if let Some(manager) = manager_guard.as_ref() {
+        manager.resume_recording().map_err(|e| e.to_string())?;
+
+        // Emit resume event to frontend
+        app.emit("recording-resumed", serde_json::json!({
+            "message": "Recording resumed"
+        })).map_err(|e| e.to_string())?;
+
+        // Update tray menu to reflect resumed state
+        crate::tray::update_tray_menu(&app);
+
+        info!("Recording resumed successfully");
+        Ok(())
+    } else {
+        Err("No recording manager found".to_string())
+    }
+}
+
+/// Check if recording is currently paused
+#[tauri::command]
+pub async fn is_recording_paused() -> bool {
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    if let Some(manager) = manager_guard.as_ref() {
+        manager.is_paused()
+    } else {
+        false
+    }
+}
+
+/// Get detailed recording state
+#[tauri::command]
+pub async fn get_recording_state() -> serde_json::Value {
+    let is_recording = IS_RECORDING.load(Ordering::SeqCst);
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+
+    if let Some(manager) = manager_guard.as_ref() {
+        serde_json::json!({
+            "is_recording": is_recording,
+            "is_paused": manager.is_paused(),
+            "is_active": manager.is_active(),
+            "recording_duration": manager.get_recording_duration(),
+            "active_duration": manager.get_active_recording_duration(),
+            "total_pause_duration": manager.get_total_pause_duration(),
+            "current_pause_duration": manager.get_current_pause_duration()
+        })
+    } else {
+        serde_json::json!({
+            "is_recording": is_recording,
+            "is_paused": false,
+            "is_active": false,
+            "recording_duration": null,
+            "active_duration": null,
+            "total_pause_duration": 0.0,
+            "current_pause_duration": null
+        })
     }
 }
 
@@ -570,6 +679,9 @@ pub async fn get_or_init_whisper<R: Runtime>(app: &AppHandle<R>) -> Result<Arc<c
                 }
                 crate::whisper_engine::ModelStatus::Error(ref err) => {
                     return Err(format!("Model '{}' has an error: {}. Please check the model or try downloading it again.", model_to_load, err));
+                }
+                crate::whisper_engine::ModelStatus::Corrupted { .. } => {
+                    return Err(format!("Model '{}' is corrupted. Please delete it and download again from the settings.", model_to_load));
                 }
             }
         }

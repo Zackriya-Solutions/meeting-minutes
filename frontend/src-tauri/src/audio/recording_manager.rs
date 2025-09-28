@@ -224,6 +224,28 @@ impl RecordingManager {
         self.state.is_recording()
     }
 
+    /// Pause the current recording session
+    pub fn pause_recording(&self) -> Result<()> {
+        info!("Pausing recording");
+        self.state.pause_recording()
+    }
+
+    /// Resume the current recording session
+    pub fn resume_recording(&self) -> Result<()> {
+        info!("Resuming recording");
+        self.state.resume_recording()
+    }
+
+    /// Check if recording is currently paused
+    pub fn is_paused(&self) -> bool {
+        self.state.is_paused()
+    }
+
+    /// Check if recording is active (recording and not paused)
+    pub fn is_active(&self) -> bool {
+        self.state.is_active()
+    }
+
     /// Get recording statistics
     pub fn get_stats(&self) -> super::recording_state::RecordingStats {
         self.state.get_stats()
@@ -232,6 +254,21 @@ impl RecordingManager {
     /// Get recording duration
     pub fn get_recording_duration(&self) -> Option<f64> {
         self.state.get_recording_duration()
+    }
+
+    /// Get active recording duration (excluding pauses)
+    pub fn get_active_recording_duration(&self) -> Option<f64> {
+        self.state.get_active_recording_duration()
+    }
+
+    /// Get total pause duration
+    pub fn get_total_pause_duration(&self) -> f64 {
+        self.state.get_total_pause_duration()
+    }
+
+    /// Get current pause duration if paused
+    pub fn get_current_pause_duration(&self) -> Option<f64> {
+        self.state.get_current_pause_duration()
     }
 
     /// Get error information

@@ -29,7 +29,7 @@ openmp = ["whisper-rs/openmp"]     # OpenMP parallel processing
 
 [build-dependencies]
 tauri-build = { version = "2.3.0", features = [] }
-reqwest = { version = "0.11", features = ["blocking", "multipart", "json"] }
+reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 which = "6.0.1"
 
 [dependencies]
@@ -70,7 +70,7 @@ silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", 
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
 
-reqwest = { version = "0.11", features = ["blocking", "multipart", "json"] }
+reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
 # crossbeam
 crossbeam = "0.8.4"
@@ -78,6 +78,9 @@ dashmap = "6.1.0"
 
 # Directories
 dirs = "5.0.1"
+
+# System monitoring for resource management
+sysinfo = "0.32"
 
 lazy_static = { version = "1.4.0" }
 realfft = "3.4.0"

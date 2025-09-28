@@ -165,10 +165,25 @@ pub async fn whisper_cancel_download(model_name: String) -> Result<(), String> {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
         engine.cancel_download(&model_name).await
             .map_err(|e| format!("Failed to cancel download: {}", e))
+    } else {
+        Err("Whisper engine not initialized".to_string())
+    }
+}
+
+#[command]
+pub async fn whisper_delete_corrupted_model(model_name: String) -> Result<String, String> {
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        engine.delete_model(&model_name).await
+            .map_err(|e| format!("Failed to delete model: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())
     }

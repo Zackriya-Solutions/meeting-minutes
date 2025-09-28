@@ -84,6 +84,7 @@ pub struct RecordingStats {
 pub struct RecordingState {
     // Core recording state
     is_recording: AtomicBool,
+    is_paused: AtomicBool,
 
     // Audio devices
     microphone_device: Mutex<Option<Arc<AudioDevice>>>,
@@ -103,12 +104,16 @@ pub struct RecordingState {
 
     // Recording start time for accurate timestamps
     recording_start: Mutex<Option<Instant>>,
+    // Pause time tracking
+    pause_start: Mutex<Option<Instant>>,
+    total_pause_duration: Mutex<std::time::Duration>,
 }
 
 impl RecordingState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             is_recording: AtomicBool::new(false),
+            is_paused: AtomicBool::new(false),
             microphone_device: Mutex::new(None),
             system_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
@@ -118,6 +123,8 @@ impl RecordingState {
             error_callback: Mutex::new(None),
             stats: Mutex::new(RecordingStats::default()),
             recording_start: Mutex::new(None),
+            pause_start: Mutex::new(None),
+            total_pause_duration: Mutex::new(std::time::Duration::ZERO),
         })
     }
 
@@ -133,10 +140,54 @@ impl RecordingState {
 
     pub fn stop_recording(&self) {
         self.is_recording.store(false, Ordering::SeqCst);
+        self.is_paused.store(false, Ordering::SeqCst);
+        // Clear pause tracking when stopping
+        *self.pause_start.lock().unwrap() = None;
+    }
+
+    pub fn pause_recording(&self) -> Result<()> {
+        if !self.is_recording() {
+            return Err(anyhow::anyhow!("Cannot pause when not recording"));
+        }
+        if self.is_paused() {
+            return Err(anyhow::anyhow!("Recording is already paused"));
+        }
+
+        self.is_paused.store(true, Ordering::SeqCst);
+        *self.pause_start.lock().unwrap() = Some(Instant::now());
+        log::info!("Recording paused");
+        Ok(())
+    }
+
+    pub fn resume_recording(&self) -> Result<()> {
+        if !self.is_recording() {
+            return Err(anyhow::anyhow!("Cannot resume when not recording"));
+        }
+        if !self.is_paused() {
+            return Err(anyhow::anyhow!("Recording is not paused"));
+        }
+
+        // Calculate pause duration and add to total
+        if let Some(pause_start) = self.pause_start.lock().unwrap().take() {
+            let pause_duration = pause_start.elapsed();
+            *self.total_pause_duration.lock().unwrap() += pause_duration;
+            log::info!("Recording resumed after pause of {:.2}s", pause_duration.as_secs_f64());
+        }
+
+        self.is_paused.store(false, Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn is_recording(&self) -> bool {
         self.is_recording.load(Ordering::SeqCst)
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.is_paused.load(Ordering::SeqCst)
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_recording() && !self.is_paused()
     }
 
     // Device management
@@ -162,6 +213,11 @@ impl RecordingState {
     }
 
     pub fn send_audio_chunk(&self, chunk: AudioChunk) -> Result<()> {
+        // Don't send audio chunks when paused
+        if self.is_paused() {
+            return Ok(()); // Silently discard chunks while paused
+        }
+
         if let Some(sender) = self.audio_sender.lock().unwrap().as_ref() {
             sender.send(chunk).map_err(|_| anyhow::anyhow!("Failed to send audio chunk"))?;
 
@@ -249,6 +305,38 @@ impl RecordingState {
             .map(|start| start.elapsed().as_secs_f64())
     }
 
+    pub fn get_active_recording_duration(&self) -> Option<f64> {
+        self.recording_start.lock().unwrap().map(|start| {
+            let total_duration = start.elapsed().as_secs_f64();
+            let pause_duration = self.get_total_pause_duration();
+            let current_pause = if self.is_paused() {
+                self.pause_start
+                    .lock()
+                    .unwrap()
+                    .map(|p| p.elapsed().as_secs_f64())
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            total_duration - pause_duration - current_pause
+        })
+    }
+
+    pub fn get_total_pause_duration(&self) -> f64 {
+        self.total_pause_duration.lock().unwrap().as_secs_f64()
+    }
+
+    pub fn get_current_pause_duration(&self) -> Option<f64> {
+        if self.is_paused() {
+            self.pause_start
+                .lock()
+                .unwrap()
+                .map(|start| start.elapsed().as_secs_f64())
+        } else {
+            None
+        }
+    }
+
     // Cleanup
     pub fn cleanup(&self) {
         self.stop_recording();
@@ -259,6 +347,8 @@ impl RecordingState {
         *self.error_callback.lock().unwrap() = None;
         *self.stats.lock().unwrap() = RecordingStats::default();
         *self.recording_start.lock().unwrap() = None;
+        *self.pause_start.lock().unwrap() = None;
+        *self.total_pause_duration.lock().unwrap() = std::time::Duration::ZERO;
         self.error_count.store(0, Ordering::SeqCst);
         self.recoverable_error_count.store(0, Ordering::SeqCst);
     }
@@ -268,6 +358,7 @@ impl Default for RecordingState {
     fn default() -> Self {
         Self {
             is_recording: AtomicBool::new(false),
+            is_paused: AtomicBool::new(false),
             microphone_device: Mutex::new(None),
             system_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
@@ -277,6 +368,8 @@ impl Default for RecordingState {
             error_callback: Mutex::new(None),
             stats: Mutex::new(RecordingStats::default()),
             recording_start: Mutex::new(None),
+            pause_start: Mutex::new(None),
+            total_pause_duration: Mutex::new(std::time::Duration::ZERO),
         }
     }
 }

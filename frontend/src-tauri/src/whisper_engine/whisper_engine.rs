@@ -17,6 +17,7 @@ pub enum ModelStatus {
     Missing,
     Downloading { progress: u8 },
     Error(String),
+    Corrupted { file_size: u64, expected_min_size: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,18 +93,74 @@ impl WhisperEngine {
         let mut models = Vec::new();
                 // Using standard ggerganov/whisper.cpp GGML models
         let model_configs = [
+            // Standard f16 models (full precision)
             ("tiny", "ggml-tiny.bin", 39, "Decent", "Very Fast", "Fastest processing, good for real-time use"),
-            ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance of speed and accuracy"), 
+            ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance of speed and accuracy"),
             ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy, moderate speed"),
             ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy for professional use"),
             ("large-v3", "ggml-large-v3.bin", 2870, "High", "Slow", "Best accuracy, latest large model"),
             ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with improved speed"),
+
+            // Q5_0 quantized models (balanced speed/accuracy)
+            ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny model, ~50% faster processing"),
+            ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base model, good speed/accuracy balance"),
+            ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small model, faster than f16 version"),
+            ("medium-q5_0", "ggml-medium-q5_0.bin", 852, "High", "Medium", "Quantized medium model, professional quality"),
+            ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1723, "High", "Medium", "Quantized large model, best balance"),
+
+            // Q4_0 quantized models (maximum speed)
+            ("tiny-q4_0", "ggml-tiny-q4_0.bin", 21, "Decent", "Very Fast", "Fastest tiny model, some accuracy loss"),
+            ("base-q4_0", "ggml-base-q4_0.bin", 71, "Good", "Very Fast", "Fastest base model, good for quick transcription"),
+            ("small-q4_0", "ggml-small-q4_0.bin", 233, "Good", "Very Fast", "Fastest small model, rapid processing"),
+            ("medium-q4_0", "ggml-medium-q4_0.bin", 710, "High", "Fast", "Fast medium model, good quality"),
         ];
         
         for (name, filename, size_mb, accuracy, speed, description) in model_configs {
             let model_path = models_dir.join(filename);
             let status = if model_path.exists() {
-                ModelStatus::Available
+                // Check if file size is reasonable (at least 1MB for a valid model)
+                match std::fs::metadata(&model_path) {
+                    Ok(metadata) => {
+                        let file_size_bytes = metadata.len();
+                        let file_size_mb = file_size_bytes / (1024 * 1024);
+                        let expected_min_size_mb = size_mb / 2; // Allow 50% of expected size as minimum
+
+                        if file_size_mb >= expected_min_size_mb && file_size_mb > 1 {
+                            ModelStatus::Available
+                        } else if file_size_mb > 0 {
+                            // File exists but is smaller than expected
+                            // Check if this model is currently being downloaded
+                            let models_guard = self.available_models.read().await;
+                            if let Some(existing_model) = models_guard.get(name) {
+                                match &existing_model.status {
+                                    ModelStatus::Downloading { progress } => {
+                                        log::debug!("Model {} appears to be downloading ({} MB so far, {}% complete)",
+                                                  filename, file_size_mb, progress);
+                                        ModelStatus::Downloading { progress: *progress }
+                                    }
+                                    _ => {
+                                        log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
+                                                 filename, file_size_mb, size_mb);
+                                        ModelStatus::Corrupted {
+                                            file_size: file_size_bytes,
+                                            expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                        }
+                                    }
+                                }
+                            } else {
+                                log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
+                                         filename, file_size_mb, size_mb);
+                                ModelStatus::Corrupted {
+                                    file_size: file_size_bytes,
+                                    expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                }
+                            }
+                        } else {
+                            ModelStatus::Missing
+                        }
+                    }
+                    Err(_) => ModelStatus::Missing
+                }
             } else {
                 ModelStatus::Missing
             };
@@ -111,7 +168,7 @@ impl WhisperEngine {
             let model_info = ModelInfo {
                 name: name.to_string(),
                 path: model_path,
-                size_mb,
+                size_mb: size_mb as u32,
                 accuracy: accuracy.to_string(),
                 speed: speed.to_string(),
                 status,
@@ -167,6 +224,9 @@ impl WhisperEngine {
             },
             ModelStatus::Error(ref err) => {
                 Err(anyhow!("Model {} has error: {}", model_name, err))
+            },
+            ModelStatus::Corrupted { .. } => {
+                Err(anyhow!("Model {} is corrupted and cannot be loaded", model_name))
             }
         }
     }
@@ -475,23 +535,81 @@ impl WhisperEngine {
     pub async fn get_models_directory(&self) -> PathBuf {
         self.models_dir.clone()
     }
+
+    pub async fn delete_model(&self, model_name: &str) -> Result<String> {
+        log::info!("Attempting to delete model: {}", model_name);
+
+        // Get model info to find the file path
+        let model_info = {
+            let models = self.available_models.read().await;
+            models.get(model_name).cloned()
+        };
+
+        let model_info = model_info.ok_or_else(|| anyhow!("Model '{}' not found", model_name))?;
+
+        // Check if model is corrupted before allowing deletion
+        match &model_info.status {
+            ModelStatus::Corrupted { file_size, expected_min_size } => {
+                log::info!("Deleting corrupted model '{}' (file size: {} bytes, expected min: {} bytes)",
+                          model_name, file_size, expected_min_size);
+
+                // Delete the file
+                if model_info.path.exists() {
+                    fs::remove_file(&model_info.path).await
+                        .map_err(|e| anyhow!("Failed to delete file '{}': {}", model_info.path.display(), e))?;
+                    log::info!("Successfully deleted corrupted file: {}", model_info.path.display());
+                } else {
+                    log::warn!("File '{}' does not exist, nothing to delete", model_info.path.display());
+                }
+
+                // Update model status to Missing
+                {
+                    let mut models = self.available_models.write().await;
+                    if let Some(model) = models.get_mut(model_name) {
+                        model.status = ModelStatus::Missing;
+                    }
+                }
+
+                Ok(format!("Successfully deleted corrupted model '{}'", model_name))
+            }
+            _ => {
+                Err(anyhow!("Can only delete corrupted models. Model '{}' has status: {:?}", model_name, model_info.status))
+            }
+        }
+    }
     
     pub async fn download_model(&self, model_name: &str, progress_callback: Option<Box<dyn Fn(u8) + Send>>) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
         
         // Official ggerganov/whisper.cpp model URLs from Hugging Face
         let model_url = match model_name {
+            // Standard f16 models
             "tiny" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
             "base" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
             "small" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
             "medium" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
             "large-v3" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
             "large-v3-turbo" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+
+            // Q5_0 quantized models
+            "tiny-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_0.bin",
+            "base-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_0.bin",
+            "small-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_0.bin",
+            "medium-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
+            "large-v3-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
+
+            // Q4_0 quantized models
+            "tiny-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q4_0.bin",
+            "base-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q4_0.bin",
+            "small-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q4_0.bin",
+            "medium-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q4_0.bin",
+
             _ => return Err(anyhow!("Unsupported model: {}", model_name))
         };
         
         log::info!("Model URL for {}: {}", model_name, model_url);
         
+        // Generate correct filename - all models follow ggml-{model_name}.bin pattern
         let filename = format!("ggml-{}.bin", model_name);
         let file_path = self.models_dir.join(&filename);
         
@@ -535,63 +653,64 @@ impl WhisperEngine {
         
         log::info!("File created successfully at: {}", file_path.display());
         
-        // Use bytes().await with timeout for better progress reporting
-        log::info!("Starting to read response body (this may take a while for large models)...");
+        // Stream download with real progress reporting
+        log::info!("Starting streaming download...");
         log::info!("Expected size: {:.1} MB", total_size as f64 / (1024.0 * 1024.0));
-        
-        let bytes = tokio::time::timeout(
-            std::time::Duration::from_secs(300), // 5 minute timeout
-            response.bytes()
-        ).await
-        .map_err(|_| {
-            log::error!("Download timed out after 5 minutes!");
-            anyhow!("Download timed out after 5 minutes")
-        })?
-        .map_err(|e| {
-            log::error!("Failed to download bytes: {}", e);
-            anyhow!("Failed to download bytes: {}", e)
-        })?;
-        
-        let total_len = bytes.len();
-        log::info!("Downloaded {} bytes into memory, writing to file with progress...", total_len);
-        
-        // Write with progress reporting
-        let chunk_size = 1024 * 1024; // 1MB chunks
-        let mut written = 0;
-        
-        for chunk_start in (0..total_len).step_by(chunk_size) {
-            let chunk_end = (chunk_start + chunk_size).min(total_len);
-            let chunk = &bytes[chunk_start..chunk_end];
-            
-            file.write_all(chunk).await
-                .map_err(|e| anyhow!("Failed to write chunk to file: {}", e))?;
-            
-            written += chunk.len();
-            
-            // Calculate progress
-            let progress = ((written as f64 / total_len as f64) * 100.0) as u8;
-            
-            // Always report progress for debugging
-            log::info!("Write progress: {}% ({} MB / {} MB)", 
-                     progress, 
-                     written / (1024 * 1024),
-                     total_len / (1024 * 1024));
-            
-            // Update progress
-            {
-                let mut models = self.available_models.write().await;
-                if let Some(model_info) = models.get_mut(model_name) {
-                    model_info.status = ModelStatus::Downloading { progress };
-                }
-            }
-            
-            if let Some(ref callback) = progress_callback {
-                callback(progress);
-            }
-            
-            // Small delay to make progress visible
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        use futures_util::StreamExt;
+        let mut stream = response.bytes_stream();
+        let mut downloaded = 0u64;
+        let mut last_progress_report = 0u8;
+        let mut last_report_time = std::time::Instant::now();
+
+        // Emit initial 0% progress immediately
+        if let Some(ref callback) = progress_callback {
+            callback(0);
         }
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result
+                .map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
+
+            file.write_all(&chunk).await
+                .map_err(|e| anyhow!("Failed to write chunk to file: {}", e))?;
+
+            downloaded += chunk.len() as u64;
+
+            // Calculate progress
+            let progress = if total_size > 0 {
+                ((downloaded as f64 / total_size as f64) * 100.0) as u8
+            } else {
+                0
+            };
+
+            // Report progress every 1% or every 2 seconds for better UI responsiveness
+            let time_since_last_report = last_report_time.elapsed().as_secs();
+            if progress >= last_progress_report + 1 || progress == 100 || time_since_last_report >= 2 {
+                log::info!("Download progress: {}% ({:.1} MB / {:.1} MB)",
+                         progress,
+                         downloaded as f64 / (1024.0 * 1024.0),
+                         total_size as f64 / (1024.0 * 1024.0));
+
+                // Update progress in model info
+                {
+                    let mut models = self.available_models.write().await;
+                    if let Some(model_info) = models.get_mut(model_name) {
+                        model_info.status = ModelStatus::Downloading { progress };
+                    }
+                }
+
+                // Call progress callback
+                if let Some(ref callback) = progress_callback {
+                    callback(progress);
+                }
+
+                last_progress_report = progress;
+                last_report_time = std::time::Instant::now();
+            }
+        }
+
+        log::info!("Streaming download completed: {} bytes", downloaded);
         
         // Ensure 100% progress is always reported
         {

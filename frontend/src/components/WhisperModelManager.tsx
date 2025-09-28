@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { 
-  ModelInfo, 
-  ModelStatus, 
-  getModelIcon, 
-  formatFileSize, 
-  WhisperAPI 
+import {
+  ModelInfo,
+  ModelStatus,
+  getModelIcon,
+  formatFileSize,
+  getModelPerformanceBadge,
+  isQuantizedModel,
+  WhisperAPI
 } from '../lib/whisper';
 import { ModelDownloadProgress, ProgressRing, DownloadSummary } from './ModelDownloadProgress';
 
@@ -19,11 +21,63 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+
+  // Load persisted downloading state from localStorage
+  const getPersistedDownloadingModels = () => {
+    try {
+      const saved = localStorage.getItem('downloading-models');
+      return saved ? new Set(JSON.parse(saved)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  };
+
+  const [downloadingModels, setDownloadingModels] = useState<Set<string>>(getPersistedDownloadingModels());
+
+  // Persist downloading state to localStorage whenever it changes
+  const updateDownloadingModels = (updater: (prev: Set<string>) => Set<string>) => {
+    setDownloadingModels(prev => {
+      const newSet = updater(prev);
+      localStorage.setItem('downloading-models', JSON.stringify(Array.from(newSet)));
+      return newSet;
+    });
+  };
 
   useEffect(() => {
-    loadAvailableModels();
+    const initializeModels = async () => {
+      await loadAvailableModels();
+      // Check if any downloads from previous session are still in progress
+      await syncDownloadStates();
+    };
+    initializeModels();
   }, []);
+
+  // Check and sync download states with actual model status
+  const syncDownloadStates = async () => {
+    try {
+      const persistedDownloading = getPersistedDownloadingModels();
+
+      // Clean up completed downloads from persisted state
+      // This handles the case where downloads completed while the app was closed
+      setModels(prevModels => {
+        const updatedModels = prevModels.map(model => {
+          if (persistedDownloading.has(model.name) && model.status === 'Available') {
+            // Download completed while app was closed - clean up localStorage
+            updateDownloadingModels(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(model.name);
+              return newSet;
+            });
+            console.log(`Download completed while app was closed: ${model.name}`);
+          }
+          return model;
+        });
+        return updatedModels;
+      });
+    } catch (error) {
+      console.error('Failed to sync download states:', error);
+    }
+  };
 
   // Set up download progress event listeners
   useEffect(() => {
@@ -32,8 +86,10 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
     let unlistenError: (() => void) | null = null;
 
     const setupListeners = async () => {
+      console.log('Setting up download event listeners...');
       // Listen for download progress updates
       unlistenProgress = await listen<{ modelName: string; progress: number }>('model-download-progress', (event) => {
+        console.log('Received model-download-progress event:', event);
         const { modelName, progress } = event.payload;
         console.log(`Download progress for ${modelName}: ${progress}%`);
         
@@ -50,6 +106,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
 
       // Listen for download completion
       unlistenComplete = await listen<{ modelName: string }>('model-download-complete', (event) => {
+        console.log('Received model-download-complete event:', event);
         const { modelName } = event.payload;
         console.log(`Download completed for ${modelName}`);
         
@@ -63,7 +120,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
           return model;
         }));
         
-        setDownloadingModels(prev => {
+        updateDownloadingModels(prev => {
           const newSet = new Set(prev);
           newSet.delete(modelName);
           return newSet;
@@ -72,6 +129,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
 
       // Listen for download errors
       unlistenError = await listen<{ modelName: string; error: string }>('model-download-error', (event) => {
+        console.log('Received model-download-error event:', event);
         const { modelName, error } = event.payload;
         console.error(`Download failed for ${modelName}:`, error);
         
@@ -85,7 +143,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
           return model;
         }));
         
-        setDownloadingModels(prev => {
+        updateDownloadingModels(prev => {
           const newSet = new Set(prev);
           newSet.delete(modelName);
           return newSet;
@@ -114,11 +172,37 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       // Get actual model list from whisper-rs backend
       const modelList = await WhisperAPI.getAvailableModels();
       console.log(modelList)
-      setModels(modelList);
+
+      // Immediately apply persisted downloading states before setting models
+      const persistedDownloading = getPersistedDownloadingModels();
+      const modelsWithDownloadState = modelList.map(model => {
+        if (persistedDownloading.has(model.name) && model.status !== 'Available') {
+          // Model is in localStorage as downloading and not yet available - show as downloading
+          return {
+            ...model,
+            status: { Downloading: 0 } as ModelStatus
+          };
+        }
+        return model;
+      });
+
+      setModels(modelsWithDownloadState);
       
-      // Auto-select best available model if none selected
-      if (!selectedModel) {
-        const availableModel = modelList.find(m => m.status === 'Available');
+      // Validate current selection and auto-select if needed
+      if (selectedModel) {
+        // Check if the currently selected model is actually available
+        const currentModel = modelsWithDownloadState.find(m => m.name === selectedModel);
+        if (!currentModel || currentModel.status !== 'Available') {
+          // Clear invalid selection
+          if (onModelSelect) {
+            onModelSelect('');
+          }
+        }
+      }
+
+      // Auto-select best available model if none selected or selection was cleared
+      if (!selectedModel || !modelsWithDownloadState.find(m => m.name === selectedModel && m.status === 'Available')) {
+        const availableModel = modelsWithDownloadState.find(m => m.status === 'Available');
         if (availableModel && onModelSelect) {
           onModelSelect(availableModel.name);
         }
@@ -132,9 +216,16 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
   };
 
   const downloadModel = async (modelName: string) => {
+    // Prevent multiple downloads of the same model
+    if (downloadingModels.has(modelName)) {
+      console.log(`Download already in progress for model: ${modelName}`);
+      return;
+    }
+
     try {
-      setDownloadingModels(prev => new Set([...prev, modelName]));
-      
+      console.log(`Starting download for model: ${modelName}`);
+      updateDownloadingModels(prev => new Set([...prev, modelName]));
+
       // Immediately set status to downloading with 0% progress
       setModels(prevModels => prevModels.map(model => {
         if (model.name === modelName) {
@@ -145,41 +236,93 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
         }
         return model;
       }));
-      
+
       // Start real download using WhisperAPI
+      console.log(`Calling WhisperAPI.downloadModel for: ${modelName}`);
       await WhisperAPI.downloadModel(modelName);
-      
+      console.log(`Download completed for: ${modelName}`);
+
+      // Wait a moment for file to be written completely
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       // Refresh model list to get updated status
+      console.log(`Refreshing model list after download of: ${modelName}`);
       await loadAvailableModels();
-      
-      setDownloadingModels(prev => {
+
+      // Verify the model was actually downloaded
+      const updatedModels = await WhisperAPI.getAvailableModels();
+      const downloadedModel = updatedModels.find(m => m.name === modelName);
+
+      if (downloadedModel?.status !== 'Available') {
+        throw new Error(`Model download verification failed. Model status: ${JSON.stringify(downloadedModel?.status)}`);
+      }
+
+      updateDownloadingModels(prev => {
         const newSet = new Set(prev);
         newSet.delete(modelName);
         return newSet;
       });
 
-      // Auto-select the downloaded model
+      console.log(`Successfully downloaded and verified model: ${modelName}`);
+
+      // Auto-select the downloaded model only if verification passed
       if (onModelSelect) {
         onModelSelect(modelName);
       }
     } catch (err) {
       console.error('Failed to download model:', err);
-      setModels(prev => prev.map(model => 
-        model.name === modelName 
-          ? { ...model, status: { Error: 'Download failed' } }
+
+      // Show detailed error message
+      const errorMessage = err instanceof Error ? err.message : 'Download failed';
+
+      setModels(prev => prev.map(model =>
+        model.name === modelName
+          ? { ...model, status: { Error: errorMessage } }
           : model
       ));
-      setDownloadingModels(prev => {
+      updateDownloadingModels(prev => {
         const newSet = new Set(prev);
         newSet.delete(modelName);
         return newSet;
       });
+
+      // Show user-friendly error notification
+      console.error(`Model download failed for ${modelName}: ${errorMessage}`);
     }
   };
 
   const selectModel = async (modelName: string) => {
     if (onModelSelect) {
       onModelSelect(modelName);
+    }
+  };
+
+  const deleteCorruptedModel = async (modelName: string) => {
+    try {
+      console.log(`Attempting to delete corrupted model: ${modelName}`);
+
+      // Show confirmation dialog
+      const confirmed = window.confirm(
+        `Are you sure you want to delete the corrupted file for "${modelName}"? This cannot be undone.`
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      const result = await WhisperAPI.deleteCorruptedModel(modelName);
+      console.log(`Delete result: ${result}`);
+
+      // Refresh model list to update status
+      await loadAvailableModels();
+
+      console.log(`Successfully deleted corrupted model: ${modelName}`);
+    } catch (err) {
+      console.error('Failed to delete corrupted model:', err);
+
+      // Show user-friendly error notification
+      const errorMessage = err instanceof Error ? err.message : 'Delete failed';
+      alert(`Failed to delete corrupted model: ${errorMessage}`);
     }
   };
 
@@ -205,6 +348,18 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
         <div className="flex items-center space-x-1">
           <div className="w-2 h-2 bg-red-500 rounded-full"></div>
           <span className="text-xs text-red-700">Error</span>
+        </div>
+      );
+    } else if (typeof status === 'object' && 'Corrupted' in status) {
+      const { file_size, expected_min_size } = status.Corrupted;
+      const fileSizeMB = (file_size / (1024 * 1024)).toFixed(1);
+      const expectedSizeMB = (expected_min_size / (1024 * 1024)).toFixed(1);
+      return (
+        <div className="flex items-center space-x-1">
+          <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+          <span className="text-xs text-orange-700" title={`File corrupted: ${fileSizeMB}MB (expected ≥${expectedSizeMB}MB)`}>
+            Corrupted
+          </span>
         </div>
       );
     }
@@ -260,11 +415,15 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
           
           return (
             <div key={model.name} className="space-y-2 ">
-              <div 
-                className={`p-4 border rounded-lg transition-all cursor-pointer ${
-                  isSelected 
-                    ? 'border-blue-500 bg-blue-50 shadow-sm' 
-                    : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+              <div
+                className={`p-4 border rounded-lg transition-all ${
+                  isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'
+                } ${
+                  isSelected
+                    ? 'border-blue-500 bg-blue-50 shadow-sm'
+                    : isAvailable
+                      ? 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                      : 'border-gray-200'
                 } ${!isAvailable && !isDownloading ? 'opacity-75' : ''}`}
                 onClick={() => isAvailable && selectModel(model.name)}
               >
@@ -278,6 +437,17 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
                           {isSelected && (
                             <span className="bg-blue-600 text-white px-2 py-1 rounded-full text-xs">
                               Active
+                            </span>
+                          )}
+                          {isQuantizedModel(model.name) && (
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              getModelPerformanceBadge(model.name).color === 'green'
+                                ? 'bg-green-100 text-green-700'
+                                : getModelPerformanceBadge(model.name).color === 'orange'
+                                ? 'bg-orange-100 text-orange-700'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {getModelPerformanceBadge(model.name).label}
                             </span>
                           )}
                         </h4>
@@ -326,6 +496,29 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
                       >
                         Retry
                       </button>
+                    )}
+
+                    {typeof model.status === 'object' && 'Corrupted' in model.status && (
+                      <div className="flex flex-col space-y-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteCorruptedModel(model.name);
+                          }}
+                          className="bg-orange-600 text-white px-3 py-1 rounded text-xs hover:bg-orange-700 transition-colors"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadModel(model.name);
+                          }}
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
+                        >
+                          Re-download
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

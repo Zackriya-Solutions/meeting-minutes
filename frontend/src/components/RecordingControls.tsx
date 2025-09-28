@@ -43,6 +43,9 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isPausing, setIsPausing] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
   const MIN_RECORDING_DURATION = 2000; // 2 seconds minimum recording time
   const [transcriptionErrors, setTranscriptionErrors] = useState(0);
 
@@ -184,13 +187,49 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       console.log('Early return from handleStopRecording due to state check');
       return;
     }
-    
+
     console.log('Stopping recording...');
     setIsStopping(true);
-    
+
     // Immediately trigger the stop action
     await stopRecordingAction();
   }, [isRecording, isStarting, isStopping, stopRecordingAction]);
+
+  const handlePauseRecording = useCallback(async () => {
+    if (!isRecording || isPaused || isPausing) return;
+
+    console.log('Pausing recording...');
+    setIsPausing(true);
+
+    try {
+      await invoke('pause_recording');
+      setIsPaused(true);
+      console.log('Recording paused successfully');
+    } catch (error) {
+      console.error('Failed to pause recording:', error);
+      alert('Failed to pause recording. Please check the console for details.');
+    } finally {
+      setIsPausing(false);
+    }
+  }, [isRecording, isPaused, isPausing]);
+
+  const handleResumeRecording = useCallback(async () => {
+    if (!isRecording || !isPaused || isResuming) return;
+
+    console.log('Resuming recording...');
+    setIsResuming(true);
+
+    try {
+      await invoke('resume_recording');
+      setIsPaused(false);
+      console.log('Recording resumed successfully');
+    } catch (error) {
+      console.error('Failed to resume recording:', error);
+      alert('Failed to resume recording. Please check the console for details.');
+    } finally {
+      setIsResuming(false);
+    }
+  }, [isRecording, isPaused, isResuming]);
 
   useEffect(() => {
     return () => {
@@ -199,20 +238,20 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, []);
 
   useEffect(() => {
-    console.log('Setting up transcript-error event listener');
-    let unsubscribe: (() => void) | undefined;
-    
-    const setupListener = async () => {
+    console.log('Setting up recording event listeners');
+    let unsubscribes: (() => void)[] = [];
+
+    const setupListeners = async () => {
       try {
-        unsubscribe = await listen('transcript-error', (event) => {
+        // Transcript error listener
+        const transcriptErrorUnsubscribe = await listen('transcript-error', (event) => {
           console.log('transcript-error event received:', event);
           console.error('Transcription error received:', event.payload);
           const errorMessage = event.payload as string;
-          
-          // Track the error (no debouncing needed since backend only emits once)
+
           Analytics.trackTranscriptionError(errorMessage);
           console.log('Tracked transcription error:', errorMessage);
-          
+
           setTranscriptionErrors(prev => {
             const newCount = prev + 1;
             console.log('Transcription error count incremented:', newCount);
@@ -225,21 +264,37 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             onTranscriptionError(errorMessage);
           }
         });
-        console.log('transcript-error event listener set up successfully');
+
+        // Recording paused listener
+        const pausedUnsubscribe = await listen('recording-paused', (event) => {
+          console.log('recording-paused event received:', event);
+          setIsPaused(true);
+        });
+
+        // Recording resumed listener
+        const resumedUnsubscribe = await listen('recording-resumed', (event) => {
+          console.log('recording-resumed event received:', event);
+          setIsPaused(false);
+        });
+
+        unsubscribes = [transcriptErrorUnsubscribe, pausedUnsubscribe, resumedUnsubscribe];
+        console.log('Recording event listeners set up successfully');
       } catch (error) {
-        console.error('Failed to set up transcript-error event listener:', error);
+        console.error('Failed to set up recording event listeners:', error);
       }
     };
-    
-    setupListener();
-    
+
+    setupListeners();
+
     return () => {
-      console.log('Cleaning up transcript-error event listener');
-      if (unsubscribe && typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
+      console.log('Cleaning up recording event listeners');
+      unsubscribes.forEach(unsubscribe => {
+        if (unsubscribe && typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      });
     };
-  }, []); // Include dependencies
+  }, [onRecordingStop, onTranscriptionError]);
 
     return (
     <div className="flex flex-col space-y-2">
@@ -288,43 +343,76 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
               </>
             ) : (
               <>
-                <button
-                  onClick={() => {
-                    if (isRecording) {
-                      Analytics.trackButtonClick('stop_recording', 'recording_controls');
-                      handleStopRecording();
-                    } else {
+                {!isRecording ? (
+                  // Start recording button
+                  <button
+                    onClick={() => {
                       Analytics.trackButtonClick('start_recording', 'recording_controls');
                       handleStartRecording();
-                    }
-                  }}
-                  disabled={isStarting || isProcessing || isStopping || isRecordingDisabled}
-                  className={`w-12 h-12 flex items-center justify-center ${
-                    isStarting || isProcessing || isStopping ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
-                  } rounded-full text-white transition-colors relative`}
+                    }}
+                    disabled={isStarting || isProcessing || isRecordingDisabled}
+                    className={`w-12 h-12 flex items-center justify-center ${
+                      isStarting || isProcessing ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                    } rounded-full text-white transition-colors relative`}
+                  >
+                    <Mic size={20} />
+                  </button>
+                ) : (
+                  // Recording controls (pause/resume + stop)
+                  <>
+                    <button
+                      onClick={() => {
+                        if (isPaused) {
+                          Analytics.trackButtonClick('resume_recording', 'recording_controls');
+                          handleResumeRecording();
+                        } else {
+                          Analytics.trackButtonClick('pause_recording', 'recording_controls');
+                          handlePauseRecording();
+                        }
+                      }}
+                      disabled={isPausing || isResuming || isStopping}
+                      className={`w-10 h-10 flex items-center justify-center ${
+                        isPausing || isResuming || isStopping ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
+                      } rounded-full text-white transition-colors relative`}
+                    >
+                      {isPaused ? <Play size={16} /> : <Pause size={16} />}
+                      {(isPausing || isResuming) && (
+                        <div className="absolute -top-8 text-gray-600 font-medium text-xs">
+                          {isPausing ? 'Pausing...' : 'Resuming...'}
+                        </div>
+                      )}
+                    </button>
 
-                >
-                  {isRecording ? (
-                    <>
-                      <Square size={20} />
+                    <button
+                      onClick={() => {
+                        Analytics.trackButtonClick('stop_recording', 'recording_controls');
+                        handleStopRecording();
+                      }}
+                      disabled={isStopping || isPausing || isResuming}
+                      className={`w-10 h-10 flex items-center justify-center ${
+                        isStopping || isPausing || isResuming ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                      } rounded-full text-white transition-colors relative`}
+                    >
+                      <Square size={16} />
                       {isStopping && (
-                        <div className="absolute -top-8 text-gray-600 font-medium text-sm">
+                        <div className="absolute -top-8 text-gray-600 font-medium text-xs">
                           Stopping...
                         </div>
                       )}
-                    </>
-                  ) : (
-                    <Mic size={20} />
-                  )}
-                </button>
+                    </button>
+                  </>
+                )}
 
                 <div className="flex items-center space-x-1 mx-4">
                   {barHeights.map((height, index) => (
                     <div
                       key={index}
-                      className="w-1 bg-red-500 rounded-full transition-all duration-200"
+                      className={`w-1 rounded-full transition-all duration-200 ${
+                        isPaused ? 'bg-orange-500' : 'bg-red-500'
+                      }`}
                       style={{
-                        height: isRecording ? height : '4px',
+                        height: isRecording && !isPaused ? height : '4px',
+                        opacity: isPaused ? 0.6 : 1,
                       }}
                     />
                   ))}

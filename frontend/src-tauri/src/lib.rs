@@ -214,6 +214,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -270,10 +271,30 @@ pub fn run() {
             whisper_engine::commands::whisper_get_models_directory,
             whisper_engine::commands::whisper_download_model,
             whisper_engine::commands::whisper_cancel_download,
+            whisper_engine::commands::whisper_delete_corrupted_model,
+
+            // Parallel processing commands
+            whisper_engine::parallel_commands::initialize_parallel_processor,
+            whisper_engine::parallel_commands::start_parallel_processing,
+            whisper_engine::parallel_commands::pause_parallel_processing,
+            whisper_engine::parallel_commands::resume_parallel_processing,
+            whisper_engine::parallel_commands::stop_parallel_processing,
+            whisper_engine::parallel_commands::get_parallel_processing_status,
+            whisper_engine::parallel_commands::get_system_resources,
+            whisper_engine::parallel_commands::check_resource_constraints,
+            whisper_engine::parallel_commands::calculate_optimal_workers,
+            whisper_engine::parallel_commands::prepare_audio_chunks,
+            whisper_engine::parallel_commands::test_parallel_processing_setup,
 
             get_audio_devices,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
+
+            // Recording pause/resume commands
+            audio::recording_commands::pause_recording,
+            audio::recording_commands::resume_recording,
+            audio::recording_commands::is_recording_paused,
+            audio::recording_commands::get_recording_state,
 
             console_utils::show_console,
             console_utils::hide_console,
