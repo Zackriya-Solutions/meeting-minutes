@@ -42,6 +42,31 @@ pub struct WhisperEngine {
 }
 
 impl WhisperEngine {
+    /// Detect available GPU acceleration capabilities
+    fn detect_gpu_acceleration() -> bool {
+        // On macOS, prefer Metal GPU acceleration
+        if cfg!(target_os = "macos") {
+            log::info!("macOS detected - attempting to enable Metal GPU acceleration");
+            return true; // Enable GPU by default on macOS, whisper-rs will fallback if needed
+        }
+
+        // Check for CUDA support on other platforms
+        if cfg!(feature = "cuda") {
+            log::info!("CUDA feature enabled - attempting GPU acceleration");
+            return true;
+        }
+
+        // Check for Vulkan support on other platforms
+        if cfg!(feature = "vulkan") {
+            log::info!("Vulkan feature enabled - attempting GPU acceleration");
+            return true;
+        }
+
+        // Fall back to CPU
+        log::info!("No GPU acceleration features detected - using CPU processing");
+        false
+    }
+
     pub fn new() -> Result<Self> {
         // Use backend/models directory to preserve existing models
         let current_dir = std::env::current_dir()
@@ -74,6 +99,28 @@ impl WhisperEngine {
         
         log::info!("WhisperEngine using models directory: {}", models_dir.display());
         log::info!("Debug mode: {}", cfg!(debug_assertions));
+
+        // Log acceleration capabilities
+        let gpu_support = Self::detect_gpu_acceleration();
+        log::info!("Hardware acceleration support: {}", if gpu_support { "enabled" } else { "disabled" });
+
+        #[cfg(feature = "metal")]
+        log::info!("Apple Metal GPU support: enabled");
+
+        #[cfg(feature = "openblas")]
+        log::info!("OpenBLAS CPU optimization: enabled");
+
+        #[cfg(feature = "coreml")]
+        log::info!("Apple CoreML support: enabled");
+
+        #[cfg(feature = "cuda")]
+        log::info!("NVIDIA CUDA support: enabled");
+
+        #[cfg(feature = "vulkan")]
+        log::info!("Vulkan GPU support: enabled");
+
+        #[cfg(feature = "openmp")]
+        log::info!("OpenMP parallel processing: enabled");
         
         let engine = Self {
             models_dir,
@@ -106,7 +153,7 @@ impl WhisperEngine {
             ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base model, good speed/accuracy balance"),
             ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small model, faster than f16 version"),
             ("medium-q5_0", "ggml-medium-q5_0.bin", 852, "High", "Medium", "Quantized medium model, professional quality"),
-            ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1723, "High", "Medium", "Quantized large model, best balance"),
+            ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1000, "High", "Medium", "Quantized large model, best balance"),
 
             // Q4_0 quantized models (maximum speed)
             ("tiny-q4_0", "ggml-tiny-q4_0.bin", 21, "Decent", "Very Fast", "Fastest tiny model, some accuracy loss"),
@@ -123,10 +170,21 @@ impl WhisperEngine {
                     Ok(metadata) => {
                         let file_size_bytes = metadata.len();
                         let file_size_mb = file_size_bytes / (1024 * 1024);
-                        let expected_min_size_mb = size_mb / 2; // Allow 50% of expected size as minimum
+                        let expected_min_size_mb = (size_mb as f64 * 0.9) as u64; // Allow 90% of expected size as minimum for more accurate corruption detection
 
                         if file_size_mb >= expected_min_size_mb && file_size_mb > 1 {
-                            ModelStatus::Available
+                            // File size looks good, but let's also check if it's a valid GGML file
+                            match self.validate_model_file(&model_path).await {
+                                Ok(_) => ModelStatus::Available,
+                                Err(_) => {
+                                    log::warn!("Model file {} has correct size but appears corrupted (failed validation)",
+                                             filename);
+                                    ModelStatus::Corrupted {
+                                        file_size: file_size_bytes,
+                                        expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                    }
+                                }
+                            }
                         } else if file_size_mb > 0 {
                             // File exists but is smaller than expected
                             // Check if this model is currently being downloaded
@@ -197,23 +255,29 @@ impl WhisperEngine {
             ModelStatus::Available => {
                 log::info!("Loading model: {}", model_name);
                 
-                // Create context parameters optimized for streaming accuracy
+                // Create context parameters optimized for streaming accuracy with GPU fallback
+                let use_gpu = Self::detect_gpu_acceleration();
                 let context_param = WhisperContextParameters {
-                    use_gpu: true,
+                    use_gpu,
                     gpu_device: 0,
                     flash_attn: false, // Disabled due to potential crashes in streaming
                     ..Default::default()
                 };
-                
+
                 // Load whisper context with parameters
                 let ctx = WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
                     .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?;
-                
+
                 // Update current context and model
                 *self.current_context.write().await = Some(ctx);
                 *self.current_model.write().await = Some(model_name.to_string());
-                
-                log::info!("Successfully loaded model: {} with GPU acceleration", model_name);
+
+                let acceleration_status = if use_gpu {
+                    "GPU acceleration enabled"
+                } else {
+                    "CPU processing only"
+                };
+                log::info!("Successfully loaded model: {} with {}", model_name, acceleration_status);
                 Ok(())
             },
             ModelStatus::Missing => {
@@ -479,7 +543,7 @@ impl WhisperEngine {
         state.full(params, &audio_data)?;
 
         // Extract text with improved segment handling
-        let num_segments = state.full_n_segments()?;
+        let num_segments = state.full_n_segments();
 
         // Only log segment completion for longer audio or when something meaningful was detected
         if should_log_transcription || num_segments > 0 {
@@ -488,18 +552,17 @@ impl WhisperEngine {
         let mut result = String::new();
 
         for i in 0..num_segments {
-            let segment_text = state.full_get_segment_text(i)?;
+            let segment = match state.get_segment(i) {
+                Some(seg) => seg,
+                None => continue,
+            };
 
-            // Get segment timestamps for debugging
-            if let (Ok(start_time), Ok(end_time)) = (
-                state.full_get_segment_t0(i),
-                state.full_get_segment_t1(i)
-            ) {
-                log::debug!("Segment {} ({:.2}s-{:.2}s): '{}'",
-                          i, start_time as f64 / 100.0, end_time as f64 / 100.0, segment_text);
-            } else {
-                log::debug!("Segment {}: '{}'", i, segment_text);
-            }
+            let segment_text = segment.to_str_lossy()?;
+            let start_time = segment.start_timestamp();
+            let end_time = segment.end_timestamp();
+
+            log::debug!("Segment {} ({:.2}s-{:.2}s): '{}'",
+                      i, start_time as f64 / 100.0, end_time as f64 / 100.0, segment_text);
 
             // Clean and append segment text
             let cleaned_text = segment_text.trim();
@@ -536,6 +599,28 @@ impl WhisperEngine {
         self.models_dir.clone()
     }
 
+    /// Validate if a model file is a valid GGML file by checking its header
+    async fn validate_model_file(&self, model_path: &PathBuf) -> Result<()> {
+        use tokio::io::AsyncReadExt;
+
+        let mut file = fs::File::open(model_path).await
+            .map_err(|e| anyhow!("Failed to open model file: {}", e))?;
+
+        // Read the first 8 bytes to check for GGML magic number
+        let mut buffer = [0u8; 8];
+        file.read_exact(&mut buffer).await
+            .map_err(|e| anyhow!("Failed to read model file header: {}", e))?;
+
+        // Check for GGML magic number (various versions and endianness)
+        if buffer.starts_with(b"ggml") || buffer.starts_with(b"GGUF") || buffer.starts_with(b"ggmf") ||
+           buffer.starts_with(b"lmgg") || buffer.starts_with(b"FUGU") || buffer.starts_with(b"fmgg") {
+            Ok(())
+        } else {
+            Err(anyhow!("Invalid model file: missing GGML/GGUF magic number. Found: {:?}",
+                       String::from_utf8_lossy(&buffer[..4])))
+        }
+    }
+
     pub async fn delete_model(&self, model_name: &str) -> Result<String> {
         log::info!("Attempting to delete model: {}", model_name);
 
@@ -548,6 +633,7 @@ impl WhisperEngine {
         let model_info = model_info.ok_or_else(|| anyhow!("Model '{}' not found", model_name))?;
 
         // Check if model is corrupted before allowing deletion
+        log::info!("Model '{}' has status: {:?}", model_name, model_info.status);
         match &model_info.status {
             ModelStatus::Corrupted { file_size, expected_min_size } => {
                 log::info!("Deleting corrupted model '{}' (file size: {} bytes, expected min: {} bytes)",
@@ -572,8 +658,30 @@ impl WhisperEngine {
 
                 Ok(format!("Successfully deleted corrupted model '{}'", model_name))
             }
+            ModelStatus::Available => {
+                // Allow deletion of available models for testing/cleanup
+                log::info!("Deleting available model '{}' (for cleanup)", model_name);
+
+                if model_info.path.exists() {
+                    fs::remove_file(&model_info.path).await
+                        .map_err(|e| anyhow!("Failed to delete file '{}': {}", model_info.path.display(), e))?;
+                    log::info!("Successfully deleted available model file: {}", model_info.path.display());
+                } else {
+                    log::warn!("File '{}' does not exist, nothing to delete", model_info.path.display());
+                }
+
+                // Update model status to Missing
+                {
+                    let mut models = self.available_models.write().await;
+                    if let Some(model) = models.get_mut(model_name) {
+                        model.status = ModelStatus::Missing;
+                    }
+                }
+
+                Ok(format!("Successfully deleted model '{}'", model_name))
+            }
             _ => {
-                Err(anyhow!("Can only delete corrupted models. Model '{}' has status: {:?}", model_name, model_info.status))
+                Err(anyhow!("Can only delete corrupted or available models. Model '{}' has status: {:?}", model_name, model_info.status))
             }
         }
     }

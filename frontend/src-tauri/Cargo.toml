@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 # Hardware acceleration features for whisper-rs
 [features]
-default = []  # Disable hardware acceleration temporarily to fix build issues
+default = []  # No hardware acceleration by default to ensure compatibility
 # Hardware acceleration - enable based on target platform
 coreml = ["whisper-rs/coreml"]  # Apple CoreML (macOS/iOS)
 metal = ["whisper-rs/metal"]    # Apple Metal GPU (macOS)
@@ -31,6 +31,7 @@ openmp = ["whisper-rs/openmp"]     # OpenMP parallel processing
 tauri-build = { version = "2.3.0", features = [] }
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 which = "6.0.1"
+
 
 [dependencies]
 serde_json = "1.0"
@@ -63,7 +64,7 @@ bytemuck = "1.16.1"
 
 
 # Whisper-rs for speech recognition 
-whisper-rs = { git = "https://github.com/tazz4843/whisper-rs", rev = "e3d67d5", features = ["raw-api", "tracing_backend"] }
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
 futures-util = "0.3"
 silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", package = "silero" }
 
@@ -78,6 +79,10 @@ dashmap = "6.1.0"
 
 # Directories
 dirs = "5.0.1"
+
+# Additional dependencies for notification system
+url = "2.5.0"
+
 
 # System monitoring for resource management
 sysinfo = "0.32"
@@ -110,6 +115,7 @@ tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
 anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
+mac-notification-sys = "0.6.1"
 
 [dev-dependencies]
 tempfile = "3.3.0"

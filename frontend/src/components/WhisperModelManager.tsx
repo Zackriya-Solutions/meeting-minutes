@@ -23,10 +23,10 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
   const [error, setError] = useState<string | null>(null);
 
   // Load persisted downloading state from localStorage
-  const getPersistedDownloadingModels = () => {
+  const getPersistedDownloadingModels = (): Set<string> => {
     try {
       const saved = localStorage.getItem('downloading-models');
-      return saved ? new Set(JSON.parse(saved)) : new Set<string>();
+      return saved ? new Set<string>(JSON.parse(saved) as string[]) : new Set<string>();
     } catch {
       return new Set<string>();
     }
@@ -57,18 +57,36 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
     try {
       const persistedDownloading = getPersistedDownloadingModels();
 
-      // Clean up completed downloads from persisted state
-      // This handles the case where downloads completed while the app was closed
+      // Clean up completed downloads and corrupted files from persisted state
+      // This handles the case where downloads completed/failed while the app was closed
       setModels(prevModels => {
         const updatedModels = prevModels.map(model => {
-          if (persistedDownloading.has(model.name) && model.status === 'Available') {
-            // Download completed while app was closed - clean up localStorage
-            updateDownloadingModels(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(model.name);
-              return newSet;
-            });
-            console.log(`Download completed while app was closed: ${model.name}`);
+          if (persistedDownloading.has(model.name)) {
+            if (model.status === 'Available') {
+              // Download completed while app was closed - clean up localStorage
+              updateDownloadingModels(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(model.name);
+                return newSet;
+              });
+              console.log(`Download completed while app was closed: ${model.name}`);
+            } else if (typeof model.status === 'object' && 'Corrupted' in model.status) {
+              // Download was interrupted and file is corrupted - clean up localStorage
+              updateDownloadingModels(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(model.name);
+                return newSet;
+              });
+              console.log(`Download was interrupted and file is corrupted: ${model.name}`);
+            } else if (model.status === 'Missing') {
+              // Download failed or was never completed - clean up localStorage
+              updateDownloadingModels(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(model.name);
+                return newSet;
+              });
+              console.log(`Download failed or incomplete: ${model.name}`);
+            }
           }
           return model;
         });
@@ -177,11 +195,32 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       const persistedDownloading = getPersistedDownloadingModels();
       const modelsWithDownloadState = modelList.map(model => {
         if (persistedDownloading.has(model.name) && model.status !== 'Available') {
-          // Model is in localStorage as downloading and not yet available - show as downloading
-          return {
-            ...model,
-            status: { Downloading: 0 } as ModelStatus
-          };
+          // Check if the model is actually corrupted (interrupted download)
+          if (typeof model.status === 'object' && 'Corrupted' in model.status) {
+            // Backend detected corruption - clean up localStorage and keep corrupted status
+            updateDownloadingModels(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(model.name);
+              return newSet;
+            });
+            console.log(`Download was interrupted and model is corrupted: ${model.name}`);
+            return model; // Keep the corrupted status from backend
+          } else if (model.status === 'Missing') {
+            // Model is missing - likely download was never started or completely failed
+            updateDownloadingModels(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(model.name);
+              return newSet;
+            });
+            console.log(`Download was interrupted and model is missing: ${model.name}`);
+            return model; // Keep missing status
+          } else {
+            // Model is in localStorage as downloading and not yet available - show as downloading
+            return {
+              ...model,
+              status: { Downloading: 0 } as ModelStatus
+            };
+          }
         }
         return model;
       });
@@ -310,15 +349,29 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
         return;
       }
 
+      // Immediately update UI to show deletion in progress
+      setModels(prevModels => prevModels.map(model => {
+        if (model.name === modelName) {
+          return {
+            ...model,
+            status: { Error: 'Deleting corrupted file...' } as ModelStatus
+          };
+        }
+        return model;
+      }));
+
       const result = await WhisperAPI.deleteCorruptedModel(modelName);
       console.log(`Delete result: ${result}`);
 
-      // Refresh model list to update status
+      // Refresh model list to get the updated status
       await loadAvailableModels();
 
       console.log(`Successfully deleted corrupted model: ${modelName}`);
     } catch (err) {
       console.error('Failed to delete corrupted model:', err);
+
+      // Revert UI state on error and refresh to get actual state
+      await loadAvailableModels();
 
       // Show user-friendly error notification
       const errorMessage = err instanceof Error ? err.message : 'Delete failed';
@@ -356,8 +409,8 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       const expectedSizeMB = (expected_min_size / (1024 * 1024)).toFixed(1);
       return (
         <div className="flex items-center space-x-1">
-          <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-          <span className="text-xs text-orange-700" title={`File corrupted: ${fileSizeMB}MB (expected ≥${expectedSizeMB}MB)`}>
+          <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+          <span className="text-xs text-orange-700 font-medium" title={`File corrupted: ${fileSizeMB}MB (expected ≥${expectedSizeMB}MB). The file may be incomplete or damaged.`}>
             Corrupted
           </span>
         </div>
@@ -367,7 +420,6 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
   };
 
   const availableModels = models.filter(m => m.status === 'Available');
-  const totalSizeMb = availableModels.reduce((sum, m) => sum + m.size_mb, 0);
 
   if (loading) {
     return (
@@ -498,27 +550,42 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
                       </button>
                     )}
 
-                    {typeof model.status === 'object' && 'Corrupted' in model.status && (
+                    {(typeof model.status === 'object' && 'Corrupted' in model.status) && (
                       <div className="flex flex-col space-y-1">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             deleteCorruptedModel(model.name);
                           }}
-                          className="bg-orange-600 text-white px-3 py-1 rounded text-xs hover:bg-orange-700 transition-colors"
+                          title="Delete the corrupted model file to free up space"
+                          className="bg-orange-600 text-white px-3 py-1 rounded text-xs hover:bg-orange-700 transition-colors shadow-sm border border-orange-700 font-medium"
                         >
-                          Delete
+                          🗑️ Delete
                         </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             downloadModel(model.name);
                           }}
-                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
+                          title="Download the model again to replace the corrupted file"
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors shadow-sm border border-blue-700"
                         >
-                          Re-download
+                          ↻ Re-download
                         </button>
                       </div>
+                    )}
+
+                    {model.status === 'Available' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteCorruptedModel(model.name);
+                        }}
+                        title="Delete this model to free up space"
+                        className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition-colors shadow-sm border border-red-700 font-medium"
+                      >
+                        🗑️ Delete
+                      </button>
                     )}
                   </div>
                 </div>

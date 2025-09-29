@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
-use tauri_plugin_notification::NotificationExt;
+// Removed unused import
 
 // Declare audio module
 pub mod audio;
@@ -12,10 +12,14 @@ pub mod console_utils;
 pub mod tray;
 pub mod whisper_engine;
 pub mod openrouter;
+pub mod notifications;
 
 use audio::{AudioDevice, list_audio_devices};
 use tauri::{Runtime, AppHandle};
 use log::{info as log_info, error as log_error};
+use notifications::commands::NotificationManagerState;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
@@ -45,17 +49,54 @@ async fn start_recording<R: Runtime>(
     }
 
     // Call the actual audio recording system with meeting name
-    match audio::recording_commands::start_recording_with_devices_and_meeting(app.clone(), mic_device_name, system_device_name, meeting_name).await {
+    match audio::recording_commands::start_recording_with_devices_and_meeting(app.clone(), mic_device_name, system_device_name, meeting_name.clone()).await {
         Ok(_) => {
             RECORDING_FLAG.store(true, Ordering::SeqCst);
             tray::update_tray_menu(&app);
 
             log_info!("Recording started successfully");
 
-            let _ = app.notification().builder()
-                .title("Meetily")
-                .body("Recording has started.")
-                .show();
+            // Show enhanced recording started notification
+            if let Err(e) = notifications::commands::show_enhanced_recording_confirmation_internal(&app, meeting_name.clone()).await {
+                log_error!("Failed to show enhanced recording started notification: {}", e);
+
+                // Fallback to basic notification
+                let title = "Meetily";
+                let body = match meeting_name.as_ref() {
+                    Some(name) => format!("Recording started for meeting: {}", name),
+                    None => "Recording has started".to_string(),
+                };
+
+                #[cfg(target_os = "macos")]
+                {
+                    // Use native macOS notification as fallback
+                    let result = tokio::task::spawn_blocking({
+                        let title = title.to_string();
+                        let body = body.clone();
+                        move || {
+                            mac_notification_sys::send_notification(
+                                &title,
+                                None, // No subtitle
+                                &body,
+                                Some(mac_notification_sys::Notification::new().sound("default"))
+                            )
+                        }
+                    }).await;
+
+                    match result {
+                        Ok(Ok(_)) => log_info!("Successfully showed fallback macOS recording started notification"),
+                        Ok(Err(e)) => log_error!("Failed to show fallback macOS recording started notification: {:?}", e),
+                        Err(e) => log_error!("Task join error for macOS notification: {}", e),
+                    }
+                }
+
+                #[cfg(not(target_os = "macos"))]
+                {
+                    log_info!("Would show notification: {} - {}", title, body);
+                }
+            } else {
+                log_info!("Successfully showed enhanced recording confirmation notification");
+            }
 
             Ok(())
         }
@@ -96,8 +137,29 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
                 }
             }
 
-            // Send a system notification indicating recording has stopped
-            let _ = app.notification().builder().title("Meetily").body("Recording stopped").show();
+            // Show recording stopped notification using native system
+            #[cfg(target_os = "macos")]
+            {
+                let result = tokio::task::spawn_blocking(|| {
+                    mac_notification_sys::send_notification(
+                        "Meetily",
+                        None, // No subtitle
+                        "Recording has stopped",
+                        Some(mac_notification_sys::Notification::new().sound("default"))
+                    )
+                }).await;
+
+                match result {
+                    Ok(Ok(_)) => log_info!("Successfully showed native macOS recording stopped notification"),
+                    Ok(Err(e)) => log_error!("Failed to show native macOS recording stopped notification: {:?}", e),
+                    Err(e) => log_error!("Task join error for macOS notification: {}", e),
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                log_info!("Would show notification: Meetily - Recording has stopped");
+            }
 
             Ok(())
         }
@@ -181,6 +243,9 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
 
+    // Clone meeting_name for notification use later
+    let meeting_name_for_notification = meeting_name.clone();
+
     // Call the recording module functions that support meeting names
     let recording_result = match (mic_device_name.clone(), system_device_name.clone()) {
         (None, None) => {
@@ -199,6 +264,41 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     match recording_result {
         Ok(_) => {
             log_info!("Recording started successfully via tauri command");
+
+            // Show recording started notification using native system
+            let title = "Meetily";
+            let body = match meeting_name_for_notification.as_ref() {
+                Some(name) => format!("Recording started for meeting: {}", name),
+                None => "Recording has started".to_string(),
+            };
+
+            #[cfg(target_os = "macos")]
+            {
+                let result = tokio::task::spawn_blocking({
+                    let title = title.to_string();
+                    let body = body.clone();
+                    move || {
+                        mac_notification_sys::send_notification(
+                            &title,
+                            None, // No subtitle
+                            &body,
+                            Some(mac_notification_sys::Notification::new().sound("default"))
+                        )
+                    }
+                }).await;
+
+                match result {
+                    Ok(Ok(_)) => log_info!("Successfully showed native macOS recording started notification"),
+                    Ok(Err(e)) => log_error!("Failed to show native macOS recording started notification: {:?}", e),
+                    Err(e) => log_error!("Task join error for macOS notification: {}", e),
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                log_info!("Would show notification: {} - {}", title, body);
+            }
+
             Ok(())
         }
         Err(e) => {
@@ -215,12 +315,23 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
+        .manage(Arc::new(RwLock::new(None::<notifications::manager::NotificationManager<tauri::Wry>>)) as NotificationManagerState<tauri::Wry>)
         .setup(|_app| {
             log::info!("Application setup complete");
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
+            }
+
+            // Initialize notification system (will be done on first use)
+            log::info!("Notification system will be initialized on first use");
+
+            // Setup enhanced notification handlers (macOS only)
+            #[cfg(target_os = "macos")]
+            {
+                notifications::setup_enhanced_notification_handlers(_app.handle().clone());
+                log::info!("Enhanced notification handlers set up for macOS");
             }
 
             // Initialize Whisper engine on startup
@@ -267,6 +378,8 @@ pub fn run() {
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,
             whisper_engine::commands::whisper_is_model_loaded,
+            whisper_engine::commands::whisper_has_available_models,
+            whisper_engine::commands::whisper_validate_model_ready,
             whisper_engine::commands::whisper_transcribe_audio,
             whisper_engine::commands::whisper_get_models_directory,
             whisper_engine::commands::whisper_download_model,
@@ -330,6 +443,26 @@ pub fn run() {
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,
             audio::recording_preferences::select_recording_folder,
+
+            // Notification system commands
+            notifications::commands::get_notification_settings,
+            notifications::commands::set_notification_settings,
+            notifications::commands::request_notification_permission,
+            notifications::commands::show_notification,
+            notifications::commands::show_test_notification,
+            notifications::commands::is_dnd_active,
+            notifications::commands::get_system_dnd_status,
+            notifications::commands::set_manual_dnd,
+            notifications::commands::set_notification_consent,
+            notifications::commands::clear_notifications,
+            notifications::commands::is_notification_system_ready,
+            notifications::commands::initialize_notification_manager_manual,
+            notifications::commands::test_notification_with_auto_consent,
+            notifications::commands::get_notification_stats,
+
+            // Enhanced notification commands
+            notifications::commands::show_enhanced_recording_confirmation,
+            notifications::commands::dismiss_all_enhanced_notifications,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

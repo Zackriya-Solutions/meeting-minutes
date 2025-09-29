@@ -61,6 +61,22 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
+    // Validate that Whisper models are available before starting recording
+    info!("🔍 Validating Whisper model availability before starting recording...");
+    if let Err(validation_error) = validate_whisper_model_ready(&app).await {
+        error!("Model validation failed: {}", validation_error);
+
+        // Emit actionable error event for frontend to show model selector
+        let _ = app.emit("transcription-error", serde_json::json!({
+            "error": validation_error,
+            "userMessage": "Recording cannot start: No Whisper models are available. Please download a model to enable transcription.",
+            "actionable": true
+        }));
+
+        return Err(validation_error);
+    }
+    info!("✅ Whisper model validation passed");
+
     // Spawn the recording task in a separate thread to avoid Send issues
     let app_clone = app.clone();
     let meeting_name_clone = meeting_name.clone();
@@ -143,6 +159,22 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
+
+    // Validate that Whisper models are available before starting recording
+    info!("🔍 Validating Whisper model availability before starting recording...");
+    if let Err(validation_error) = validate_whisper_model_ready(&app).await {
+        error!("Model validation failed: {}", validation_error);
+
+        // Emit actionable error event for frontend to show model selector
+        let _ = app.emit("transcription-error", serde_json::json!({
+            "error": validation_error,
+            "userMessage": "Recording cannot start: No Whisper models are available. Please download a model to enable transcription.",
+            "actionable": true
+        }));
+
+        return Err(validation_error);
+    }
+    info!("✅ Whisper model validation passed");
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -584,6 +616,27 @@ async fn transcribe_chunk<R: Runtime>(
             let error_msg = "Transcription timeout - chunk took too long to process";
             warn!("{}", error_msg);
             Err(error_msg.to_string())
+        }
+    }
+}
+
+/// Validate that Whisper models are ready before starting recording
+async fn validate_whisper_model_ready<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
+    // Ensure whisper engine is initialized first
+    if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
+        warn!("❌ Failed to initialize Whisper engine: {}", init_error);
+        return Err(format!("Failed to initialize speech recognition: {}", init_error));
+    }
+
+    // Call the whisper validation command
+    match crate::whisper_engine::commands::whisper_validate_model_ready().await {
+        Ok(model_name) => {
+            info!("✅ Model validation successful: {} is ready", model_name);
+            Ok(())
+        }
+        Err(e) => {
+            warn!("❌ Model validation failed: {}", e);
+            Err(e)
         }
     }
 }

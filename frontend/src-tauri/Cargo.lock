@@ -3131,6 +3131,7 @@ dependencies = [
  "infer 0.15.0",
  "lazy_static",
  "log",
+ "mac-notification-sys",
  "memory-stats",
  "ndarray",
  "objc",
@@ -3159,6 +3160,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "which",
  "whisper-rs",
@@ -7137,17 +7139,18 @@ dependencies = [
 
 [[package]]
 name = "whisper-rs"
-version = "0.14.3"
-source = "git+https://github.com/tazz4843/whisper-rs?rev=e3d67d5#e3d67d513b86c6360f62e1f563bc4601c87946d6"
+version = "0.15.0"
+source = "git+https://codeberg.org/tazz4843/whisper-rs?rev=0c509ec#0c509ec9c5d4e1d49d83e80bfe8a9060dfaca79b"
 dependencies = [
+ "libc",
  "tracing",
  "whisper-rs-sys",
 ]
 
 [[package]]
 name = "whisper-rs-sys"
-version = "0.13.0"
-source = "git+https://github.com/tazz4843/whisper-rs?rev=e3d67d5#e3d67d513b86c6360f62e1f563bc4601c87946d6"
+version = "0.14.0"
+source = "git+https://codeberg.org/tazz4843/whisper-rs?rev=0c509ec#0c509ec9c5d4e1d49d83e80bfe8a9060dfaca79b"
 dependencies = [
  "bindgen 0.71.1",
  "cfg-if",

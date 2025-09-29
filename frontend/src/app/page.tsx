@@ -8,6 +8,7 @@ import { RecordingControls } from '@/components/RecordingControls';
 import { AISummary } from '@/components/AISummary';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { ModelManager } from '@/components/WhisperModelManager';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -74,6 +75,8 @@ export default function Home() {
     systemDevice: null
   });
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const [modelSelectorMessage, setModelSelectorMessage] = useState('');
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording , serverAddress} = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -394,7 +397,7 @@ export default function Home() {
           console.log('Chunk drop warning received:', event.payload);
           setChunkDropMessage(event.payload);
           setShowChunkDropWarning(true);
-          
+
           // // Auto-dismiss after 8 seconds
           // setTimeout(() => {
           //   setShowChunkDropWarning(false);
@@ -410,6 +413,43 @@ export default function Home() {
 
     return () => {
       console.log('Cleaning up chunk drop warning listener...');
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
+  // Set up transcription error listener for model loading failures
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupTranscriptionErrorListener = async () => {
+      try {
+        console.log('Setting up transcription-error listener...');
+        unlistenFn = await listen<{error: string, userMessage: string, actionable: boolean}>('transcription-error', (event) => {
+          console.log('Transcription error received:', event.payload);
+          const { userMessage, actionable } = event.payload;
+
+          if (actionable) {
+            // This is a model-related error that requires user action
+            setModelSelectorMessage(userMessage);
+            setShowModelSelector(true);
+          } else {
+            // Regular transcription error
+            setErrorMessage(userMessage);
+            setShowErrorAlert(true);
+          }
+        });
+        console.log('Transcription error listener setup complete');
+      } catch (error) {
+        console.error('Failed to setup transcription error listener:', error);
+      }
+    };
+
+    setupTranscriptionErrorListener();
+
+    return () => {
+      console.log('Cleaning up transcription error listener...');
       if (unlistenFn) {
         unlistenFn();
       }
@@ -1535,6 +1575,57 @@ export default function Home() {
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   >
                     Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Model Selection Modal - shown when model loading fails */}
+          {showModelSelector && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Speech Recognition Setup Required</h3>
+                  <button
+                    onClick={() => setShowModelSelector(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <span className="text-yellow-600 text-xl">⚠️</span>
+                    <div>
+                      <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
+                      <p className="text-sm text-yellow-700">
+                        {modelSelectorMessage || 'Please download a Whisper model to enable speech recognition and start transcription.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <ModelManager
+                  selectedModel={modelConfig.whisperModel}
+                  onModelSelect={(modelName) => {
+                    setModelConfig(prev => ({ ...prev, whisperModel: modelName }));
+                    // Close the modal once a model is selected
+                    if (modelName) {
+                      setShowModelSelector(false);
+                    }
+                  }}
+                />
+
+                <div className="mt-6 flex justify-end space-x-3">
+                  <button
+                    onClick={() => setShowModelSelector(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>

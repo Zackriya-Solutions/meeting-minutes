@@ -48,6 +48,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [isResuming, setIsResuming] = useState(false);
   const MIN_RECORDING_DURATION = 2000; // 2 seconds minimum recording time
   const [transcriptionErrors, setTranscriptionErrors] = useState(0);
+  const [isValidatingModel, setIsValidatingModel] = useState(false);
 
 
   const currentTime = 0;
@@ -75,15 +76,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, []);
 
   const handleStartRecording = useCallback(async () => {
-    if (isStarting) return;
+    if (isStarting || isValidatingModel) return;
     console.log('Starting recording...');
     console.log('Selected devices:', selectedDevices);
     console.log('Meeting name:', meetingName);
     console.log('Current isRecording state:', isRecording);
-    setIsStarting(true);
+
+    setIsValidatingModel(true);
     setShowPlayback(false);
     setTranscript(''); // Clear any previous transcript
-    
+
     try {
       // Generate meeting title here to ensure it's available for the backend call
       const now = new Date();
@@ -94,7 +96,22 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const seconds = String(now.getSeconds()).padStart(2, '0');
       const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
-      
+
+      setIsStarting(true);
+      setIsValidatingModel(false);
+
+      // Show enhanced recording confirmation on macOS
+      try {
+        console.log('Attempting to show enhanced recording confirmation notification...');
+        await invoke('show_enhanced_recording_confirmation', {
+          meetingName: meetingName || generatedMeetingTitle,
+          actionUrl: 'meetily://confirm-recording'
+        });
+        console.log('Enhanced recording confirmation notification shown');
+      } catch (enhancedError) {
+        console.log('Enhanced notification not available (non-macOS or error):', enhancedError);
+      }
+
       // Use the correct command with device parameters
       if (selectedDevices || meetingName || generatedMeetingTitle) {
         console.log('Using start_recording_with_devices_and_meeting with:', {
@@ -115,7 +132,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       }
       console.log('Recording started successfully');
       setIsProcessing(false);
-      
+
       // Call onRecordingStart after successful recording start
       onRecordingStart();
     } catch (error) {
@@ -128,6 +145,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       alert('Failed to start recording. Please check the console for details.');
     } finally {
       setIsStarting(false);
+      setIsValidatingModel(false);
     }
   }, [onRecordingStart, isStarting, selectedDevices, meetingName]);
 
@@ -243,7 +261,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
     const setupListeners = async () => {
       try {
-        // Transcript error listener
+        // Transcript error listener - handles both regular and actionable errors
         const transcriptErrorUnsubscribe = await listen('transcript-error', (event) => {
           console.log('transcript-error event received:', event);
           console.error('Transcription error received:', event.payload);
@@ -265,6 +283,41 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           }
         });
 
+        // Transcription error listener - handles structured error objects with actionable flag
+        const transcriptionErrorUnsubscribe = await listen('transcription-error', (event) => {
+          console.log('transcription-error event received:', event);
+          console.error('Transcription error received:', event.payload);
+
+          let errorMessage: string;
+          let isActionable = false;
+
+          if (typeof event.payload === 'object' && event.payload !== null) {
+            const payload = event.payload as {error: string, userMessage: string, actionable: boolean};
+            errorMessage = payload.userMessage || payload.error;
+            isActionable = payload.actionable || false;
+          } else {
+            errorMessage = String(event.payload);
+          }
+
+          Analytics.trackTranscriptionError(errorMessage);
+          console.log('Tracked transcription error:', errorMessage);
+
+          setTranscriptionErrors(prev => {
+            const newCount = prev + 1;
+            console.log('Transcription error count incremented:', newCount);
+            return newCount;
+          });
+          setIsProcessing(false);
+          console.log('Calling onRecordingStop(false) due to transcription error');
+          onRecordingStop(false);
+
+          // For actionable errors (like model loading failures), the main page will handle showing the model selector
+          // For regular errors, show via the error callback
+          if (onTranscriptionError && !isActionable) {
+            onTranscriptionError(errorMessage);
+          }
+        });
+
         // Recording paused listener
         const pausedUnsubscribe = await listen('recording-paused', (event) => {
           console.log('recording-paused event received:', event);
@@ -277,7 +330,28 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setIsPaused(false);
         });
 
-        unsubscribes = [transcriptErrorUnsubscribe, pausedUnsubscribe, resumedUnsubscribe];
+        // Enhanced notification confirmed listener
+        const enhancedConfirmedUnsubscribe = await listen('enhanced-notification-confirmed', (event) => {
+          console.log('enhanced-notification-confirmed event received:', event);
+          // The recording has already started, the notification just confirmed it
+          // This can be used to show additional UI feedback if needed
+        });
+
+        // Enhanced notification dismissed listener
+        const enhancedDismissedUnsubscribe = await listen('enhanced-notification-dismissed', (event) => {
+          console.log('enhanced-notification-dismissed event received:', event);
+          // The user dismissed the notification, recording may have already started
+          // This is just for informational purposes
+        });
+
+        unsubscribes = [
+          transcriptErrorUnsubscribe,
+          transcriptionErrorUnsubscribe,
+          pausedUnsubscribe,
+          resumedUnsubscribe,
+          enhancedConfirmedUnsubscribe,
+          enhancedDismissedUnsubscribe
+        ];
         console.log('Recording event listeners set up successfully');
       } catch (error) {
         console.error('Failed to set up recording event listeners:', error);
@@ -350,12 +424,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                       Analytics.trackButtonClick('start_recording', 'recording_controls');
                       handleStartRecording();
                     }}
-                    disabled={isStarting || isProcessing || isRecordingDisabled}
+                    disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
                     className={`w-12 h-12 flex items-center justify-center ${
-                      isStarting || isProcessing ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                      isStarting || isProcessing || isValidatingModel ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
                     } rounded-full text-white transition-colors relative`}
                   >
-                    <Mic size={20} />
+                    {isValidatingModel ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    ) : (
+                      <Mic size={20} />
+                    )}
                   </button>
                 ) : (
                   // Recording controls (pause/resume + stop)
@@ -422,6 +500,14 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           </>
         )}
       </div>
+
+      {/* Show validation status */}
+      {isValidatingModel && (
+        <div className="text-xs text-gray-600 text-center mt-2">
+          Validating speech recognition...
+        </div>
+      )}
+
             {/* {showPlayback && recordingPath && (
         <div className="text-sm text-gray-600 px-4">
           Recording saved to: {recordingPath}

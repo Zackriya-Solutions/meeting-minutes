@@ -10,7 +10,7 @@ export interface ModelInfo {
 }
 
 export type ModelAccuracy = 'High' | 'Good' | 'Decent';
-export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast';
+export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast';
 
 export type ModelStatus =
   | 'Available'
@@ -91,7 +91,7 @@ export const MODEL_CONFIGS: Record<string, Partial<ModelInfo>> = {
   // Q5_0 quantized models (balanced speed/accuracy)
   'large-v3-q5_0': {
     description: 'Quantized large model, best balance of speed and accuracy.',
-    size_mb: 1723,
+    size_mb: 1000,
     accuracy: 'High',
     speed: 'Medium'
   },
@@ -282,5 +282,13 @@ export class WhisperAPI {
 
   static async deleteCorruptedModel(modelName: string): Promise<string> {
     return await invoke('whisper_delete_corrupted_model', { modelName });
+  }
+
+  static async hasAvailableModels(): Promise<boolean> {
+    return await invoke('whisper_has_available_models');
+  }
+
+  static async validateModelReady(): Promise<string> {
+    return await invoke('whisper_validate_model_ready');
   }
 }

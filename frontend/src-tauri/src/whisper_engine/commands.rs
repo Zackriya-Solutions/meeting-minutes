@@ -68,9 +68,69 @@ pub async fn whisper_is_model_loaded() -> Result<bool, String> {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
         Ok(engine.is_model_loaded().await)
+    } else {
+        Err("Whisper engine not initialized".to_string())
+    }
+}
+
+#[command]
+pub async fn whisper_has_available_models() -> Result<bool, String> {
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        let models = engine.discover_models().await
+            .map_err(|e| format!("Failed to discover models: {}", e))?;
+
+        // Check if at least one model is available
+        let available_models: Vec<_> = models.iter()
+            .filter(|model| matches!(model.status, crate::whisper_engine::ModelStatus::Available))
+            .collect();
+
+        Ok(!available_models.is_empty())
+    } else {
+        Ok(false)
+    }
+}
+
+#[command]
+pub async fn whisper_validate_model_ready() -> Result<String, String> {
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        // Check if a model is currently loaded
+        if engine.is_model_loaded().await {
+            if let Some(current_model) = engine.get_current_model().await {
+                return Ok(current_model);
+            }
+        }
+
+        // No model loaded, check if any models are available to load
+        let models = engine.discover_models().await
+            .map_err(|e| format!("Failed to discover models: {}", e))?;
+
+        let available_models: Vec<_> = models.iter()
+            .filter(|model| matches!(model.status, crate::whisper_engine::ModelStatus::Available))
+            .collect();
+
+        if available_models.is_empty() {
+            return Err("No Whisper models are available. Please download a model to enable transcription.".to_string());
+        }
+
+        // Try to load the first available model
+        let first_model = &available_models[0];
+        engine.load_model(&first_model.name).await
+            .map_err(|e| format!("Failed to load model {}: {}", first_model.name, e))?;
+
+        Ok(first_model.name.clone())
     } else {
         Err("Whisper engine not initialized".to_string())
     }
