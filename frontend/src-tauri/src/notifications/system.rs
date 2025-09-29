@@ -4,8 +4,6 @@ use log::{info as log_info, error as log_error, warn as log_warn};
 use tauri::{AppHandle, Runtime};
 use std::time::Duration;
 
-#[cfg(not(target_os = "macos"))]
-use tauri_plugin_notification::NotificationExt;
 
 #[cfg(target_os = "macos")]
 use std::process::Command;

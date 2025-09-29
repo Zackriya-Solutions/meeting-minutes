@@ -11,7 +11,9 @@ use crate::notifications::{
 };
 use anyhow::Result;
 use log::{info as log_info, error as log_error};
-use tauri::{State, AppHandle, Runtime, Wry, Manager, Emitter};
+use tauri::{State, AppHandle, Runtime, Wry};
+#[cfg(target_os = "macos")]
+use tauri::{Manager, Emitter};
 use tauri_plugin_notification::NotificationExt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -548,8 +550,9 @@ pub fn setup_enhanced_notification_handlers(
 }
 
 /// Helper function to show enhanced recording confirmation with app context
+#[allow(unused_variables)] // app_handle is used conditionally based on target_os
 pub async fn show_enhanced_recording_confirmation_internal<R: Runtime>(
-    _app_handle: &AppHandle<R>,
+    app_handle: &AppHandle<R>,
     meeting_name: Option<String>,
 ) -> Result<()> {
     #[cfg(target_os = "macos")]

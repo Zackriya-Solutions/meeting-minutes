@@ -31,8 +31,11 @@ pub use commands::{
     show_enhanced_recording_confirmation,
     dismiss_all_enhanced_notifications,
     show_enhanced_recording_confirmation_internal,
-    setup_enhanced_notification_handlers,
 };
+
+// Export enhanced notification handlers only on macOS
+#[cfg(target_os = "macos")]
+pub use commands::setup_enhanced_notification_handlers;
 
 // Re-export enhanced macOS notifications
 #[cfg(target_os = "macos")]
