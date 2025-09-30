@@ -349,6 +349,7 @@ export default function Home() {
             sequence_id: event.payload.sequence_id,
             chunk_start_time: event.payload.chunk_start_time,
             is_partial: event.payload.is_partial,
+            confidence: event.payload.confidence,
           };
 
           // Add to buffer
@@ -633,6 +634,8 @@ export default function Home() {
   };
 
   const handleRecordingStop2 = async (isCallApi: boolean) => {
+    // Immediately update UI state to reflect that recording has stopped
+    setIsRecordingState(false);
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
     try {
@@ -791,7 +794,7 @@ export default function Home() {
         router.push('/meeting-details');
       }
       setIsMeetingActive(false);
-      setIsRecordingState(false);
+      // isRecordingState already set to false at function start
       setIsRecordingDisabled(false);
       // Show summary button if we have transcript content
       if (transcripts.length > 0) {
@@ -801,7 +804,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Error in handleRecordingStop2:', error);
-      setIsRecordingState(false);
+      // isRecordingState already set to false at function start
       setSummaryStatus('idle');
       setIsSavingTranscript(false);
       setIsRecordingDisabled(false);

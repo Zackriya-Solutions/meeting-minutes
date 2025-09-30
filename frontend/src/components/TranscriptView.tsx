@@ -1,7 +1,8 @@
 'use client';
 
 import { Transcript } from '@/types';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { ConfidenceIndicator } from './ConfidenceIndicator';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -11,6 +12,26 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>();
   const isUserAtBottomRef = useRef<boolean>(true);
+
+  // Load preference for showing confidence indicator
+  const [showConfidence, setShowConfidence] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('showConfidenceIndicator');
+      return saved !== null ? saved === 'true' : true; // Default to true
+    }
+    return true;
+  });
+
+  // Listen for preference changes from settings
+  useEffect(() => {
+    const handleConfidenceChange = (e: Event) => {
+      const customEvent = e as CustomEvent<boolean>;
+      setShowConfidence(customEvent.detail);
+    };
+
+    window.addEventListener('confidenceIndicatorChanged', handleConfidenceChange);
+    return () => window.removeEventListener('confidenceIndicatorChanged', handleConfidenceChange);
+  }, []);
 
   // Smart scrolling - only auto-scroll if user is at bottom
   useEffect(() => {
@@ -61,10 +82,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
                   Partial
                 </span>
               )}
-              {transcript.sequence_id && !transcript.is_partial && (
-                <span className="text-xs text-gray-400 font-mono">
-                  #{transcript.sequence_id}
-                </span>
+              {transcript.confidence !== undefined && !transcript.is_partial && (
+                <ConfidenceIndicator
+                  confidence={transcript.confidence}
+                  showIndicator={showConfidence}
+                />
               )}
             </div>
           </div>

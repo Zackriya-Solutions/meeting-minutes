@@ -11,6 +11,7 @@ export interface Transcript {
   sequence_id?: number;
   chunk_start_time?: number;
   is_partial?: boolean;
+  confidence?: number;
 }
 
 export interface TranscriptUpdate {
@@ -20,6 +21,7 @@ export interface TranscriptUpdate {
   sequence_id: number;
   chunk_start_time: number;
   is_partial: boolean;
+  confidence: number;
 }
 
 export interface Block {

@@ -40,6 +40,7 @@ pub struct TranscriptUpdate {
     pub sequence_id: u64,
     pub chunk_start_time: f64,
     pub is_partial: bool,
+    pub confidence: f32,
 }
 
 /// Start recording with default devices
@@ -633,7 +634,7 @@ fn start_transcription_task<R: Runtime>(
                                             }
                                         }
 
-                                        // Emit transcript update with partial flag
+                                        // Emit transcript update with partial flag and confidence
                                         let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
                                         let update = TranscriptUpdate {
                                             text: transcript,
@@ -642,6 +643,7 @@ fn start_transcription_task<R: Runtime>(
                                             sequence_id,
                                             chunk_start_time: chunk_timestamp,
                                             is_partial,
+                                            confidence,
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update) {
@@ -802,19 +804,15 @@ async fn transcribe_chunk_with_streaming<R: Runtime>(
     // Skip VAD processing here since the pipeline already extracted speech using VAD
     let speech_samples = whisper_data;
 
-    // Basic energy check to avoid transcribing very quiet audio
+    // PERFORMANCE FIX: Only check for empty samples - trust VAD's decision on audio quality
+    // Redundant energy checking after VAD filtering was too aggressive and rejected valid speech
     if speech_samples.is_empty() {
         info!("Empty audio chunk {}, skipping transcription", chunk.chunk_id);
         return Ok((String::new(), 0.0, false));
     }
 
-    // Check energy level of the audio with optimized threshold
+    // Calculate energy for logging/monitoring only (not filtering)
     let energy: f32 = speech_samples.iter().map(|&x| x * x).sum::<f32>() / speech_samples.len() as f32;
-    if energy < 0.00005 {
-        info!("Very low energy audio in chunk {} (energy: {:.6}), skipping transcription", chunk.chunk_id, energy);
-        return Ok((String::new(), 0.0, false));
-    }
-
     info!("Processing speech audio chunk {} with {} samples (energy: {:.6})",
           chunk.chunk_id, speech_samples.len(), energy);
 

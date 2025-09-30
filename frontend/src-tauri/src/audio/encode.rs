@@ -47,7 +47,7 @@ pub fn encode_single_audio(
             "-c:a",
             "aac",
             "-b:a",
-            "64k", // Reduced bitrate for higher compression
+            "192k", // Increased from 64k for better audio quality (especially for speech)
             "-profile:a",
             "aac_low", // Use AAC-LC profile for better compatibility
             "-movflags",

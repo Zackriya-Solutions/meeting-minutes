@@ -38,43 +38,35 @@ fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     resampled
 }
 
-// Simple audio data structure
+// Simple audio data structure (NO TIMESTAMP - prevents sorting issues)
 #[derive(Debug, Clone)]
 struct AudioData {
     data: Vec<f32>,
     sample_rate: u32,
 }
 
-// Session-scoped audio storage (improvement over unsafe static buffers)
-#[derive(Debug, Clone)]
-struct AudioSession {
-    mic_chunks: Arc<Mutex<Vec<AudioData>>>,
-    system_chunks: Arc<Mutex<Vec<AudioData>>>,
-    session_id: uuid::Uuid,
-}
+// Simple static buffers for audio accumulation (proven working approach)
+static mut MIC_CHUNKS: Option<Arc<Mutex<Vec<AudioData>>>> = None;
+static mut SYSTEM_CHUNKS: Option<Arc<Mutex<Vec<AudioData>>>> = None;
 
-impl AudioSession {
-    fn new() -> Self {
-        Self {
-            mic_chunks: Arc::new(Mutex::new(Vec::new())),
-            system_chunks: Arc::new(Mutex::new(Vec::new())),
-            session_id: uuid::Uuid::new_v4(),
-        }
-    }
-
-    fn clear(&self) {
-        if let Ok(mut mic_chunks) = self.mic_chunks.lock() {
-            mic_chunks.clear();
-        }
-        if let Ok(mut system_chunks) = self.system_chunks.lock() {
-            system_chunks.clear();
-        }
+// Helper functions to safely access static buffers
+fn with_mic_chunks<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&Arc<Mutex<Vec<AudioData>>>) -> R,
+{
+    unsafe {
+        let ptr = std::ptr::addr_of!(MIC_CHUNKS);
+        (*ptr).as_ref().map(f)
     }
 }
 
-impl Default for AudioSession {
-    fn default() -> Self {
-        Self::new()
+fn with_system_chunks<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&Arc<Mutex<Vec<AudioData>>>) -> R,
+{
+    unsafe {
+        let ptr = std::ptr::addr_of!(SYSTEM_CHUNKS);
+        (*ptr).as_ref().map(f)
     }
 }
 
@@ -82,7 +74,6 @@ impl Default for AudioSession {
 pub struct RecordingSaver {
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
     is_saving: Arc<Mutex<bool>>,
-    current_session: Option<AudioSession>,
     meeting_name: Option<String>,
     transcript_chunks: Arc<Mutex<Vec<String>>>,
 }
@@ -92,7 +83,6 @@ impl RecordingSaver {
         Self {
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
-            current_session: None,
             meeting_name: None,
             transcript_chunks: Arc::new(Mutex::new(Vec::new())),
         }
@@ -110,37 +100,15 @@ impl RecordingSaver {
         }
     }
 
-    /// Force cleanup of any existing session
-    pub fn force_cleanup(&mut self) {
-        if let Some(session) = &self.current_session {
-            info!("Force cleaning up recording session: {}", session.session_id);
-            session.clear();
-        }
-        self.current_session = None;
-
-        if let Ok(mut is_saving) = self.is_saving.lock() {
-            *is_saving = false;
-        }
-
-        // Clear transcript chunks
-        if let Ok(mut chunks) = self.transcript_chunks.lock() {
-            chunks.clear();
-        }
-
-        self.chunk_receiver = None;
-    }
-
-    /// Start accumulating audio chunks - simple approach
+    /// Start accumulating audio chunks - simple proven approach
     pub fn start_accumulation(&mut self) -> mpsc::UnboundedSender<AudioChunk> {
-        // Force cleanup any existing session first
-        self.force_cleanup();
+        info!("Initializing simple audio buffers for recording");
 
-        // Create new clean session
-        let session = AudioSession::new();
-        info!("Starting new recording session: {}", session.session_id);
-
-        let session_clone = session.clone();
-        self.current_session = Some(session);
+        // Initialize static audio buffers
+        unsafe {
+            MIC_CHUNKS = Some(Arc::new(Mutex::new(Vec::new())));
+            SYSTEM_CHUNKS = Some(Arc::new(Mutex::new(Vec::new())));
+        }
 
         // Create channel for receiving audio chunks
         let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
@@ -151,7 +119,7 @@ impl RecordingSaver {
 
         if let Some(mut receiver) = self.chunk_receiver.take() {
             tokio::spawn(async move {
-                info!("Recording saver started for session: {}", session_clone.session_id);
+                info!("Recording saver accumulation task started");
 
                 while let Some(chunk) = receiver.recv().await {
                     // Check if we should continue saving
@@ -165,7 +133,7 @@ impl RecordingSaver {
                         break;
                     }
 
-                    // Simple chunk storage - no filtering, no processing
+                    // Simple chunk storage - no filtering, no processing, NO TIMESTAMP
                     let audio_data = AudioData {
                         data: chunk.data,
                         sample_rate: chunk.sample_rate,
@@ -173,19 +141,23 @@ impl RecordingSaver {
 
                     match chunk.device_type {
                         DeviceType::Microphone => {
-                            if let Ok(mut mic_chunks) = session_clone.mic_chunks.lock() {
-                                mic_chunks.push(audio_data);
-                            }
+                            with_mic_chunks(|chunks| {
+                                if let Ok(mut mic_chunks) = chunks.lock() {
+                                    mic_chunks.push(audio_data);
+                                }
+                            });
                         }
                         DeviceType::System => {
-                            if let Ok(mut system_chunks) = session_clone.system_chunks.lock() {
-                                system_chunks.push(audio_data);
-                            }
+                            with_system_chunks(|chunks| {
+                                if let Ok(mut system_chunks) = chunks.lock() {
+                                    system_chunks.push(audio_data);
+                                }
+                            });
                         }
                     }
                 }
 
-                info!("Recording saver accumulation ended for session: {}", session_clone.session_id);
+                info!("Recording saver accumulation task ended");
             });
         }
 
@@ -199,13 +171,15 @@ impl RecordingSaver {
 
     /// Get recording statistics
     pub fn get_stats(&self) -> (usize, u32) {
-        if let Some(session) = &self.current_session {
-            let mic_count = session.mic_chunks.lock().map(|chunks| chunks.len()).unwrap_or(0);
-            let system_count = session.system_chunks.lock().map(|chunks| chunks.len()).unwrap_or(0);
-            (mic_count + system_count, 48000) // Default sample rate
-        } else {
-            (0, 48000)
-        }
+        let mic_count = with_mic_chunks(|chunks| {
+            chunks.lock().map(|c| c.len()).unwrap_or(0)
+        }).unwrap_or(0);
+
+        let system_count = with_system_chunks(|chunks| {
+            chunks.lock().map(|c| c.len()).unwrap_or(0)
+        }).unwrap_or(0);
+
+        (mic_count + system_count, 48000)
     }
 
     /// Stop and save using simple concatenation approach
@@ -231,45 +205,45 @@ impl RecordingSaver {
 
         if !preferences.auto_save {
             info!("Auto-save disabled, skipping save");
-            if let Some(session) = &self.current_session {
-                session.clear();
+            // Clean up buffers
+            unsafe {
+                MIC_CHUNKS = None;
+                SYSTEM_CHUNKS = None;
             }
-            self.current_session = None;
             return Ok(None);
         }
 
-        // Get current session
-        let session = self.current_session.as_ref().ok_or_else(|| {
-            "No active recording session found".to_string()
-        })?;
+        // Extract chunks from static buffers
+        let mic_chunks = with_mic_chunks(|chunks| {
+            if let Ok(guard) = chunks.lock() {
+                guard.clone()
+            } else {
+                Vec::new()
+            }
+        }).unwrap_or_default();
 
-        info!("Saving session: {}", session.session_id);
-
-        // Extract chunks from session
-        let mic_chunks = if let Ok(guard) = session.mic_chunks.lock() {
-            guard.clone()
-        } else {
-            warn!("Failed to lock mic chunks");
-            Vec::new()
-        };
-
-        let system_chunks = if let Ok(guard) = session.system_chunks.lock() {
-            guard.clone()
-        } else {
-            warn!("Failed to lock system chunks");
-            Vec::new()
-        };
+        let system_chunks = with_system_chunks(|chunks| {
+            if let Ok(guard) = chunks.lock() {
+                guard.clone()
+            } else {
+                Vec::new()
+            }
+        }).unwrap_or_default();
 
         info!("Processing {} mic chunks and {} system chunks", mic_chunks.len(), system_chunks.len());
 
         if mic_chunks.is_empty() && system_chunks.is_empty() {
             error!("No audio data captured");
-            session.clear();
-            self.current_session = None;
+            unsafe {
+                MIC_CHUNKS = None;
+                SYSTEM_CHUNKS = None;
+            }
             return Err("No audio data captured".to_string());
         }
 
-        // Simple concatenation approach - what was working before
+        // CRITICAL FIX: Use direct concatenation WITHOUT sorting by timestamp
+        // Timestamps can be unreliable and sorting causes audio sync issues
+        // Trust the order that chunks arrive in - it's guaranteed by the audio callback
         let mic_data: Vec<f32> = mic_chunks.iter().flat_map(|chunk| &chunk.data).cloned().collect();
         let system_data: Vec<f32> = system_chunks.iter().flat_map(|chunk| &chunk.data).cloned().collect();
 
@@ -285,26 +259,22 @@ impl RecordingSaver {
         info!("Sample rates - Mic: {}Hz, System: {}Hz, Target: {}Hz",
               mic_sample_rate, system_sample_rate, target_sample_rate);
 
-        // Simple resampling if needed
+        // Resample ONCE before mixing
         let mic_resampled = if mic_sample_rate != target_sample_rate && !mic_data.is_empty() {
-            info!("Resampling mic audio");
+            info!("Resampling mic audio from {}Hz to {}Hz", mic_sample_rate, target_sample_rate);
             resample_audio(&mic_data, mic_sample_rate, target_sample_rate)
         } else {
             mic_data
         };
 
         let system_resampled = if system_sample_rate != target_sample_rate && !system_data.is_empty() {
-            info!("Resampling system audio");
+            info!("Resampling system audio from {}Hz to {}Hz", system_sample_rate, target_sample_rate);
             resample_audio(&system_data, system_sample_rate, target_sample_rate)
         } else {
             system_data
         };
 
-        // FIXED: Improved mixing to prevent overlapping/stretching
-        let max_len = mic_resampled.len().max(system_resampled.len());
-        let mut mixed_data = Vec::with_capacity(max_len);
-
-        // Calculate RMS levels for balancing
+        // Calculate RMS levels for adaptive mixing
         let mic_rms = if !mic_resampled.is_empty() {
             (mic_resampled.iter().map(|x| x * x).sum::<f32>() / mic_resampled.len() as f32).sqrt()
         } else {
@@ -317,20 +287,15 @@ impl RecordingSaver {
             0.0
         };
 
-        // Conservative mic boost only when significantly quieter
-        let mic_boost = if mic_rms > 0.0 && system_rms > 0.0 && mic_rms < system_rms * 0.3 {
-            (system_rms / mic_rms * 0.4).min(2.5) // Max 2.5x boost
-        } else {
-            1.0
-        };
+        info!("Audio levels - Mic RMS: {:.6}, System RMS: {:.6}", mic_rms, system_rms);
 
-        info!("Audio levels - Mic RMS: {:.6}, System RMS: {:.6}, Mic boost: {:.2}x",
-              mic_rms, system_rms, mic_boost);
+        // Simple balanced mixing with proper level control
+        let max_len = mic_resampled.len().max(system_resampled.len());
+        let mut mixed_data = Vec::with_capacity(max_len);
 
-        // FIXED: Balanced mixing to prevent overlapping issues
         for i in 0..max_len {
             let mic_sample = if i < mic_resampled.len() {
-                mic_resampled[i] * mic_boost
+                mic_resampled[i]
             } else {
                 0.0
             };
@@ -341,15 +306,23 @@ impl RecordingSaver {
                 0.0
             };
 
-            // FIXED: Better mixing ratio - 70% mic + 30% system to prevent overlapping
-            let mixed_sample = mic_sample * 0.7 + system_sample * 0.3;
-
-            // Simple clipping to prevent distortion
-            let clipped_sample = mixed_sample.max(-0.95).min(0.95);
-            mixed_data.push(clipped_sample);
+            // Simple 50/50 mix, will normalize once at the end
+            let mixed_sample = (mic_sample + system_sample) * 0.5;
+            mixed_data.push(mixed_sample);
         }
 
-        info!("Mixed audio: {} samples at {}Hz", mixed_data.len(), target_sample_rate);
+        info!("Mixed {} samples at {}Hz", mixed_data.len(), target_sample_rate);
+
+        // CRITICAL FIX: Normalize ONCE at the very end
+        // Single normalization pass prevents artifacts from multiple normalization
+        let mixed_data = if !mixed_data.is_empty() {
+            let normalized = super::audio_processing::normalize_v2(&mixed_data);
+            let rms_after = (normalized.iter().map(|x| x * x).sum::<f32>() / normalized.len() as f32).sqrt();
+            info!("Normalized audio - Final RMS: {:.6}", rms_after);
+            normalized
+        } else {
+            mixed_data
+        };
 
         // Use the new audio writing function with meeting name
         let filename = write_audio_to_file_with_meeting_name(
@@ -402,9 +375,11 @@ impl RecordingSaver {
             warn!("Failed to emit recording-saved event: {}", e);
         }
 
-        // Clean up session and transcript chunks
-        session.clear();
-        self.current_session = None;
+        // Clean up static buffers and transcript chunks
+        unsafe {
+            MIC_CHUNKS = None;
+            SYSTEM_CHUNKS = None;
+        }
         if let Ok(mut chunks) = self.transcript_chunks.lock() {
             chunks.clear();
         }

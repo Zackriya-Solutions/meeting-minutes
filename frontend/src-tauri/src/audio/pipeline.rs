@@ -59,29 +59,66 @@ impl AudioCapture {
             data.to_vec()
         };
 
-        // Create audio chunk with stream-specific timestamp
+        // Create audio chunk with stream-specific timestamp (get ID first for logging)
         let chunk_id = self.chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        // PERFORMANCE FIX: Apply gain boost for microphones to fix low energy audio
+        // External mics produce very low amplitude (0.000009) that gets rejected by VAD
+        // Reduced from 10x to 5x to prevent excessive clipping while still boosting energy
+        let gain_factor = match self.device_type {
+            DeviceType::Microphone => 5.0,  // 5x boost for external mics (balanced for quality)
+            DeviceType::System => 1.0,       // No boost for system audio (already normalized)
+        };
+
+        let amplified_data: Vec<f32> = if gain_factor != 1.0 {
+            mono_data.iter()
+                .map(|&sample| (sample * gain_factor).clamp(-1.0, 1.0))
+                .collect()
+        } else {
+            mono_data.clone()
+        };
+
+        // PERFORMANCE DEBUG: Log audio levels periodically for monitoring
+        if chunk_id % 100 == 0 && !amplified_data.is_empty() {
+            let rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
+            let peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+            perf_debug!(
+                "Audio levels [{:?}] - RMS: {:.6}, Peak: {:.6}, Gain: {}x",
+                self.device_type, rms, peak, gain_factor
+            );
+        }
 
         // Use global recording timestamp for proper synchronization
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
 
-        let chunk = AudioChunk {
-            data: mono_data.clone(),
+        // CRITICAL FIX: Create TWO separate audio chunks to prevent double amplification bug
+        // 1. Original audio for recording file (no gain) - normalization only happens once at the end during save
+        // 2. Amplified audio for transcription (5x gain for mic) - needed for VAD energy detection
+        let recording_chunk = AudioChunk {
+            data: mono_data,  // ORIGINAL audio without gain boost for clean recording
             sample_rate: self.sample_rate,
-            timestamp, // Use global recording time for both streams
+            timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
         };
 
-        // Send raw audio chunk directly to recording saver (bypasses VAD filtering)
+        let transcription_chunk = AudioChunk {
+            data: amplified_data,  // AMPLIFIED audio for transcription VAD/Whisper
+            sample_rate: self.sample_rate,
+            timestamp,
+            chunk_id,
+            device_type: self.device_type.clone(),
+        };
+
+        // Send ORIGINAL audio to recording saver (no double amplification)
         if let Some(recording_sender) = &self.recording_sender {
-            if let Err(e) = recording_sender.send(chunk.clone()) {
+            if let Err(e) = recording_sender.send(recording_chunk) {
                 warn!("Failed to send chunk to recording saver: {}", e);
             }
         }
 
-        // Send to processing pipeline for transcription
-        if let Err(e) = self.state.send_audio_chunk(chunk) {
+        // Send AMPLIFIED audio to processing pipeline for transcription
+        if let Err(e) = self.state.send_audio_chunk(transcription_chunk) {
             // Check if this is the "pipeline not ready" error
             if e.to_string().contains("Audio pipeline not ready") {
                 // This is expected during initialization, just log it as debug
@@ -367,10 +404,11 @@ impl AudioPipeline {
                 speech
             }
             Ok(_) => {
-                // PERFORMANCE OPTIMIZATION: VAD detected no speech, apply balanced threshold for audio content
-                // Match old implementation's threshold for better speech detection
+                // PERFORMANCE FIX: VAD detected no speech, apply balanced threshold
+                // With 10x mic gain on transcription path, we can use a more permissive threshold
+                // to catch all speech while still filtering pure silence
                 let avg_level = accumulated_samples.iter().map(|&x| x.abs()).sum::<f32>() / accumulated_samples.len() as f32;
-                if avg_level > 0.01 { // Balanced threshold: catches more speech without over-processing
+                if avg_level > 0.002 { // Lower threshold: catch all speech with 10x amplification
                     perf_debug!("VAD detected no speech but significant audio present ({:.6}), including audio", avg_level);
                     accumulated_samples
                 } else {

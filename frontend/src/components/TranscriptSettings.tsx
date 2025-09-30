@@ -27,6 +27,13 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [selectedWhisperModel, setSelectedWhisperModel] = useState<string>(transcriptModelConfig.model || 'large-v3');
+    const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('showConfidenceIndicator');
+            return saved !== null ? saved === 'true' : true;
+        }
+        return true;
+    });
     const { serverAddress } = useSidebar();
 
     useEffect(() => {
@@ -81,6 +88,15 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                 model: modelName
             });
         }
+    };
+
+    const handleConfidenceToggle = (checked: boolean) => {
+        setShowConfidenceIndicator(checked);
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('showConfidenceIndicator', checked.toString());
+        }
+        // Trigger a custom event to notify other components
+        window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
     };
     return (
         <div className='max-h-[calc(100vh-200px)]'>
@@ -195,6 +211,28 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             </div>
                         </div>
                     )}
+
+                    <div className="border-t border-gray-200 pt-4 mt-4">
+                        <div className="flex items-center justify-between mx-1">
+                            <div className="flex-1">
+                                <Label className="text-sm font-medium text-gray-700">
+                                    Show Confidence Indicators
+                                </Label>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Display colored dots showing transcription confidence quality
+                                </p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer ml-4">
+                                <input
+                                    type="checkbox"
+                                    checked={showConfidenceIndicator}
+                                    onChange={(e) => handleConfidenceToggle(e.target.checked)}
+                                    className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                        </div>
+                    </div>
                 </div>
             </div>
 

@@ -17,6 +17,24 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 # Hardware acceleration features for whisper-rs
 # Cross-platform GPU acceleration with smart defaults
+#
+# BUILD INSTRUCTIONS:
+# ===================
+# macOS:     cargo build --release              (Metal GPU auto-enabledon)
+#
+# Windows:   cargo build --release              (CPU with OpenBLAS)
+#            cargo build --release --features cuda    (NVIDIA GPU)
+#            cargo build --release --features vulkan  (AMD/Intel GPU)
+#
+# Linux:     cargo build --release              (CPU with OpenBLAS)
+#            cargo build --release --features cuda    (NVIDIA GPU)
+#            cargo build --release --features hipblas (AMD GPU with ROCm)
+#            cargo build --release --features vulkan  (Other GPUs)
+#
+# QUICK START: Use the helper scripts!
+#   ./build-gpu.sh (Unix/macOS)
+#   .\build-gpu.ps1 (Windows PowerShell)
+#
 [features]
 default = ["platform-default"]  # Automatically enables best backend per platform
 
@@ -131,7 +149,8 @@ cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["a
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 
-# PERFORMANCE: Enable Metal GPU acceleration automatically on macOS
+# PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
+# CoreML provides additional acceleration for Apple Silicon chips
 whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "metal"] }
 
 # Windows-specific dependencies with CPU optimization (OpenBLAS)
