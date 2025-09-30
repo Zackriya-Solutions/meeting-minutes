@@ -42,25 +42,30 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
   return (
     <div ref={containerRef} className="h-full overflow-y-auto px-4 py-2">
       {transcripts?.map((transcript, index) => (
-        <div 
-          key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`} 
-          className={`mb-3 p-3 rounded-lg transition-colors duration-200 bg-gray-50 border-l-4 border-gray-200`}
+        <div
+          key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
+          className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${
+            transcript.is_partial
+              ? 'bg-blue-25 border-l-4 border-blue-300 opacity-75'
+              : 'bg-gray-50 border-l-4 border-gray-200'
+          }`}
         >
           <div className="flex justify-between items-center mb-1">
             <span className="text-xs text-gray-500">
               {transcript.timestamp}
             </span>
             <div className="flex items-center space-x-2">
-              {/* {transcript.is_partial && (
-                <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+              {transcript.is_partial && (
+                <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                   Partial
                 </span>
-              )} */}
-              {/* {transcript.sequence_id && (
+              )}
+              {transcript.sequence_id && !transcript.is_partial && (
                 <span className="text-xs text-gray-400 font-mono">
                   #{transcript.sequence_id}
                 </span>
-              )} */}
+              )}
             </div>
           </div>
           <p className={`text-sm text-gray-800`}>

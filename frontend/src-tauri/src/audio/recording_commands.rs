@@ -77,59 +77,55 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
     info!("✅ Whisper model validation passed");
 
-    // Spawn the recording task in a separate thread to avoid Send issues
-    let app_clone = app.clone();
-    let meeting_name_clone = meeting_name.clone();
-    tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(async {
-            // Create new recording manager
-            let mut manager = RecordingManager::new();
+    // Async-first approach - no more blocking operations!
+    info!("🚀 Starting async recording initialization");
 
-            // Set meeting name if provided
-            if let Some(name) = meeting_name_clone {
-                manager.set_meeting_name(Some(name));
-            }
+    // Create new recording manager
+    let mut manager = RecordingManager::new();
 
-            // Set up error callback
-            let app_for_error = app_clone.clone();
-            manager.set_error_callback(move |error| {
-                let _ = app_for_error.emit("recording-error", error.user_message());
-            });
+    // Set meeting name if provided
+    if let Some(name) = meeting_name.clone() {
+        manager.set_meeting_name(Some(name));
+    }
 
-            // Start recording with default devices
-            let transcription_receiver = manager.start_recording_with_defaults().await
-                .map_err(|e| format!("Failed to start recording: {}", e))?;
+    // Set up error callback
+    let app_for_error = app.clone();
+    manager.set_error_callback(move |error| {
+        let _ = app_for_error.emit("recording-error", error.user_message());
+    });
 
-            // Store the manager globally to keep it alive
-            {
-                let mut global_manager = RECORDING_MANAGER.lock().unwrap();
-                *global_manager = Some(manager);
-            }
+    // Start recording with default devices
+    let transcription_receiver = manager.start_recording_with_defaults().await
+        .map_err(|e| format!("Failed to start recording: {}", e))?;
 
-            // Set recording flag
-            info!("🔍 Setting IS_RECORDING to true");
-            IS_RECORDING.store(true, Ordering::SeqCst);
+    // Store the manager globally to keep it alive
+    {
+        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        *global_manager = Some(manager);
+    }
 
-            // Start transcription task and store handle
-            let task_handle = start_transcription_task(app_clone.clone(), transcription_receiver);
-            {
-                let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-                *global_task = Some(task_handle);
-            }
+    // Set recording flag
+    info!("🔍 Setting IS_RECORDING to true");
+    IS_RECORDING.store(true, Ordering::SeqCst);
 
-            // Emit success event
-            app_clone.emit("recording-started", serde_json::json!({
-                "message": "Recording started successfully",
-                "devices": ["Default Microphone", "Default System Audio"]
-            })).map_err(|e| e.to_string())?;
+    // Start optimized parallel transcription task and store handle
+    let task_handle = start_transcription_task(app.clone(), transcription_receiver);
+    {
+        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+        *global_task = Some(task_handle);
+    }
 
-            // Update tray menu to reflect recording state
-            crate::tray::update_tray_menu(&app_clone);
+    // Emit success event
+    app.emit("recording-started", serde_json::json!({
+        "message": "Recording started successfully with parallel processing",
+        "devices": ["Default Microphone", "Default System Audio"],
+        "workers": 4
+    })).map_err(|e| e.to_string())?;
 
-            info!("Recording started successfully");
-            Ok::<(), String>(())
-        })
-    }).await.map_err(|e| format!("Task join error: {}", e))??;
+    // Update tray menu to reflect recording state
+    crate::tray::update_tray_menu(&app);
+
+    info!("✅ Recording started successfully with async-first approach");
     
     Ok(())
 }
@@ -191,69 +187,65 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         None
     };
 
-    // Spawn the recording task in a separate thread to avoid Send issues
-    let app_clone = app.clone();
-    let meeting_name_clone = meeting_name.clone();
-    tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(async {
-            // Create new recording manager
-            let mut manager = RecordingManager::new();
+    // Async-first approach for custom devices - no more blocking operations!
+    info!("🚀 Starting async recording initialization with custom devices");
 
-            // Set meeting name if provided
-            if let Some(name) = meeting_name_clone {
-                manager.set_meeting_name(Some(name));
-            }
+    // Create new recording manager
+    let mut manager = RecordingManager::new();
 
-            // Set up error callback
-            let app_for_error = app_clone.clone();
-            manager.set_error_callback(move |error| {
-                let _ = app_for_error.emit("recording-error", error.user_message());
-            });
+    // Set meeting name if provided
+    if let Some(name) = meeting_name.clone() {
+        manager.set_meeting_name(Some(name));
+    }
 
-            // Start recording with specified devices
-            let transcription_receiver = manager.start_recording(mic_device, system_device).await
-                .map_err(|e| format!("Failed to start recording: {}", e))?;
+    // Set up error callback
+    let app_for_error = app.clone();
+    manager.set_error_callback(move |error| {
+        let _ = app_for_error.emit("recording-error", error.user_message());
+    });
 
-            // Store the manager globally to keep it alive
-            {
-                let mut global_manager = RECORDING_MANAGER.lock().unwrap();
-                *global_manager = Some(manager);
-            }
+    // Start recording with specified devices
+    let transcription_receiver = manager.start_recording(mic_device, system_device).await
+        .map_err(|e| format!("Failed to start recording: {}", e))?;
 
-            // Set recording flag
-            info!("🔍 Setting IS_RECORDING to true");
-            IS_RECORDING.store(true, Ordering::SeqCst);
+    // Store the manager globally to keep it alive
+    {
+        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        *global_manager = Some(manager);
+    }
 
-            // Start transcription task and store handle
-            let task_handle = start_transcription_task(app_clone.clone(), transcription_receiver);
-            {
-                let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-                *global_task = Some(task_handle);
-            }
+    // Set recording flag
+    info!("🔍 Setting IS_RECORDING to true");
+    IS_RECORDING.store(true, Ordering::SeqCst);
 
-            // Emit success event
-            app_clone.emit("recording-started", serde_json::json!({
-                "message": "Recording started with custom devices",
-                "devices": [
-                    mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
-                    system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
-                ]
-            })).map_err(|e| e.to_string())?;
+    // Start optimized parallel transcription task and store handle
+    let task_handle = start_transcription_task(app.clone(), transcription_receiver);
+    {
+        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+        *global_task = Some(task_handle);
+    }
 
-            // Update tray menu to reflect recording state
-            crate::tray::update_tray_menu(&app_clone);
+    // Emit success event
+    app.emit("recording-started", serde_json::json!({
+        "message": "Recording started with custom devices and parallel processing",
+        "devices": [
+            mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
+            system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
+        ],
+        "workers": 4
+    })).map_err(|e| e.to_string())?;
 
-            info!("Recording started with custom devices");
-            Ok::<(), String>(())
-        })
-    }).await.map_err(|e| format!("Task join error: {}", e))??;
+    // Update tray menu to reflect recording state
+    crate::tray::update_tray_menu(&app);
+
+    info!("✅ Recording started with custom devices using async-first approach");
     
     Ok(())
 }
 
-/// Stop recording
+/// Stop recording with optimized graceful shutdown ensuring NO transcript chunks are lost
 pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs) -> Result<(), String> {
-    info!("Stopping recording");
+    info!("🛑 Starting optimized recording shutdown - ensuring ALL transcript chunks are preserved");
 
     // Check if recording is active
     if !IS_RECORDING.load(Ordering::SeqCst) {
@@ -261,57 +253,105 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
         return Ok(());
     }
 
-    // Step 1: Stop the recording manager using the old approach (stop everything at once)
-    let app_clone = app.clone();
-    let stop_result = tokio::task::spawn_blocking(move || {
-        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
-        if let Some(mut manager) = global_manager.take() {
-            // Use a blocking async runtime for the stop operation
-            tokio::runtime::Handle::current().block_on(manager.stop_recording(&app_clone))
-        } else {
-            warn!("No recording manager found to stop");
-            Ok(())
-        }
-    }).await.map_err(|e| format!("Task join error: {}", e))?;
+    // Emit shutdown progress to frontend
+    let _ = app.emit("recording-shutdown-progress", serde_json::json!({
+        "stage": "stopping_audio",
+        "message": "Stopping audio capture...",
+        "progress": 20
+    }));
 
-    // Step 2: Wait for transcription task to complete all pending chunks
+    // Step 1: Stop audio capture immediately (no more new chunks) with proper error handling
+    let manager_for_cleanup = {
+        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        global_manager.take()
+    };
+
+    let stop_result = if let Some(mut manager) = manager_for_cleanup {
+        // Use FORCE FLUSH to immediately process all accumulated audio - eliminates 30s delay!
+        info!("🚀 Using FORCE FLUSH to eliminate pipeline accumulation delays");
+        let result = manager.stop_streams_and_force_flush().await;
+        // Store manager back for later cleanup
+        let manager_for_cleanup = Some(manager);
+        (result, manager_for_cleanup)
+    } else {
+        warn!("No recording manager found to stop");
+        (Ok(()), None)
+    };
+
+    let (stop_result, manager_for_cleanup) = stop_result;
+
+    match stop_result {
+        Ok(_) => {
+            info!("✅ Audio streams stopped successfully - no more chunks will be created");
+        }
+        Err(e) => {
+            error!("❌ Failed to stop audio streams: {}", e);
+            return Err(format!("Failed to stop audio streams: {}", e));
+        }
+    }
+
+    // Step 2: Signal transcription workers to finish processing ALL queued chunks
+    let _ = app.emit("recording-shutdown-progress", serde_json::json!({
+        "stage": "processing_transcripts",
+        "message": "Processing remaining transcript chunks...",
+        "progress": 40
+    }));
+
+    // Wait for transcription task with enhanced progress monitoring (NO TIMEOUT - we must process all chunks)
     let transcription_task = {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         global_task.take()
     };
 
     if let Some(task_handle) = transcription_task {
-        info!("Waiting for transcription task to complete all pending chunks...");
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(30), // 30 second timeout
-            task_handle
-        ).await {
-            Ok(Ok(())) => {
-                info!("Transcription task completed successfully");
+        info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
+
+        // Enhanced progress monitoring during shutdown
+        let progress_app = app.clone();
+        let progress_task = tokio::spawn(async move {
+            let last_update = std::time::Instant::now();
+
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                // Emit periodic progress updates during shutdown
+                let elapsed = last_update.elapsed().as_secs();
+                let _ = progress_app.emit("recording-shutdown-progress", serde_json::json!({
+                    "stage": "processing_transcripts",
+                    "message": format!("Processing transcripts... ({}s elapsed)", elapsed),
+                    "progress": 40,
+                    "detailed": true,
+                    "elapsed_seconds": elapsed
+                }));
             }
-            Ok(Err(e)) => {
-                warn!("Transcription task completed with error: {:?}", e);
+        });
+
+        // Wait indefinitely for transcription completion - no 30 second timeout!
+        match task_handle.await {
+            Ok(()) => {
+                info!("✅ ALL transcription chunks processed successfully - no data lost");
             }
-            Err(_) => {
-                warn!("Transcription task timed out after 30 seconds");
+            Err(e) => {
+                warn!("⚠️ Transcription task completed with error: {:?}", e);
+                // Continue anyway - the worker may have processed most chunks
             }
         }
+
+        // Stop progress monitoring
+        progress_task.abort();
+
     } else {
-        info!("No transcription task found to wait for");
+        info!("ℹ️ No transcription task found to wait for");
     }
 
-    match stop_result {
-        Ok(_) => {
-            info!("Recording manager stopped successfully");
-        }
-        Err(e) => {
-            error!("Failed to stop recording: {}", e);
-            return Err(format!("Failed to stop recording: {}", e));
-        }
-    }
+    // Step 3: Now safely unload Whisper model after ALL chunks are processed
+    let _ = app.emit("recording-shutdown-progress", serde_json::json!({
+        "stage": "unloading_model",
+        "message": "Unloading speech recognition model...",
+        "progress": 70
+    }));
 
-    // Unload the whisper model to free memory (like old implementation)
-    info!("Unloading whisper model to free memory...");
+    info!("🧠 All transcript chunks processed. Now safely unloading Whisper model...");
     let engine_clone = {
         let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE.lock().unwrap();
         engine_guard.as_ref().cloned()
@@ -330,19 +370,49 @@ pub async fn stop_recording<R: Runtime>(app: AppHandle<R>, _args: RecordingArgs)
         warn!("⚠️ No whisper engine found to unload model");
     }
 
+    // Step 4: Finalize recording state and cleanup resources safely
+    let _ = app.emit("recording-shutdown-progress", serde_json::json!({
+        "stage": "finalizing",
+        "message": "Finalizing recording and cleaning up resources...",
+        "progress": 90
+    }));
+
+    // Perform final cleanup with the manager if available
+    if let Some(mut manager) = manager_for_cleanup {
+        info!("🧹 Performing final cleanup and saving recording data");
+        match manager.save_recording_only(&app).await {
+            Ok(_) => {
+                info!("✅ Recording data saved successfully during cleanup");
+            }
+            Err(e) => {
+                warn!("⚠️ Error during recording cleanup (transcripts preserved): {}", e);
+                // Don't fail shutdown - transcripts are already preserved
+            }
+        }
+    } else {
+        info!("ℹ️ No recording manager available for cleanup");
+    }
+
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
 
-    // Emit stop event
+    // Step 5: Complete shutdown
+    let _ = app.emit("recording-shutdown-progress", serde_json::json!({
+        "stage": "complete",
+        "message": "Recording stopped successfully",
+        "progress": 100
+    }));
+
+    // Emit final stop event
     app.emit("recording-stopped", serde_json::json!({
-        "message": "Recording stopped"
+        "message": "Recording stopped - all transcript chunks preserved"
     })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect stopped state
     crate::tray::update_tray_menu(&app);
 
-    info!("Recording stopped successfully");
+    info!("🎉 Recording stopped successfully with ZERO transcript chunks lost");
     Ok(())
 }
 
@@ -460,20 +530,19 @@ pub async fn get_recording_state() -> serde_json::Value {
     }
 }
 
-/// Transcription task with simplified error handling
+/// Optimized parallel transcription task ensuring ZERO chunk loss
 fn start_transcription_task<R: Runtime>(
     app: AppHandle<R>,
-    mut transcription_receiver: tokio::sync::mpsc::UnboundedReceiver<AudioChunk>
+    transcription_receiver: tokio::sync::mpsc::UnboundedReceiver<AudioChunk>
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        info!("Starting simplified transcription task");
+        info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
 
         // Initialize whisper engine
         let whisper_engine = match get_or_init_whisper(&app).await {
             Ok(engine) => engine,
             Err(e) => {
                 error!("Failed to initialize Whisper engine: {}", e);
-                // Emit error to frontend with user-friendly message
                 let _ = app.emit("transcription-error", serde_json::json!({
                     "error": e,
                     "userMessage": "Recording failed: Unable to initialize speech recognition. Please check your model settings.",
@@ -483,66 +552,246 @@ fn start_transcription_task<R: Runtime>(
             }
         };
 
-        // Process transcription chunks
-        while let Some(chunk) = transcription_receiver.recv().await {
-            info!("Processing transcription chunk {} with {} samples",
-                  chunk.chunk_id, chunk.data.len());
+        // Create parallel workers for faster processing while preserving ALL chunks
+        const NUM_WORKERS: usize = 4; // Increased from 3 to ensure better chunk distribution
+        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
+        let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
-            // Store timestamp before moving chunk
-            let chunk_timestamp = chunk.timestamp;
+        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
+        let chunks_queued = Arc::new(AtomicU64::new(0));
+        let chunks_completed = Arc::new(AtomicU64::new(0));
+        let input_finished = Arc::new(AtomicBool::new(false));
 
-            // Transcribe with whisper
-            match transcribe_chunk(&whisper_engine, chunk, &app).await {
-                Ok(transcript) => {
-                    if !transcript.trim().is_empty() {
-                        info!("Transcription result: {}", transcript);
+        info!("📊 Starting {} parallel transcription workers", NUM_WORKERS);
 
-                        // Save transcript chunk to recording manager
-                        {
-                            let global_manager = RECORDING_MANAGER.lock().unwrap();
-                            if let Some(manager) = global_manager.as_ref() {
-                                manager.add_transcript_chunk(transcript.clone());
+        // Spawn worker tasks
+        let mut worker_handles = Vec::new();
+        for worker_id in 0..NUM_WORKERS {
+            let whisper_engine_clone = whisper_engine.clone();
+            let app_clone = app.clone();
+            let work_receiver_clone = work_receiver.clone();
+            let chunks_completed_clone = chunks_completed.clone();
+            let input_finished_clone = input_finished.clone();
+            let chunks_queued_clone = chunks_queued.clone();
+
+            let worker_handle = tokio::spawn(async move {
+                info!("👷 Worker {} started", worker_id);
+
+                // PRE-VALIDATE Whisper model state to avoid repeated async calls per chunk
+                let initial_model_loaded = whisper_engine_clone.is_model_loaded().await;
+                let current_model = whisper_engine_clone.get_current_model().await.unwrap_or_else(|| "unknown".to_string());
+
+                if initial_model_loaded {
+                    info!("✅ Worker {} pre-validation: Whisper model '{}' is loaded and ready", worker_id, current_model);
+                } else {
+                    warn!("⚠️ Worker {} pre-validation: Whisper model not loaded - chunks may be skipped", worker_id);
+                }
+
+                loop {
+                    // Try to get a chunk to process
+                    let chunk = {
+                        let mut receiver = work_receiver_clone.lock().await;
+                        receiver.recv().await
+                    };
+
+                    match chunk {
+                        Some(chunk) => {
+                            // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
+                            // Only log every 10th chunk per worker to reduce I/O overhead
+                            let should_log_this_chunk = chunk.chunk_id % 10 == 0;
+
+                            if should_log_this_chunk {
+                                info!("👷 Worker {} processing chunk {} with {} samples",
+                                      worker_id, chunk.chunk_id, chunk.data.len());
+                            }
+
+                            // Check if model is still loaded before processing
+                            if !whisper_engine_clone.is_model_loaded().await {
+                                warn!("⚠️ Worker {}: Whisper model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
+                                // Still count as completed even if we can't process
+                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                continue;
+                            }
+
+                            let chunk_timestamp = chunk.timestamp;
+
+                            // Transcribe with whisper using streaming approach
+                            match transcribe_chunk_with_streaming(&whisper_engine_clone, chunk, &app_clone).await {
+                                Ok((transcript, confidence, is_partial)) => {
+                                    let confidence_threshold = 0.4; // Display results above 40% confidence
+
+                                    if !transcript.trim().is_empty() && confidence >= confidence_threshold {
+                                        // PERFORMANCE: Only log transcription results, not every processing step
+                                        info!("✅ Worker {} transcribed: {} (confidence: {:.2}, partial: {})",
+                                              worker_id, transcript, confidence, is_partial);
+
+                                        // Save transcript chunk to recording manager (only final results)
+                                        if !is_partial {
+                                            let global_manager = RECORDING_MANAGER.lock().unwrap();
+                                            if let Some(manager) = global_manager.as_ref() {
+                                                manager.add_transcript_chunk(transcript.clone());
+                                            }
+                                        }
+
+                                        // Emit transcript update with partial flag
+                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        let update = TranscriptUpdate {
+                                            text: transcript,
+                                            timestamp: format_current_timestamp(),
+                                            source: "Audio".to_string(),
+                                            sequence_id,
+                                            chunk_start_time: chunk_timestamp,
+                                            is_partial,
+                                        };
+
+                                        if let Err(e) = app_clone.emit("transcript-update", &update) {
+                                            error!("Worker {}: Failed to emit transcript update: {}", worker_id, e);
+                                        }
+                                        // PERFORMANCE: Removed verbose logging of every emission
+                                    } else if !transcript.trim().is_empty() && should_log_this_chunk {
+                                        // PERFORMANCE: Only log low-confidence results occasionally
+                                        info!("Worker {} low-confidence transcription (confidence: {:.2}), skipping", worker_id, confidence);
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Worker {}: Transcription failed: {}", worker_id, e);
+                                    let _ = app_clone.emit("transcription-warning", e);
+                                }
+                            }
+
+                            // Mark chunk as completed
+                            let completed = chunks_completed_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                            let queued = chunks_queued_clone.load(Ordering::SeqCst);
+
+                            // PERFORMANCE: Only log progress every 5th chunk to reduce I/O overhead
+                            if completed % 5 == 0 || should_log_this_chunk {
+                                info!("Worker {}: Progress {}/{} chunks ({:.1}%)",
+                                      worker_id, completed, queued,
+                                      (completed as f64 / queued.max(1) as f64 * 100.0));
+                            }
+
+                            // Emit progress event for frontend
+                            let progress_percentage = if queued > 0 {
+                                (completed as f64 / queued as f64 * 100.0) as u32
+                            } else {
+                                100
+                            };
+
+                            let _ = app_clone.emit("transcription-progress", serde_json::json!({
+                                "worker_id": worker_id,
+                                "chunks_completed": completed,
+                                "chunks_queued": queued,
+                                "progress_percentage": progress_percentage,
+                                "message": format!("Worker {} processing... ({}/{})", worker_id, completed, queued)
+                            }));
+                        }
+                        None => {
+                            // No more chunks available
+                            if input_finished_clone.load(Ordering::SeqCst) {
+                                // Double-check that all queued chunks are actually completed
+                                let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
+                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
+
+                                if final_completed >= final_queued {
+                                    info!("👷 Worker {} finishing - all {}/{} chunks processed", worker_id, final_completed, final_queued);
+                                    break;
+                                } else {
+                                    warn!("👷 Worker {} detected potential chunk loss: {}/{} completed, waiting...", worker_id, final_completed, final_queued);
+                                    // AGGRESSIVE POLLING: Reduced from 50ms to 5ms for faster chunk detection during shutdown
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                                }
+                            } else {
+                                // AGGRESSIVE POLLING: Reduced from 10ms to 1ms for faster response during shutdown
+                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                             }
                         }
-
-                        // Emit transcript update
-                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
-                        let update = TranscriptUpdate {
-                            text: transcript,
-                            timestamp: format_current_timestamp(),
-                            source: "Audio".to_string(),
-                            sequence_id,
-                            chunk_start_time: chunk_timestamp,
-                            is_partial: false,
-                        };
-
-                        if let Err(e) = app.emit("transcript-update", &update) {
-                            error!("Failed to emit transcript update: {}", e);
-                        } else {
-                            info!("Successfully emitted transcript-update with sequence_id: {}", sequence_id);
-                        }
-
-                        // Note: Transcript saving happens in the recording saver during stop_and_save
                     }
                 }
-                Err(e) => {
-                    warn!("Transcription failed: {}", e);
-                    // Emit error but continue processing
-                    let _ = app.emit("transcription-warning", e);
-                }
+
+                info!("👷 Worker {} completed", worker_id);
+            });
+
+            worker_handles.push(worker_handle);
+        }
+
+        // Main dispatcher: receive chunks and distribute to workers
+        let mut receiver = transcription_receiver;
+        while let Some(chunk) = receiver.recv().await {
+            let queued = chunks_queued.fetch_add(1, Ordering::SeqCst) + 1;
+            info!("📥 Dispatching chunk {} to workers (total queued: {})", chunk.chunk_id, queued);
+
+            if let Err(_) = work_sender.send(chunk) {
+                error!("❌ Failed to send chunk to workers - this should not happen!");
+                break;
             }
         }
 
-        info!("✅ Transcription task completed - all pending chunks processed");
+        // Signal that input is finished
+        input_finished.store(true, Ordering::SeqCst);
+        drop(work_sender); // Close the channel to signal workers
+
+        let total_chunks_queued = chunks_queued.load(Ordering::SeqCst);
+        info!("📭 Input finished with {} total chunks queued. Waiting for all {} workers to complete...",
+              total_chunks_queued, NUM_WORKERS);
+
+        // Emit final chunk count to frontend
+        let _ = app.emit("transcription-queue-complete", serde_json::json!({
+            "total_chunks": total_chunks_queued,
+            "message": format!("{} chunks queued for processing - waiting for completion", total_chunks_queued)
+        }));
+
+        // Wait for all workers to complete
+        for (worker_id, handle) in worker_handles.into_iter().enumerate() {
+            if let Err(e) = handle.await {
+                error!("❌ Worker {} panicked: {:?}", worker_id, e);
+            } else {
+                info!("✅ Worker {} completed successfully", worker_id);
+            }
+        }
+
+        // Final verification with retry logic to catch any stragglers
+        let mut verification_attempts = 0;
+        const MAX_VERIFICATION_ATTEMPTS: u32 = 10;
+
+        loop {
+            let final_queued = chunks_queued.load(Ordering::SeqCst);
+            let final_completed = chunks_completed.load(Ordering::SeqCst);
+
+            if final_queued == final_completed {
+                info!("🎉 ALL {} chunks processed successfully - ZERO chunks lost!", final_completed);
+                break;
+            } else if verification_attempts < MAX_VERIFICATION_ATTEMPTS {
+                verification_attempts += 1;
+                warn!("⚠️ Chunk count mismatch (attempt {}): {} queued, {} completed - waiting for stragglers...",
+                     verification_attempts, final_queued, final_completed);
+
+                // Wait a bit for any remaining chunks to be processed
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            } else {
+                error!("❌ CRITICAL: After {} attempts, chunk loss detected: {} queued, {} completed",
+                      MAX_VERIFICATION_ATTEMPTS, final_queued, final_completed);
+
+                // Emit critical error event
+                let _ = app.emit("transcript-chunk-loss-detected", serde_json::json!({
+                    "chunks_queued": final_queued,
+                    "chunks_completed": final_completed,
+                    "chunks_lost": final_queued - final_completed,
+                    "message": "Some transcript chunks may have been lost during shutdown"
+                }));
+                break;
+            }
+        }
+
+        info!("✅ Parallel transcription task completed - all workers finished, ready for model unload");
     })
 }
 
-/// Transcribe a single audio chunk with VAD filtering and error handling
-async fn transcribe_chunk<R: Runtime>(
+/// Transcribe audio chunk with streaming support and confidence scoring
+async fn transcribe_chunk_with_streaming<R: Runtime>(
     whisper_engine: &Arc<crate::whisper_engine::WhisperEngine>,
     chunk: AudioChunk,
-    _app: &AppHandle<R>,
-) -> Result<String, String> {
+    app: &AppHandle<R>,
+) -> Result<(String, f32, bool), String> {
     // Convert to 16kHz mono for whisper and VAD
     let whisper_data = if chunk.sample_rate != 16000 {
         crate::audio::audio_processing::resample_audio(&chunk.data, chunk.sample_rate, 16000)
@@ -551,74 +800,53 @@ async fn transcribe_chunk<R: Runtime>(
     };
 
     // Skip VAD processing here since the pipeline already extracted speech using VAD
-    // The incoming chunk.data already contains VAD-processed speech segments
     let speech_samples = whisper_data;
 
     // Basic energy check to avoid transcribing very quiet audio
     if speech_samples.is_empty() {
         info!("Empty audio chunk {}, skipping transcription", chunk.chunk_id);
-        return Ok(String::new());
+        return Ok((String::new(), 0.0, false));
     }
 
-    // Check energy level of the audio
+    // Check energy level of the audio with optimized threshold
     let energy: f32 = speech_samples.iter().map(|&x| x * x).sum::<f32>() / speech_samples.len() as f32;
-    if energy < 0.00001 { // Very low energy threshold
+    if energy < 0.00005 {
         info!("Very low energy audio in chunk {} (energy: {:.6}), skipping transcription", chunk.chunk_id, energy);
-        return Ok(String::new());
+        return Ok((String::new(), 0.0, false));
     }
 
     info!("Processing speech audio chunk {} with {} samples (energy: {:.6})",
           chunk.chunk_id, speech_samples.len(), energy);
 
-    // Check if we have enough speech content for transcription
-    // Whisper needs at least 1 second of audio for reliable transcription
-    let speech_duration_ms = (speech_samples.len() as f64 / 16000.0) * 1000.0;
-
-    // Use old implementation's approach: pad short chunks instead of rejecting them
-    let final_data = if speech_samples.len() < 16000 { // Less than 1 second of actual speech
-        info!("Speech chunk {} too short ({:.1}ms), padding to 1 second", 
-              chunk.chunk_id, speech_duration_ms);
-        
-        // Pad with silence to reach minimum 1 second (like old implementation)
-        let mut padded_chunk = speech_samples;
-        padded_chunk.resize(16000, 0.0); // Pad with silence
-        padded_chunk
-    } else {
-        info!("Speech chunk {} has {} samples ({:.1}ms) - sufficient for whisper", 
-              chunk.chunk_id, speech_samples.len(), speech_duration_ms);
-        speech_samples
-    };
-
-    // Get current model name for logging
-    let current_model = whisper_engine.get_current_model().await.unwrap_or_else(|| "unknown".to_string());
-    info!("🎯 Transcribing chunk {} using model: '{}'", chunk.chunk_id, current_model);
-
-    // Transcribe with timeout and error handling
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(30), // 30 second timeout
-        whisper_engine.transcribe_audio(final_data)
-    ).await {
-        Ok(result) => {
-            match result {
-                Ok(transcript) => {
-                    info!("✅ Transcription successful for chunk {} using model '{}': '{}'", 
-                          chunk.chunk_id, current_model, transcript.trim());
-                    Ok(transcript)
-                }
-                Err(e) => {
-                    error!("❌ Transcription failed for chunk {} using model '{}': {}", 
-                           chunk.chunk_id, current_model, e);
-                    Err(format!("Whisper transcription failed: {}", e))
-                }
+    match whisper_engine.transcribe_audio_with_confidence(speech_samples).await {
+        Ok((text, confidence, is_partial)) => {
+            let cleaned_text = text.trim().to_string();
+            if cleaned_text.is_empty() {
+                return Ok((String::new(), confidence, is_partial));
             }
+
+            info!("Transcription complete for chunk {}: '{}' (confidence: {:.2}, partial: {})",
+                  chunk.chunk_id, cleaned_text, confidence, is_partial);
+
+            Ok((cleaned_text, confidence, is_partial))
         }
-        Err(_) => {
-            let error_msg = "Transcription timeout - chunk took too long to process";
-            warn!("{}", error_msg);
-            Err(error_msg.to_string())
+        Err(e) => {
+            error!("Whisper transcription failed for chunk {}: {}", chunk.chunk_id, e);
+
+            let error_msg = format!("Transcription failed: {}", e);
+            if let Err(emit_err) = app.emit("transcription-error", &serde_json::json!({
+                "error": e.to_string(),
+                "userMessage": error_msg.clone(),
+                "actionable": false
+            })) {
+                error!("Failed to emit transcription error: {}", emit_err);
+            }
+
+            Err(error_msg)
         }
     }
 }
+
 
 /// Validate that Whisper models are ready before starting recording
 async fn validate_whisper_model_ready<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {

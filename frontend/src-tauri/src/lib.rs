@@ -2,6 +2,38 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 // Removed unused import
 
+// Performance optimization: Conditional logging macros for hot paths
+// These macros will completely eliminate logging overhead in release builds
+#[cfg(debug_assertions)]
+macro_rules! perf_debug {
+    ($($arg:tt)*) => {
+        log::debug!($($arg)*)
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! perf_debug {
+    ($($arg:tt)*) => {};
+}
+
+#[cfg(debug_assertions)]
+macro_rules! perf_trace {
+    ($($arg:tt)*) => {
+        log::trace!($($arg)*)
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! perf_trace {
+    ($($arg:tt)*) => {};
+}
+
+// Make these macros available to other modules
+pub(crate) use perf_debug;
+pub(crate) use perf_trace;
+
+// Re-export async logging macros for external use (removed due to macro conflicts)
+
 // Declare audio module
 pub mod audio;
 pub mod ollama;
@@ -215,6 +247,31 @@ async fn save_transcript(file_path: String, content: String) -> Result<(), Strin
     Ok(())
 }
 
+// Audio level monitoring commands
+#[tauri::command]
+async fn start_audio_level_monitoring<R: Runtime>(
+    app: AppHandle<R>,
+    device_names: Vec<String>
+) -> Result<(), String> {
+    log_info!("Starting audio level monitoring for devices: {:?}", device_names);
+
+    audio::simple_level_monitor::start_monitoring(app, device_names).await
+        .map_err(|e| format!("Failed to start audio level monitoring: {}", e))
+}
+
+#[tauri::command]
+async fn stop_audio_level_monitoring() -> Result<(), String> {
+    log_info!("Stopping audio level monitoring");
+
+    audio::simple_level_monitor::stop_monitoring().await
+        .map_err(|e| format!("Failed to stop audio level monitoring: {}", e))
+}
+
+#[tauri::command]
+async fn is_audio_level_monitoring() -> bool {
+    audio::simple_level_monitor::is_monitoring()
+}
+
 // Analytics commands are now handled by analytics::commands module
 
 // Whisper commands are now handled by whisper_engine::commands module
@@ -316,6 +373,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(None::<notifications::manager::NotificationManager<tauri::Wry>>)) as NotificationManagerState<tauri::Wry>)
+        .manage(audio::init_system_audio_state())
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -340,6 +398,16 @@ pub fn run() {
                     log::error!("Failed to initialize Whisper engine on startup: {}", e);
                 }
             });
+
+            // Trigger system audio permission request on startup (similar to microphone permission)
+            #[cfg(target_os = "macos")]
+            {
+                tauri::async_runtime::spawn(async {
+                    if let Err(e) = audio::permissions::trigger_system_audio_permission() {
+                        log::warn!("Failed to trigger system audio permission: {}", e);
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -402,6 +470,9 @@ pub fn run() {
             get_audio_devices,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
+            start_audio_level_monitoring,
+            stop_audio_level_monitoring,
+            is_audio_level_monitoring,
 
             // Recording pause/resume commands
             audio::recording_commands::pause_recording,
@@ -443,6 +514,10 @@ pub fn run() {
             audio::recording_preferences::get_default_recordings_folder_path,
             audio::recording_preferences::open_recordings_folder,
             audio::recording_preferences::select_recording_folder,
+            audio::recording_preferences::get_available_audio_backends,
+            audio::recording_preferences::get_current_audio_backend,
+            audio::recording_preferences::set_audio_backend,
+            audio::recording_preferences::get_audio_backend_info,
 
             // Notification system commands
             notifications::commands::get_notification_settings,
@@ -463,6 +538,19 @@ pub fn run() {
             // Enhanced notification commands
             notifications::commands::show_enhanced_recording_confirmation,
             notifications::commands::dismiss_all_enhanced_notifications,
+
+            // System audio capture commands
+            audio::system_audio_commands::start_system_audio_capture_command,
+            audio::system_audio_commands::list_system_audio_devices_command,
+            audio::system_audio_commands::check_system_audio_permissions_command,
+            audio::system_audio_commands::start_system_audio_monitoring,
+            audio::system_audio_commands::stop_system_audio_monitoring,
+            audio::system_audio_commands::get_system_audio_monitoring_status,
+
+            // Screen Recording permission commands
+            audio::permissions::check_screen_recording_permission_command,
+            audio::permissions::request_screen_recording_permission_command,
+            audio::permissions::trigger_system_audio_permission_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

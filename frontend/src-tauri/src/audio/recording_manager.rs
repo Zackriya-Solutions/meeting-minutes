@@ -1,13 +1,18 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use anyhow::Result;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 
-use super::core::{AudioDevice, default_input_device, default_output_device};
+use super::devices::{AudioDevice, default_input_device, default_output_device};
 use super::recording_state::{RecordingState, AudioChunk};
 use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
 use super::recording_saver::RecordingSaver;
+
+/// Stream manager type enumeration
+pub enum StreamManagerType {
+    Standard(AudioStreamManager),
+}
 
 /// Simplified recording manager that coordinates all audio components
 pub struct RecordingManager {
@@ -63,15 +68,23 @@ impl RecordingManager {
 
             // Spawn task to forward chunks to both transcription and saving
             tokio::spawn(async move {
+                let mut error_count = 0u32;
                 while let Some(chunk) = combined_rx.recv().await {
                     // Send to transcription (original functionality)
                     if let Err(e) = trans_sender.send(chunk.clone()) {
-                        warn!("Failed to send chunk to transcription: {}", e);
+                        // Performance optimization: reduce warning frequency to avoid log spam
+                        error_count += 1;
+                        if error_count % 100 == 1 {
+                            warn!("Failed to send chunk to transcription: {} (showing every 100th error)", e);
+                        }
                     }
 
                     // Send to saving (new functionality)
                     if let Err(e) = save_sender_clone.send(chunk) {
-                        warn!("Failed to send chunk to saving: {}", e);
+                        // Performance optimization: reduce warning frequency
+                        if error_count % 100 == 1 {
+                            warn!("Failed to send chunk to saving: {} (showing every 100th error)", e);
+                        }
                     }
                 }
             });
@@ -153,13 +166,35 @@ impl RecordingManager {
             error!("Error stopping audio pipeline: {}", e);
         }
 
-        info!("Recording streams stopped");
+        debug!("Recording streams stopped successfully");
+        Ok(())
+    }
+
+    /// Stop streams and force immediate pipeline flush to process all accumulated audio
+    pub async fn stop_streams_and_force_flush(&mut self) -> Result<()> {
+        info!("🚀 Stopping recording streams with IMMEDIATE pipeline flush");
+
+        // Stop recording state first
+        self.state.stop_recording();
+
+        // Stop audio streams immediately
+        if let Err(e) = self.stream_manager.stop_streams() {
+            error!("Error stopping audio streams: {}", e);
+        }
+
+        // CRITICAL: Force pipeline to flush ALL accumulated audio before stopping
+        debug!("💨 Forcing pipeline to flush accumulated audio immediately");
+        if let Err(e) = self.pipeline_manager.force_flush_and_stop().await {
+            error!("Error during force flush: {}", e);
+        }
+
+        info!("✅ Recording streams stopped with immediate flush completed");
         Ok(())
     }
 
     /// Save recording after transcription is complete
     pub async fn save_recording_only<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
-        info!("Saving recording with transcript chunks");
+        debug!("Saving recording with transcript chunks");
 
         // Save the recording
         match self.recording_saver.stop_and_save(app).await {
@@ -167,7 +202,7 @@ impl RecordingManager {
                 info!("Recording saved successfully to: {}", file_path);
             }
             Ok(None) => {
-                info!("Recording not saved (auto-save disabled or no audio data)");
+                debug!("Recording not saved (auto-save disabled or no audio data)");
             }
             Err(e) => {
                 error!("Failed to save recording: {}", e);
@@ -175,7 +210,7 @@ impl RecordingManager {
             }
         }
 
-        info!("Recording saved");
+        debug!("Recording save operation completed");
         Ok(())
     }
 
@@ -307,7 +342,7 @@ impl RecordingManager {
     /// Cleanup all resources without saving
     pub async fn cleanup_without_save(&mut self) {
         if self.is_recording() {
-            info!("Stopping recording without saving during cleanup");
+            debug!("Stopping recording without saving during cleanup");
 
             // Stop recording state first
             self.state.stop_recording();

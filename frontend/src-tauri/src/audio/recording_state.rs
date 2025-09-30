@@ -4,7 +4,8 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use anyhow::Result;
 
-use super::core::AudioDevice;
+use super::devices::AudioDevice;
+use super::buffer_pool::AudioBufferPool;
 
 /// Device type for audio chunks
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +94,9 @@ pub struct RecordingState {
     // Audio pipeline
     audio_sender: Mutex<Option<mpsc::UnboundedSender<AudioChunk>>>,
 
+    // Memory optimization
+    buffer_pool: AudioBufferPool,
+
     // Error handling
     error_count: AtomicU32,
     recoverable_error_count: AtomicU32,
@@ -117,6 +121,7 @@ impl RecordingState {
             microphone_device: Mutex::new(None),
             system_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
+            buffer_pool: AudioBufferPool::new(16, 48000), // Pool of 16 buffers with 48kHz samples capacity
             error_count: AtomicU32::new(0),
             recoverable_error_count: AtomicU32::new(0),
             last_error: Mutex::new(None),
@@ -337,6 +342,11 @@ impl RecordingState {
         }
     }
 
+    // Memory management
+    pub fn get_buffer_pool(&self) -> AudioBufferPool {
+        self.buffer_pool.clone()
+    }
+
     // Cleanup
     pub fn cleanup(&self) {
         self.stop_recording();
@@ -351,6 +361,9 @@ impl RecordingState {
         *self.total_pause_duration.lock().unwrap() = std::time::Duration::ZERO;
         self.error_count.store(0, Ordering::SeqCst);
         self.recoverable_error_count.store(0, Ordering::SeqCst);
+
+        // Clear buffer pool to free memory
+        self.buffer_pool.clear();
     }
 }
 
@@ -362,6 +375,7 @@ impl Default for RecordingState {
             microphone_device: Mutex::new(None),
             system_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
+            buffer_pool: AudioBufferPool::new(16, 48000), // Pool of 16 buffers with 48kHz samples capacity
             error_count: AtomicU32::new(0),
             recoverable_error_count: AtomicU32::new(0),
             last_error: Mutex::new(None),

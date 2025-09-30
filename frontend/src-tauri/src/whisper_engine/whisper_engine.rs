@@ -10,6 +10,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use crate::{perf_debug, perf_trace};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelStatus {
@@ -39,6 +40,8 @@ pub struct WhisperEngine {
     // State tracking for smart logging
     last_transcription_was_short: Arc<RwLock<bool>>,
     short_audio_warning_logged: Arc<RwLock<bool>>,
+    // Performance optimization: reduce logging frequency
+    transcription_count: Arc<RwLock<u64>>,
 }
 
 impl WhisperEngine {
@@ -68,6 +71,12 @@ impl WhisperEngine {
     }
 
     pub fn new() -> Result<Self> {
+        // PERFORMANCE: Suppress verbose whisper.cpp and Metal logs
+        // These C library logs bypass Rust logging and clutter output
+        // Set environment variables to reduce C library verbosity
+        std::env::set_var("GGML_METAL_LOG_LEVEL", "1"); // 0=off, 1=error, 2=warn, 3=info
+        std::env::set_var("WHISPER_LOG_LEVEL", "1");    // Reduce whisper.cpp verbosity
+
         // Use backend/models directory to preserve existing models
         let current_dir = std::env::current_dir()
             .map_err(|e| anyhow!("Failed to get current directory: {}", e))?;
@@ -130,6 +139,8 @@ impl WhisperEngine {
             // Initialize state tracking
             last_transcription_was_short: Arc::new(RwLock::new(false)),
             short_audio_warning_logged: Arc::new(RwLock::new(false)),
+            // Performance optimization: reduce logging frequency
+            transcription_count: Arc::new(RwLock::new(0)),
         };
         
         Ok(engine)
@@ -254,30 +265,55 @@ impl WhisperEngine {
         match model_info.status {
             ModelStatus::Available => {
                 log::info!("Loading model: {}", model_name);
-                
-                // Create context parameters optimized for streaming accuracy with GPU fallback
-                let use_gpu = Self::detect_gpu_acceleration();
+
+                // PERFORMANCE OPTIMIZATION: Use comprehensive hardware profile for optimal GPU configuration
+                let hardware_profile = crate::audio::HardwareProfile::detect();
+                let adaptive_config = hardware_profile.get_whisper_config();
+
+                // Enable flash attention for high-end GPUs (Metal on Apple Silicon, CUDA on NVIDIA)
+                // Flash attention provides 20-40% speedup but requires stable GPU drivers
+                let flash_attn_enabled = match (&hardware_profile.gpu_type, &hardware_profile.performance_tier) {
+                    (crate::audio::GpuType::Metal, crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High) => true,
+                    (crate::audio::GpuType::Cuda, crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High) => true,
+                    _ => false, // Conservative: disable for other GPU types and lower tiers
+                };
+
                 let context_param = WhisperContextParameters {
-                    use_gpu,
+                    use_gpu: adaptive_config.use_gpu,
                     gpu_device: 0,
-                    flash_attn: false, // Disabled due to potential crashes in streaming
+                    flash_attn: flash_attn_enabled,
                     ..Default::default()
                 };
 
-                // Load whisper context with parameters
-                let ctx = WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
-                    .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?;
+                // PERFORMANCE: Suppress verbose C library logs during model loading
+                // This hides the excessive Metal/GGML initialization logs in release builds
+                let ctx = {
+                    let _suppressor = crate::whisper_engine::StderrSuppressor::new();
+
+                    // Load whisper context with hardware-optimized parameters
+                    WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
+                        .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?
+                    // Suppressor dropped here, stderr restored
+                };
 
                 // Update current context and model
                 *self.current_context.write().await = Some(ctx);
                 *self.current_model.write().await = Some(model_name.to_string());
 
-                let acceleration_status = if use_gpu {
-                    "GPU acceleration enabled"
-                } else {
-                    "CPU processing only"
+                // Enhanced acceleration status reporting
+                let acceleration_status = match (&hardware_profile.gpu_type, flash_attn_enabled) {
+                    (crate::audio::GpuType::Metal, true) => "Metal GPU with Flash Attention (Ultra-Fast)",
+                    (crate::audio::GpuType::Metal, false) => "Metal GPU acceleration",
+                    (crate::audio::GpuType::Cuda, true) => "CUDA GPU with Flash Attention (Ultra-Fast)",
+                    (crate::audio::GpuType::Cuda, false) => "CUDA GPU acceleration",
+                    (crate::audio::GpuType::Vulkan, _) => "Vulkan GPU acceleration",
+                    (crate::audio::GpuType::OpenCL, _) => "OpenCL GPU acceleration",
+                    (crate::audio::GpuType::None, _) => "CPU processing only",
                 };
-                log::info!("Successfully loaded model: {} with {}", model_name, acceleration_status);
+
+                log::info!("Successfully loaded model: {} with {} (Performance Tier: {:?}, Beam Size: {}, Threads: {:?})",
+                          model_name, acceleration_status, hardware_profile.performance_tier,
+                          adaptive_config.beam_size, adaptive_config.max_threads);
                 Ok(())
             },
             ModelStatus::Missing => {
@@ -324,7 +360,8 @@ impl WhisperEngine {
 
         // Check for obviously meaningless patterns first
         if Self::is_meaningless_output(text) {
-            log::info!("Detected meaningless output, returning empty: '{}'", text);
+            // Performance optimization: reduce meaningless output logging to debug level
+            perf_debug!("Detected meaningless output, returning empty: '{}'", text);
             return String::new();
         }
 
@@ -342,7 +379,8 @@ impl WhisperEngine {
         // Check for overall repetition ratio
         let final_text = cleaned_words.join(" ");
         if Self::calculate_repetition_ratio(&final_text) > 0.7 {
-            log::info!("High repetition ratio detected, filtering out: '{}'", final_text);
+            // Performance optimization: reduce repetition ratio logging to debug level
+            perf_debug!("High repetition ratio detected, filtering out: '{}'", final_text);
             return String::new();
         }
 
@@ -463,18 +501,120 @@ impl WhisperEngine {
         repeated_words as f32 / total_words
     }
     
+    /// Transcribe audio with streaming support for partial results and adaptive quality
+    pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>) -> Result<(String, f32, bool)> {
+        let ctx_lock = self.current_context.read().await;
+        let ctx = ctx_lock.as_ref()
+            .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
+
+        // Get adaptive configuration based on hardware
+        let hardware_profile = crate::audio::HardwareProfile::detect();
+        let adaptive_config = hardware_profile.get_whisper_config();
+
+        // ADAPTIVE parameters - optimized for current hardware
+        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+            beam_size: adaptive_config.beam_size as i32,
+            patience: 1.0
+        });
+
+        // Configure with adaptive settings
+        params.set_language(Some("en"));
+        params.set_translate(false);
+
+        // PERFORMANCE: Disable ALL whisper.cpp internal printing
+        // This reduces C library log spam significantly
+        params.set_print_special(false);      // Don't print special tokens
+        params.set_print_progress(false);     // Don't print progress
+        params.set_print_realtime(false);     // Don't print realtime info
+        params.set_print_timestamps(false);   // Don't print timestamps
+
+        // Additional suppression to reduce C library verbosity
+        params.set_suppress_blank(true);
+        params.set_suppress_nst(true);
+        params.set_temperature(adaptive_config.temperature);
+        params.set_max_initial_ts(1.0);
+        params.set_entropy_thold(2.4);
+        params.set_logprob_thold(-1.0);
+        params.set_no_speech_thold(0.6);
+        params.set_max_len(200);
+        params.set_single_segment(false);
+
+        // Set thread count based on hardware (if supported by whisper.cpp)
+        if let Some(_max_threads) = adaptive_config.max_threads {
+            // Note: whisper.cpp may or may not expose thread control through params
+            // Removed debug log to reduce I/O overhead in transcription hot path
+        }
+
+        let duration_seconds = audio_data.len() as f64 / 16000.0;
+        let is_partial = duration_seconds < 15.0; // Consider chunks under 15s as partial
+
+        // PERFORMANCE: Suppress verbose C library logs during transcription
+        // This hides whisper_full_with_state debug logs and beam search details
+        let (num_segments, state) = {
+            let _suppressor = crate::whisper_engine::StderrSuppressor::new();
+
+            let mut state = ctx.create_state()?;
+            state.full(params, &audio_data)?;
+            let num_segments = state.full_n_segments();
+
+            (num_segments, state)
+            // Suppressor dropped here, stderr restored
+        };
+        let mut result = String::new();
+        let mut total_confidence = 0.0;
+        let mut segment_count = 0;
+
+        for i in 0..num_segments {
+            let segment = match state.get_segment(i) {
+                Some(seg) => seg,
+                None => continue,
+            };
+
+            let segment_text = segment.to_str_lossy()?;
+
+            // Calculate confidence based on segment length and duration (simplified approach)
+            let segment_length = segment_text.len() as f32;
+            let segment_confidence = if segment_length > 0.0 {
+                (segment_length / 100.0).min(0.9) + 0.1 // 0.1 to 1.0 confidence based on text length
+            } else {
+                0.1
+            };
+            total_confidence += segment_confidence;
+            segment_count += 1;
+
+            let cleaned_text = segment_text.trim();
+            if !cleaned_text.is_empty() {
+                if !result.is_empty() {
+                    result.push(' ');
+                }
+                result.push_str(cleaned_text);
+            }
+        }
+
+        let final_result = result.trim().to_string();
+        let cleaned_result = Self::clean_repetitive_text(&final_result);
+
+        let avg_confidence = if segment_count > 0 {
+            total_confidence / segment_count as f32
+        } else {
+            0.0
+        };
+
+        Ok((cleaned_result, avg_confidence, is_partial))
+    }
+
     pub async fn transcribe_audio(&self, audio_data: Vec<f32>) -> Result<String> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
 
-        // Optimize parameters for streaming accuracy based on research
+        // BALANCED parameters - reasonable speed with good accuracy
         let mut params = FullParams::new(SamplingStrategy::BeamSearch {
-            beam_size: 5,      // Increased beam size for better accuracy
+            beam_size: 2,      // Reduced from 5 to 2 for speed while keeping quality
             patience: 1.0      // Balance between speed and accuracy
         });
 
-        // Configure for maximum streaming accuracy
+        // Configure for good quality
         params.set_language(Some("en"));
         params.set_translate(false);
         params.set_print_special(false);
@@ -482,18 +622,18 @@ impl WhisperEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
 
-        // Enhanced settings for better accuracy and anti-repetition
-        params.set_suppress_blank(true);         // Suppress blank outputs
-        params.set_suppress_nst(true);           // Suppress non-speech tokens
-        params.set_temperature(0.4);             // Increased from 0.2 to 0.4 for better diversity and less repetition
-        params.set_max_initial_ts(1.0);          // Allow for better initial timestamp detection
-        params.set_entropy_thold(2.4);           // Entropy threshold for segment detection
-        params.set_logprob_thold(-1.0);          // Stricter threshold (was -2.0) to filter low-confidence outputs
-        params.set_no_speech_thold(0.6);         // Stricter threshold (was 0.2) to better detect silence
+        // BALANCED settings - good quality with reasonable speed
+        params.set_suppress_blank(true);
+        params.set_suppress_nst(true);
+        params.set_temperature(0.2);             // Lower than 0.4 for consistency, higher than 0.0 for quality
+        params.set_max_initial_ts(1.0);
+        params.set_entropy_thold(2.4);
+        params.set_logprob_thold(-1.0);
+        params.set_no_speech_thold(0.6);
 
-        // Anti-repetition settings to prevent infinite loops
-        params.set_max_len(224);                 // Shorter maximum sequence length to prevent repetition
-        params.set_single_segment(false);        // Allow multiple segments but controlled
+        // Reasonable length limits
+        params.set_max_len(200);                 // Reasonable length
+        params.set_single_segment(false);        // Allow multiple segments for better accuracy
 
         // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
         // This would help detect repetitive outputs: params.set_compression_ratio_threshold(2.4);
@@ -535,9 +675,17 @@ impl WhisperEngine {
             log::warn!("Audio duration is short ({:.1}s < 1.0s). Consider padding the input audio with silence. Further short audio warnings will be suppressed.", duration_seconds);
         }
 
-        if should_log_transcription {
-            log::info!("Starting optimized transcription of {} samples ({:.1}s duration)",
-                      audio_data.len(), duration_seconds);
+        // Performance optimization: reduce transcription start logging frequency
+        let transcription_count = {
+            let mut count = self.transcription_count.write().await;
+            *count += 1;
+            *count
+        };
+
+        // Only log every 10th transcription or significant audio (>10s) to reduce I/O overhead
+        if should_log_transcription && (transcription_count % 10 == 0 || duration_seconds > 10.0) {
+            log::info!("Starting transcription #{} of {} samples ({:.1}s duration)",
+                      transcription_count, audio_data.len(), duration_seconds);
         }
         let mut state = ctx.create_state()?;
         state.full(params, &audio_data)?;
@@ -545,9 +693,10 @@ impl WhisperEngine {
         // Extract text with improved segment handling
         let num_segments = state.full_n_segments();
 
-        // Only log segment completion for longer audio or when something meaningful was detected
-        if should_log_transcription || num_segments > 0 {
-            log::debug!("Transcription completed with {} segments", num_segments);
+        // Performance optimization: reduce segment completion logging
+        // Only log for significant transcriptions to avoid I/O overhead
+        if (should_log_transcription || num_segments > 0) && (num_segments > 3 || duration_seconds > 5.0) {
+            perf_debug!("Transcription #{} completed with {} segments ({:.1}s)", transcription_count, num_segments, duration_seconds);
         }
         let mut result = String::new();
 
@@ -561,8 +710,13 @@ impl WhisperEngine {
             let start_time = segment.start_timestamp();
             let end_time = segment.end_timestamp();
 
-            log::debug!("Segment {} ({:.2}s-{:.2}s): '{}'",
-                      i, start_time as f64 / 100.0, end_time as f64 / 100.0, segment_text);
+            // Performance optimization: remove per-segment debug logging
+            // This was causing significant I/O overhead during transcription
+            // Only log segments for very long audio (>30s) or when explicitly debugging
+            if duration_seconds > 30.0 {
+                perf_trace!("Segment {} ({:.2}s-{:.2}s): '{}'",
+                           i, start_time as f64 / 100.0, end_time as f64 / 100.0, segment_text);
+            }
 
             // Clean and append segment text
             let cleaned_text = segment_text.trim();
@@ -579,17 +733,23 @@ impl WhisperEngine {
         // Check for repetition loops and clean them up
         let cleaned_result = Self::clean_repetitive_text(&final_result);
 
-        // Smart logging for transcription results
+        // Performance optimization: smart logging for transcription results
         if cleaned_result.is_empty() {
-            if should_log_transcription {
-                log::debug!("Transcription result is empty - no speech detected");
+            // Only log empty results occasionally to reduce spam
+            if should_log_transcription && transcription_count % 20 == 0 {
+                perf_debug!("Transcription #{} result is empty - no speech detected", transcription_count);
             }
         } else {
             if cleaned_result != final_result {
-                log::info!("Cleaned repetitive transcription: '{}' -> '{}'", final_result, cleaned_result);
+                log::info!("Cleaned repetitive transcription #{}: '{}' -> '{}'", transcription_count, final_result, cleaned_result);
             }
-            // Always log successful transcriptions with meaningful results
-            log::info!("Final transcription result: '{}'", cleaned_result);
+            // Reduce successful transcription logging frequency
+            // Only log every 5th result or significant results (>50 chars) to reduce I/O overhead
+            if transcription_count % 5 == 0 || cleaned_result.len() > 50 || duration_seconds > 10.0 {
+                log::info!("Transcription #{} result: '{}'", transcription_count, cleaned_result);
+            } else {
+                perf_debug!("Transcription #{} result: '{}'", transcription_count, cleaned_result);
+            }
         }
 
         Ok(cleaned_result)

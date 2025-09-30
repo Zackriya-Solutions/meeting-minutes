@@ -16,15 +16,22 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 
 # Hardware acceleration features for whisper-rs
+# Cross-platform GPU acceleration with smart defaults
 [features]
-default = []  # No hardware acceleration by default to ensure compatibility
-# Hardware acceleration - enable based on target platform
-coreml = ["whisper-rs/coreml"]  # Apple CoreML (macOS/iOS)
-metal = ["whisper-rs/metal"]    # Apple Metal GPU (macOS)
-cuda = ["whisper-rs/cuda"]      # NVIDIA CUDA
-vulkan = ["whisper-rs/vulkan"]  # Cross-platform Vulkan
-openblas = ["whisper-rs/openblas"] # Optimized BLAS
-hipblas = ["whisper-rs/hipblas"]   # AMD ROCm HIP
+default = ["platform-default"]  # Automatically enables best backend per platform
+
+# Platform-appropriate defaults - see target-specific dependencies below
+platform-default = []
+
+# Manual GPU acceleration options (for power users to override defaults)
+metal = ["whisper-rs/metal"]       # macOS: Apple Metal GPU (Auto-enabled on macOS)
+coreml = ["whisper-rs/coreml"]     # macOS: Apple CoreML acceleration
+cuda = ["whisper-rs/cuda"]         # Windows/Linux: NVIDIA CUDA GPU
+vulkan = ["whisper-rs/vulkan"]     # Windows/Linux: AMD/Intel Vulkan GPU
+hipblas = ["whisper-rs/hipblas"]   # Linux: AMD ROCm HIP
+
+# CPU optimizations (fallback for systems without GPU)
+openblas = ["whisper-rs/openblas"] # Optimized BLAS (Auto-enabled on Windows/Linux)
 openmp = ["whisper-rs/openmp"]     # OpenMP parallel processing
 
 [build-dependencies]
@@ -63,7 +70,8 @@ which = "6.0.1"
 bytemuck = "1.16.1"
 
 
-# Whisper-rs for speech recognition 
+# Whisper-rs for speech recognition - BASE dependency (no GPU features)
+# Platform-specific GPU features are added via target-specific dependencies below
 whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
 futures-util = "0.3"
 silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", package = "silero" }
@@ -97,6 +105,7 @@ esaxx-rs = "0.1.10"
 symphonia = { version = "0.5.4", features = ["aac", "isomp4", "opt-simd"] }
 rand = "0.8.5"
 rubato = "0.15.0"
+ringbuf = "0.3"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
@@ -107,6 +116,7 @@ tauri-plugin-dialog = "2.3.0"
 tauri-plugin-store = "2.3.0"
 tauri-plugin-notification = "2.3.1"
 
+# macOS-specific dependencies with Metal GPU acceleration
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2.6.2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
 once_cell = "1.17.1"
@@ -115,7 +125,25 @@ tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
 anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
+core-graphics = "0.23"
 mac-notification-sys = "0.6.1"
+cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
+dasp = "0.11.0"
+futures-channel = "0.3.31"
+
+# PERFORMANCE: Enable Metal GPU acceleration automatically on macOS
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "metal"] }
+
+# Windows-specific dependencies with CPU optimization (OpenBLAS)
+# Users with NVIDIA GPUs can manually build with --features cuda
+[target.'cfg(target_os = "windows")'.dependencies]
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "openblas"] }
+
+# Linux-specific dependencies with CPU optimization (OpenBLAS)
+# Users with NVIDIA GPUs can manually build with --features cuda
+# Users with AMD GPUs can manually build with --features hipblas
+[target.'cfg(target_os = "linux")'.dependencies]
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "openblas"] }
 
 [dev-dependencies]
 tempfile = "3.3.0"

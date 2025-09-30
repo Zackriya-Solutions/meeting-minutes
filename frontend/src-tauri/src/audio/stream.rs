@@ -5,18 +5,36 @@ use cpal::{Device, Stream, SupportedStreamConfig};
 use log::{error, info, warn};
 use tokio::sync::mpsc;
 
-use super::core::{AudioDevice, get_device_and_config};
+use super::devices::{AudioDevice, get_device_and_config};
 use super::pipeline::AudioCapture;
 use super::recording_state::{RecordingState, DeviceType};
+use super::capture::{AudioCaptureBackend, get_current_backend};
 
-/// Simplified audio stream wrapper
-pub struct AudioStream {
-    device: Arc<AudioDevice>,
-    stream: Stream,
+#[cfg(target_os = "macos")]
+use super::capture::CoreAudioCapture;
+
+/// Stream backend implementation
+pub enum StreamBackend {
+    /// CPAL-based stream (ScreenCaptureKit or default)
+    Cpal(Stream),
+    /// Core Audio direct implementation (macOS only)
+    #[cfg(target_os = "macos")]
+    CoreAudio {
+        task: Option<tokio::task::JoinHandle<()>>,
+    },
 }
 
 // SAFETY: While Stream doesn't implement Send, we ensure it's only accessed
 // from the same thread context by using spawn_blocking for operations that cross thread boundaries
+unsafe impl Send for StreamBackend {}
+
+/// Simplified audio stream wrapper with multi-backend support
+pub struct AudioStream {
+    device: Arc<AudioDevice>,
+    backend: StreamBackend,
+}
+
+// SAFETY: AudioStream contains StreamBackend which we've marked as Send
 unsafe impl Send for AudioStream {}
 
 impl AudioStream {
@@ -27,7 +45,51 @@ impl AudioStream {
         device_type: DeviceType,
         recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
     ) -> Result<Self> {
-        info!("Creating audio stream for device: {}", device.name);
+        // Get current backend from global config
+        let backend_type = get_current_backend();
+        Self::create_with_backend(device, state, device_type, recording_sender, backend_type).await
+    }
+
+    /// Create a new audio stream with explicit backend selection
+    pub async fn create_with_backend(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+        backend_type: AudioCaptureBackend,
+    ) -> Result<Self> {
+        info!("🎵 Stream: Creating audio stream for device: {} with backend: {:?}, device_type: {:?}",
+              device.name, backend_type, device_type);
+
+        // For system audio devices, use the selected backend
+        // For microphone devices, always use CPAL
+        let use_core_audio = device_type == DeviceType::System
+            && backend_type == AudioCaptureBackend::CoreAudio;
+
+        info!("🎵 Stream: use_core_audio = {}, device_type == System: {}, backend == CoreAudio: {}",
+              use_core_audio,
+              device_type == DeviceType::System,
+              backend_type == AudioCaptureBackend::CoreAudio);
+
+        #[cfg(target_os = "macos")]
+        if use_core_audio {
+            info!("🎵 Stream: Using Core Audio backend for system audio");
+            return Self::create_core_audio_stream(device, state, device_type, recording_sender).await;
+        }
+
+        // Default path: use CPAL (ScreenCaptureKit for macOS system audio)
+        info!("🎵 Stream: Using CPAL backend (ScreenCaptureKit)");
+        Self::create_cpal_stream(device, state, device_type, recording_sender).await
+    }
+
+    /// Create a CPAL-based stream (ScreenCaptureKit on macOS)
+    async fn create_cpal_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        info!("Creating CPAL stream for device: {}", device.name);
 
         // Get the underlying cpal device and config
         let (cpal_device, config) = get_device_and_config(&device).await?;
@@ -50,11 +112,104 @@ impl AudioStream {
 
         // Start the stream
         stream.play()?;
-        info!("Audio stream started for device: {}", device.name);
+        info!("CPAL stream started for device: {}", device.name);
 
         Ok(Self {
             device,
-            stream,
+            backend: StreamBackend::Cpal(stream),
+        })
+    }
+
+    /// Create a Core Audio stream (macOS only)
+    #[cfg(target_os = "macos")]
+    async fn create_core_audio_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        info!("🔊 Stream: Creating Core Audio stream for device: {}", device.name);
+
+        // Create Core Audio capture
+        info!("🔊 Stream: Calling CoreAudioCapture::new()...");
+        let capture_impl = CoreAudioCapture::new()
+            .map_err(|e| {
+                error!("❌ Stream: CoreAudioCapture::new() failed: {}", e);
+                anyhow::anyhow!("Failed to create Core Audio capture: {}", e)
+            })?;
+
+        info!("✅ Stream: CoreAudioCapture created, calling stream()...");
+        let core_stream = capture_impl.stream()
+            .map_err(|e| {
+                error!("❌ Stream: capture_impl.stream() failed: {}", e);
+                anyhow::anyhow!("Failed to create Core Audio stream: {}", e)
+            })?;
+
+        let sample_rate = core_stream.sample_rate();
+        info!("✅ Stream: Core Audio stream created with sample rate: {} Hz", sample_rate);
+
+        // Create audio capture processor for pipeline integration
+        // Note: Core Audio stream is now stereo (2 channels)
+        let capture = AudioCapture::new(
+            device.clone(),
+            state.clone(),
+            sample_rate,
+            2, // Core Audio stream is stereo
+            device_type,
+            recording_sender,
+        );
+
+        // Spawn task to process Core Audio stream samples
+        // The stream needs to be polled continuously to produce samples
+        let device_name = device.name.clone();
+        info!("🔊 Stream: Spawning tokio task to poll Core Audio stream...");
+        let task = tokio::spawn({
+            let capture = capture.clone();
+            let mut stream = core_stream;
+
+            async move {
+                use futures_util::StreamExt;
+
+                let mut buffer = Vec::new();
+                let mut frame_count = 0;
+                let frames_per_chunk = 1024; // Process in chunks of 1024 samples
+
+                info!("✅ Stream: Core Audio processing task started for {}", device_name);
+
+                let mut sample_count = 0u64;
+                while let Some(sample) = stream.next().await {
+                    sample_count += 1;
+                    if sample_count % 48000 == 0 {
+                        info!("📊 Stream: Received {} samples from Core Audio stream", sample_count);
+                    }
+
+                    buffer.push(sample);
+                    frame_count += 1;
+
+                    // Process when we have enough samples
+                    if frame_count >= frames_per_chunk {
+                        capture.process_audio_data(&buffer);
+                        buffer.clear();
+                        frame_count = 0;
+                    }
+                }
+
+                // Process any remaining samples
+                if !buffer.is_empty() {
+                    capture.process_audio_data(&buffer);
+                }
+
+                info!("⚠️ Stream: Core Audio processing task ended for {}", device_name);
+            }
+        });
+
+        info!("✅ Stream: Core Audio stream fully initialized for device: {}", device.name);
+
+        Ok(Self {
+            device: device.clone(),
+            backend: StreamBackend::CoreAudio {
+                task: Some(task),
+            },
         })
     }
 
@@ -144,7 +299,21 @@ impl AudioStream {
     /// Stop the stream
     pub fn stop(self) -> Result<()> {
         info!("Stopping audio stream for device: {}", self.device.name);
-        drop(self.stream);
+
+        match self.backend {
+            StreamBackend::Cpal(stream) => {
+                drop(stream);
+            }
+            #[cfg(target_os = "macos")]
+            StreamBackend::CoreAudio { task } => {
+                // Abort the processing task (which will drop the stream)
+                if let Some(task_handle) = task {
+                    task_handle.abort();
+                }
+            }
+        }
+
+        info!("Audio stream stopped for device: {}", self.device.name);
         Ok(())
     }
 }

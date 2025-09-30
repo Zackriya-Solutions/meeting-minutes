@@ -239,8 +239,8 @@ export default function Home() {
 
       // Add any buffered transcripts that might be out of order
       const now = Date.now();
-      const staleThreshold = 5000; // 5 seconds
-      const recentThreshold = 2000; // 2 seconds - for recent out-of-order transcripts
+      const staleThreshold = 3000; // 3 seconds - reduced for faster processing
+      const recentThreshold = 1000; // 1 second - faster processing of recent transcripts
       const staleTranscripts: Transcript[] = [];
       const recentTranscripts: Transcript[] = [];
       const forceFlushTranscripts: Transcript[] = [];
@@ -360,8 +360,8 @@ export default function Home() {
             clearTimeout(processingTimer);
           }
           
-          // Process buffer after a short delay to allow for batching
-          processingTimer = setTimeout(processBufferedTranscripts, 100);
+          // Process buffer with optimized delay for better UI responsiveness
+          processingTimer = setTimeout(processBufferedTranscripts, 50);
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
@@ -636,27 +636,17 @@ export default function Home() {
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
     try {
-      console.log('Stopping recording (new implementation)...', {
+      console.log('Post-stop processing (new implementation)...', {
         stop_initiated_at: new Date(stopStartTime).toISOString(),
         current_transcript_count: transcripts.length
       });
       const { invoke } = await import('@tauri-apps/api/core');
       const { appDataDir } = await import('@tauri-apps/api/path');
       const { listen } = await import('@tauri-apps/api/event');
-      
-      const dataDir = await appDataDir();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const transcriptPath = `${dataDir}transcript-${timestamp}.txt`;
-      const audioPath = `${dataDir}recording-${timestamp}.wav`;
-      
-      // Stop recording and get audio path
-      await invoke('stop_recording', { 
-        args: { 
-          model_config: modelConfig,
-          save_path: audioPath
-        }
-      });
-      console.log('Recording stopped successfully');
+
+      // Note: stop_recording is already called by RecordingControls.stopRecordingAction
+      // This function only handles post-stop processing (transcription wait, API call, navigation)
+      console.log('Recording already stopped by RecordingControls, processing transcription...');
    
       // Wait for transcription to complete
       setSummaryStatus('processing');

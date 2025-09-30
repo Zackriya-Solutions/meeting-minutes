@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { RefreshCw, Mic, Speaker } from 'lucide-react';
 import { AudioLevelMeter, CompactAudioLevelMeter } from './AudioLevelMeter';
+import { AudioBackendSelector } from './AudioBackendSelector';
 
 export interface AudioDevice {
   name: string;
@@ -299,6 +300,12 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
             <p className="text-xs text-gray-500">No system audio devices found</p>
           )}
 
+          {/* Backend Selection - only show when not recording */}
+          {!disabled && (
+            <div className="pt-3 border-t border-gray-100">
+              <AudioBackendSelector disabled={disabled} />
+            </div>
+          )}
         </div>
       </div>
 
