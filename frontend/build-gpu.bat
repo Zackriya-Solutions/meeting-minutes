@@ -31,6 +31,7 @@ REM Detect GPU capabilities
 echo 🔍 Detecting GPU capabilities...
 
 set "GPU_FEATURES="
+set "GPU_DETECTED=0"
 
 REM Check for NVIDIA GPU
 where nvidia-smi >nul 2>&1
@@ -42,25 +43,36 @@ if %errorlevel% equ 0 (
     )
     :nvidia_detected
     set "GPU_FEATURES=cuda"
+    set "GPU_DETECTED=1"
     echo    Building with CUDA acceleration
-) else (
-    REM Check for Vulkan support (AMD/Intel GPUs)
-    if exist "C:\VulkanSDK" (
-        echo ⚠️  Vulkan SDK detected (AMD/Intel GPU)
-        set "GPU_FEATURES=vulkan"
-        echo    Building with Vulkan acceleration
-    ) else (
-        where vulkaninfo >nul 2>&1
-        if !errorlevel! equ 0 (
-            echo ⚠️  Vulkan detected (AMD/Intel GPU)
-            set "GPU_FEATURES=vulkan"
-            echo    Building with Vulkan acceleration
-        ) else (
-            echo ⚠️  No GPU detected
-            echo    Building with CPU optimization (OpenBLAS)
-        )
-    )
+    goto :gpu_check_done
 )
+
+REM Check for Vulkan support (AMD/Intel GPUs)
+if exist "C:\VulkanSDK" (
+    echo ⚠️  Vulkan SDK detected (AMD/Intel GPU)
+    set "GPU_FEATURES=vulkan"
+    set "GPU_DETECTED=1"
+    echo    Building with Vulkan acceleration
+    goto :gpu_check_done
+)
+
+where vulkaninfo >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ⚠️  Vulkan detected (AMD/Intel GPU)
+    set "GPU_FEATURES=vulkan"
+    set "GPU_DETECTED=1"
+    echo    Building with Vulkan acceleration
+    goto :gpu_check_done
+)
+
+REM No GPU found
+if %GPU_DETECTED% equ 0 (
+    echo ⚠️  No GPU detected
+    echo    Building with CPU optimization (OpenBLAS)
+)
+
+:gpu_check_done
 
 echo.
 

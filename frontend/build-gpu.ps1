@@ -24,7 +24,7 @@ if (Test-CommandExists "nvidia-smi") {
         $gpuName = & nvidia-smi --query-gpu=name --format=csv,noheader | Select-Object -First 1
         Write-Host "   $gpuName" -ForegroundColor Green
     } catch {
-        Write-Host "   (Unable to query GPU name)" -ForegroundColor Yellow
+        Write-Host "   Unable to query GPU name" -ForegroundColor Yellow
     }
 
     $features = "cuda"
@@ -42,8 +42,15 @@ if (Test-CommandExists "nvidia-smi") {
     $features = ""
 }
 
-# Change to build directory
-Set-Location "frontend\src-tauri" -ErrorAction Stop
+# Change to build directory (we're already in frontend/)
+if (Test-Path "src-tauri") {
+    Set-Location "src-tauri"
+} elseif (Test-Path "frontend\src-tauri") {
+    Set-Location "frontend\src-tauri"
+} else {
+    Write-Host "❌ Error: Could not find src-tauri directory" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host ""
 Write-Host "📦 Building Meetily..." -ForegroundColor Blue
