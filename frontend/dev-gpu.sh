@@ -1,6 +1,6 @@
 #!/bin/bash
-# GPU-accelerated build script for Meetily
-# Automatically detects and builds with optimal GPU features
+# GPU-accelerated development script for Meetily
+# Automatically detects and runs in development mode with optimal GPU features
 
 set -e
 
@@ -9,9 +9,10 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🚀 Meetily GPU-Accelerated Build Script${NC}"
+echo -e "${BLUE}🚀 Meetily GPU-Accelerated Development Mode${NC}"
 echo ""
 
 # Detect OS
@@ -101,29 +102,60 @@ elif [[ "$OS" == "linux" ]]; then
     fi
 fi
 
-# Build command
-cd frontend/src-tauri || { echo -e "${RED}❌ Failed to change to frontend/src-tauri directory${NC}"; exit 1; }
+# Find the correct directory - we need to be in frontend root for npm commands
+if [ -f "package.json" ]; then
+    FRONTEND_DIR="."
+elif [ -f "frontend/package.json" ]; then
+    cd frontend
+    FRONTEND_DIR="frontend"
+else
+    echo -e "${RED}❌ Could not find package.json${NC}"
+    echo -e "${RED}   Make sure you're in the project root or frontend directory${NC}"
+    exit 1
+fi
 
 echo ""
-echo -e "${BLUE}📦 Building Meetily...${NC}"
+echo -e "${BLUE}📦 Starting Meetily in development mode...${NC}"
+echo ""
 
+# Set up GPU features as cargo flags
 if [[ -z "$FEATURES" ]]; then
-    cargo build --release
+    echo -e "${CYAN}Running: cargo tauri dev${NC}"
+    export CARGO_BUILD_FEATURES=""
 else
-    cargo build --release --features "$FEATURES"
+    echo -e "${CYAN}Running: cargo tauri dev with features: $FEATURES${NC}"
+    export CARGO_BUILD_FEATURES="--features $FEATURES"
+fi
+
+# Run tauri dev - use npm/pnpm tauri instead of cargo tauri
+if [[ -z "$FEATURES" ]]; then
+    if command_exists pnpm; then
+        pnpm tauri dev
+    elif command_exists npm; then
+        npm run tauri dev
+    else
+        echo -e "${RED}❌ Neither npm nor pnpm found${NC}"
+        exit 1
+    fi
+else
+    # When features are needed, we need to pass them to cargo
+    # We'll set an environment variable that cargo will pick up
+    export CARGO_FEATURES="--features $FEATURES"
+    if command_exists pnpm; then
+        pnpm tauri dev -- -- --features "$FEATURES"
+    elif command_exists npm; then
+        npm run tauri dev -- -- --features "$FEATURES"
+    else
+        echo -e "${RED}❌ Neither npm nor pnpm found${NC}"
+        exit 1
+    fi
 fi
 
 if [ $? -eq 0 ]; then
     echo ""
-    echo -e "${GREEN}✅ Build completed successfully!${NC}"
-    echo ""
-    echo -e "${BLUE}Build configuration:${NC}"
-    echo -e "  OS: $OS"
-    echo -e "  Features: ${FEATURES:-default (CPU optimized)}"
-    echo ""
-    echo -e "${GREEN}🎉 You can now run Meetily with GPU acceleration!${NC}"
+    echo -e "${GREEN}✅ Development server stopped cleanly${NC}"
 else
     echo ""
-    echo -e "${RED}❌ Build failed${NC}"
+    echo -e "${RED}❌ Development server encountered an error${NC}"
     exit 1
 fi

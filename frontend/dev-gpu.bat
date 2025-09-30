@@ -1,9 +1,7 @@
 @echo off
-REM Meetily GPU-Accelerated Build Script for Windows
-REM Automatically detects and builds with optimal GPU features
-REM Based on the existing build.bat with GPU detection enhancements
+REM Meetily GPU-Accelerated Development Script for Windows
+REM Automatically detects and runs in development mode with optimal GPU features
 
-REM Exit on error
 setlocal enabledelayedexpansion
 
 REM Check if help is requested
@@ -23,7 +21,7 @@ if "%~1" == "help" (
 
 echo.
 echo ========================================
-echo   Meetily GPU-Accelerated Build
+echo   Meetily GPU-Accelerated Dev Mode
 echo ========================================
 echo.
 
@@ -42,33 +40,64 @@ if %errorlevel% equ 0 (
         goto :nvidia_detected
     )
     :nvidia_detected
-    set "GPU_FEATURES=cuda"
-    set "GPU_DETECTED=1"
-    echo    Building with CUDA acceleration
+    REM Check if CUDA is installed
+    if defined CUDA_PATH (
+        set "GPU_FEATURES=cuda"
+        set "GPU_DETECTED=1"
+        echo    Building with CUDA acceleration
+    ) else (
+        echo    ⚠️  CUDA_PATH not set - falling back to CPU
+        echo    Install CUDA Toolkit to enable GPU acceleration
+        set "GPU_DETECTED=0"
+    )
     goto :gpu_check_done
 )
 
 REM Check for Vulkan support (AMD/Intel GPUs)
 if exist "C:\VulkanSDK" (
-    echo ⚠️  Vulkan SDK detected (AMD/Intel GPU)
-    set "GPU_FEATURES=vulkan"
-    set "GPU_DETECTED=1"
-    echo    Building with Vulkan acceleration
+    echo ℹ️  Vulkan SDK detected
+    REM Check if required environment variables are set
+    if defined VULKAN_SDK (
+        if defined BLAS_INCLUDE_DIRS (
+            set "GPU_FEATURES=vulkan"
+            set "GPU_DETECTED=1"
+            echo    Building with Vulkan acceleration
+        ) else (
+            echo    ⚠️  BLAS_INCLUDE_DIRS not set - falling back to CPU
+            echo    Install OpenBLAS and set BLAS_INCLUDE_DIRS
+            set "GPU_DETECTED=0"
+        )
+    ) else (
+        echo    ⚠️  VULKAN_SDK not set - falling back to CPU
+        set "GPU_DETECTED=0"
+    )
     goto :gpu_check_done
 )
 
 where vulkaninfo >nul 2>&1
 if %errorlevel% equ 0 (
-    echo ⚠️  Vulkan detected (AMD/Intel GPU)
-    set "GPU_FEATURES=vulkan"
-    set "GPU_DETECTED=1"
-    echo    Building with Vulkan acceleration
+    echo ℹ️  Vulkan support detected
+    REM Check if required environment variables are set
+    if defined VULKAN_SDK (
+        if defined BLAS_INCLUDE_DIRS (
+            set "GPU_FEATURES=vulkan"
+            set "GPU_DETECTED=1"
+            echo    Building with Vulkan acceleration
+        ) else (
+            echo    ⚠️  BLAS_INCLUDE_DIRS not set - falling back to CPU
+            echo    Install OpenBLAS and set BLAS_INCLUDE_DIRS
+            set "GPU_DETECTED=0"
+        )
+    ) else (
+        echo    ⚠️  VULKAN_SDK not set - falling back to CPU
+        set "GPU_DETECTED=0"
+    )
     goto :gpu_check_done
 )
 
 REM No GPU found
 if %GPU_DETECTED% equ 0 (
-    echo ⚠️  No GPU detected
+    echo ℹ️  No GPU detected
     echo    Building with CPU optimization (OpenBLAS)
 )
 
@@ -126,64 +155,79 @@ set "RUST_ENV_LIB=%LIB%"
 set "RUST_ENV_INCLUDE=%INCLUDE%"
 
 echo.
-echo 📦 Building Meetily...
+echo 🚀 Starting Meetily in development mode...
 echo.
 
-REM Find Cargo.toml location
-if exist "src-tauri\Cargo.toml" (
-    echo    Found Cargo.toml in src-tauri
-    cd src-tauri
-) else if exist "frontend\src-tauri\Cargo.toml" (
-    echo    Found Cargo.toml in frontend\src-tauri
-    cd frontend\src-tauri
-) else if exist "Cargo.toml" (
-    echo    Found Cargo.toml in current directory
+REM Find package.json location
+if exist "package.json" (
+    echo    Found package.json in current directory
+) else if exist "frontend\package.json" (
+    echo    Found package.json in frontend directory
+    cd frontend
 ) else (
-    echo    ❌ Error: Could not find Cargo.toml
+    echo    ❌ Error: Could not find package.json
     echo    Make sure you're in the project root or frontend directory
     exit /b 1
 )
 
-REM Build based on GPU detection
-if "%GPU_FEATURES%" == "" (
-    echo    Building with default features (OpenBLAS CPU optimization)
-    cargo build --release
+REM Check if pnpm or npm is available
+where pnpm >nul 2>&1
+if %errorlevel% equ 0 (
+    set "USE_PNPM=1"
 ) else (
-    echo    Building with GPU features: %GPU_FEATURES%
-    cargo build --release --features %GPU_FEATURES%
+    set "USE_PNPM=0"
+)
+
+where npm >nul 2>&1
+if %errorlevel% equ 0 (
+    set "USE_NPM=1"
+) else (
+    set "USE_NPM=0"
+)
+
+if %USE_PNPM% equ 0 (
+    if %USE_NPM% equ 0 (
+        echo    ❌ Error: Neither npm nor pnpm found
+        exit /b 1
+    )
+)
+
+REM Run tauri dev with GPU features using npm/pnpm
+if "%GPU_FEATURES%" == "" (
+    echo    Running: tauri dev
+    if %USE_PNPM% equ 1 (
+        pnpm tauri dev
+    ) else (
+        npm run tauri dev
+    )
+) else (
+    echo    Running: tauri dev (features: %GPU_FEATURES%)
+    set CARGO_BUILD_FEATURES=--features %GPU_FEATURES%
+    if %USE_PNPM% equ 1 (
+        pnpm tauri dev -- -- --features %GPU_FEATURES%
+    ) else (
+        npm run tauri dev -- -- --features %GPU_FEATURES%
+    )
 )
 
 if errorlevel 1 (
     echo.
-    echo ❌ Build failed
+    echo ❌ Development server failed
     exit /b 1
 )
 
 echo.
-echo ========================================
-echo ✅ Build completed successfully!
-echo ========================================
-echo.
-echo Build configuration:
-echo   OS: Windows
-if "%GPU_FEATURES%" == "" (
-    echo   Features: default (CPU optimized with OpenBLAS)
-) else (
-    echo   Features: %GPU_FEATURES%
-)
-echo.
-echo 🎉 You can now run Meetily with GPU acceleration!
-echo.
+echo ✅ Development server stopped cleanly
 exit /b 0
 
 :_print_help
 echo.
 echo ========================================
-echo   Meetily GPU Build Script - Help
+echo   Meetily GPU Dev Script - Help
 echo ========================================
 echo.
 echo USAGE:
-echo   build-gpu.bat [OPTION]
+echo   dev-gpu.bat [OPTION]
 echo.
 echo OPTIONS:
 echo   help      Show this help message
@@ -192,28 +236,28 @@ echo   -h        Show this help message
 echo   /?        Show this help message
 echo.
 echo DESCRIPTION:
-echo   This script automatically detects your GPU and builds
-echo   Meetily with optimal hardware acceleration features:
+echo   This script automatically detects your GPU and runs
+echo   Meetily in development mode with optimal hardware
+echo   acceleration features:
 echo.
-echo   - NVIDIA GPU    : Builds with CUDA acceleration
-echo   - AMD/Intel GPU : Builds with Vulkan acceleration
-echo   - No GPU        : Builds with OpenBLAS CPU optimization
+echo   - NVIDIA GPU    : Runs with CUDA acceleration
+echo   - AMD/Intel GPU : Runs with Vulkan acceleration
+echo   - No GPU        : Runs with OpenBLAS CPU optimization
 echo.
 echo REQUIREMENTS:
 echo   - Visual Studio 2022 Build Tools
 echo   - Windows SDK 10.0.22621.0 or compatible
 echo   - Rust toolchain installed
 echo   - LLVM installed at C:\Program Files\LLVM\bin
+echo   - Node.js and pnpm/npm installed
 echo.
 echo GPU REQUIREMENTS:
 echo   CUDA:   NVIDIA GPU + CUDA Toolkit installed
 echo   Vulkan: AMD/Intel GPU + Vulkan SDK installed
 echo.
-echo MANUAL GPU FEATURES:
-echo   If you want to manually specify GPU features:
-echo     cd src-tauri
-echo     cargo build --release --features cuda
-echo     cargo build --release --features vulkan
+echo NOTE:
+echo   Development mode enables hot-reloading and debugging.
+echo   For production builds, use build-gpu.bat instead.
 echo.
 echo ========================================
 exit /b 0

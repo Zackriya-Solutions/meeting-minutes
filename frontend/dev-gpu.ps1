@@ -1,7 +1,7 @@
-# GPU-accelerated build script for Meetily (Windows PowerShell)
-# Automatically detects and builds with optimal GPU features
+# GPU-accelerated development script for Meetily (Windows PowerShell)
+# Automatically detects and runs in development mode with optimal GPU features
 
-Write-Host "GPU-Accelerated Build Script for Meetily" -ForegroundColor Blue
+Write-Host "GPU-Accelerated Development Mode for Meetily" -ForegroundColor Blue
 Write-Host ""
 
 # Function to check if command exists
@@ -75,66 +75,59 @@ if (Test-CommandExists "nvidia-smi") {
 
 Write-Host ""
 
-# Change to build directory
-$targetDir = ""
-if (Test-Path "src-tauri\Cargo.toml") {
-    $targetDir = "src-tauri"
-} elseif (Test-Path "frontend\src-tauri\Cargo.toml") {
-    $targetDir = "frontend\src-tauri"
-} elseif (Test-Path "Cargo.toml") {
-    $targetDir = "."
+# Find frontend directory with package.json
+if (Test-Path "package.json") {
+    Write-Host "Using current directory" -ForegroundColor Cyan
+} elseif (Test-Path "frontend\package.json") {
+    Write-Host "Changing to directory: frontend" -ForegroundColor Cyan
+    Set-Location frontend
 } else {
-    Write-Host "[ERROR] Could not find Cargo.toml" -ForegroundColor Red
+    Write-Host "[ERROR] Could not find package.json" -ForegroundColor Red
     Write-Host "        Make sure you're in the project root or frontend directory" -ForegroundColor Red
     exit 1
 }
 
-if ($targetDir -ne ".") {
-    Write-Host "Changing to directory: $targetDir" -ForegroundColor Cyan
-    Set-Location $targetDir
-}
-
 Write-Host ""
-Write-Host "Building Meetily..." -ForegroundColor Blue
+Write-Host "Starting Meetily in development mode..." -ForegroundColor Blue
 Write-Host ""
 
-# Build command
-$buildSuccess = $false
-
+# Run tauri dev using npm/pnpm
 try {
+    # Check if pnpm or npm is available
+    $usePnpm = Test-CommandExists "pnpm"
+    $useNpm = Test-CommandExists "npm"
+
+    if (-not $usePnpm -and -not $useNpm) {
+        Write-Host "[ERROR] Neither npm nor pnpm found" -ForegroundColor Red
+        exit 1
+    }
+
     if ($features -eq "") {
-        Write-Host "Running: cargo build --release" -ForegroundColor Cyan
-        cargo build --release
+        Write-Host "Running: tauri dev" -ForegroundColor Cyan
+        if ($usePnpm) {
+            pnpm tauri dev
+        } else {
+            npm run tauri dev
+        }
     } else {
-        Write-Host "Running: cargo build --release --features $features" -ForegroundColor Cyan
-        cargo build --release --features $features
+        Write-Host "Running: tauri dev (features: $features)" -ForegroundColor Cyan
+        # Set environment variable for cargo features
+        $env:CARGO_BUILD_FEATURES = "--features $features"
+        if ($usePnpm) {
+            pnpm tauri dev -- -- --features $features
+        } else {
+            npm run tauri dev -- -- --features $features
+        }
     }
 
     if ($LASTEXITCODE -eq 0) {
-        $buildSuccess = $true
+        Write-Host ""
+        Write-Host "Development server stopped cleanly" -ForegroundColor Green
+    } else {
+        throw "Development server exited with code $LASTEXITCODE"
     }
 } catch {
     Write-Host ""
-    Write-Host "[ERROR] Build failed: $_" -ForegroundColor Red
-    exit 1
-}
-
-if ($buildSuccess) {
-    Write-Host ""
-    Write-Host "======================================" -ForegroundColor Green
-    Write-Host "Build completed successfully!" -ForegroundColor Green
-    Write-Host "======================================" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "Build configuration:" -ForegroundColor Cyan
-    Write-Host "  OS: Windows"
-    if ($features -eq "") {
-        Write-Host "  Features: default (CPU with OpenBLAS)"
-    } else {
-        Write-Host "  Features: $features"
-    }
-    Write-Host ""
-} else {
-    Write-Host ""
-    Write-Host "[ERROR] Build failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    Write-Host "[ERROR] Development server failed: $_" -ForegroundColor Red
     exit 1
 }
