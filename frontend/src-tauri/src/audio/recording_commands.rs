@@ -619,7 +619,7 @@ fn start_transcription_task<R: Runtime>(
                             // Transcribe with whisper using streaming approach
                             match transcribe_chunk_with_streaming(&whisper_engine_clone, chunk, &app_clone).await {
                                 Ok((transcript, confidence, is_partial)) => {
-                                    let confidence_threshold = 0.4; // Display results above 40% confidence
+                                    let confidence_threshold = 0.3; // Display results above 30% confidence
 
                                     if !transcript.trim().is_empty() && confidence >= confidence_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step

@@ -80,11 +80,11 @@ impl AudioCapture {
 
         // PERFORMANCE DEBUG: Log audio levels periodically for monitoring
         if chunk_id % 100 == 0 && !amplified_data.is_empty() {
-            let rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
-            let peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+            let _rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
+            let _peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
             perf_debug!(
                 "Audio levels [{:?}] - RMS: {:.6}, Peak: {:.6}, Gain: {}x",
-                self.device_type, rms, peak, gain_factor
+                self.device_type, _rms, _peak, gain_factor
             );
         }
 

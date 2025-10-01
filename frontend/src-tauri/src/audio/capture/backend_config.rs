@@ -62,21 +62,20 @@ impl AudioCaptureBackend {
 
     /// Get all available backends for current platform
     pub fn available_backends() -> Vec<Self> {
-        let mut backends = vec![AudioCaptureBackend::ScreenCaptureKit];
-
         #[cfg(target_os = "macos")]
-        backends.push(AudioCaptureBackend::CoreAudio);
+        {
+            vec![AudioCaptureBackend::ScreenCaptureKit, AudioCaptureBackend::CoreAudio]
+        }
 
-        backends
+        #[cfg(not(target_os = "macos"))]
+        {
+            vec![AudioCaptureBackend::ScreenCaptureKit]
+        }
     }
 
     /// Get default backend for current platform
     pub fn default() -> Self {
-        // Core Audio is the default on macOS for better performance
-        #[cfg(target_os = "macos")]
-        {
-            AudioCaptureBackend::ScreenCaptureKit
-        }
+        AudioCaptureBackend::ScreenCaptureKit
     }
 }
 

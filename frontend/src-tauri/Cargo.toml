@@ -161,6 +161,7 @@ whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec"
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
 whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
+futures-channel = "0.3.31"
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)

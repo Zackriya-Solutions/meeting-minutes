@@ -641,7 +641,7 @@ impl WhisperEngine {
         // BALANCED settings - good quality with reasonable speed
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
-        params.set_temperature(0.2);             // Lower than 0.4 for consistency, higher than 0.0 for quality
+        params.set_temperature(0.3);             // Lower than 0.4 for consistency, higher than 0.0 for quality
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
@@ -723,15 +723,15 @@ impl WhisperEngine {
             };
 
             let segment_text = segment.to_str_lossy()?;
-            let start_time = segment.start_timestamp();
-            let end_time = segment.end_timestamp();
+            let _start_time = segment.start_timestamp();
+            let _end_time = segment.end_timestamp();
 
             // Performance optimization: remove per-segment debug logging
             // This was causing significant I/O overhead during transcription
             // Only log segments for very long audio (>30s) or when explicitly debugging
             if duration_seconds > 30.0 {
                 perf_trace!("Segment {} ({:.2}s-{:.2}s): '{}'",
-                           i, start_time as f64 / 100.0, end_time as f64 / 100.0, segment_text);
+                           i, _start_time as f64 / 100.0, _end_time as f64 / 100.0, segment_text);
             }
 
             // Clean and append segment text

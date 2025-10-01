@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
-use log::{info, warn, error};
+use log::{info, warn};
+
+#[cfg(target_os = "macos")]
+use log::error;
 use anyhow::Result;
 
 #[cfg(target_os = "macos")]
@@ -89,14 +92,16 @@ pub async fn load_recording_preferences<R: Runtime>(
 ) -> Result<RecordingPreferences> {
     // Try to load from Tauri store, fallback to defaults
     // For now, return defaults - can be enhanced to use tauri-plugin-store
-    let mut prefs = RecordingPreferences::default();
-
-    // Load backend preference from global config
     #[cfg(target_os = "macos")]
-    {
+    let prefs = {
+        let mut p = RecordingPreferences::default();
         let backend = crate::audio::capture::get_current_backend();
-        prefs.system_audio_backend = Some(backend.to_string());
-    }
+        p.system_audio_backend = Some(backend.to_string());
+        p
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let prefs = RecordingPreferences::default();
 
     info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}",
           prefs.save_folder, prefs.auto_save, prefs.file_format);

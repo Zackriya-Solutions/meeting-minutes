@@ -63,13 +63,23 @@ impl AudioStream {
 
         // For system audio devices, use the selected backend
         // For microphone devices, always use CPAL
+        #[cfg(target_os = "macos")]
         let use_core_audio = device_type == DeviceType::System
             && backend_type == AudioCaptureBackend::CoreAudio;
 
+        #[cfg(not(target_os = "macos"))]
+        let use_core_audio = false;
+
+        #[cfg(target_os = "macos")]
         info!("🎵 Stream: use_core_audio = {}, device_type == System: {}, backend == CoreAudio: {}",
               use_core_audio,
               device_type == DeviceType::System,
               backend_type == AudioCaptureBackend::CoreAudio);
+
+        #[cfg(not(target_os = "macos"))]
+        info!("🎵 Stream: use_core_audio = {}, device_type == System: {}",
+              use_core_audio,
+              device_type == DeviceType::System);
 
         #[cfg(target_os = "macos")]
         if use_core_audio {
