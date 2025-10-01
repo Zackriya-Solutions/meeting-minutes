@@ -288,7 +288,7 @@ impl WhisperEngine {
                 // PERFORMANCE: Suppress verbose C library logs during model loading
                 // This hides the excessive Metal/GGML initialization logs in release builds
                 let ctx = {
-                    let _suppressor = crate::whisper_engine::StderrSuppressor::new();
+                    // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
 
                     // Load whisper context with hardware-optimized parameters
                     WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
@@ -543,7 +543,9 @@ impl WhisperEngine {
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
-        params.set_no_speech_thold(0.6);
+        // CRITICAL FIX: Increased from 0.6 to 0.75 to prevent hallucinations on silence
+        // Higher threshold = more conservative = less likely to transcribe silence as speech
+        params.set_no_speech_thold(0.75);
         params.set_max_len(200);
         params.set_single_segment(false);
 
@@ -559,7 +561,7 @@ impl WhisperEngine {
         // PERFORMANCE: Suppress verbose C library logs during transcription
         // This hides whisper_full_with_state debug logs and beam search details
         let (num_segments, state) = {
-            let _suppressor = crate::whisper_engine::StderrSuppressor::new();
+            // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
 
             let mut state = ctx.create_state()?;
             state.full(params, &audio_data)?;
@@ -645,7 +647,9 @@ impl WhisperEngine {
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
-        params.set_no_speech_thold(0.6);
+        // CRITICAL FIX: Increased from 0.6 to 0.75 to prevent hallucinations on silence
+        // Higher threshold = more conservative = less likely to transcribe silence as speech
+        params.set_no_speech_thold(0.75);
 
         // Reasonable length limits
         params.set_max_len(200);                 // Reasonable length

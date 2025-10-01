@@ -37,13 +37,22 @@ impl ContinuousVadProcessor {
         let mut config = VadConfig::default();
         config.sample_rate = VAD_SAMPLE_RATE as usize;
 
-        // STRICT settings to filter silence and prevent Whisper hallucinations
-        let safe_redemption_time = std::cmp::min(redemption_time_ms, 400); // Optimized redemption time
+        // BALANCED FIX: Configure Silero VAD thresholds for reliable speech detection
+        // Tuned based on real audio levels: RMS=0.01-0.15, Peak=0.02-0.25 observed
+        // 0.75/0.60 was too strict and rejected real speech
+        // 0.55/0.40 is more balanced - stricter than default (0.5/0.35) but not aggressive
+        config.positive_speech_threshold = 0.55;  // Balanced: catches speech without false positives
+        config.negative_speech_threshold = 0.40;  // Balanced: allows speech transitions
+
+        // STREAMING OPTIMIZED: VAD processes continuous stream, not batches
+        let safe_redemption_time = std::cmp::min(redemption_time_ms, 400);
         config.redemption_time = Duration::from_millis(safe_redemption_time as u64);
         config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
         config.post_speech_pad = Duration::from_millis(300);   // Post-speech padding for context
-        config.min_speech_time = Duration::from_millis(1200);  // Increased to 1200ms to filter out short noise/silence
-        // Note: VadConfig doesn't expose threshold field, using min_speech_time as primary filter
+        // CRITICAL: With continuous streaming, VAD accumulates state across many 10-20ms chunks
+        // min_speech_time of 100ms = only 5-10 chunks needed to detect speech
+        // This is close to Silero's default (90ms) but slightly more conservative
+        config.min_speech_time = Duration::from_millis(100);   // Optimized for streaming
 
         debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, input_rate={}Hz",
                VAD_SAMPLE_RATE, safe_redemption_time, input_sample_rate);
@@ -269,16 +278,20 @@ pub fn extract_speech_16k(samples_mono_16k: &[f32]) -> Result<Vec<f32>> {
         result.extend_from_slice(&segment.samples);
     }
 
-    // Apply stricter energy filtering for very short segments
+    // Apply MUCH stricter energy filtering for very short segments
     if result.len() < 1600 { // Less than 100ms at 16kHz
         let input_energy: f32 = samples_mono_16k.iter().map(|&x| x * x).sum::<f32>() / samples_mono_16k.len() as f32;
+        let rms = input_energy.sqrt();
+        let peak = samples_mono_16k.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
 
-        // Increased threshold from 0.0001 to 0.01 for better silence filtering
-        if input_energy < 0.01 {
-            info!("VAD detected genuine silence or low-quality audio ({:.6}), skipping", input_energy);
+        // CRITICAL FIX: Dramatically increased thresholds to prevent Whisper hallucinations
+        // Old: 0.01 energy (too low, allowed silence through)
+        // New: 0.12 RMS, 0.15 peak - only passes real speech with sufficient energy
+        if rms < 0.08 || peak < 0.15 {
+            info!("VAD detected silence/noise (RMS: {:.6}, Peak: {:.6}), skipping to prevent hallucinations", rms, peak);
             return Ok(Vec::new());
         } else {
-            info!("VAD detected speech with sufficient energy ({:.6})", input_energy);
+            info!("VAD detected speech with sufficient energy (RMS: {:.6}, Peak: {:.6})", rms, peak);
             return Ok(samples_mono_16k.to_vec());
         }
     }

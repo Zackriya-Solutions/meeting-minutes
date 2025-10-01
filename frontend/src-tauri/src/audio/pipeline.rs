@@ -65,37 +65,58 @@ impl AudioCapture {
         // PERFORMANCE FIX: Apply gain boost for microphones to fix low energy audio
         // External mics produce very low amplitude (0.000009) that gets rejected by VAD
         // Reduced from 10x to 5x to prevent excessive clipping while still boosting energy
-        let gain_factor = match self.device_type {
+        let transcription_gain = match self.device_type {
             DeviceType::Microphone => 5.0,  // 5x boost for external mics (balanced for quality)
             DeviceType::System => 1.0,       // No boost for system audio (already normalized)
         };
 
-        let amplified_data: Vec<f32> = if gain_factor != 1.0 {
+        let amplified_data: Vec<f32> = if transcription_gain != 1.0 {
             mono_data.iter()
-                .map(|&sample| (sample * gain_factor).clamp(-1.0, 1.0))
+                .map(|&sample| (sample * transcription_gain).clamp(-1.0, 1.0))
                 .collect()
         } else {
             mono_data.clone()
         };
 
-        // PERFORMANCE DEBUG: Log audio levels periodically for monitoring
-        if chunk_id % 100 == 0 && !amplified_data.is_empty() {
-            let _rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
-            let _peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-            perf_debug!(
-                "Audio levels [{:?}] - RMS: {:.6}, Peak: {:.6}, Gain: {}x",
-                self.device_type, _rms, _peak, gain_factor
-            );
+        // RECORDING FIX: Apply moderate gain boost to recordings for audible playback
+        // Transcription uses 5x, but we use 2.5x for recordings to keep them cleaner
+        let recording_gain = match self.device_type {
+            DeviceType::Microphone => 2.5,  // 2.5x boost for recordings (less aggressive than transcription)
+            DeviceType::System => 1.0,       // No boost for system audio
+        };
+
+        let recording_data: Vec<f32> = if recording_gain != 1.0 {
+            mono_data.iter()
+                .map(|&sample| (sample * recording_gain).clamp(-1.0, 1.0))
+                .collect()
+        } else {
+            mono_data.clone()
+        };
+
+        // DIAGNOSTIC: Log audio levels for debugging (especially mic issues)
+        if chunk_id % 100 == 0 && !mono_data.is_empty() {
+            let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+            let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+            let amp_rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
+            let amp_peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+
+            info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6} | After {}x gain: RMS={:.6}, Peak={:.6}",
+                  self.device_type, chunk_id, raw_rms, raw_peak, transcription_gain, amp_rms, amp_peak);
+
+            // Warn if microphone is completely silent
+            if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
+                warn!("⚠️ Microphone producing ZERO audio - check permissions or hardware!");
+            }
         }
 
         // Use global recording timestamp for proper synchronization
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
 
-        // CRITICAL FIX: Create TWO separate audio chunks to prevent double amplification bug
-        // 1. Original audio for recording file (no gain) - normalization only happens once at the end during save
-        // 2. Amplified audio for transcription (5x gain for mic) - needed for VAD energy detection
+        // CRITICAL FIX: Create TWO separate audio chunks with appropriate gain levels
+        // 1. Recording audio with 2.5x gain for audible playback (was unamplified → too quiet)
+        // 2. Transcription audio with 5x gain for VAD energy detection
         let recording_chunk = AudioChunk {
-            data: mono_data,  // ORIGINAL audio without gain boost for clean recording
+            data: recording_data,  // 2.5x boosted audio for audible recordings
             sample_rate: self.sample_rate,
             timestamp,
             chunk_id,
@@ -309,8 +330,27 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
-                    // Use chunk-based approach like old implementation
-                    // Accumulate audio in larger chunks before processing
+                    // HYBRID APPROACH: Feed VAD continuously (streaming) but accumulate all audio
+                    // VAD builds state across chunks and emits segments when it detects speech
+                    // We accumulate BOTH VAD-detected speech AND all raw audio for fallback
+
+                    // Feed audio to streaming VAD (maintains state across chunks)
+                    match self.vad_processor.process_audio(&chunk.data) {
+                        Ok(speech_segments) => {
+                            if !speech_segments.is_empty() {
+                                let total_samples: usize = speech_segments.iter().map(|s| s.samples.len()).sum();
+                                info!("✅ VAD emitted {} speech segments ({} samples) from chunk {}",
+                                      speech_segments.len(), total_samples, chunk.chunk_id);
+                            }
+                            // Note: VAD segments are emitted on SpeechEnd, not every chunk
+                        }
+                        Err(e) => {
+                            warn!("⚠️ VAD error on chunk {}: {}", chunk.chunk_id, e);
+                        }
+                    }
+
+                    // CRITICAL: Accumulate ALL audio regardless of VAD decision
+                    // This ensures we don't lose audio if VAD is too conservative
                     self.accumulate_speech(&chunk.data, chunk.timestamp)?;
 
                     // Check if we should send accumulated speech for transcription
@@ -396,38 +436,29 @@ impl AudioPipeline {
         perf_debug!("Processing accumulated speech: {} samples ({:.1}ms)",
                    accumulated_samples.len(), duration_ms);
 
-        // Use strict VAD to prevent silence from reaching Whisper
-        let speech_samples = match crate::audio::vad::extract_speech_16k(&accumulated_samples) {
-            Ok(speech) if !speech.is_empty() => {
-                perf_debug!("✅ VAD extracted {} speech samples from {} total samples",
-                           speech.len(), accumulated_samples.len());
-                speech
-            }
-            Ok(_) => {
-                // VAD detected no speech - TRUST THE VAD and filter aggressively
-                // If Silero VAD says no speech, it's almost certainly silence or noise
-                // Sending this to Whisper causes hallucinations (e.g., "I'm not sure if you can see the screen")
-                let rms_energy = (accumulated_samples.iter().map(|&x| x * x).sum::<f32>() / accumulated_samples.len() as f32).sqrt();
-                let avg_level = accumulated_samples.iter().map(|&x| x.abs()).sum::<f32>() / accumulated_samples.len() as f32;
-                let peak_level = accumulated_samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+        // Simplified validation: Energy + ZCR only (streaming VAD already ran)
+        // The streaming VAD has been monitoring for 20-28s, we just validate energy here
+        let rms_energy = (accumulated_samples.iter().map(|&x| x * x).sum::<f32>() / accumulated_samples.len() as f32).sqrt();
+        let peak_level = accumulated_samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
 
-                // When VAD says no speech, SKIP IT - trust the VAD
-                // Only exception: extremely loud signal that VAD might have missed
-                if rms_energy > 0.05 && peak_level > 0.3 {
-                    warn!("⚠️ VAD detected no speech but VERY strong signal (RMS: {:.6}, Peak: {:.6}) - including with caution",
-                          rms_energy, peak_level);
-                    accumulated_samples
-                } else {
-                    perf_debug!("🔇 VAD detected no speech (RMS: {:.6}, Avg: {:.6}, Peak: {:.6}) - SKIPPING to prevent hallucinations",
-                               rms_energy, avg_level, peak_level);
-                    return Ok(());
-                }
-            }
-            Err(e) => {
-                warn!("⚠️ VAD error: {}, skipping chunk to prevent potential issues", e);
-                return Ok(());
-            }
-        };
+        // Lower thresholds: streaming VAD already did heavy filtering
+        // We just want to catch completely silent chunks
+        if rms_energy < 0.005 && peak_level < 0.01 {
+            perf_debug!("🔇 Accumulated audio too quiet (RMS: {:.6}, Peak: {:.6}) - likely complete silence",
+                       rms_energy, peak_level);
+            return Ok(());
+        }
+
+        // ZCR validation for tone/noise detection
+        if !Self::validate_speech_characteristics(&accumulated_samples) {
+            perf_debug!("🔇 ZCR validation failed - likely tone/noise, skipping");
+            return Ok(());
+        }
+
+        perf_debug!("✅ Sending {} samples to Whisper (RMS: {:.6}, Peak: {:.6})",
+                   accumulated_samples.len(), rms_energy, peak_level);
+
+        let speech_samples = accumulated_samples;
 
         let transcription_chunk = AudioChunk {
             data: speech_samples,
@@ -460,6 +491,41 @@ impl AudioPipeline {
         }
 
         Ok(())
+    }
+
+    /// Calculate Zero-Crossing Rate - helps distinguish speech from silence/pure tones
+    /// Speech has varied frequency content (high ZCR), silence/tones have low ZCR
+    fn calculate_zcr(samples: &[f32]) -> f32 {
+        if samples.len() < 2 {
+            return 0.0;
+        }
+
+        let zero_crossings = samples.windows(2)
+            .filter(|window| (window[0] * window[1]) < 0.0)
+            .count();
+
+        zero_crossings as f32 / samples.len() as f32
+    }
+
+    /// Validate audio has speech characteristics using Zero-Crossing Rate
+    /// Returns true if audio likely contains speech, false if silence/noise
+    fn validate_speech_characteristics(samples: &[f32]) -> bool {
+        let zcr = Self::calculate_zcr(samples);
+
+        // Speech typically has ZCR between 0.02 and 0.5
+        // Silence/DC offset: < 0.01
+        // Pure tones: < 0.02
+        // Background noise: 0.01-0.05 (borderline)
+        // Speech: > 0.05 (clear indicator)
+        const MIN_ZCR_FOR_SPEECH: f32 = 0.02;
+
+        if zcr < MIN_ZCR_FOR_SPEECH {
+            perf_debug!("ZCR validation failed: {:.4} < {:.4} (likely silence/tone)", zcr, MIN_ZCR_FOR_SPEECH);
+            false
+        } else {
+            perf_debug!("ZCR validation passed: {:.4} (likely speech)", zcr);
+            true
+        }
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
