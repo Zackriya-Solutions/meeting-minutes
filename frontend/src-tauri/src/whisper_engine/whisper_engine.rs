@@ -502,7 +502,7 @@ impl WhisperEngine {
     }
     
     /// Transcribe audio with streaming support for partial results and adaptive quality
-    pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>) -> Result<(String, f32, bool)> {
+    pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
@@ -518,8 +518,16 @@ impl WhisperEngine {
         });
 
         // Configure with adaptive settings
-        params.set_language(Some("en"));
-        params.set_translate(false);
+        // If language is "auto" or None, use automatic language detection (pass None)
+        // If language is "auto-translate", enable translation to English
+        // Otherwise, use the specified language code
+        let (language_code, should_translate) = match language.as_deref() {
+            Some("auto") | None => (None, false),
+            Some("auto-translate") => (None, true),
+            Some(lang) => (Some(lang), false),
+        };
+        params.set_language(language_code);
+        params.set_translate(should_translate);
 
         // PERFORMANCE: Disable ALL whisper.cpp internal printing
         // This reduces C library log spam significantly
@@ -603,7 +611,7 @@ impl WhisperEngine {
         Ok((cleaned_result, avg_confidence, is_partial))
     }
 
-    pub async fn transcribe_audio(&self, audio_data: Vec<f32>) -> Result<String> {
+    pub async fn transcribe_audio(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<String> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
@@ -615,8 +623,16 @@ impl WhisperEngine {
         });
 
         // Configure for good quality
-        params.set_language(Some("en"));
-        params.set_translate(false);
+        // If language is "auto" or None, use automatic language detection (pass None)
+        // If language is "auto-translate", enable translation to English
+        // Otherwise, use the specified language code
+        let (language_code, should_translate) = match language.as_deref() {
+            Some("auto") | None => (None, false),
+            Some("auto-translate") => (None, true),
+            Some(lang) => (Some(lang), false),
+        };
+        params.set_language(language_code);
+        params.set_translate(should_translate);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);

@@ -151,18 +151,26 @@ futures-channel = "0.3.31"
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "metal"] }
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "metal", "coreml"] }
 
-# Windows-specific dependencies with CPU optimization (OpenBLAS)
-# Users with NVIDIA GPUs can manually build with --features cuda
+# Windows-specific dependencies
+# Default: CPU-only build (no BLAS)
+# Users can enable features manually:
+#   --features cuda     (NVIDIA GPUs)
+#   --features vulkan   (AMD/Intel GPUs)
+#   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "openblas"] }
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
 
-# Linux-specific dependencies with CPU optimization (OpenBLAS)
-# Users with NVIDIA GPUs can manually build with --features cuda
-# Users with AMD GPUs can manually build with --features hipblas
+# Linux-specific dependencies
+# Default: CPU-only build (no BLAS)
+# Users can enable features manually:
+#   --features cuda     (NVIDIA GPUs)
+#   --features vulkan   (AMD/Intel GPUs)
+#   --features hipblas  (AMD ROCm)
+#   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "openblas"] }
+whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
 
 [dev-dependencies]
 tempfile = "3.3.0"

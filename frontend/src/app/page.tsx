@@ -9,6 +9,7 @@ import { AISummary } from '@/components/AISummary';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { ModelManager } from '@/components/WhisperModelManager';
+import { LanguageSelection } from '@/components/LanguageSelection';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -77,6 +78,8 @@ export default function Home() {
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
+  const [showLanguageSettings, setShowLanguageSettings] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording , serverAddress} = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -1220,6 +1223,24 @@ export default function Home() {
     loadDevicePreferences();
   }, []);
 
+  // Load language preference on startup
+  useEffect(() => {
+    const loadLanguagePreference = async () => {
+      try {
+        const language = await invoke('get_language_preference') as string;
+        if (language) {
+          setSelectedLanguage(language);
+          console.log('Loaded language preference:', language);
+        }
+      } catch (error) {
+        console.log('No language preference found or failed to load, using default (auto-translate):', error);
+        // Default to 'auto-translate' (Auto Detect with English translation) if no preference is saved
+        setSelectedLanguage('auto-translate');
+      }
+    };
+    loadLanguagePreference();
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {showErrorAlert && (
@@ -1270,13 +1291,13 @@ export default function Home() {
                         ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
                         : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 active:bg-blue-200'
                     }`}
-                    title={transcripts.length === 0 ? 'No transcript available' : 'Copy Transcript'}
+                    title={transcripts.length === 0 ? 'No transcript available' : 'Copy'}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V7.5l-3.75-3.612z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 3v3.75a.75.75 0 0 0 .75.75H18" />
                     </svg>
-                    <span className="text-sm">Copy Transcript</span>
+                    <span className="text-sm">Copy</span>
                   </button>
                   <button
                     onClick={() => setShowDeviceSettings(true)}
@@ -1290,6 +1311,18 @@ export default function Home() {
                       <line x1="8" y1="23" x2="16" y2="23"/>
                     </svg>
                     <span className="text-sm">Devices</span>
+                  </button>
+                  <button
+                    onClick={() => setShowLanguageSettings(true)}
+                    className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
+                    title="Language Settings"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <line x1="2" y1="12" x2="22" y2="12"/>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                    <span className="text-sm">Language</span>
                   </button>
                   {/* {showSummary && !isRecording && (
                     <>
@@ -1565,6 +1598,40 @@ export default function Home() {
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setShowDeviceSettings(false)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Language Settings Modal */}
+          {showLanguageSettings && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Language Settings</h3>
+                  <button
+                    onClick={() => setShowLanguageSettings(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <LanguageSelection
+                  selectedLanguage={selectedLanguage}
+                  onLanguageChange={setSelectedLanguage}
+                  disabled={isRecording}
+                />
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setShowLanguageSettings(false)}
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   >
                     Done

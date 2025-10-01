@@ -142,9 +142,11 @@ pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, St
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
-        engine.transcribe_audio(audio_data).await
+        // Get language preference
+        let language = crate::get_language_preference_internal();
+        engine.transcribe_audio(audio_data, language).await
             .map_err(|e| format!("Transcription failed: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())

@@ -787,13 +787,13 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                       ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
                       : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 active:bg-blue-200'
                   }`}
-                  title={transcripts?.length === 0 ? 'No transcript available' : 'Copy Transcript'}
+                  title={transcripts?.length === 0 ? 'No transcript available' : 'Copy'}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V7.5l-3.75-3.612z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 3v3.75a.75.75 0 0 0 .75.75H18" />
                   </svg>
-                  <span className="text-sm">Copy Transcript</span>
+                  <span className="text-sm">Copy</span>
                 </button>
                 {transcripts?.length > 0 && (
                   <>

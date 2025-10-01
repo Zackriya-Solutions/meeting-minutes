@@ -816,7 +816,10 @@ async fn transcribe_chunk_with_streaming<R: Runtime>(
     info!("Processing speech audio chunk {} with {} samples (energy: {:.6})",
           chunk.chunk_id, speech_samples.len(), energy);
 
-    match whisper_engine.transcribe_audio_with_confidence(speech_samples).await {
+    // Get language preference from global state
+    let language = crate::get_language_preference_internal();
+
+    match whisper_engine.transcribe_audio_with_confidence(speech_samples, language).await {
         Ok((text, confidence, is_partial)) => {
             let cleaned_text = text.trim().to_string();
             if cleaned_text.is_empty() {

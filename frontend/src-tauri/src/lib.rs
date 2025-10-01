@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex as StdMutex;
 // Removed unused import
 
 // Performance optimization: Conditional logging macros for hot paths
@@ -53,6 +54,10 @@ use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+
+// Global language preference storage (default to "auto-translate" for automatic translation to English)
+static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
+    std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -365,6 +370,34 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 }
 
+// Language preference commands
+#[tauri::command]
+async fn get_language_preference() -> Result<String, String> {
+    let language = LANGUAGE_PREFERENCE
+        .lock()
+        .map_err(|e| format!("Failed to get language preference: {}", e))?;
+    log_info!("Retrieved language preference: {}", &*language);
+    Ok(language.clone())
+}
+
+#[tauri::command]
+async fn set_language_preference(language: String) -> Result<(), String> {
+    let mut lang_pref = LANGUAGE_PREFERENCE
+        .lock()
+        .map_err(|e| format!("Failed to set language preference: {}", e))?;
+    log_info!("Setting language preference to: {}", language);
+    *lang_pref = language;
+    Ok(())
+}
+
+// Internal helper function to get language preference (for use within Rust code)
+pub fn get_language_preference_internal() -> Option<String> {
+    LANGUAGE_PREFERENCE
+        .lock()
+        .ok()
+        .map(|lang| lang.clone())
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -518,6 +551,10 @@ pub fn run() {
             audio::recording_preferences::get_current_audio_backend,
             audio::recording_preferences::set_audio_backend,
             audio::recording_preferences::get_audio_backend_info,
+
+            // Language preference commands
+            get_language_preference,
+            set_language_preference,
 
             // Notification system commands
             notifications::commands::get_notification_settings,
