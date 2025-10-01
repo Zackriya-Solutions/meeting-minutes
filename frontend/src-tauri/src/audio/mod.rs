@@ -56,7 +56,7 @@ pub use system_audio_commands::{
 };
 
 // Export new simplified components
-pub use recording_state::{RecordingState, AudioChunk, AudioError};
+pub use recording_state::{RecordingState, AudioChunk, ProcessedAudioChunk, AudioError};
 pub use pipeline::{AudioPipelineManager};
 pub use stream::{AudioStreamManager};
 pub use recording_manager::{RecordingManager};

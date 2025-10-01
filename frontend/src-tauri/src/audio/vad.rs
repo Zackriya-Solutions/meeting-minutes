@@ -33,16 +33,17 @@ impl ContinuousVadProcessor {
         // Silero VAD MUST use 16kHz - this is hardcoded requirement
         const VAD_SAMPLE_RATE: u32 = 16000;
 
-        // Use conservative settings proven to work with Silero VAD
+        // Use STRICT settings to prevent silence from reaching Whisper
         let mut config = VadConfig::default();
         config.sample_rate = VAD_SAMPLE_RATE as usize;
 
-        // Optimized settings based best practices for better speech quality
+        // STRICT settings to filter silence and prevent Whisper hallucinations
         let safe_redemption_time = std::cmp::min(redemption_time_ms, 400); // Optimized redemption time
         config.redemption_time = Duration::from_millis(safe_redemption_time as u64);
         config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
         config.post_speech_pad = Duration::from_millis(300);   // Post-speech padding for context
-        config.min_speech_time = Duration::from_millis(1000);  // Increased to 1000ms to filter out short noise
+        config.min_speech_time = Duration::from_millis(1200);  // Increased to 1200ms to filter out short noise/silence
+        // Note: VadConfig doesn't expose threshold field, using min_speech_time as primary filter
 
         debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, input_rate={}Hz",
                VAD_SAMPLE_RATE, safe_redemption_time, input_sample_rate);

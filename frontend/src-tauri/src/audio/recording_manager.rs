@@ -53,60 +53,27 @@ impl RecordingManager {
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
 
-        // Start recording saver to accumulate audio data
-        let save_sender = self.recording_saver.start_accumulation();
+        // Start recording saver with RAW audio (not VAD-processed)
+        // This ensures high quality recordings without VAD artifacts
+        let recording_sender = self.recording_saver.start_accumulation();
 
         // Start recording state first
         self.state.start_recording()?;
 
-        // Create a combined sender that forwards to both transcription and saving
-        let combined_sender = {
-            let trans_sender = transcription_sender.clone();
-            let save_sender_clone = save_sender.clone();
-
-            let (combined_tx, mut combined_rx) = mpsc::unbounded_channel::<AudioChunk>();
-
-            // Spawn task to forward chunks to both transcription and saving
-            tokio::spawn(async move {
-                let mut error_count = 0u32;
-                while let Some(chunk) = combined_rx.recv().await {
-                    // Send to transcription (original functionality)
-                    if let Err(e) = trans_sender.send(chunk.clone()) {
-                        // Performance optimization: reduce warning frequency to avoid log spam
-                        error_count += 1;
-                        if error_count % 100 == 1 {
-                            warn!("Failed to send chunk to transcription: {} (showing every 100th error)", e);
-                        }
-                    }
-
-                    // Send to saving (new functionality)
-                    if let Err(e) = save_sender_clone.send(chunk) {
-                        // Performance optimization: reduce warning frequency
-                        if error_count % 100 == 1 {
-                            warn!("Failed to send chunk to saving: {} (showing every 100th error)", e);
-                        }
-                    }
-                }
-            });
-
-            combined_tx
-        };
-
-        // Start the audio processing pipeline with dynamic chunk sizing
-        // Note: chunk duration parameter is now ignored in favor of dynamic sizing (5s first, 10s subsequent)
+        // Start the audio processing pipeline for transcription only
+        // Pipeline applies VAD to transcription path, but recording gets raw audio
         self.pipeline_manager.start(
             self.state.clone(),
-            combined_sender,
+            transcription_sender,
             0, // Ignored - using dynamic sizing internally
             48000, // 48kHz sample rate
         )?;
 
-
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        // Start audio streams last, after pipeline is ready, passing the recording saver sender
-        self.stream_manager.start_streams(microphone_device, system_device, Some(save_sender)).await?;
+        // Start audio streams - they send raw chunks to BOTH pipeline (for transcription) and recording saver
+        self.stream_manager.start_streams(microphone_device, system_device, Some(recording_sender)).await?;
 
         info!("Recording manager started successfully with {} active streams",
                self.stream_manager.active_stream_count());

@@ -24,6 +24,15 @@ pub struct AudioChunk {
     pub device_type: DeviceType,
 }
 
+/// Processed audio chunk (post-VAD) for recording
+#[derive(Debug, Clone)]
+pub struct ProcessedAudioChunk {
+    pub data: Vec<f32>,
+    pub sample_rate: u32,
+    pub timestamp: f64,
+    pub device_type: DeviceType,
+}
+
 /// Comprehensive error types for audio system
 #[derive(Debug, Clone)]
 pub enum AudioError {

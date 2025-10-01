@@ -396,29 +396,36 @@ impl AudioPipeline {
         perf_debug!("Processing accumulated speech: {} samples ({:.1}ms)",
                    accumulated_samples.len(), duration_ms);
 
-        // Use old implementation's VAD approach: apply VAD to the complete chunk
+        // Use strict VAD to prevent silence from reaching Whisper
         let speech_samples = match crate::audio::vad::extract_speech_16k(&accumulated_samples) {
             Ok(speech) if !speech.is_empty() => {
-                perf_debug!("VAD extracted {} speech samples from {} total samples",
+                perf_debug!("✅ VAD extracted {} speech samples from {} total samples",
                            speech.len(), accumulated_samples.len());
                 speech
             }
             Ok(_) => {
-                // PERFORMANCE FIX: VAD detected no speech, apply balanced threshold
-                // With 10x mic gain on transcription path, we can use a more permissive threshold
-                // to catch all speech while still filtering pure silence
+                // VAD detected no speech - TRUST THE VAD and filter aggressively
+                // If Silero VAD says no speech, it's almost certainly silence or noise
+                // Sending this to Whisper causes hallucinations (e.g., "I'm not sure if you can see the screen")
+                let rms_energy = (accumulated_samples.iter().map(|&x| x * x).sum::<f32>() / accumulated_samples.len() as f32).sqrt();
                 let avg_level = accumulated_samples.iter().map(|&x| x.abs()).sum::<f32>() / accumulated_samples.len() as f32;
-                if avg_level > 0.002 { // Lower threshold: catch all speech with 10x amplification
-                    perf_debug!("VAD detected no speech but significant audio present ({:.6}), including audio", avg_level);
+                let peak_level = accumulated_samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+
+                // When VAD says no speech, SKIP IT - trust the VAD
+                // Only exception: extremely loud signal that VAD might have missed
+                if rms_energy > 0.05 && peak_level > 0.3 {
+                    warn!("⚠️ VAD detected no speech but VERY strong signal (RMS: {:.6}, Peak: {:.6}) - including with caution",
+                          rms_energy, peak_level);
                     accumulated_samples
                 } else {
-                    perf_debug!("VAD detected genuine silence or low-quality audio ({:.6}), skipping", avg_level);
+                    perf_debug!("🔇 VAD detected no speech (RMS: {:.6}, Avg: {:.6}, Peak: {:.6}) - SKIPPING to prevent hallucinations",
+                               rms_energy, avg_level, peak_level);
                     return Ok(());
                 }
             }
             Err(e) => {
-                warn!("VAD error: {}, using original samples", e);
-                accumulated_samples
+                warn!("⚠️ VAD error: {}, skipping chunk to prevent potential issues", e);
+                return Ok(());
             }
         };
 

@@ -4,7 +4,7 @@ use log::{info, warn, error};
 use tauri::{AppHandle, Runtime, Emitter};
 use tokio::sync::mpsc;
 
-use super::recording_state::{AudioChunk, DeviceType};
+use super::recording_state::{AudioChunk, ProcessedAudioChunk, DeviceType};
 use super::recording_preferences::load_recording_preferences;
 use super::audio_processing::{write_audio_to_file_with_meeting_name, write_transcript_to_file};
 
@@ -169,6 +169,68 @@ impl RecordingSaver {
         sender
     }
 
+    /// NEW: Start accumulation with processed (VAD-filtered) audio
+    /// This receives clean speech-only audio from the pipeline
+    pub fn start_accumulation_with_processed(&mut self, mut receiver: mpsc::UnboundedReceiver<ProcessedAudioChunk>) {
+        info!("Initializing processed audio buffers for recording");
+
+        // Initialize static audio buffers
+        unsafe {
+            MIC_CHUNKS = Some(Arc::new(Mutex::new(Vec::new())));
+            SYSTEM_CHUNKS = Some(Arc::new(Mutex::new(Vec::new())));
+        }
+
+        // Start accumulation task for processed audio
+        let is_saving_clone = self.is_saving.clone();
+
+        tokio::spawn(async move {
+            info!("Recording saver (processed audio) accumulation task started");
+
+            while let Some(chunk) = receiver.recv().await {
+                // Check if we should continue saving
+                let should_continue = if let Ok(is_saving) = is_saving_clone.lock() {
+                    *is_saving
+                } else {
+                    false
+                };
+
+                if !should_continue {
+                    break;
+                }
+
+                // Store processed audio chunk
+                let audio_data = AudioData {
+                    data: chunk.data,
+                    sample_rate: chunk.sample_rate,
+                };
+
+                match chunk.device_type {
+                    DeviceType::Microphone => {
+                        with_mic_chunks(|chunks| {
+                            if let Ok(mut mic_chunks) = chunks.lock() {
+                                mic_chunks.push(audio_data);
+                            }
+                        });
+                    }
+                    DeviceType::System => {
+                        with_system_chunks(|chunks| {
+                            if let Ok(mut system_chunks) = chunks.lock() {
+                                system_chunks.push(audio_data);
+                            }
+                        });
+                    }
+                }
+            }
+
+            info!("Recording saver (processed audio) accumulation task ended");
+        });
+
+        // Set saving flag
+        if let Ok(mut is_saving) = self.is_saving.lock() {
+            *is_saving = true;
+        }
+    }
+
     /// Get recording statistics
     pub fn get_stats(&self) -> (usize, u32) {
         let mic_count = with_mic_chunks(|chunks| {
@@ -289,7 +351,8 @@ impl RecordingSaver {
 
         info!("Audio levels - Mic RMS: {:.6}, System RMS: {:.6}", mic_rms, system_rms);
 
-        // Simple balanced mixing with proper level control
+        // NEW: Smart ducking mix (from old working implementation)
+        // System audio gets priority, mic is ducked when system is active
         let max_len = mic_resampled.len().max(system_resampled.len());
         let mut mixed_data = Vec::with_capacity(max_len);
 
@@ -306,20 +369,36 @@ impl RecordingSaver {
                 0.0
             };
 
-            // Simple 50/50 mix, will normalize once at the end
-            let mixed_sample = (mic_sample + system_sample) * 0.5;
+            // Smart ducking from old implementation (lib_old_complex.rs:579-586)
+            // When system audio is active (> 0.01), mix with ducked mic (0.6 mic + 0.9 system)
+            // When only mic, use full strength
+            let mixed_sample = if system_sample.abs() > 0.01 {
+                // System audio active: duck mic, boost system
+                ((mic_sample * 0.6) + (system_sample * 0.9)).clamp(-1.0, 1.0)
+            } else {
+                // Only mic: full strength
+                mic_sample
+            };
+
             mixed_data.push(mixed_sample);
         }
 
-        info!("Mixed {} samples at {}Hz", mixed_data.len(), target_sample_rate);
+        info!("Mixed {} samples at {}Hz with smart ducking", mixed_data.len(), target_sample_rate);
 
-        // CRITICAL FIX: Normalize ONCE at the very end
-        // Single normalization pass prevents artifacts from multiple normalization
+        // NO NORMALIZATION NEEDED: Audio is already VAD-processed and clean
+        // The VAD output is speech-only with proper levels
+        // Only apply safety normalization if RMS is extremely low
         let mixed_data = if !mixed_data.is_empty() {
-            let normalized = super::audio_processing::normalize_v2(&mixed_data);
-            let rms_after = (normalized.iter().map(|x| x * x).sum::<f32>() / normalized.len() as f32).sqrt();
-            info!("Normalized audio - Final RMS: {:.6}", rms_after);
-            normalized
+            let current_rms = (mixed_data.iter().map(|x| x * x).sum::<f32>() / mixed_data.len() as f32).sqrt();
+            info!("Final mixed audio RMS: {:.6} (no normalization - VAD output is clean)", current_rms);
+
+            // Safety: only normalize if extremely quiet (< 0.05 RMS)
+            if current_rms < 0.05 && current_rms > 0.0 {
+                warn!("Audio extremely quiet ({:.6}), applying safety normalization", current_rms);
+                super::audio_processing::normalize_v2(&mixed_data)
+            } else {
+                mixed_data
+            }
         } else {
             mixed_data
         };

@@ -1,7 +1,8 @@
-use std::time::Instant;
+
 
 #[cfg(target_os = "macos")]
 use std::time::Duration;
+use std::time::Instant;
 
 #[cfg(target_os = "macos")]
 use cidre::{core_audio as ca, os};
