@@ -24,6 +24,7 @@ import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { MessageToast } from '../MessageToast';
 import Logo from '../Logo';
 import Info from '../Info';
+import { ComplianceNotification } from '../ComplianceNotification';
 
 interface SidebarItem {
   id: string;
