@@ -127,6 +127,8 @@ ringbuf = "0.3"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
+
 # Common Tauri configuration
 tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
 tauri-plugin-fs = "2.4.0"
@@ -172,6 +174,7 @@ futures-channel = "0.3.31"
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
 whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
+futures-channel = "0.3.31"
 
 [dev-dependencies]
 tempfile = "3.3.0"
