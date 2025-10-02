@@ -12,6 +12,136 @@ use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType}
 use super::audio_processing::audio_to_mono;
 use super::vad::{ContinuousVadProcessor};
 
+/// Ring buffer for synchronized audio mixing
+/// Accumulates samples from mic and system streams until we have aligned windows
+struct AudioMixerRingBuffer {
+    mic_buffer: VecDeque<f32>,
+    system_buffer: VecDeque<f32>,
+    window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
+    max_buffer_size: usize,  // Safety limit (e.g., 100ms)
+}
+
+impl AudioMixerRingBuffer {
+    fn new(sample_rate: u32) -> Self {
+        // Use 50ms windows for mixing
+        let window_ms = 50.0;
+        let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
+
+        // Max buffer size: 100ms (prevent unbounded growth)
+        let max_buffer_size = window_size_samples * 2;
+
+        Self {
+            mic_buffer: VecDeque::with_capacity(max_buffer_size),
+            system_buffer: VecDeque::with_capacity(max_buffer_size),
+            window_size_samples,
+            max_buffer_size,
+        }
+    }
+
+    fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
+        match device_type {
+            DeviceType::Microphone => self.mic_buffer.extend(samples),
+            DeviceType::System => self.system_buffer.extend(samples),
+        }
+
+        // Safety: prevent buffer overflow (keep only last 100ms)
+        while self.mic_buffer.len() > self.max_buffer_size {
+            self.mic_buffer.pop_front();
+        }
+        while self.system_buffer.len() > self.max_buffer_size {
+            self.system_buffer.pop_front();
+        }
+    }
+
+    fn can_mix(&self) -> bool {
+        self.mic_buffer.len() >= self.window_size_samples &&
+        self.system_buffer.len() >= self.window_size_samples
+    }
+
+    fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        if !self.can_mix() {
+            return None;
+        }
+
+        let mic: Vec<f32> = self.mic_buffer.drain(0..self.window_size_samples).collect();
+        let sys: Vec<f32> = self.system_buffer.drain(0..self.window_size_samples).collect();
+
+        Some((mic, sys))
+    }
+
+    fn flush(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        if self.mic_buffer.is_empty() && self.system_buffer.is_empty() {
+            return None;
+        }
+
+        let mic: Vec<f32> = self.mic_buffer.drain(..).collect();
+        let sys: Vec<f32> = self.system_buffer.drain(..).collect();
+
+        Some((mic, sys))
+    }
+}
+
+/// Professional audio mixer with RMS-based ducking
+/// Uses industry-standard techniques to prevent clipping and artifacts
+struct ProfessionalAudioMixer {
+    system_rms: f32,  // Running RMS estimate for smooth ducking
+    rms_smoothing: f32,  // Smoothing factor (0.95 = very smooth)
+}
+
+impl ProfessionalAudioMixer {
+    fn new(_sample_rate: u32) -> Self {
+        Self {
+            system_rms: 0.0,
+            rms_smoothing: 0.95,
+        }
+    }
+
+    fn mix_window(&mut self, mic_window: &[f32], sys_window: &[f32]) -> Vec<f32> {
+        // Handle different lengths (pad shorter with zeros)
+        let max_len = mic_window.len().max(sys_window.len());
+        let mut mixed = Vec::with_capacity(max_len);
+
+        // Calculate system RMS for ducking decision
+        let sys_rms = Self::calculate_rms(sys_window);
+        self.system_rms = self.rms_smoothing * self.system_rms +
+                          (1.0 - self.rms_smoothing) * sys_rms;
+
+        // Calculate ducking amount based on system RMS (not per-sample)
+        // Smooth curve: 0.0 → 0.4 as RMS increases from 0.01 → 0.1
+        let duck_amount = if self.system_rms > 0.01 {
+            ((self.system_rms - 0.01) / 0.09).min(1.0) * 0.4
+        } else {
+            0.0
+        };
+
+        // Mix sample-by-sample with professional formula
+        for i in 0..max_len {
+            let mic = mic_window.get(i).copied().unwrap_or(0.0);
+            let sys = sys_window.get(i).copied().unwrap_or(0.0);
+
+            // Apply ducking to mic (1.0 → 0.6 based on system RMS)
+            let mic_ducked = mic * (1.0 - duck_amount);
+
+            // Sum with automatic gain compensation to prevent clipping
+            // This is the key: scale down if sum would exceed ±1.0
+            let sum_abs = mic_ducked.abs() + sys.abs();
+            let scale = if sum_abs > 1.0 { 1.0 / sum_abs } else { 1.0 };
+
+            let mixed_sample = (mic_ducked + sys) * scale;
+            mixed.push(mixed_sample.clamp(-1.0, 1.0));
+        }
+
+        mixed
+    }
+
+    fn calculate_rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+}
+
 /// Simplified audio capture without broadcast channels
 #[derive(Clone)]
 pub struct AudioCapture {
@@ -63,36 +193,18 @@ impl AudioCapture {
         // Create audio chunk with stream-specific timestamp (get ID first for logging)
         let chunk_id = self.chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        // UNIFIED GAIN: Apply same gain for BOTH recording and transcription
-        // This ensures recorded output matches exactly what Whisper processes
-        // External mics produce very low amplitude (0.000009) that gets rejected by VAD
-        let gain = match self.device_type {
-            DeviceType::Microphone => 5.0,  // 5x boost for external mics (balanced for quality)
-            DeviceType::System => 1.0,       // No boost for system audio (already normalized)
-        };
-
-        let amplified_data: Vec<f32> = if gain != 1.0 {
-            mono_data.iter()
-                .map(|&sample| (sample * gain).clamp(-1.0, 1.0))
-                .collect()
-        } else {
-            mono_data.clone()
-        };
+        // RAW AUDIO: No gain applied here - will be applied AFTER mixing
+        // This prevents amplifying system audio bleed-through in the microphone
 
         // DIAGNOSTIC: Log audio levels for debugging (especially mic issues)
         if chunk_id % 100 == 0 && !mono_data.is_empty() {
             let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
             let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-            let amp_rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
-            let amp_peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+
             if self.device_type == DeviceType::Microphone {
-            info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6} | After {}x gain: RMS={:.6}, Peak={:.6}",
-                  self.device_type, chunk_id, raw_rms, raw_peak, gain, amp_rms, amp_peak);
+                info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
+                      self.device_type, chunk_id, raw_rms, raw_peak);
             }
-            // else {
-            //     perf_debug!("🔊 [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6} | After {}x gain: RMS={:.6}, Peak={:.6}",
-            //       self.device_type, chunk_id, raw_rms, raw_peak, gain, amp_rms, amp_peak);
-            // }
 
             // Warn if microphone is completely silent
             if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
@@ -103,10 +215,9 @@ impl AudioCapture {
         // Use global recording timestamp for proper synchronization
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
 
-        // UNIFIED FIX: Use SAME amplified data for both recording and transcription
-        // This ensures recorded output matches exactly what Whisper processes
+        // RAW AUDIO CHUNK: No gain applied - will be mixed and gained downstream
         let audio_chunk = AudioChunk {
-            data: amplified_data.clone(),  // Same gain-boosted audio for both paths
+            data: mono_data,  // Raw audio, no gain yet
             sample_rate: self.sample_rate,
             timestamp,
             chunk_id,
@@ -180,9 +291,11 @@ pub struct AudioPipeline {
     processed_chunks: u64,
     // Smart batching for audio metrics
     metrics_batcher: Option<AudioMetricsBatcher>,
-    // AUDIO MIXING FIX: Separate buffers for mic and system audio
-    mic_buffer: VecDeque<f32>,
-    system_buffer: VecDeque<f32>,
+    // PROFESSIONAL AUDIO MIXING: Ring buffer + RMS-based mixer
+    ring_buffer: AudioMixerRingBuffer,
+    mixer: ProfessionalAudioMixer,
+    // Recording sender for pre-mixed audio
+    recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
 
 impl AudioPipeline {
@@ -241,6 +354,10 @@ impl AudioPipeline {
               recommended_duration, min_chunk_duration_ms, max_chunk_duration_ms,
               hardware_profile.performance_tier, hardware_profile.gpu_type);
 
+        // Initialize professional audio mixing components
+        let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
+        let mixer = ProfessionalAudioMixer::new(sample_rate);
+
         Self {
             receiver,
             transcription_sender,
@@ -258,9 +375,10 @@ impl AudioPipeline {
             processed_chunks: 0,
             // Initialize metrics batcher for smart batching
             metrics_batcher: Some(AudioMetricsBatcher::new()),
-            // Initialize separate buffers for audio mixing
-            mic_buffer: VecDeque::new(),
-            system_buffer: VecDeque::new(),
+            // Initialize professional audio mixing
+            ring_buffer,
+            mixer,
+            recording_sender_for_mixed: None,  // Will be set by manager
         }
     }
 
@@ -318,19 +436,49 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
-                    // AUDIO MIXING FIX: Route chunks to separate buffers based on device type
-                    // Then mix them properly before VAD/transcription
-                    match chunk.device_type {
-                        DeviceType::Microphone => {
-                            self.mic_buffer.extend(chunk.data.iter());
-                        }
-                        DeviceType::System => {
-                            self.system_buffer.extend(chunk.data.iter());
+                    // PROFESSIONAL MIXING: Add to ring buffer (no immediate mixing)
+                    self.ring_buffer.add_samples(chunk.device_type.clone(), chunk.data);
+
+                    // Mix in fixed windows only when both streams have sufficient data
+                    while self.ring_buffer.can_mix() {
+                        if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
+                            // UNIFIED MIXING: Same algorithm for recording AND transcription
+                            let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
+
+                            // Apply post-gain (5x boost) - SAME for both recording AND transcription
+                            let mixed_with_gain: Vec<f32> = mixed_clean.iter()
+                                .map(|&s| (s * 5.0).clamp(-1.0, 1.0))
+                                .collect();
+
+                            // Send to recording (WITH post-gain for consistency)
+                            if let Some(ref sender) = self.recording_sender_for_mixed {
+                                let recording_chunk = AudioChunk {
+                                    data: mixed_with_gain.clone(),  // Same gain as transcription
+                                    sample_rate: self.sample_rate,
+                                    timestamp: chunk.timestamp,
+                                    chunk_id: self.chunk_id_counter,
+                                    device_type: DeviceType::Microphone,  // Mixed audio
+                                };
+                                let _ = sender.send(recording_chunk);
+                            }
+
+                            // Process for transcription
+                            match self.vad_processor.process_audio(&mixed_with_gain) {
+                                Ok(speech_segments) => {
+                                    if !speech_segments.is_empty() {
+                                        let total_samples: usize = speech_segments.iter().map(|s| s.samples.len()).sum();
+                                        info!("✅ VAD emitted {} speech segments ({} samples) from professionally mixed audio",
+                                              speech_segments.len(), total_samples);
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ VAD error on mixed audio: {}", e);
+                                }
+                            }
+
+                            self.accumulate_speech(&mixed_with_gain, chunk.timestamp)?;
                         }
                     }
-
-                    // Mix available samples from both buffers and process
-                    self.mix_and_process(chunk.timestamp)?;
 
                     // Check if we should send accumulated speech for transcription
                     // Optimized: check every 8 chunks for better responsiveness
@@ -363,55 +511,6 @@ impl AudioPipeline {
     }
 
 
-    /// Mix audio from mic and system buffers using smart ducking logic
-    /// This is the CRITICAL FIX for transcription quality
-    fn mix_and_process(&mut self, timestamp: f64) -> Result<()> {
-        // Calculate how many samples we can mix (minimum of both buffer lengths)
-        let mixable_len = self.mic_buffer.len().min(self.system_buffer.len());
-
-        if mixable_len == 0 {
-            return Ok(());
-        }
-
-        let mut mixed_samples = Vec::with_capacity(mixable_len);
-
-        for _ in 0..mixable_len {
-            let mic_sample = self.mic_buffer.pop_front().unwrap_or(0.0);
-            let system_sample = self.system_buffer.pop_front().unwrap_or(0.0);
-
-            // Smart ducking logic from recording_saver.rs (proven to work)
-            // When system audio is active (> 0.01), duck mic and boost system
-            // When only mic, use full strength
-            let mixed_sample = if system_sample.abs() > 0.01 {
-                // System audio active: duck mic (0.6x), boost system (0.9x)
-                ((mic_sample * 0.6) + (system_sample * 0.9)).clamp(-1.0, 1.0)
-            } else {
-                // Only mic: full strength
-                mic_sample
-            };
-
-            mixed_samples.push(mixed_sample);
-        }
-
-        // Feed mixed audio to VAD processor
-        match self.vad_processor.process_audio(&mixed_samples) {
-            Ok(speech_segments) => {
-                if !speech_segments.is_empty() {
-                    let total_samples: usize = speech_segments.iter().map(|s| s.samples.len()).sum();
-                    info!("✅ VAD emitted {} speech segments ({} samples) from mixed audio",
-                          speech_segments.len(), total_samples);
-                }
-            }
-            Err(e) => {
-                warn!("⚠️ VAD error on mixed audio: {}", e);
-            }
-        }
-
-        // Accumulate the mixed audio for transcription
-        self.accumulate_speech(&mixed_samples, timestamp)?;
-
-        Ok(())
-    }
 
     fn accumulate_speech(&mut self, samples: &[f32], timestamp: f64) -> Result<()> {
         if self.accumulated_speech.is_empty() {
@@ -558,35 +657,37 @@ impl AudioPipeline {
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
-        // AUDIO MIXING FIX: Mix any remaining audio in the buffers first
+        // PROFESSIONAL MIXING: Flush any remaining audio in ring buffer
         let last_timestamp = self.accumulated_start_timestamp +
             (self.accumulated_speech.len() as f64 / self.sample_rate as f64);
 
-        // Mix remaining buffered audio
-        let mic_len = self.mic_buffer.len();
-        let sys_len = self.system_buffer.len();
+        if let Some((mic_remaining, sys_remaining)) = self.ring_buffer.flush() {
+            if !mic_remaining.is_empty() || !sys_remaining.is_empty() {
+                info!("Flushing remaining buffered audio - Mic: {} samples, System: {} samples",
+                      mic_remaining.len(), sys_remaining.len());
 
-        if mic_len > 0 || sys_len > 0 {
-            info!("Flushing remaining buffered audio - Mic: {} samples, System: {} samples",
-                  mic_len, sys_len);
+                // Mix remaining audio with professional mixer
+                let mixed_clean = self.mixer.mix_window(&mic_remaining, &sys_remaining);
 
-            let max_len = mic_len.max(sys_len);
-            let mut remaining_mixed = Vec::with_capacity(max_len);
+                // Send to recording
+                if let Some(ref sender) = self.recording_sender_for_mixed {
+                    let recording_chunk = AudioChunk {
+                        data: mixed_clean.clone(),
+                        sample_rate: self.sample_rate,
+                        timestamp: last_timestamp,
+                        chunk_id: self.chunk_id_counter,
+                        device_type: DeviceType::Microphone,
+                    };
+                    let _ = sender.send(recording_chunk);
+                }
 
-            for _ in 0..max_len {
-                let mic_sample = self.mic_buffer.pop_front().unwrap_or(0.0);
-                let system_sample = self.system_buffer.pop_front().unwrap_or(0.0);
+                // Apply post-gain for transcription
+                let mixed_with_gain: Vec<f32> = mixed_clean.iter()
+                    .map(|&s| (s * 5.0).clamp(-1.0, 1.0))
+                    .collect();
 
-                let mixed_sample = if system_sample.abs() > 0.01 {
-                    ((mic_sample * 0.6) + (system_sample * 0.9)).clamp(-1.0, 1.0)
-                } else {
-                    mic_sample
-                };
-
-                remaining_mixed.push(mixed_sample);
+                self.accumulate_speech(&mixed_with_gain, last_timestamp)?;
             }
-
-            self.accumulate_speech(&remaining_mixed, last_timestamp)?;
         }
 
         // Flush any remaining audio from VAD processor
