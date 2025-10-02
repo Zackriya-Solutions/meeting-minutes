@@ -543,9 +543,10 @@ impl WhisperEngine {
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
-        // CRITICAL FIX: Increased from 0.6 to 0.75 to prevent hallucinations on silence
-        // Higher threshold = more conservative = less likely to transcribe silence as speech
-        params.set_no_speech_thold(0.75);
+        // BALANCED FIX: Lowered from 0.75 to 0.55 to allow quiet speech detection
+        // Previous value was too aggressive and rejected valid quiet speech
+        // 0.55 is balanced - prevents hallucinations while preserving quiet speech
+        params.set_no_speech_thold(0.55);
         params.set_max_len(200);
         params.set_single_segment(false);
 
@@ -647,9 +648,10 @@ impl WhisperEngine {
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
-        // CRITICAL FIX: Increased from 0.6 to 0.75 to prevent hallucinations on silence
-        // Higher threshold = more conservative = less likely to transcribe silence as speech
-        params.set_no_speech_thold(0.75);
+        // BALANCED FIX: Lowered from 0.75 to 0.55 to allow quiet speech detection
+        // Previous value was too aggressive and rejected valid quiet speech
+        // 0.55 is balanced - prevents hallucinations while preserving quiet speech
+        params.set_no_speech_thold(0.55);
 
         // Reasonable length limits
         params.set_max_len(200);                 // Reasonable length

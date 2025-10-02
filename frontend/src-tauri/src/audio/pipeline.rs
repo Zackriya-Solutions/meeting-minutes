@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::collections::VecDeque;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use anyhow::Result;
@@ -62,32 +63,17 @@ impl AudioCapture {
         // Create audio chunk with stream-specific timestamp (get ID first for logging)
         let chunk_id = self.chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        // PERFORMANCE FIX: Apply gain boost for microphones to fix low energy audio
+        // UNIFIED GAIN: Apply same gain for BOTH recording and transcription
+        // This ensures recorded output matches exactly what Whisper processes
         // External mics produce very low amplitude (0.000009) that gets rejected by VAD
-        // Reduced from 10x to 5x to prevent excessive clipping while still boosting energy
-        let transcription_gain = match self.device_type {
+        let gain = match self.device_type {
             DeviceType::Microphone => 5.0,  // 5x boost for external mics (balanced for quality)
             DeviceType::System => 1.0,       // No boost for system audio (already normalized)
         };
 
-        let amplified_data: Vec<f32> = if transcription_gain != 1.0 {
+        let amplified_data: Vec<f32> = if gain != 1.0 {
             mono_data.iter()
-                .map(|&sample| (sample * transcription_gain).clamp(-1.0, 1.0))
-                .collect()
-        } else {
-            mono_data.clone()
-        };
-
-        // RECORDING FIX: Apply moderate gain boost to recordings for audible playback
-        // Transcription uses 5x, but we use 2.5x for recordings to keep them cleaner
-        let recording_gain = match self.device_type {
-            DeviceType::Microphone => 2.5,  // 2.5x boost for recordings (less aggressive than transcription)
-            DeviceType::System => 1.0,       // No boost for system audio
-        };
-
-        let recording_data: Vec<f32> = if recording_gain != 1.0 {
-            mono_data.iter()
-                .map(|&sample| (sample * recording_gain).clamp(-1.0, 1.0))
+                .map(|&sample| (sample * gain).clamp(-1.0, 1.0))
                 .collect()
         } else {
             mono_data.clone()
@@ -99,9 +85,14 @@ impl AudioCapture {
             let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
             let amp_rms = (amplified_data.iter().map(|&x| x * x).sum::<f32>() / amplified_data.len() as f32).sqrt();
             let amp_peak = amplified_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-
+            if self.device_type == DeviceType::Microphone {
             info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6} | After {}x gain: RMS={:.6}, Peak={:.6}",
-                  self.device_type, chunk_id, raw_rms, raw_peak, transcription_gain, amp_rms, amp_peak);
+                  self.device_type, chunk_id, raw_rms, raw_peak, gain, amp_rms, amp_peak);
+            }
+            // else {
+            //     perf_debug!("🔊 [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6} | After {}x gain: RMS={:.6}, Peak={:.6}",
+            //       self.device_type, chunk_id, raw_rms, raw_peak, gain, amp_rms, amp_peak);
+            // }
 
             // Warn if microphone is completely silent
             if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
@@ -112,34 +103,25 @@ impl AudioCapture {
         // Use global recording timestamp for proper synchronization
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
 
-        // CRITICAL FIX: Create TWO separate audio chunks with appropriate gain levels
-        // 1. Recording audio with 2.5x gain for audible playback (was unamplified → too quiet)
-        // 2. Transcription audio with 5x gain for VAD energy detection
-        let recording_chunk = AudioChunk {
-            data: recording_data,  // 2.5x boosted audio for audible recordings
+        // UNIFIED FIX: Use SAME amplified data for both recording and transcription
+        // This ensures recorded output matches exactly what Whisper processes
+        let audio_chunk = AudioChunk {
+            data: amplified_data.clone(),  // Same gain-boosted audio for both paths
             sample_rate: self.sample_rate,
             timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
         };
 
-        let transcription_chunk = AudioChunk {
-            data: amplified_data,  // AMPLIFIED audio for transcription VAD/Whisper
-            sample_rate: self.sample_rate,
-            timestamp,
-            chunk_id,
-            device_type: self.device_type.clone(),
-        };
-
-        // Send ORIGINAL audio to recording saver (no double amplification)
+        // Send to recording saver
         if let Some(recording_sender) = &self.recording_sender {
-            if let Err(e) = recording_sender.send(recording_chunk) {
+            if let Err(e) = recording_sender.send(audio_chunk.clone()) {
                 warn!("Failed to send chunk to recording saver: {}", e);
             }
         }
 
-        // Send AMPLIFIED audio to processing pipeline for transcription
-        if let Err(e) = self.state.send_audio_chunk(transcription_chunk) {
+        // Send to processing pipeline for transcription
+        if let Err(e) = self.state.send_audio_chunk(audio_chunk) {
             // Check if this is the "pipeline not ready" error
             if e.to_string().contains("Audio pipeline not ready") {
                 // This is expected during initialization, just log it as debug
@@ -198,6 +180,9 @@ pub struct AudioPipeline {
     processed_chunks: u64,
     // Smart batching for audio metrics
     metrics_batcher: Option<AudioMetricsBatcher>,
+    // AUDIO MIXING FIX: Separate buffers for mic and system audio
+    mic_buffer: VecDeque<f32>,
+    system_buffer: VecDeque<f32>,
 }
 
 impl AudioPipeline {
@@ -273,6 +258,9 @@ impl AudioPipeline {
             processed_chunks: 0,
             // Initialize metrics batcher for smart batching
             metrics_batcher: Some(AudioMetricsBatcher::new()),
+            // Initialize separate buffers for audio mixing
+            mic_buffer: VecDeque::new(),
+            system_buffer: VecDeque::new(),
         }
     }
 
@@ -330,28 +318,19 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
-                    // HYBRID APPROACH: Feed VAD continuously (streaming) but accumulate all audio
-                    // VAD builds state across chunks and emits segments when it detects speech
-                    // We accumulate BOTH VAD-detected speech AND all raw audio for fallback
-
-                    // Feed audio to streaming VAD (maintains state across chunks)
-                    match self.vad_processor.process_audio(&chunk.data) {
-                        Ok(speech_segments) => {
-                            if !speech_segments.is_empty() {
-                                let total_samples: usize = speech_segments.iter().map(|s| s.samples.len()).sum();
-                                info!("✅ VAD emitted {} speech segments ({} samples) from chunk {}",
-                                      speech_segments.len(), total_samples, chunk.chunk_id);
-                            }
-                            // Note: VAD segments are emitted on SpeechEnd, not every chunk
+                    // AUDIO MIXING FIX: Route chunks to separate buffers based on device type
+                    // Then mix them properly before VAD/transcription
+                    match chunk.device_type {
+                        DeviceType::Microphone => {
+                            self.mic_buffer.extend(chunk.data.iter());
                         }
-                        Err(e) => {
-                            warn!("⚠️ VAD error on chunk {}: {}", chunk.chunk_id, e);
+                        DeviceType::System => {
+                            self.system_buffer.extend(chunk.data.iter());
                         }
                     }
 
-                    // CRITICAL: Accumulate ALL audio regardless of VAD decision
-                    // This ensures we don't lose audio if VAD is too conservative
-                    self.accumulate_speech(&chunk.data, chunk.timestamp)?;
+                    // Mix available samples from both buffers and process
+                    self.mix_and_process(chunk.timestamp)?;
 
                     // Check if we should send accumulated speech for transcription
                     // Optimized: check every 8 chunks for better responsiveness
@@ -383,6 +362,56 @@ impl AudioPipeline {
         Ok(())
     }
 
+
+    /// Mix audio from mic and system buffers using smart ducking logic
+    /// This is the CRITICAL FIX for transcription quality
+    fn mix_and_process(&mut self, timestamp: f64) -> Result<()> {
+        // Calculate how many samples we can mix (minimum of both buffer lengths)
+        let mixable_len = self.mic_buffer.len().min(self.system_buffer.len());
+
+        if mixable_len == 0 {
+            return Ok(());
+        }
+
+        let mut mixed_samples = Vec::with_capacity(mixable_len);
+
+        for _ in 0..mixable_len {
+            let mic_sample = self.mic_buffer.pop_front().unwrap_or(0.0);
+            let system_sample = self.system_buffer.pop_front().unwrap_or(0.0);
+
+            // Smart ducking logic from recording_saver.rs (proven to work)
+            // When system audio is active (> 0.01), duck mic and boost system
+            // When only mic, use full strength
+            let mixed_sample = if system_sample.abs() > 0.01 {
+                // System audio active: duck mic (0.6x), boost system (0.9x)
+                ((mic_sample * 0.6) + (system_sample * 0.9)).clamp(-1.0, 1.0)
+            } else {
+                // Only mic: full strength
+                mic_sample
+            };
+
+            mixed_samples.push(mixed_sample);
+        }
+
+        // Feed mixed audio to VAD processor
+        match self.vad_processor.process_audio(&mixed_samples) {
+            Ok(speech_segments) => {
+                if !speech_segments.is_empty() {
+                    let total_samples: usize = speech_segments.iter().map(|s| s.samples.len()).sum();
+                    info!("✅ VAD emitted {} speech segments ({} samples) from mixed audio",
+                          speech_segments.len(), total_samples);
+                }
+            }
+            Err(e) => {
+                warn!("⚠️ VAD error on mixed audio: {}", e);
+            }
+        }
+
+        // Accumulate the mixed audio for transcription
+        self.accumulate_speech(&mixed_samples, timestamp)?;
+
+        Ok(())
+    }
 
     fn accumulate_speech(&mut self, samples: &[f32], timestamp: f64) -> Result<()> {
         if self.accumulated_speech.is_empty() {
@@ -529,6 +558,37 @@ impl AudioPipeline {
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
+        // AUDIO MIXING FIX: Mix any remaining audio in the buffers first
+        let last_timestamp = self.accumulated_start_timestamp +
+            (self.accumulated_speech.len() as f64 / self.sample_rate as f64);
+
+        // Mix remaining buffered audio
+        let mic_len = self.mic_buffer.len();
+        let sys_len = self.system_buffer.len();
+
+        if mic_len > 0 || sys_len > 0 {
+            info!("Flushing remaining buffered audio - Mic: {} samples, System: {} samples",
+                  mic_len, sys_len);
+
+            let max_len = mic_len.max(sys_len);
+            let mut remaining_mixed = Vec::with_capacity(max_len);
+
+            for _ in 0..max_len {
+                let mic_sample = self.mic_buffer.pop_front().unwrap_or(0.0);
+                let system_sample = self.system_buffer.pop_front().unwrap_or(0.0);
+
+                let mixed_sample = if system_sample.abs() > 0.01 {
+                    ((mic_sample * 0.6) + (system_sample * 0.9)).clamp(-1.0, 1.0)
+                } else {
+                    mic_sample
+                };
+
+                remaining_mixed.push(mixed_sample);
+            }
+
+            self.accumulate_speech(&remaining_mixed, last_timestamp)?;
+        }
+
         // Flush any remaining audio from VAD processor
         match self.vad_processor.flush() {
             Ok(final_segments) => {

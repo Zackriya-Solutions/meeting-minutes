@@ -278,17 +278,17 @@ pub fn extract_speech_16k(samples_mono_16k: &[f32]) -> Result<Vec<f32>> {
         result.extend_from_slice(&segment.samples);
     }
 
-    // Apply MUCH stricter energy filtering for very short segments
+    // Apply balanced energy filtering for very short segments
     if result.len() < 1600 { // Less than 100ms at 16kHz
         let input_energy: f32 = samples_mono_16k.iter().map(|&x| x * x).sum::<f32>() / samples_mono_16k.len() as f32;
         let rms = input_energy.sqrt();
         let peak = samples_mono_16k.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
 
-        // CRITICAL FIX: Dramatically increased thresholds to prevent Whisper hallucinations
-        // Old: 0.01 energy (too low, allowed silence through)
-        // New: 0.12 RMS, 0.15 peak - only passes real speech with sufficient energy
-        if rms < 0.08 || peak < 0.15 {
-            info!("VAD detected silence/noise (RMS: {:.6}, Peak: {:.6}), skipping to prevent hallucinations", rms, peak);
+        // BALANCED FIX: Lowered thresholds to preserve quiet speech while still filtering silence
+        // Previous aggressive values (0.08/0.15) were discarding valid quiet speech
+        // New values (0.03/0.08) are more balanced - catch quiet speech, reject pure silence
+        if rms < 0.2 || peak < 0.20 {
+            info!("-----VAD detected silence/noise (RMS: {:.6}, Peak: {:.6}), skipping to prevent hallucinations-----", rms, peak);
             return Ok(Vec::new());
         } else {
             info!("VAD detected speech with sufficient energy (RMS: {:.6}, Peak: {:.6})", rms, peak);

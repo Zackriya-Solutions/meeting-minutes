@@ -8,30 +8,46 @@ use super::recording_state::{AudioChunk, ProcessedAudioChunk, DeviceType};
 use super::recording_preferences::load_recording_preferences;
 use super::audio_processing::{write_audio_to_file_with_meeting_name, write_transcript_to_file};
 
-/// Simple resample function for sample rate conversion
+/// Improved resample function with anti-aliasing (adapted from VAD processor)
+/// Prevents aliasing artifacts and distortion for better audio quality
 fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if from_rate == to_rate {
         return samples.to_vec();
     }
 
     let ratio = from_rate as f64 / to_rate as f64;
-    let new_len = (samples.len() as f64 / ratio) as usize;
-    let mut resampled = Vec::with_capacity(new_len);
+    let output_len = (samples.len() as f64 / ratio) as usize;
+    let mut resampled = Vec::with_capacity(output_len);
 
-    for i in 0..new_len {
-        let src_pos = i as f64 * ratio;
-        let src_idx = src_pos as usize;
-        let fraction = src_pos - src_idx as f64;
+    // Apply simple low-pass filter before downsampling to reduce aliasing
+    let cutoff_freq = 0.4; // Normalized frequency (0.4 * Nyquist)
+    let mut filtered_samples = Vec::with_capacity(samples.len());
 
-        if src_idx + 1 < samples.len() {
-            // Linear interpolation between adjacent samples
-            let sample1 = samples[src_idx];
-            let sample2 = samples[src_idx + 1];
+    // Simple moving average filter (basic low-pass)
+    let filter_size = (from_rate as f64 / (cutoff_freq * from_rate as f64)) as usize;
+    let filter_size = std::cmp::max(1, std::cmp::min(filter_size, 5)); // Limit filter size
+
+    for i in 0..samples.len() {
+        let start = if i >= filter_size { i - filter_size } else { 0 };
+        let end = std::cmp::min(i + filter_size + 1, samples.len());
+        let sum: f32 = samples[start..end].iter().sum();
+        filtered_samples.push(sum / (end - start) as f32);
+    }
+
+    // Linear interpolation downsampling
+    for i in 0..output_len {
+        let source_pos = i as f64 * ratio;
+        let source_index = source_pos as usize;
+        let fraction = source_pos - source_index as f64;
+
+        if source_index + 1 < filtered_samples.len() {
+            // Linear interpolation
+            let sample1 = filtered_samples[source_index];
+            let sample2 = filtered_samples[source_index + 1];
             let interpolated = sample1 + (sample2 - sample1) * fraction as f32;
             resampled.push(interpolated);
-        } else if src_idx < samples.len() {
-            // Use the last sample if we're at the end
-            resampled.push(samples[src_idx]);
+        } else if source_index < filtered_samples.len() {
+            resampled.push(filtered_samples[source_index]);
         }
     }
 
@@ -351,29 +367,21 @@ impl RecordingSaver {
 
         info!("Audio levels - Mic RMS: {:.6}, System RMS: {:.6}", mic_rms, system_rms);
 
-        // NEW: Smart ducking mix (from old working implementation)
-        // System audio gets priority, mic is ducked when system is active
-        let max_len = mic_resampled.len().max(system_resampled.len());
-        let mut mixed_data = Vec::with_capacity(max_len);
+        // FIXED: Smart ducking mix matching transcription pipeline exactly
+        // Use min() to avoid zero-padding artifacts that cause echo/reverb
+        let min_len = mic_resampled.len().min(system_resampled.len());
+        let mut mixed_data = Vec::with_capacity(min_len);
 
-        for i in 0..max_len {
-            let mic_sample = if i < mic_resampled.len() {
-                mic_resampled[i]
-            } else {
-                0.0
-            };
+        // Mix only the overlapping portion
+        for i in 0..min_len {
+            let mic_sample = mic_resampled[i];
+            let system_sample = system_resampled[i];
 
-            let system_sample = if i < system_resampled.len() {
-                system_resampled[i]
-            } else {
-                0.0
-            };
-
-            // Smart ducking from old implementation (lib_old_complex.rs:579-586)
+            // Smart ducking (IDENTICAL to transcription pipeline)
             // When system audio is active (> 0.01), mix with ducked mic (0.6 mic + 0.9 system)
             // When only mic, use full strength
             let mixed_sample = if system_sample.abs() > 0.01 {
-                // System audio active: duck mic, boost system
+                // System audio active: duck mic (0.6x), boost system (0.9x)
                 ((mic_sample * 0.6) + (system_sample * 0.9)).clamp(-1.0, 1.0)
             } else {
                 // Only mic: full strength
@@ -383,7 +391,17 @@ impl RecordingSaver {
             mixed_data.push(mixed_sample);
         }
 
-        info!("Mixed {} samples at {}Hz with smart ducking", mixed_data.len(), target_sample_rate);
+        // Handle any remaining samples from the longer buffer
+        // This prevents losing audio while avoiding echo artifacts
+        if mic_resampled.len() > min_len {
+            info!("Appending {} remaining mic samples", mic_resampled.len() - min_len);
+            mixed_data.extend_from_slice(&mic_resampled[min_len..]);
+        } else if system_resampled.len() > min_len {
+            info!("Appending {} remaining system samples", system_resampled.len() - min_len);
+            mixed_data.extend_from_slice(&system_resampled[min_len..]);
+        }
+
+        info!("Mixed {} samples at {}Hz with smart ducking (matched transcription)", mixed_data.len(), target_sample_rate);
 
         // NO NORMALIZATION NEEDED: Audio is already VAD-processed and clean
         // The VAD output is speech-only with proper levels
