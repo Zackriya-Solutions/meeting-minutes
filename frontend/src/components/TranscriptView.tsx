@@ -67,7 +67,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
           key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
           className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${
             transcript.is_partial
-              ? 'bg-blue-25 border-l-4 border-blue-300 opacity-75'
+              ? 'bg-gray-50 border-l-4 border-gray-200'
               : 'bg-gray-50 border-l-4 border-gray-200'
           }`}
         >
@@ -77,10 +77,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
             </span>
             <div className="flex items-center space-x-2">
               {transcript.is_partial && (
-                <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                // <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                  Partial
-                </span>
+                  
+                // </span>
               )}
               {transcript.confidence !== undefined && !transcript.is_partial && (
                 <ConfidenceIndicator
