@@ -69,16 +69,6 @@ impl AudioMixerRingBuffer {
         Some((mic, sys))
     }
 
-    fn flush(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
-        if self.mic_buffer.is_empty() && self.system_buffer.is_empty() {
-            return None;
-        }
-
-        let mic: Vec<f32> = self.mic_buffer.drain(..).collect();
-        let sys: Vec<f32> = self.system_buffer.drain(..).collect();
-
-        Some((mic, sys))
-    }
 }
 
 /// Professional audio mixer with RMS-based ducking
@@ -205,6 +195,10 @@ impl AudioCapture {
                 info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
                       self.device_type, chunk_id, raw_rms, raw_peak);
             }
+            else {
+                perf_debug!("🔊 [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
+                  self.device_type, chunk_id, raw_rms, raw_peak);
+            }
 
             // Warn if microphone is completely silent
             if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
@@ -273,7 +267,8 @@ impl AudioCapture {
     }
 }
 
-/// Optimized audio processing pipeline using VAD-driven chunking
+/// VAD-driven audio processing pipeline
+/// Uses Voice Activity Detection to segment speech in real-time and send only speech to Whisper
 pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
     transcription_sender: mpsc::UnboundedSender<AudioChunk>,
@@ -281,11 +276,6 @@ pub struct AudioPipeline {
     vad_processor: ContinuousVadProcessor,
     sample_rate: u32,
     chunk_id_counter: u64,
-    min_chunk_duration_ms: u32,   // Minimum duration before sending to transcription
-    max_chunk_duration_ms: u32,   // Maximum duration before forcing transcription
-    accumulated_speech: Vec<f32>, // Accumulate speech segments for larger chunks
-    last_transcription_time: std::time::Instant,
-    accumulated_start_timestamp: f64,
     // Performance optimization: reduce logging frequency
     last_summary_time: std::time::Instant,
     processed_chunks: u64,
@@ -308,9 +298,11 @@ impl AudioPipeline {
     ) -> Self {
         // Create VAD processor with longer redemption time for better speech accumulation
         // The VAD processor now handles 48kHz->16kHz resampling internally
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 800) {
+        // CRITICAL FIX: Increased from 800ms to 2000ms to prevent fragmenting continuous speech
+        // This allows VAD to bridge natural pauses and capture complete 5+ second utterances
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 2000) {
             Ok(processor) => {
-                info!("VAD processor created successfully");
+                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor
             }
             Err(e) => {
@@ -319,44 +311,12 @@ impl AudioPipeline {
             }
         };
 
-        // PERFORMANCE OPTIMIZATION: Hardware-adaptive chunk sizing for optimal performance
-        // Larger chunks = fewer transcription calls = much better throughput
-        let hardware_profile = crate::audio::HardwareProfile::detect();
-        let recommended_duration = hardware_profile.get_recommended_chunk_duration_ms();
-
-        // Use larger chunks to reduce transcription frequency (major performance gain)
-        // Old implementation used 30s chunks - we'll use hardware-adaptive approach
-        let min_chunk_duration_ms = if target_chunk_duration_ms == 0 {
-            // Match old implementation's strategy: longer chunks for better performance
-            match hardware_profile.performance_tier {
-                crate::audio::PerformanceTier::Ultra => 25000,  // 25s minimum for best quality
-                crate::audio::PerformanceTier::High => 20000,   // 20s for high-end
-                crate::audio::PerformanceTier::Medium => 15000, // 15s for medium
-                crate::audio::PerformanceTier::Low => 12000,    // 12s for low-end (still better than old 10s)
-            }
-        } else {
-            std::cmp::max(15000, target_chunk_duration_ms) // Minimum 15s for any quality (improved from 10s)
-        };
-
-        let max_chunk_duration_ms = if target_chunk_duration_ms == 0 {
-            // Maximum duration before forcing transcription
-            match hardware_profile.performance_tier {
-                crate::audio::PerformanceTier::Ultra => 30000,  // 30s max (matches old implementation)
-                crate::audio::PerformanceTier::High => 28000,   // 28s max
-                crate::audio::PerformanceTier::Medium => 22000, // 22s max
-                crate::audio::PerformanceTier::Low => 18000,    // 18s max
-            }
-        } else {
-            std::cmp::max(20000, target_chunk_duration_ms) // Minimum 20s max (improved from 15s)
-        };
-
-        info!("Hardware-adaptive chunking: recommended {}ms, using {}-{}ms (tier: {:?}, GPU: {:?})",
-              recommended_duration, min_chunk_duration_ms, max_chunk_duration_ms,
-              hardware_profile.performance_tier, hardware_profile.gpu_type);
-
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
+
+        // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
+        let _ = target_chunk_duration_ms;
 
         Self {
             receiver,
@@ -365,11 +325,6 @@ impl AudioPipeline {
             vad_processor,
             sample_rate,
             chunk_id_counter: 0,
-            min_chunk_duration_ms,
-            max_chunk_duration_ms,
-            accumulated_speech: Vec::new(),
-            last_transcription_time: std::time::Instant::now(),
-            accumulated_start_timestamp: 0.0,
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
@@ -384,8 +339,7 @@ impl AudioPipeline {
 
     /// Run the VAD-driven audio processing pipeline
     pub async fn run(mut self) -> Result<()> {
-        info!("Audio pipeline started with hardware-adaptive {}-{}ms chunk durations",
-              self.min_chunk_duration_ms, self.max_chunk_duration_ms);
+        info!("VAD-driven audio pipeline started - segments sent in real-time based on speech detection");
 
         while self.state.is_recording() {
             // Receive audio chunks with timeout
@@ -397,14 +351,8 @@ impl AudioPipeline {
                     // PERFORMANCE: Check for flush signal (special chunk with ID >= u64::MAX - 10)
                     // Multiple flush signals may be sent to ensure processing
                     if chunk.chunk_id >= u64::MAX - 10 {
-                        info!("📥 Received FLUSH signal #{} - processing ALL accumulated audio immediately", u64::MAX - chunk.chunk_id);
-                        if !self.accumulated_speech.is_empty() {
-                            info!("🚀 Force-processing {} accumulated samples immediately",
-                                  self.accumulated_speech.len());
-                            self.send_accumulated_speech(chunk.sample_rate)?;
-                        } else {
-                            perf_debug!("✅ No accumulated speech to flush");
-                        }
+                        info!("📥 Received FLUSH signal #{} - flushing VAD processor", u64::MAX - chunk.chunk_id);
+                        self.flush_remaining_audio()?;
                         // Continue processing to handle any remaining chunks
                         continue;
                     }
@@ -462,28 +410,41 @@ impl AudioPipeline {
                                 let _ = sender.send(recording_chunk);
                             }
 
-                            // Process for transcription
+                            // Process for transcription - USE VAD segments directly
                             match self.vad_processor.process_audio(&mixed_with_gain) {
                                 Ok(speech_segments) => {
-                                    if !speech_segments.is_empty() {
-                                        let total_samples: usize = speech_segments.iter().map(|s| s.samples.len()).sum();
-                                        info!("✅ VAD emitted {} speech segments ({} samples) from professionally mixed audio",
-                                              speech_segments.len(), total_samples);
+                                    for segment in speech_segments {
+                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+
+                                        // VAD outputs 16kHz audio, ensure minimum 100ms (1600 samples)
+                                        if segment.samples.len() >= 1600 {
+                                            info!("📤 Sending VAD segment to Whisper: {:.1}ms duration, {} samples",
+                                                  duration_ms, segment.samples.len());
+
+                                            let transcription_chunk = AudioChunk {
+                                                data: segment.samples,
+                                                sample_rate: 16000, // VAD outputs 16kHz
+                                                timestamp: segment.start_timestamp_ms / 1000.0,
+                                                chunk_id: self.chunk_id_counter,
+                                                device_type: DeviceType::Microphone,
+                                            };
+
+                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                                                warn!("Failed to send VAD segment to transcription: {}", e);
+                                            } else {
+                                                self.chunk_id_counter += 1;
+                                            }
+                                        } else {
+                                            info!("⏭️ Skipping short VAD segment: {:.1}ms ({} samples < 1600)",
+                                                  duration_ms, segment.samples.len());
+                                        }
                                     }
                                 }
                                 Err(e) => {
                                     warn!("⚠️ VAD error on mixed audio: {}", e);
                                 }
                             }
-
-                            self.accumulate_speech(&mixed_with_gain, chunk.timestamp)?;
                         }
-                    }
-
-                    // Check if we should send accumulated speech for transcription
-                    // Optimized: check every 8 chunks for better responsiveness
-                    if chunk.chunk_id % 8 == 0 {
-                        self.check_and_send_transcription_chunk(chunk.sample_rate)?;
                     }
                 }
                 Ok(None) => {
@@ -491,222 +452,55 @@ impl AudioPipeline {
                     break;
                 }
                 Err(_) => {
-                    // Timeout - check for forced transcription due to time limit
-                    if self.should_force_transcription() {
-                        self.send_accumulated_speech(self.sample_rate)?;
-                    } else if self.state.is_paused() && !self.accumulated_speech.is_empty() {
-                        // Only log pause state changes, not every timeout
-                        // This reduces log spam during pause periods
-                    }
+                    // Timeout - just continue, VAD handles all segmentation
                     continue;
                 }
             }
         }
 
-        // Process any remaining speech segments and accumulated audio
+        // Flush any remaining VAD segments
         self.flush_remaining_audio()?;
 
         info!("VAD-driven audio pipeline ended");
         Ok(())
     }
 
-
-
-    fn accumulate_speech(&mut self, samples: &[f32], timestamp: f64) -> Result<()> {
-        if self.accumulated_speech.is_empty() {
-            self.accumulated_start_timestamp = timestamp;
-        }
-        self.accumulated_speech.extend_from_slice(samples);
-        Ok(())
-    }
-
-    fn check_and_send_transcription_chunk(&mut self, sample_rate: u32) -> Result<()> {
-        if self.accumulated_speech.is_empty() {
-            return Ok(());
-        }
-
-        let accumulated_duration_ms = (self.accumulated_speech.len() as f64 / sample_rate as f64) * 1000.0;
-        let time_since_last = self.last_transcription_time.elapsed().as_millis() as u32;
-
-        // Send if we have enough speech or if too much time has passed
-        let should_send = accumulated_duration_ms >= self.min_chunk_duration_ms as f64 ||
-                         time_since_last >= self.max_chunk_duration_ms;
-
-        if should_send {
-            self.send_accumulated_speech(sample_rate)?;
-        }
-
-        Ok(())
-    }
-
-    fn should_force_transcription(&self) -> bool {
-        !self.accumulated_speech.is_empty() &&
-        !self.state.is_paused() && // Don't force transcription when paused
-        self.last_transcription_time.elapsed().as_millis() as u32 >= self.max_chunk_duration_ms
-    }
-
-    fn send_accumulated_speech(&mut self, sample_rate: u32) -> Result<()> {
-        if self.accumulated_speech.is_empty() {
-            return Ok(());
-        }
-
-        // Don't process accumulated speech when recording is paused
-        if self.state.is_paused() {
-            info!("Skipping accumulated speech processing while paused ({} samples)",
-                  self.accumulated_speech.len());
-            return Ok(());
-        }
-
-        let accumulated_samples = std::mem::take(&mut self.accumulated_speech);
-        let duration_ms = (accumulated_samples.len() as f64 / sample_rate as f64) * 1000.0;
-
-        // Use performance-optimized debug logging
-        perf_debug!("Processing accumulated speech: {} samples ({:.1}ms)",
-                   accumulated_samples.len(), duration_ms);
-
-        // Simplified validation: Energy + ZCR only (streaming VAD already ran)
-        // The streaming VAD has been monitoring for 20-28s, we just validate energy here
-        let rms_energy = (accumulated_samples.iter().map(|&x| x * x).sum::<f32>() / accumulated_samples.len() as f32).sqrt();
-        let peak_level = accumulated_samples.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-
-        // Lower thresholds: streaming VAD already did heavy filtering
-        // We just want to catch completely silent chunks
-        if rms_energy < 0.005 && peak_level < 0.01 {
-            perf_debug!("🔇 Accumulated audio too quiet (RMS: {:.6}, Peak: {:.6}) - likely complete silence",
-                       rms_energy, peak_level);
-            return Ok(());
-        }
-
-        // ZCR validation for tone/noise detection
-        if !Self::validate_speech_characteristics(&accumulated_samples) {
-            perf_debug!("🔇 ZCR validation failed - likely tone/noise, skipping");
-            return Ok(());
-        }
-
-        perf_debug!("✅ Sending {} samples to Whisper (RMS: {:.6}, Peak: {:.6})",
-                   accumulated_samples.len(), rms_energy, peak_level);
-
-        let speech_samples = accumulated_samples;
-
-        let transcription_chunk = AudioChunk {
-            data: speech_samples,
-            sample_rate,
-            timestamp: self.accumulated_start_timestamp,
-            chunk_id: self.chunk_id_counter,
-            device_type: DeviceType::Microphone, // Mixed audio for transcription
-        };
-
-        // Only log transcription sends for significant chunks to reduce I/O overhead
-        if duration_ms > 5000.0 || self.chunk_id_counter % 10 == 0 {
-            info!("🎤 Sending VAD-optimized chunk {} for transcription: {:.1}ms duration, {} samples",
-                  self.chunk_id_counter, duration_ms, transcription_chunk.data.len());
-        } else {
-            perf_debug!("Sending chunk {} for transcription: {:.1}ms duration",
-                       self.chunk_id_counter, duration_ms);
-        }
-
-        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-            warn!("Failed to send transcription chunk: {}", e);
-            let error = if e.to_string().contains("closed") {
-                AudioError::ChannelClosed
-            } else {
-                AudioError::TranscriptionFailed
-            };
-            self.state.report_error(error);
-        } else {
-            self.chunk_id_counter += 1;
-            self.last_transcription_time = std::time::Instant::now();
-        }
-
-        Ok(())
-    }
-
-    /// Calculate Zero-Crossing Rate - helps distinguish speech from silence/pure tones
-    /// Speech has varied frequency content (high ZCR), silence/tones have low ZCR
-    fn calculate_zcr(samples: &[f32]) -> f32 {
-        if samples.len() < 2 {
-            return 0.0;
-        }
-
-        let zero_crossings = samples.windows(2)
-            .filter(|window| (window[0] * window[1]) < 0.0)
-            .count();
-
-        zero_crossings as f32 / samples.len() as f32
-    }
-
-    /// Validate audio has speech characteristics using Zero-Crossing Rate
-    /// Returns true if audio likely contains speech, false if silence/noise
-    fn validate_speech_characteristics(samples: &[f32]) -> bool {
-        let zcr = Self::calculate_zcr(samples);
-
-        // Speech typically has ZCR between 0.02 and 0.5
-        // Silence/DC offset: < 0.01
-        // Pure tones: < 0.02
-        // Background noise: 0.01-0.05 (borderline)
-        // Speech: > 0.05 (clear indicator)
-        const MIN_ZCR_FOR_SPEECH: f32 = 0.02;
-
-        if zcr < MIN_ZCR_FOR_SPEECH {
-            perf_debug!("ZCR validation failed: {:.4} < {:.4} (likely silence/tone)", zcr, MIN_ZCR_FOR_SPEECH);
-            false
-        } else {
-            perf_debug!("ZCR validation passed: {:.4} (likely speech)", zcr);
-            true
-        }
-    }
-
     fn flush_remaining_audio(&mut self) -> Result<()> {
-        // PROFESSIONAL MIXING: Flush any remaining audio in ring buffer
-        let last_timestamp = self.accumulated_start_timestamp +
-            (self.accumulated_speech.len() as f64 / self.sample_rate as f64);
+        info!("Flushing remaining audio from pipeline (processed {} chunks)", self.processed_chunks);
 
-        if let Some((mic_remaining, sys_remaining)) = self.ring_buffer.flush() {
-            if !mic_remaining.is_empty() || !sys_remaining.is_empty() {
-                info!("Flushing remaining buffered audio - Mic: {} samples, System: {} samples",
-                      mic_remaining.len(), sys_remaining.len());
-
-                // Mix remaining audio with professional mixer
-                let mixed_clean = self.mixer.mix_window(&mic_remaining, &sys_remaining);
-
-                // Send to recording
-                if let Some(ref sender) = self.recording_sender_for_mixed {
-                    let recording_chunk = AudioChunk {
-                        data: mixed_clean.clone(),
-                        sample_rate: self.sample_rate,
-                        timestamp: last_timestamp,
-                        chunk_id: self.chunk_id_counter,
-                        device_type: DeviceType::Microphone,
-                    };
-                    let _ = sender.send(recording_chunk);
-                }
-
-                // Apply post-gain for transcription
-                let mixed_with_gain: Vec<f32> = mixed_clean.iter()
-                    .map(|&s| (s * 5.0).clamp(-1.0, 1.0))
-                    .collect();
-
-                self.accumulate_speech(&mixed_with_gain, last_timestamp)?;
-            }
-        }
-
-        // Flush any remaining audio from VAD processor
+        // Flush any remaining audio from VAD processor and send segments to transcription
         match self.vad_processor.flush() {
             Ok(final_segments) => {
                 for segment in final_segments {
-                    self.accumulated_speech.extend_from_slice(&segment.samples);
+                    let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+
+                    // Send segments >= 100ms (1600 samples at 16kHz)
+                    if segment.samples.len() >= 1600 {
+                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
+                              duration_ms, segment.samples.len());
+
+                        let transcription_chunk = AudioChunk {
+                            data: segment.samples,
+                            sample_rate: 16000,
+                            timestamp: segment.start_timestamp_ms / 1000.0,
+                            chunk_id: self.chunk_id_counter,
+                            device_type: DeviceType::Microphone,
+                        };
+
+                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                            warn!("Failed to send final VAD segment: {}", e);
+                        } else {
+                            self.chunk_id_counter += 1;
+                        }
+                    } else {
+                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 1600)",
+                              duration_ms, segment.samples.len());
+                    }
                 }
             }
             Err(e) => {
                 warn!("Failed to flush VAD processor: {}", e);
             }
-        }
-
-        // Send any remaining accumulated speech
-        if !self.accumulated_speech.is_empty() {
-            info!("Flushing final accumulated speech: {} samples (processed {} total chunks)",
-                  self.accumulated_speech.len(), self.processed_chunks);
-            self.send_accumulated_speech(self.sample_rate)?;
         }
 
         Ok(())

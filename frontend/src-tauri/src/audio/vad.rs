@@ -37,25 +37,26 @@ impl ContinuousVadProcessor {
         let mut config = VadConfig::default();
         config.sample_rate = VAD_SAMPLE_RATE as usize;
 
-        // BALANCED FIX: Configure Silero VAD thresholds for reliable speech detection
-        // Tuned based on real audio levels: RMS=0.01-0.15, Peak=0.02-0.25 observed
-        // 0.75/0.60 was too strict and rejected real speech
-        // 0.55/0.40 is more balanced - stricter than default (0.5/0.35) but not aggressive
-        config.positive_speech_threshold = 0.55;  // Balanced: catches speech without false positives
-        config.negative_speech_threshold = 0.40;  // Balanced: allows speech transitions
+        // CONTINUOUS SPEECH FIX: Tuned for capturing complete 5+ second utterances
+        // Previous: 0.55/0.40 with 400ms redemption was fragmenting speech into 40ms segments
+        // New: More lenient thresholds + longer redemption for continuous speech
+        config.positive_speech_threshold = 0.50;  // Silero default - good for continuous speech
+        config.negative_speech_threshold = 0.35;  // Silero default - allows natural pauses
 
-        // STREAMING OPTIMIZED: VAD processes continuous stream, not batches
-        let safe_redemption_time = std::cmp::min(redemption_time_ms, 400);
-        config.redemption_time = Duration::from_millis(safe_redemption_time as u64);
+        // CRITICAL FIX: Removed redemption_time capping to support long continuous speech
+        // Previous: capped at 400ms, causing VAD to fragment 5-second speech into 40ms segments
+        // New: Use full redemption_time from pipeline (2000ms) to bridge natural pauses
+        config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
         config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
-        config.post_speech_pad = Duration::from_millis(300);   // Post-speech padding for context
-        // CRITICAL: With continuous streaming, VAD accumulates state across many 10-20ms chunks
-        // min_speech_time of 100ms = only 5-10 chunks needed to detect speech
-        // This is close to Silero's default (90ms) but slightly more conservative
-        config.min_speech_time = Duration::from_millis(100);   // Optimized for streaming
+        config.post_speech_pad = Duration::from_millis(500);  // Increased: more context at end
 
-        debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, input_rate={}Hz",
-               VAD_SAMPLE_RATE, safe_redemption_time, input_sample_rate);
+        // CRITICAL FIX: Increased min_speech_time to prevent tiny 40ms fragments
+        // Previous: 100ms allowed too-short segments that Whisper rejects
+        // New: 250ms ensures segments are substantial enough for Whisper (>100ms requirement)
+        config.min_speech_time = Duration::from_millis(250);  // Prevent tiny fragments
+
+        debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, min_speech={}ms, input_rate={}Hz",
+               VAD_SAMPLE_RATE, redemption_time_ms, 250, input_sample_rate);
 
         let session = VadSession::new(config)
             .map_err(|e| anyhow!("Failed to create VAD session: {:?}", e))?;
