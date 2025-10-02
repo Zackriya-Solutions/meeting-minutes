@@ -4,5 +4,9 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>This application needs access to your microphone to record meeting audio.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>This application needs screen recording permission to capture system audio during meetings.</string>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>

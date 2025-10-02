@@ -408,7 +408,7 @@ export class Analytics {
       await invoke('track_event', {
         eventName: 'transcription_success',
         properties: {
-          duration: duration ? duration.toString() : null,
+          duration: duration ? duration.toString() : '',
           timestamp: new Date().toISOString()
         }
       });

@@ -1,0 +1,13 @@
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-mmacosx-version-min=14.2",
+]
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-mmacosx-version-min=14.2",
+]
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = { value = "14.2", force = true }
+CMAKE_OSX_DEPLOYMENT_TARGET = "14.2"

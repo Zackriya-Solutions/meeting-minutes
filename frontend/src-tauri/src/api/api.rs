@@ -184,12 +184,13 @@ pub struct Profile {
 }
 
 // Helper function to get auth token from store (optional)
+#[allow(dead_code)]
 async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     let store = match app.store("store.json") {
         Ok(store) => store,
         Err(_) => return None,
     };
-    
+
     match store.get("authToken") {
         Some(token) => {
             if let Some(token_str) = token.as_str() {
@@ -541,7 +542,7 @@ pub async fn api_get_summary<R: Runtime>(
     let result = make_api_request::<R, SummaryResponse>(&app, &format!("/get-summary/{}", meeting_id), "GET", None, None, auth_token).await;
     
     match &result {
-        Ok(summary) => log_debug!("✓ api_get_summary successful"),
+        Ok(_summary) => log_debug!("✓ api_get_summary successful"),
         Err(e) => log_error!("✗ api_get_summary failed: {}", e),
     }
     

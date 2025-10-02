@@ -1,8 +1,8 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ModelConfig, ModelSettingsModal } from "./ModelSettingsModal"
-import { TranscriptModelProps } from "./TranscriptSettings"
+import { TranscriptModelProps, TranscriptSettings } from "./TranscriptSettings"
+import { RecordingSettings, RecordingPreferences } from "./RecordingSettings"
 import { About } from "./About";
-import { PreferenceSettings } from "./PreferenceSettings";
 
 interface SettingTabsProps {
     modelConfig: ModelConfig;
@@ -20,7 +20,10 @@ export function SettingTabs({
     setModelConfig, 
     onSave, 
     setSaveSuccess,
-    defaultTab = "modelSettings"
+    defaultTab = "transcriptSettings",
+    transcriptModelConfig,
+    setTranscriptModelConfig,
+    onSaveTranscript,
 }: SettingTabsProps) {
 
     const handleTabChange = () => {
@@ -28,11 +31,11 @@ export function SettingTabs({
     };
 
     return (
-        <Tabs defaultValue={defaultTab} className="w-full" onValueChange={handleTabChange}>
+        <Tabs defaultValue={defaultTab} className="w-full max-h-[calc(100vh-10rem)] overflow-y-auto" onValueChange={handleTabChange}>
   <TabsList>
-    <TabsTrigger value="modelSettings">Model Settings</TabsTrigger>
-    {/* <TabsTrigger value="transcriptSettings">Transcript Settings</TabsTrigger> */}
-    <TabsTrigger value="preferences">Preferences</TabsTrigger>
+    <TabsTrigger value="transcriptSettings">Transcript</TabsTrigger>
+    <TabsTrigger value="modelSettings">Ai Summary</TabsTrigger>
+    <TabsTrigger value="recordingSettings">Preferences</TabsTrigger>
     <TabsTrigger value="about">About</TabsTrigger>
   </TabsList>
   <TabsContent value="modelSettings">
@@ -43,17 +46,16 @@ setModelConfig={setModelConfig}
 onSave={onSave}
 />
   </TabsContent>
-  {/* <TabsContent value="transcriptSettings">
+<TabsContent value="transcriptSettings">
     <TranscriptSettings
     transcriptModelConfig={transcriptModelConfig}
     setTranscriptModelConfig={setTranscriptModelConfig}
     onSave={onSaveTranscript}
   />
-  </TabsContent> */}
-    <TabsContent value="preferences">
-    <PreferenceSettings/>
-    </TabsContent>
-  
+  </TabsContent>
+  <TabsContent value="recordingSettings">
+    <RecordingSettings />
+  </TabsContent>
   <TabsContent value="about">
     <About />
   </TabsContent>

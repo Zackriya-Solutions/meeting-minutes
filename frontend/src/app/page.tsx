@@ -6,7 +6,10 @@ import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
 import { RecordingControls } from '@/components/RecordingControls';
 import { AISummary } from '@/components/AISummary';
+import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { ModelManager } from '@/components/WhisperModelManager';
+import { LanguageSelection } from '@/components/LanguageSelection';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -17,12 +20,11 @@ import { useRouter } from 'next/navigation';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
-import { ComplianceNotification } from '@/components/ComplianceNotification';
 
 
 
 interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude';
+  provider: 'ollama' | 'groq' | 'claude' | 'openrouter';
   model: string;
   whisperModel: string;
 }
@@ -69,8 +71,15 @@ export default function Home() {
   const [chunkDropMessage, setChunkDropMessage] = useState('');
   const [isSavingTranscript, setIsSavingTranscript] = useState(false);
   const [isRecordingDisabled, setIsRecordingDisabled] = useState(false);
-  const [showComplianceNotification, setShowComplianceNotification] = useState(false);
-  const recordingControlsRef = useRef<HTMLDivElement>(null);
+  const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
+    micDevice: null,
+    systemDevice: null
+  });
+  const [showDeviceSettings, setShowDeviceSettings] = useState(false);
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const [modelSelectorMessage, setModelSelectorMessage] = useState('');
+  const [showLanguageSettings, setShowLanguageSettings] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording , serverAddress} = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -91,6 +100,7 @@ export default function Home() {
     ollama: models.map(model => model.name),
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
+    openrouter: [],
   };
 
   useEffect(() => {
@@ -146,10 +156,15 @@ export default function Home() {
   }, [meetingTitle, setCurrentMeeting]);
 
   useEffect(() => {
+    console.log('Setting up recording state check effect, current isRecording:', isRecording);
+    
     const checkRecordingState = async () => {
       try {
+        console.log('checkRecordingState called');
         const { invoke } = await import('@tauri-apps/api/core');
+        console.log('About to call is_recording command');
         const isCurrentlyRecording = await invoke('is_recording');
+        console.log('checkRecordingState: backend recording =', isCurrentlyRecording, 'UI recording =', isRecording);
         
         if (isCurrentlyRecording && !isRecording) {
           console.log('Recording is active in backend but not in UI, synchronizing state...');
@@ -164,13 +179,23 @@ export default function Home() {
       }
     };
 
-    checkRecordingState();
-    
-    // Set up a polling interval to periodically check recording state
-    const interval = setInterval(checkRecordingState, 1000); // Check every 1 second
-    
-    return () => clearInterval(interval);
-  }, [isRecording, setIsMeetingActive]);
+    // Test if Tauri is available
+    console.log('Testing Tauri availability...');
+    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+      console.log('Tauri is available, starting state check');
+      checkRecordingState();
+      
+      // Set up a polling interval to periodically check recording state
+      const interval = setInterval(checkRecordingState, 1000); // Check every 1 second
+      
+      return () => {
+        console.log('Cleaning up recording state check interval');
+        clearInterval(interval);
+      };
+    } else {
+      console.log('Tauri is not available, skipping state check');
+    }
+  }, [setIsMeetingActive]);
   
 
 
@@ -217,8 +242,8 @@ export default function Home() {
 
       // Add any buffered transcripts that might be out of order
       const now = Date.now();
-      const staleThreshold = 5000; // 5 seconds
-      const recentThreshold = 2000; // 2 seconds - for recent out-of-order transcripts
+      const staleThreshold = 3000; // 3 seconds - reduced for faster processing
+      const recentThreshold = 1000; // 1 second - faster processing of recent transcripts
       const staleTranscripts: Transcript[] = [];
       const recentTranscripts: Transcript[] = [];
       const forceFlushTranscripts: Transcript[] = [];
@@ -327,6 +352,7 @@ export default function Home() {
             sequence_id: event.payload.sequence_id,
             chunk_start_time: event.payload.chunk_start_time,
             is_partial: event.payload.is_partial,
+            confidence: event.payload.confidence,
           };
 
           // Add to buffer
@@ -338,8 +364,8 @@ export default function Home() {
             clearTimeout(processingTimer);
           }
           
-          // Process buffer after a short delay to allow for batching
-          processingTimer = setTimeout(processBufferedTranscripts, 100);
+          // Process buffer with optimized delay for better UI responsiveness
+          processingTimer = setTimeout(processBufferedTranscripts, 50);
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
@@ -375,7 +401,7 @@ export default function Home() {
           console.log('Chunk drop warning received:', event.payload);
           setChunkDropMessage(event.payload);
           setShowChunkDropWarning(true);
-          
+
           // // Auto-dismiss after 8 seconds
           // setTimeout(() => {
           //   setShowChunkDropWarning(false);
@@ -391,6 +417,43 @@ export default function Home() {
 
     return () => {
       console.log('Cleaning up chunk drop warning listener...');
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
+  // Set up transcription error listener for model loading failures
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupTranscriptionErrorListener = async () => {
+      try {
+        console.log('Setting up transcription-error listener...');
+        unlistenFn = await listen<{error: string, userMessage: string, actionable: boolean}>('transcription-error', (event) => {
+          console.log('Transcription error received:', event.payload);
+          const { userMessage, actionable } = event.payload;
+
+          if (actionable) {
+            // This is a model-related error that requires user action
+            setModelSelectorMessage(userMessage);
+            setShowModelSelector(true);
+          } else {
+            // Regular transcription error
+            setErrorMessage(userMessage);
+            setShowErrorAlert(true);
+          }
+        });
+        console.log('Transcription error listener setup complete');
+      } catch (error) {
+        console.error('Failed to setup transcription error listener:', error);
+      }
+    };
+
+    setupTranscriptionErrorListener();
+
+    return () => {
+      console.log('Cleaning up transcription error listener...');
       if (unlistenFn) {
         unlistenFn();
       }
@@ -442,8 +505,7 @@ export default function Home() {
 
   const handleRecordingStart = async () => {
     try {
-      console.log('Starting recording...');
-      const { invoke } = await import('@tauri-apps/api/core');
+      console.log('handleRecordingStart called - setting up meeting title and state');
       
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
@@ -454,25 +516,12 @@ export default function Home() {
       const seconds = String(now.getSeconds()).padStart(2, '0');
       const randomTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
       setMeetingTitle(randomTitle);
-      
-      // Only check if we're already recording, but don't try to stop it first
-      const isCurrentlyRecording = await invoke('is_recording');
-      if (isCurrentlyRecording) {
-        console.log('Already recording, cannot start a new recording');
-        return; // Just return without starting a new recording
-      }
 
-      // Start new recording with whisper model
-      await invoke('start_recording', {
-        args: {
-          whisper_model: modelConfig.whisperModel
-        }
-      });
-      console.log('Recording started successfully');
+      // Update state - the actual recording is already started by RecordingControls
+      console.log('Setting isRecordingState to true');
       setIsRecordingState(true); // This will also update the sidebar via the useEffect
       setTranscripts([]); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
-      setShowComplianceNotification(true); // Show compliance notification
       Analytics.trackButtonClick('start_recording', 'home_page');
     } catch (error) {
       console.error('Failed to start recording:', error);
@@ -490,13 +539,46 @@ export default function Home() {
         if (shouldAutoStart === 'true' && !isRecording && !isMeetingActive) {
           console.log('Auto-starting recording from navigation...');
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
-          await handleRecordingStart();
+          
+          // Start the actual backend recording
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            
+            // Generate meeting title
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = String(now.getFullYear()).slice(-2);
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+            
+            console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
+            const result = await invoke('start_recording_with_devices_and_meeting', {
+              mic_device_name: selectedDevices?.micDevice || null,
+              system_device_name: selectedDevices?.systemDevice || null,
+              meeting_name: generatedMeetingTitle
+            });
+            console.log('Auto-start backend recording result:', result);
+            
+            // Update UI state after successful backend start
+            setMeetingTitle(generatedMeetingTitle);
+            setIsRecordingState(true);
+            setTranscripts([]);
+            setIsMeetingActive(true);
+            Analytics.trackButtonClick('start_recording', 'sidebar_auto');
+          } catch (error) {
+            console.error('Failed to auto-start recording:', error);
+            alert('Failed to start recording. Check console for details.');
+            Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
+          }
         }
       }
     };
     
     checkAutoStartRecording();
-  }, [isRecording, isMeetingActive]);
+  }, [isRecording, isMeetingActive, selectedDevices]);
 
   const handleRecordingStop = async () => {
     try {
@@ -555,30 +637,22 @@ export default function Home() {
   };
 
   const handleRecordingStop2 = async (isCallApi: boolean) => {
+    // Immediately update UI state to reflect that recording has stopped
+    setIsRecordingState(false);
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
     try {
-      console.log('Stopping recording (new implementation)...', {
+      console.log('Post-stop processing (new implementation)...', {
         stop_initiated_at: new Date(stopStartTime).toISOString(),
         current_transcript_count: transcripts.length
       });
       const { invoke } = await import('@tauri-apps/api/core');
       const { appDataDir } = await import('@tauri-apps/api/path');
       const { listen } = await import('@tauri-apps/api/event');
-      
-      const dataDir = await appDataDir();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const transcriptPath = `${dataDir}transcript-${timestamp}.txt`;
-      const audioPath = `${dataDir}recording-${timestamp}.wav`;
-      
-      // Stop recording and get audio path
-      await invoke('stop_recording', { 
-        args: { 
-          model_config: modelConfig,
-          save_path: audioPath
-        }
-      });
-      console.log('Recording stopped successfully');
+
+      // Note: stop_recording is already called by RecordingControls.stopRecordingAction
+      // This function only handles post-stop processing (transcription wait, API call, navigation)
+      console.log('Recording already stopped by RecordingControls, processing transcription...');
    
       // Wait for transcription to complete
       setSummaryStatus('processing');
@@ -723,7 +797,7 @@ export default function Home() {
         router.push('/meeting-details');
       }
       setIsMeetingActive(false);
-      setIsRecordingState(false);
+      // isRecordingState already set to false at function start
       setIsRecordingDisabled(false);
       // Show summary button if we have transcript content
       if (transcripts.length > 0) {
@@ -733,7 +807,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Error in handleRecordingStop2:', error);
-      setIsRecordingState(false);
+      // isRecordingState already set to false at function start
       setSummaryStatus('idle');
       setIsSavingTranscript(false);
       setIsRecordingDisabled(false);
@@ -1110,6 +1184,63 @@ export default function Home() {
     };
   }, []);
   
+  useEffect(() => {
+    // Honor saved model settings from backend (including OpenRouter)
+    const fetchModelConfig = async () => {
+      try {
+        const data = await invoke('api_get_model_config') as any;
+        if (data && data.provider) {
+          setModelConfig(prev => ({
+            ...prev,
+            provider: data.provider,
+            model: data.model || prev.model,
+            whisperModel: data.whisperModel || prev.whisperModel,
+          }));
+        }
+      } catch (error) {
+        console.error('Failed to fetch saved model config in page.tsx:', error);
+      }
+    };
+    fetchModelConfig();
+  }, []);
+
+  // Load device preferences on startup
+  useEffect(() => {
+    const loadDevicePreferences = async () => {
+      try {
+        const prefs = await invoke('get_recording_preferences') as any;
+        if (prefs && (prefs.preferred_mic_device || prefs.preferred_system_device)) {
+          setSelectedDevices({
+            micDevice: prefs.preferred_mic_device,
+            systemDevice: prefs.preferred_system_device
+          });
+          console.log('Loaded device preferences:', prefs);
+        }
+      } catch (error) {
+        console.log('No device preferences found or failed to load:', error);
+      }
+    };
+    loadDevicePreferences();
+  }, []);
+
+  // Load language preference on startup
+  useEffect(() => {
+    const loadLanguagePreference = async () => {
+      try {
+        const language = await invoke('get_language_preference') as string;
+        if (language) {
+          setSelectedLanguage(language);
+          console.log('Loaded language preference:', language);
+        }
+      } catch (error) {
+        console.log('No language preference found or failed to load, using default (auto-translate):', error);
+        // Default to 'auto-translate' (Auto Detect with English translation) if no preference is saved
+        setSelectedLanguage('auto-translate');
+      }
+    };
+    loadLanguagePreference();
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {showErrorAlert && (
@@ -1160,13 +1291,38 @@ export default function Home() {
                         ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
                         : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 active:bg-blue-200'
                     }`}
-                    title={transcripts.length === 0 ? 'No transcript available' : 'Copy Transcript'}
+                    title={transcripts.length === 0 ? 'No transcript available' : 'Copy'}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V7.5l-3.75-3.612z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 3v3.75a.75.75 0 0 0 .75.75H18" />
                     </svg>
-                    <span className="text-sm">Copy Transcript</span>
+                    <span className="text-sm">Copy</span>
+                  </button>
+                  <button
+                    onClick={() => setShowDeviceSettings(true)}
+                    className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
+                    title="Audio Device Settings"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                      <line x1="12" y1="19" x2="12" y2="23"/>
+                      <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                    <span className="text-sm">Devices</span>
+                  </button>
+                  <button
+                    onClick={() => setShowLanguageSettings(true)}
+                    className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
+                    title="Language Settings"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <line x1="2" y1="12" x2="22" y2="12"/>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                    <span className="text-sm">Language</span>
                   </button>
                   {/* {showSummary && !isRecording && (
                     <>
@@ -1291,7 +1447,7 @@ export default function Home() {
           )} */}
 
           {/* Recording controls */}
-          <div ref={recordingControlsRef} className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
+          <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
             <div className="bg-white rounded-full shadow-lg flex items-center">
               <RecordingControls
                 isRecording={isRecording}
@@ -1305,6 +1461,8 @@ export default function Home() {
                 }}
                 isRecordingDisabled={isRecordingDisabled}
                 isParentProcessing={isProcessingStop}
+                selectedDevices={selectedDevices}
+                meetingName={meetingTitle}
               />
             </div>
           </div>
@@ -1360,6 +1518,7 @@ export default function Home() {
                         <option value="claude">Claude</option>
                         <option value="groq">Groq</option>
                         <option value="ollama">Ollama</option>
+                        <option value="openrouter">OpenRouter</option>
                       </select>
 
                       <select
@@ -1385,7 +1544,7 @@ export default function Home() {
                       )}
                       <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
                         {models.map((model) => (
-                          <div 
+                          <div
                             key={model.id}
                             className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${
                               modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
@@ -1408,6 +1567,125 @@ export default function Home() {
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   >
                     Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Device Settings Modal */}
+          {showDeviceSettings && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Audio Device Settings</h3>
+                  <button
+                    onClick={() => setShowDeviceSettings(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <DeviceSelection
+                  selectedDevices={selectedDevices}
+                  onDeviceChange={setSelectedDevices}
+                  disabled={isRecording}
+                />
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setShowDeviceSettings(false)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Language Settings Modal */}
+          {showLanguageSettings && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Language Settings</h3>
+                  <button
+                    onClick={() => setShowLanguageSettings(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <LanguageSelection
+                  selectedLanguage={selectedLanguage}
+                  onLanguageChange={setSelectedLanguage}
+                  disabled={isRecording}
+                />
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setShowLanguageSettings(false)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Model Selection Modal - shown when model loading fails */}
+          {showModelSelector && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Speech Recognition Setup Required</h3>
+                  <button
+                    onClick={() => setShowModelSelector(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <span className="text-yellow-600 text-xl">⚠️</span>
+                    <div>
+                      <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
+                      <p className="text-sm text-yellow-700">
+                        {modelSelectorMessage || 'Please download a Whisper model to enable speech recognition and start transcription.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <ModelManager
+                  selectedModel={modelConfig.whisperModel}
+                  onModelSelect={(modelName) => {
+                    setModelConfig(prev => ({ ...prev, whisperModel: modelName }));
+                    // Close the modal once a model is selected
+                    if (modelName) {
+                      setShowModelSelector(false);
+                    }
+                  }}
+                />
+
+                <div className="mt-6 flex justify-end space-x-3">
+                  <button
+                    onClick={() => setShowModelSelector(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -1504,17 +1782,6 @@ export default function Home() {
           )} */}
         </div>
       </div>
-
-      {/* Compliance Notification */}
-      <ComplianceNotification
-        isOpen={showComplianceNotification}
-        onClose={() => setShowComplianceNotification(false)}
-        onAcknowledge={() => {
-          console.log('User acknowledged compliance notification');
-          Analytics.trackButtonClick('compliance_acknowledged', 'home_page');
-        }}
-        recordingButtonRef={recordingControlsRef}
-      />
     </div>
   );
 }

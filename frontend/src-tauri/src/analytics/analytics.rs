@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsConfig {
@@ -107,7 +107,7 @@ impl AnalyticsClient {
             Some(id) => id,
             None => {
                 // Don't create anonymous users, wait for proper identification
-                eprintln!("Warning: Attempted to track event '{}' before user identification", event_name);
+                log::warn!("Attempted to track event '{}' before user identification", event_name);
                 return Ok(());
             }
         };
@@ -126,12 +126,12 @@ impl AnalyticsClient {
         // Add event properties
         for (key, value) in properties {
             if let Err(e) = event.insert_prop(&key, value) {
-                eprintln!("Failed to add property {}: {}", key, e);
+                log::warn!("Failed to add property {}: {}", key, e);
             }
         }
         
         if let Err(e) = client.capture(event).await {
-            eprintln!("Failed to track event {}: {}", event_name, e);
+            log::warn!("Failed to track event {}: {}", event_name, e);
         }
         
         Ok(())
@@ -174,7 +174,7 @@ impl AnalyticsClient {
         let user_id = match self.user_id.lock().await.clone() {
             Some(id) => id,
             None => {
-                eprintln!("Warning: Attempted to track daily active user before user identification");
+                log::warn!("Attempted to track daily active user before user identification");
                 return Ok(());
             }
         };
