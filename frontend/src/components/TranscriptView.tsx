@@ -8,6 +8,17 @@ interface TranscriptViewProps {
   transcripts: Transcript[];
 }
 
+// Helper function to format seconds as recording-relative time [MM:SS]
+function formatRecordingTime(seconds: number | undefined): string {
+  if (seconds === undefined) return '[--:--]';
+
+  const totalSeconds = Math.floor(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+
+  return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
+}
+
 export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>();
@@ -72,14 +83,24 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
           }`}
         >
           <div className="flex justify-between items-center mb-1">
-            <span className="text-xs text-gray-500">
-              {transcript.timestamp}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                {transcript.audio_start_time !== undefined
+                  ? formatRecordingTime(transcript.audio_start_time)
+                  : transcript.timestamp
+                }
+              </span>
+              {transcript.duration !== undefined && (
+                <span className="text-xs text-gray-400">
+                  {transcript.duration.toFixed(1)}s
+                </span>
+              )}
+            </div>
             <div className="flex items-center space-x-2">
               {transcript.is_partial && (
                 // <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                  
+
                 // </span>
               )}
               {transcript.confidence !== undefined && !transcript.is_partial && (
