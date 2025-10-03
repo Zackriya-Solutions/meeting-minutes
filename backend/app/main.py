@@ -58,6 +58,10 @@ class Transcript(BaseModel):
     id: str
     text: str
     timestamp: str
+    # Recording-relative timestamps for audio-transcript synchronization
+    audio_start_time: Optional[float] = None
+    audio_end_time: Optional[float] = None
+    duration: Optional[float] = None
 
 class MeetingResponse(BaseModel):
     id: str
@@ -510,13 +514,18 @@ async def save_transcript(request: SaveTranscriptRequest):
         logger.info(f"Received save-transcript request for meeting: {request.meeting_title}")
         logger.info(f"Number of transcripts to save: {len(request.transcripts)}")
 
+        # Log first transcript timestamps for debugging
+        if request.transcripts:
+            first = request.transcripts[0]
+            logger.debug(f"First transcript: audio_start_time={first.audio_start_time}, audio_end_time={first.audio_end_time}, duration={first.duration}")
+
         # Generate a unique meeting ID
         meeting_id = f"meeting-{int(time.time() * 1000)}"
 
         # Save the meeting
         await db.save_meeting(meeting_id, request.meeting_title)
 
-        # Save each transcript segment
+        # Save each transcript segment with NEW timestamp fields for playback sync
         for transcript in request.transcripts:
             await db.save_meeting_transcript(
                 meeting_id=meeting_id,
@@ -524,7 +533,11 @@ async def save_transcript(request: SaveTranscriptRequest):
                 timestamp=transcript.timestamp,
                 summary="",
                 action_items="",
-                key_points=""
+                key_points="",
+                # NEW: Recording-relative timestamps for audio-transcript synchronization
+                audio_start_time=transcript.audio_start_time,
+                audio_end_time=transcript.audio_end_time,
+                duration=transcript.duration
             )
 
         logger.info("Transcripts saved successfully")
