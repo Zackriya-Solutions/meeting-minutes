@@ -301,11 +301,12 @@ impl AudioPipeline {
         target_chunk_duration_ms: u32,
         sample_rate: u32,
     ) -> Self {
-        // Create VAD processor with longer redemption time for better speech accumulation
+        // Create VAD processor with balanced redemption time for speech accumulation
         // The VAD processor now handles 48kHz->16kHz resampling internally
-        // CRITICAL FIX: Increased from 800ms to 2000ms to prevent fragmenting continuous speech
-        // This allows VAD to bridge natural pauses and capture complete 5+ second utterances
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 1000) {
+        // Redemption time: 500ms bridges natural pauses while maintaining responsiveness
+        // Too long (2000ms): Delays transcription after speech ends
+        // Too short (200ms): Fragments continuous speech into tiny segments
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 500) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor

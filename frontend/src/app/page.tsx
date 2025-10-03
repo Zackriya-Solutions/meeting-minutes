@@ -1446,7 +1446,7 @@ export default function Home() {
 
           {/* Transcript content */}
           <div className="flex-1 overflow-y-auto pb-32">
-            <TranscriptView transcripts={transcripts} />
+            <TranscriptView transcripts={transcripts} isRecording={isRecording} />
           </div>
           
           {/* Custom prompt input at bottom of transcript section */}

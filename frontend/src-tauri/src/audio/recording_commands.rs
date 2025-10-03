@@ -16,6 +16,9 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+// Speech detection flag - reset per recording session
+static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
+
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -115,9 +118,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         *global_manager = Some(manager);
     }
 
-    // Set recording flag
-    info!("🔍 Setting IS_RECORDING to true");
+    // Set recording flag and reset speech detection flag
+    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst); // Reset for new recording session
+    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 
     // Start optimized parallel transcription task and store handle
     let task_handle = start_transcription_task(app.clone(), transcription_receiver);
@@ -230,9 +235,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         *global_manager = Some(manager);
     }
 
-    // Set recording flag
-    info!("🔍 Setting IS_RECORDING to true");
+    // Set recording flag and reset speech detection flag
+    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst); // Reset for new recording session
+    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 
     // Start optimized parallel transcription task and store handle
     let task_handle = start_transcription_task(app.clone(), transcription_receiver);
@@ -637,10 +644,30 @@ fn start_transcription_task<R: Runtime>(
                                 Ok((transcript, confidence, is_partial)) => {
                                     let confidence_threshold = 0.3; // Display results above 30% confidence
 
+                                    info!("🔍 Worker {} transcription result: text='{}', confidence={:.2}, partial={}, threshold={:.2}",
+                                          worker_id, transcript, confidence, is_partial, confidence_threshold);
+
                                     if !transcript.trim().is_empty() && confidence >= confidence_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {:.2}, partial: {})",
                                               worker_id, transcript, confidence, is_partial);
+
+                                        // Emit speech-detected event for frontend UX (only on first detection per session)
+                                        // This is lightweight and provides better user feedback
+                                        let current_flag = SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
+                                        info!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
+
+                                        if !current_flag {
+                                            SPEECH_DETECTED_EMITTED.store(true, Ordering::SeqCst);
+                                            match app_clone.emit("speech-detected", serde_json::json!({
+                                                "message": "Speech activity detected"
+                                            })) {
+                                                Ok(_) => info!("🎤 ✅ First speech detected - successfully emitted speech-detected event"),
+                                                Err(e) => error!("🎤 ❌ Failed to emit speech-detected event: {}", e),
+                                            }
+                                        } else {
+                                            info!("🔍 Speech already detected in this session, not re-emitting");
+                                        }
 
                                         // Generate sequence ID and calculate timestamps FIRST
                                         let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);

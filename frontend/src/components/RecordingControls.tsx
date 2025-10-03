@@ -49,6 +49,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const MIN_RECORDING_DURATION = 2000; // 2 seconds minimum recording time
   const [transcriptionErrors, setTranscriptionErrors] = useState(0);
   const [isValidatingModel, setIsValidatingModel] = useState(false);
+  const [speechDetected, setSpeechDetected] = useState(false);
 
 
   const currentTime = 0;
@@ -85,6 +86,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     setIsValidatingModel(true);
     setShowPlayback(false);
     setTranscript(''); // Clear any previous transcript
+    setSpeechDetected(false); // Reset speech detection on new recording
 
     try {
       // Generate meeting title here to ensure it's available for the backend call
@@ -344,13 +346,20 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           // This is just for informational purposes
         });
 
+        // Speech detected listener - for UX feedback when VAD detects speech
+        const speechDetectedUnsubscribe = await listen('speech-detected', (event) => {
+          console.log('speech-detected event received:', event);
+          setSpeechDetected(true);
+        });
+
         unsubscribes = [
           transcriptErrorUnsubscribe,
           transcriptionErrorUnsubscribe,
           pausedUnsubscribe,
           resumedUnsubscribe,
           enhancedConfirmedUnsubscribe,
-          enhancedDismissedUnsubscribe
+          enhancedDismissedUnsubscribe,
+          speechDetectedUnsubscribe
         ];
         console.log('Recording event listeners set up successfully');
       } catch (error) {
@@ -501,7 +510,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         )}
       </div>
 
-      {/* Show validation status */}
+      {/* Show validation status only */}
       {isValidatingModel && (
         <div className="text-xs text-gray-600 text-center mt-2">
           Validating speech recognition...

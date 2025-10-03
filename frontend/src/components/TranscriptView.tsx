@@ -6,6 +6,11 @@ import { ConfidenceIndicator } from './ConfidenceIndicator';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
+  isRecording?: boolean;
+}
+
+interface SpeechDetectedEvent {
+  message: string;
 }
 
 // Helper function to format seconds as recording-relative time [MM:SS]
@@ -19,10 +24,11 @@ function formatRecordingTime(seconds: number | undefined): string {
   return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
-export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) => {
+export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>();
   const isUserAtBottomRef = useRef<boolean>(true);
+  const [speechDetected, setSpeechDetected] = useState(false);
 
   // Load preference for showing confidence indicator
   const [showConfidence, setShowConfidence] = useState<boolean>(() => {
@@ -43,6 +49,31 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
     window.addEventListener('confidenceIndicatorChanged', handleConfidenceChange);
     return () => window.removeEventListener('confidenceIndicatorChanged', handleConfidenceChange);
   }, []);
+
+  // Listen for speech-detected event
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const setupListener = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      unsubscribe = await listen<SpeechDetectedEvent>('speech-detected', () => {
+        setSpeechDetected(true);
+      });
+    };
+
+    if (isRecording) {
+      setupListener();
+    } else {
+      // Reset when not recording
+      setSpeechDetected(false);
+    }
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [isRecording]);
 
   // Smart scrolling - only auto-scroll if user is at bottom
   useEffect(() => {
@@ -119,10 +150,59 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts }) =
           </p>
         </div>
       ))}
+
+      {/* Typing indicator - shows when recording and transcripts exist (always shows after first transcript) */}
+      {isRecording && transcripts.length > 0 && (
+        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-blue-50/30 border-l-4 border-blue-400 animate-fade-in">
+          <div className="flex items-center space-x-2">
+            <div className="flex space-x-1">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            </div>
+            <span className="text-xs text-blue-600 font-medium">Listening...</span>
+          </div>
+        </div>
+      )}
       {transcripts.length === 0 && (
         <div className="text-center text-gray-500 mt-8">
-          <p className="text-sm">No transcripts yet</p>
-          <p className="text-xs mt-1">Start recording to see live transcription</p>
+          {isRecording ? (
+            <>
+              <div className="flex items-center justify-center space-x-2 mb-3">
+                <div className="relative flex items-center justify-center">
+                  {/* Outer pulse ring - changes color when speech detected */}
+                  <div className={`absolute w-12 h-12 rounded-full animate-ping opacity-75 ${
+                    speechDetected ? 'bg-green-400' : 'bg-blue-400'
+                  }`}></div>
+                  {/* Inner solid circle with mic icon */}
+                  <div className={`relative w-10 h-10 rounded-full flex items-center justify-center ${
+                    speechDetected ? 'bg-green-500' : 'bg-blue-500'
+                  }`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                      <line x1="12" y1="19" x2="12" y2="23"/>
+                      <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              <p className={`text-sm font-medium ${speechDetected ? 'text-green-600' : 'text-blue-600'}`}>
+                {speechDetected ? 'Processing speech...' : 'Listening for speech...'}
+              </p>
+              <p className="text-xs mt-1 text-gray-400">
+                {speechDetected
+                  ? 'Your speech is being transcribed'
+                  : 'Listening to your microphone and system audio'
+                }
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm">No transcripts yet</p>
+              <p className="text-xs mt-1">Start recording to see live transcription</p>
+            </>
+          )}
         </div>
       )}
     </div>
