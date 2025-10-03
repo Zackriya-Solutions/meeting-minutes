@@ -84,6 +84,7 @@ class DeleteMeetingRequest(BaseModel):
 class SaveTranscriptRequest(BaseModel):
     meeting_title: str
     transcripts: List[Transcript]
+    folder_path: Optional[str] = None  # NEW: Path to meeting folder (for new folder structure)
 
 class SaveModelConfigRequest(BaseModel):
     provider: str
@@ -522,8 +523,8 @@ async def save_transcript(request: SaveTranscriptRequest):
         # Generate a unique meeting ID
         meeting_id = f"meeting-{int(time.time() * 1000)}"
 
-        # Save the meeting
-        await db.save_meeting(meeting_id, request.meeting_title)
+        # Save the meeting with folder path (if provided)
+        await db.save_meeting(meeting_id, request.meeting_title, folder_path=request.folder_path)
 
         # Save each transcript segment with NEW timestamp fields for playback sync
         for transcript in request.transcripts:

@@ -187,24 +187,29 @@ impl AudioCapture {
         // This prevents amplifying system audio bleed-through in the microphone
 
         // DIAGNOSTIC: Log audio levels for debugging (especially mic issues)
-        if chunk_id % 100 == 0 && !mono_data.is_empty() {
-            let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-            let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+        // if chunk_id % 100 == 0 && !mono_data.is_empty() {
+        //     let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+        //     let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
 
-            if self.device_type == DeviceType::Microphone {
-                info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
-                      self.device_type, chunk_id, raw_rms, raw_peak);
-            }
-            else {
-                perf_debug!("🔊 [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
-                  self.device_type, chunk_id, raw_rms, raw_peak);
-            }
+        //         info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
+        //               self.device_type, chunk_id, raw_rms, raw_peak);
 
-            // Warn if microphone is completely silent
-            if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
-                warn!("⚠️ Microphone producing ZERO audio - check permissions or hardware!");
-            }
-        }
+        //     // Warn if microphone is completely silent
+        //     if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
+        //         warn!("⚠️ Microphone producing ZERO audio - check permissions or hardware!");
+        //     }
+        // }
+        // else if chunk_id % 100 == 0 && matches!(self.device_type, DeviceType::System) {
+        //     let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+        //     let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+        //     info!("🔊 [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
+        //       self.device_type, chunk_id, raw_rms, raw_peak);
+            
+        //     // Warn if system audio is completely silent
+        //     if raw_rms == 0.0 && raw_peak == 0.0 {
+        //         warn!("⚠️ System audio producing ZERO audio - check permissions or hardware!");
+        //     }
+        // }
 
         // Use global recording timestamp for proper synchronization
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);

@@ -518,7 +518,7 @@ export default function Home() {
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const seconds = String(now.getSeconds()).padStart(2, '0');
-      const randomTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+      const randomTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
       setMeetingTitle(randomTitle);
 
       // Update state - the actual recording is already started by RecordingControls
@@ -556,7 +556,7 @@ export default function Home() {
             const hours = String(now.getHours()).padStart(2, '0');
             const minutes = String(now.getMinutes()).padStart(2, '0');
             const seconds = String(now.getSeconds()).padStart(2, '0');
-            const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+            const generatedMeetingTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
             
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
             const result = await invoke('start_recording_with_devices_and_meeting', {

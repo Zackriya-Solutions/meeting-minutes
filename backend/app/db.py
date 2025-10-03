@@ -53,9 +53,17 @@ class DatabaseManager:
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    folder_path TEXT
                 )
             """)
+
+            # Migration: Add folder_path column to existing meetings table
+            try:
+                cursor.execute("ALTER TABLE meetings ADD COLUMN folder_path TEXT")
+                logger.info("Added folder_path column to meetings table")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
             # Create transcripts table
             cursor.execute("""
@@ -352,22 +360,23 @@ class DatabaseManager:
                     return dict(zip([col[0] for col in cursor.description], row))
                 return None
 
-    async def save_meeting(self, meeting_id: str, title: str):
+    async def save_meeting(self, meeting_id: str, title: str, folder_path: str = None):
         """Save or update a meeting"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
+
                 # Check if meeting exists
                 cursor.execute("SELECT id FROM meetings WHERE id = ? OR title = ?", (meeting_id, title))
                 existing_meeting = cursor.fetchone()
-                
+
                 if not existing_meeting:
-                    # Create new meeting with local timestamp
+                    # Create new meeting with local timestamp and folder path
                     cursor.execute("""
-                        INSERT INTO meetings (id, title, created_at, updated_at)
-                        VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
-                    """, (meeting_id, title))
+                        INSERT INTO meetings (id, title, created_at, updated_at, folder_path)
+                        VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?)
+                    """, (meeting_id, title, folder_path))
+                    logger.info(f"Saved meeting {meeting_id} with folder_path: {folder_path}")
                 else:
                     # If we get here and meeting exists, throw error since we don't want duplicates
                     raise Exception(f"Meeting with ID {meeting_id} already exists")

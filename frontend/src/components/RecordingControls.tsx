@@ -95,7 +95,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const seconds = String(now.getSeconds()).padStart(2, '0');
-      const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+      const generatedMeetingTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
 
       setIsStarting(true);
       setIsValidatingModel(false);
