@@ -242,8 +242,8 @@ export default function Home() {
 
       // Add any buffered transcripts that might be out of order
       const now = Date.now();
-      const staleThreshold = 3000; // 3 seconds - reduced for faster processing
-      const recentThreshold = 1000; // 1 second - faster processing of recent transcripts
+      const staleThreshold = 100;  // 100ms safety net only (serial workers = sequential order)
+      const recentThreshold = 0;    // Show immediately - no delay needed with serial processing
       const staleTranscripts: Transcript[] = [];
       const recentTranscripts: Transcript[] = [];
       const forceFlushTranscripts: Transcript[] = [];
@@ -257,14 +257,14 @@ export default function Home() {
         } else {
           const transcriptAge = now - parseInt(transcript.id.split('-')[0]);
           if (transcriptAge > staleThreshold) {
-            // Process truly stale transcripts (>5s old)
+            // Process stale transcripts (>100ms old - safety net)
             staleTranscripts.push(transcript);
             transcriptBuffer.delete(sequenceId);
-          } else if (transcriptAge > recentThreshold) {
-            // Process recent out-of-order transcripts (2-5s old)
+          } else if (transcriptAge >= recentThreshold) {
+            // Process immediately (0ms threshold with serial workers)
             recentTranscripts.push(transcript);
             transcriptBuffer.delete(sequenceId);
-            console.log(`Processing recent out-of-order transcript with sequence_id ${sequenceId}, age: ${transcriptAge}ms`);
+            console.log(`Processing transcript with sequence_id ${sequenceId}, age: ${transcriptAge}ms`);
           }
         }
       }
@@ -367,9 +367,9 @@ export default function Home() {
           if (processingTimer) {
             clearTimeout(processingTimer);
           }
-          
-          // Process buffer with optimized delay for better UI responsiveness
-          processingTimer = setTimeout(processBufferedTranscripts, 50);
+
+          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
+          processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {

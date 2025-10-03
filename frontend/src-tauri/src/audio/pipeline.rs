@@ -305,7 +305,7 @@ impl AudioPipeline {
         // The VAD processor now handles 48kHz->16kHz resampling internally
         // CRITICAL FIX: Increased from 800ms to 2000ms to prevent fragmenting continuous speech
         // This allows VAD to bridge natural pauses and capture complete 5+ second utterances
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 2000) {
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 1000) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor

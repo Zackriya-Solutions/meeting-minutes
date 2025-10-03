@@ -130,7 +130,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started successfully with parallel processing",
         "devices": ["Default Microphone", "Default System Audio"],
-        "workers": 4
+        "workers": 3
     })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect recording state
@@ -248,7 +248,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
             system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
         ],
-        "workers": 4
+        "workers": 3
     })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect recording state
@@ -569,7 +569,7 @@ fn start_transcription_task<R: Runtime>(
         };
 
         // Create parallel workers for faster processing while preserving ALL chunks
-        const NUM_WORKERS: usize = 4; // Increased from 3 to ensure better chunk distribution
+        const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
@@ -578,7 +578,7 @@ fn start_transcription_task<R: Runtime>(
         let chunks_completed = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
 
-        info!("📊 Starting {} parallel transcription workers", NUM_WORKERS);
+        info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
 
         // Spawn worker tasks
         let mut worker_handles = Vec::new();
