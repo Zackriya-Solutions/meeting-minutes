@@ -88,10 +88,16 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Set meeting name if provided
-    if let Some(name) = meeting_name.clone() {
-        manager.set_meeting_name(Some(name));
-    }
+    // Always ensure a meeting name is set so incremental saver initializes
+    let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
+        // Example: Meeting 2025-10-03_08-25-23
+        let now = chrono::Local::now();
+        format!(
+            "Meeting {}",
+            now.format("%Y-%m-%d_%H-%M-%S")
+        )
+    });
+    manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
     let app_for_error = app.clone();
@@ -198,10 +204,15 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Set meeting name if provided
-    if let Some(name) = meeting_name.clone() {
-        manager.set_meeting_name(Some(name));
-    }
+    // Always ensure a meeting name is set so incremental saver initializes
+    let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
+        let now = chrono::Local::now();
+        format!(
+            "Meeting {}",
+            now.format("%Y-%m-%d_%H-%M-%S")
+        )
+    });
+    manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
     let app_for_error = app.clone();
@@ -1033,4 +1044,16 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+/// Get the meeting folder path for the current recording
+/// Returns the path if a meeting name was set and folder structure initialized
+#[tauri::command]
+pub async fn get_meeting_folder_path() -> Result<Option<String>, String> {
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    if let Some(manager) = manager_guard.as_ref() {
+        Ok(manager.get_meeting_folder().map(|p| p.to_string_lossy().to_string()))
+    } else {
+        Ok(None)
+    }
 }

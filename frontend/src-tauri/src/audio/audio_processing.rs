@@ -23,6 +23,30 @@ pub fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
+/// Create a meeting folder with timestamp and return the path
+/// Creates structure: base_path/MeetingName_YYYY-MM-DD_HH-MM/
+///                    ├── .checkpoints/  (for incremental saves)
+pub fn create_meeting_folder(
+    base_path: &PathBuf,
+    meeting_name: &str,
+) -> Result<PathBuf> {
+    let timestamp = Utc::now().format("%Y-%m-%d_%H-%M").to_string();
+    let sanitized_name = sanitize_filename(meeting_name);
+    let folder_name = format!("{}_{}", sanitized_name, timestamp);
+    let meeting_folder = base_path.join(folder_name);
+
+    // Create main meeting folder
+    std::fs::create_dir_all(&meeting_folder)?;
+
+    // Create hidden .checkpoints subfolder for temporary checkpoint files
+    let checkpoints_dir = meeting_folder.join(".checkpoints");
+    std::fs::create_dir_all(&checkpoints_dir)?;
+
+    log::info!("Created meeting folder: {}", meeting_folder.display());
+
+    Ok(meeting_folder)
+}
+
 pub fn normalize_v2(audio: &[f32]) -> Vec<f32> {
     let rms = (audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
     let peak = audio

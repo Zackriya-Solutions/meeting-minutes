@@ -512,6 +512,7 @@ pub fn run() {
             audio::recording_commands::resume_recording,
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
+            audio::recording_commands::get_meeting_folder_path,
 
             console_utils::show_console,
             console_utils::hide_console,

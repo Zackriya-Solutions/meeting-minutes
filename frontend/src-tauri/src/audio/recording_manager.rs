@@ -334,6 +334,12 @@ impl RecordingManager {
         }
         self.state.cleanup();
     }
+
+    /// Get the meeting folder path (if available)
+    /// Returns None if no meeting name was set or folder structure not initialized
+    pub fn get_meeting_folder(&self) -> Option<std::path::PathBuf> {
+        self.recording_saver.get_meeting_folder().map(|p| p.clone())
+    }
 }
 
 impl Default for RecordingManager {
