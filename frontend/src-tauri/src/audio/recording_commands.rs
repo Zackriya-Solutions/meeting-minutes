@@ -35,12 +35,16 @@ pub struct TranscriptionStatus {
 #[derive(Debug, Serialize, Clone)]
 pub struct TranscriptUpdate {
     pub text: String,
-    pub timestamp: String,
+    pub timestamp: String, // Wall-clock time for reference (e.g., "14:30:05")
     pub source: String,
     pub sequence_id: u64,
-    pub chunk_start_time: f64,
+    pub chunk_start_time: f64, // Legacy field, kept for compatibility
     pub is_partial: bool,
     pub confidence: f32,
+    // NEW: Recording-relative timestamps for playback sync
+    pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
+    pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
+    pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
 }
 
 /// Start recording with default devices
@@ -615,6 +619,7 @@ fn start_transcription_task<R: Runtime>(
                             }
 
                             let chunk_timestamp = chunk.timestamp;
+                            let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
                             // Transcribe with whisper using streaming approach
                             match transcribe_chunk_with_streaming(&whisper_engine_clone, chunk, &app_clone).await {
@@ -626,24 +631,44 @@ fn start_transcription_task<R: Runtime>(
                                         info!("✅ Worker {} transcribed: {} (confidence: {:.2}, partial: {})",
                                               worker_id, transcript, confidence, is_partial);
 
-                                        // Save transcript chunk to recording manager (only final results)
-                                        if !is_partial {
-                                            let global_manager = RECORDING_MANAGER.lock().unwrap();
-                                            if let Some(manager) = global_manager.as_ref() {
-                                                manager.add_transcript_chunk(transcript.clone());
-                                            }
+                                        // Generate sequence ID and calculate timestamps FIRST
+                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        let audio_start_time = chunk_timestamp; // Already in seconds from recording start
+                                        let audio_end_time = chunk_timestamp + chunk_duration;
+
+                                        // Save structured transcript segment to recording manager (only final results)
+                                        // Save ALL segments (partial and final) to ensure complete JSON
+                                        // Create structured segment with full timestamp data
+                                        let segment = crate::audio::recording_saver::TranscriptSegment {
+                                            id: format!("seg_{}", sequence_id),
+                                            text: transcript.clone(),
+                                            audio_start_time,
+                                            audio_end_time,
+                                            duration: chunk_duration,
+                                            display_time: format_recording_time(audio_start_time),
+                                            confidence,
+                                            sequence_id,
+                                        };
+
+                                        let global_manager = RECORDING_MANAGER.lock().unwrap();
+                                        if let Some(manager) = global_manager.as_ref() {
+                                            manager.add_transcript_segment(segment);
                                         }
 
-                                        // Emit transcript update with partial flag and confidence
-                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        // Emit transcript update with NEW recording-relative timestamps
+
                                         let update = TranscriptUpdate {
                                             text: transcript,
-                                            timestamp: format_current_timestamp(),
+                                            timestamp: format_current_timestamp(), // Wall-clock for reference
                                             source: "Audio".to_string(),
                                             sequence_id,
-                                            chunk_start_time: chunk_timestamp,
+                                            chunk_start_time: chunk_timestamp, // Legacy compatibility
                                             is_partial,
                                             confidence,
+                                            // NEW: Recording-relative timestamps for sync
+                                            audio_start_time,
+                                            audio_end_time,
+                                            duration: chunk_duration,
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update) {
@@ -988,7 +1013,7 @@ pub async fn get_or_init_whisper<R: Runtime>(app: &AppHandle<R>) -> Result<Arc<c
 }
 
 
-/// Format current timestamp
+/// Format current timestamp (wall-clock time)
 fn format_current_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -999,4 +1024,13 @@ fn format_current_timestamp() -> String {
     let seconds = now.as_secs() % 60;
 
     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+/// Format recording-relative time as [MM:SS]
+fn format_recording_time(seconds: f64) -> String {
+    let total_seconds = seconds.floor() as u64;
+    let minutes = total_seconds / 60;
+    let secs = total_seconds % 60;
+
+    format!("[{:02}:{:02}]", minutes, secs)
 }

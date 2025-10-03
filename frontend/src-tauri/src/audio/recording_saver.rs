@@ -3,10 +3,24 @@ use anyhow::Result;
 use log::{info, warn, error};
 use tauri::{AppHandle, Runtime, Emitter};
 use tokio::sync::mpsc;
+use serde::{Serialize, Deserialize};
 
 use super::recording_state::{AudioChunk, ProcessedAudioChunk, DeviceType};
 use super::recording_preferences::load_recording_preferences;
-use super::audio_processing::{write_audio_to_file_with_meeting_name, write_transcript_to_file};
+use super::audio_processing::write_audio_to_file_with_meeting_name;
+
+/// Structured transcript segment for JSON export
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptSegment {
+    pub id: String,
+    pub text: String,
+    pub audio_start_time: f64, // Seconds from recording start
+    pub audio_end_time: f64,   // Seconds from recording start
+    pub duration: f64,          // Segment duration in seconds
+    pub display_time: String,   // Formatted time for display like "[02:15]"
+    pub confidence: f32,
+    pub sequence_id: u64,
+}
 
 // Simple audio data structure (NO TIMESTAMP - prevents sorting issues)
 #[derive(Debug, Clone)]
@@ -45,7 +59,7 @@ pub struct RecordingSaver {
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
     is_saving: Arc<Mutex<bool>>,
     meeting_name: Option<String>,
-    transcript_chunks: Arc<Mutex<Vec<String>>>,
+    transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
 }
 
 impl RecordingSaver {
@@ -54,7 +68,7 @@ impl RecordingSaver {
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
             meeting_name: None,
-            transcript_chunks: Arc::new(Mutex::new(Vec::new())),
+            transcript_segments: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -63,11 +77,37 @@ impl RecordingSaver {
         self.meeting_name = name;
     }
 
-    /// Add a transcript chunk to be saved later
-    pub fn add_transcript_chunk(&self, text: String) {
-        if let Ok(mut chunks) = self.transcript_chunks.lock() {
-            chunks.push(text);
+    /// Add or update a structured transcript segment (upserts based on sequence_id)
+    pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
+        if let Ok(mut segments) = self.transcript_segments.lock() {
+            // Check if segment with same sequence_id exists (update it)
+            if let Some(existing) = segments.iter_mut().find(|s| s.sequence_id == segment.sequence_id) {
+                *existing = segment.clone();
+                info!("Updated transcript segment {} (seq: {}) - total segments: {}", segment.id, segment.sequence_id, segments.len());
+            } else {
+                // New segment, add it
+                segments.push(segment.clone());
+                info!("Added new transcript segment {} (seq: {}) - total segments: {}", segment.id, segment.sequence_id, segments.len());
+            }
+        } else {
+            error!("Failed to lock transcript segments for adding segment {}", segment.id);
         }
+    }
+
+    /// Legacy method for backward compatibility - converts text to basic segment
+    pub fn add_transcript_chunk(&self, text: String) {
+        // Create a basic segment with minimal info for backward compatibility
+        let segment = TranscriptSegment {
+            id: format!("seg_{}", chrono::Utc::now().timestamp_millis()),
+            text,
+            audio_start_time: 0.0,
+            audio_end_time: 0.0,
+            duration: 0.0,
+            display_time: "[00:00]".to_string(),
+            confidence: 1.0,
+            sequence_id: 0,
+        };
+        self.add_transcript_segment(segment);
     }
 
     /// Start accumulating audio chunks - simple proven approach
@@ -245,8 +285,9 @@ impl RecordingSaver {
             return Ok(None);
         }
 
-        // Extract chunks from static buffers
-        let mic_chunks = with_mic_chunks(|chunks| {
+        // Extract PRE-MIXED audio chunks from pipeline
+        // The pipeline professionally mixes mic + system audio and sends unified chunks
+        let mixed_chunks = with_mic_chunks(|chunks| {
             if let Ok(guard) = chunks.lock() {
                 guard.clone()
             } else {
@@ -254,17 +295,9 @@ impl RecordingSaver {
             }
         }).unwrap_or_default();
 
-        let system_chunks = with_system_chunks(|chunks| {
-            if let Ok(guard) = chunks.lock() {
-                guard.clone()
-            } else {
-                Vec::new()
-            }
-        }).unwrap_or_default();
+        info!("Processing {} pre-mixed audio chunks from pipeline", mixed_chunks.len());
 
-        info!("Processing {} mic chunks and {} system chunks", mic_chunks.len(), system_chunks.len());
-
-        if mic_chunks.is_empty() && system_chunks.is_empty() {
+        if mixed_chunks.is_empty() {
             error!("No audio data captured");
             unsafe {
                 MIC_CHUNKS = None;
@@ -273,12 +306,11 @@ impl RecordingSaver {
             return Err("No audio data captured".to_string());
         }
 
-        // UNIFIED MIXING: Receive pre-mixed audio from pipeline
-        // No mixing needed here - pipeline already did professional mixing
-        let mixed_data: Vec<f32> = mic_chunks.iter().flat_map(|chunk| &chunk.data).cloned().collect();
-        let target_sample_rate = mic_chunks.first().map(|c| c.sample_rate).unwrap_or(48000);
+        // Concatenate pre-mixed audio (already contains both mic AND system audio)
+        let mixed_data: Vec<f32> = mixed_chunks.iter().flat_map(|chunk| &chunk.data).cloned().collect();
+        let target_sample_rate = mixed_chunks.first().map(|c| c.sample_rate).unwrap_or(48000);
 
-        info!("Received pre-mixed audio: {} samples at {}Hz", mixed_data.len(), target_sample_rate);
+        info!("Saving pre-mixed audio: {} samples at {}Hz (includes mic + system)", mixed_data.len(), target_sample_rate);
 
         // Calculate RMS for logging
         let current_rms = if !mixed_data.is_empty() {
@@ -286,7 +318,7 @@ impl RecordingSaver {
         } else {
             0.0
         };
-        info!("Pre-mixed audio RMS: {:.6}", current_rms);
+        info!("Pre-mixed audio RMS: {:.6} (should be >0 if system audio present)", current_rms);
 
         // Use the new audio writing function with meeting name
         let filename = write_audio_to_file_with_meeting_name(
@@ -298,33 +330,47 @@ impl RecordingSaver {
             self.meeting_name.as_deref(),
         ).map_err(|e| format!("Failed to write audio file: {}", e))?;
 
+        let recording_duration = mixed_data.len() as f64 / target_sample_rate as f64;
         info!("✅ Recording saved: {} ({} samples, {:.2}s)",
-              filename, mixed_data.len(), mixed_data.len() as f64 / target_sample_rate as f64);
+              filename, mixed_data.len(), recording_duration);
 
-        // Save transcript if we have any transcript chunks
-        let transcript_filename = if let Ok(chunks) = self.transcript_chunks.lock() {
-            if !chunks.is_empty() {
-                let combined_transcript = chunks.join("\n");
-                match write_transcript_to_file(
-                    &combined_transcript,
+        // Save transcript with NEW structured JSON format (includes timestamps for sync)
+        info!("Attempting to save transcript JSON...");
+        let transcript_filename = if let Ok(segments) = self.transcript_segments.lock() {
+            info!("Locked transcript segments successfully, count: {}", segments.len());
+            if !segments.is_empty() {
+                // Extract just the filename from the full path for JSON reference
+                let audio_filename = std::path::Path::new(&filename)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("recording.mp4");
+
+                match super::audio_processing::write_transcript_json_to_file(
+                    &segments,
                     &preferences.save_folder,
                     self.meeting_name.as_deref(),
+                    audio_filename,
+                    recording_duration,
                 ) {
                     Ok(transcript_path) => {
-                        info!("✅ Transcript saved: {}", transcript_path);
+                        info!("✅ Structured transcript saved: {} ({} segments with timestamps)",
+                              transcript_path, segments.len());
                         Some(transcript_path)
                     }
                     Err(e) => {
-                        warn!("Failed to save transcript: {}", e);
+                        error!("❌ Failed to save structured transcript JSON: {}", e);
+                        error!("   Transcript segments: {}", segments.len());
+                        error!("   Save folder: {}", preferences.save_folder.display());
+                        error!("   Meeting name: {:?}", self.meeting_name);
                         None
                     }
                 }
             } else {
-                info!("No transcript chunks to save");
+                info!("No transcript segments to save");
                 None
             }
         } else {
-            warn!("Failed to lock transcript chunks");
+            warn!("Failed to lock transcript segments");
             None
         };
 
@@ -339,13 +385,13 @@ impl RecordingSaver {
             warn!("Failed to emit recording-saved event: {}", e);
         }
 
-        // Clean up static buffers and transcript chunks
+        // Clean up static buffers and transcript segments
         unsafe {
             MIC_CHUNKS = None;
             SYSTEM_CHUNKS = None;
         }
-        if let Ok(mut chunks) = self.transcript_chunks.lock() {
-            chunks.clear();
+        if let Ok(mut segments) = self.transcript_segments.lock() {
+            segments.clear();
         }
 
         Ok(Some(filename))

@@ -393,9 +393,9 @@ impl AudioPipeline {
                             // UNIFIED MIXING: Same algorithm for recording AND transcription
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
-                            // Apply post-gain (5x boost) - SAME for both recording AND transcription
+                            // Apply post-gain (reduced from 5x to 2x to prevent distortion)
                             let mixed_with_gain: Vec<f32> = mixed_clean.iter()
-                                .map(|&s| (s * 5.0).clamp(-1.0, 1.0))
+                                .map(|&s| (s * 2.0).clamp(-1.0, 1.0))
                                 .collect();
 
                             // Send to recording (WITH post-gain for consistency)
@@ -529,6 +529,7 @@ impl AudioPipelineManager {
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
+        recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     ) -> Result<()> {
         // Create audio processing channel
         let (audio_sender, audio_receiver) = mpsc::unbounded_channel::<AudioChunk>();
@@ -537,13 +538,17 @@ impl AudioPipelineManager {
         state.set_audio_sender(audio_sender.clone());
 
         // Create and start pipeline
-        let pipeline = AudioPipeline::new(
+        let mut pipeline = AudioPipeline::new(
             audio_receiver,
             transcription_sender,
             state.clone(),
             target_chunk_duration_ms,
             sample_rate,
         );
+
+        // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
+        // This ensures both mic AND system audio are captured in recordings
+        pipeline.recording_sender_for_mixed = recording_sender;
 
         let handle = tokio::spawn(async move {
             pipeline.run().await
@@ -552,7 +557,7 @@ impl AudioPipelineManager {
         self.pipeline_handle = Some(handle);
         self.audio_sender = Some(audio_sender);
 
-        info!("Audio pipeline manager started");
+        info!("Audio pipeline manager started with mixed audio recording");
         Ok(())
     }
 

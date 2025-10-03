@@ -114,6 +114,13 @@ pub struct MeetingTranscript {
     pub id: String,
     pub text: String,
     pub timestamp: String,
+    // Recording-relative timestamps for audio-transcript synchronization
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_start_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_end_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -151,6 +158,13 @@ pub struct TranscriptSegment {
     pub id: String,
     pub text: String,
     pub timestamp: String,
+    // NEW: Recording-relative timestamps for playback synchronization
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_start_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_end_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -556,16 +570,33 @@ pub async fn api_save_transcript<R: Runtime>(
     transcripts: Vec<serde_json::Value>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}", 
+    log_info!("api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
              meeting_title, transcripts.len(), auth_token.is_some());
-    
+
+    // Log first transcript for debugging
+    if let Some(first) = transcripts.first() {
+        log_debug!("First transcript data: {}", serde_json::to_string_pretty(first).unwrap_or_default());
+    }
+
     // Convert serde_json::Value to TranscriptSegment
     let transcript_segments: Result<Vec<TranscriptSegment>, _> = transcripts
         .into_iter()
         .map(|t| serde_json::from_value(t))
         .collect();
-    
-    let transcript_segments = transcript_segments.map_err(|e| e.to_string())?;
+
+    let transcript_segments = transcript_segments.map_err(|e| {
+        log_error!("Failed to parse transcript segments: {}", e);
+        e.to_string()
+    })?;
+
+    // Log parsed segments count and first segment details
+    if let Some(first_seg) = transcript_segments.first() {
+        log_debug!("First parsed segment: text='{}', audio_start_time={:?}, audio_end_time={:?}, duration={:?}",
+                   first_seg.text.chars().take(50).collect::<String>(),
+                   first_seg.audio_start_time,
+                   first_seg.audio_end_time,
+                   first_seg.duration);
+    }
     
     let save_request = SaveTranscriptRequest { 
         meeting_title, 
