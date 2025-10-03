@@ -172,6 +172,7 @@ futures-channel = "0.3.31"
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
 whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
+futures-channel = "0.3.31"
 
 [dev-dependencies]
 tempfile = "3.3.0"
