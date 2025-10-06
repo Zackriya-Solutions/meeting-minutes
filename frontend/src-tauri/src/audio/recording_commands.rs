@@ -913,15 +913,15 @@ async fn transcribe_chunk_with_streaming<R: Runtime>(
 
 
 /// Validate that Whisper models are ready before starting recording
-async fn validate_whisper_model_ready<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
+async fn validate_whisper_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Ensure whisper engine is initialized first
     if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
         warn!("❌ Failed to initialize Whisper engine: {}", init_error);
         return Err(format!("Failed to initialize speech recognition: {}", init_error));
     }
 
-    // Call the whisper validation command
-    match crate::whisper_engine::commands::whisper_validate_model_ready().await {
+    // Call the whisper validation command with config support
+    match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
         Ok(model_name) => {
             info!("✅ Model validation successful: {} is ready", model_name);
             Ok(())
