@@ -136,6 +136,84 @@ pub async fn whisper_validate_model_ready() -> Result<String, String> {
     }
 }
 
+/// Internal version of whisper_validate_model_ready that respects user's transcript config
+pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>
+) -> Result<String, String> {
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        // Check if a model is currently loaded
+        if engine.is_model_loaded().await {
+            if let Some(current_model) = engine.get_current_model().await {
+                log::info!("Model already loaded: {}", current_model);
+                return Ok(current_model);
+            }
+        }
+
+        // No model loaded - try to load user's configured model from transcript config
+        let model_to_load = match crate::api::api::api_get_transcript_config(app.clone(), None).await {
+            Ok(Some(config)) => {
+                log::info!("Got transcript config from API - provider: {}, model: {}", config.provider, config.model);
+                if config.provider == "localWhisper" && !config.model.is_empty() {
+                    log::info!("Using user's configured model: {}", config.model);
+                    Some(config.model)
+                } else {
+                    log::info!("API config uses non-local provider ({}) or empty model, will auto-select", config.provider);
+                    None
+                }
+            }
+            Ok(None) => {
+                log::info!("No transcript config found in API, will auto-select model");
+                None
+            }
+            Err(e) => {
+                log::warn!("Failed to get transcript config from API: {}, will auto-select model", e);
+                None
+            }
+        };
+
+        // Check available models
+        let models = engine.discover_models().await
+            .map_err(|e| format!("Failed to discover models: {}", e))?;
+
+        let available_models: Vec<_> = models.iter()
+            .filter(|model| matches!(model.status, crate::whisper_engine::ModelStatus::Available))
+            .collect();
+
+        if available_models.is_empty() {
+            return Err("No Whisper models are available. Please download a model to enable transcription.".to_string());
+        }
+
+        // Try to load user's configured model if specified
+        let model_name = if let Some(configured_model) = model_to_load {
+            // Check if configured model is available
+            if available_models.iter().any(|m| m.name == configured_model) {
+                log::info!("Loading user's configured model: {}", configured_model);
+                configured_model
+            } else {
+                log::warn!("Configured model '{}' not found, falling back to first available: {}",
+                          configured_model, available_models[0].name);
+                available_models[0].name.clone()
+            }
+        } else {
+            // No configured model, use first available
+            log::info!("No configured model, loading first available: {}", available_models[0].name);
+            available_models[0].name.clone()
+        };
+
+        engine.load_model(&model_name).await
+            .map_err(|e| format!("Failed to load model {}: {}", model_name, e))?;
+
+        Ok(model_name)
+    } else {
+        Err("Whisper engine not initialized".to_string())
+    }
+}
+
 #[command]
 pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, String> {
     let engine = {

@@ -16,6 +16,9 @@ static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+// Speech detection flag - reset per recording session
+static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
+
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -35,12 +38,16 @@ pub struct TranscriptionStatus {
 #[derive(Debug, Serialize, Clone)]
 pub struct TranscriptUpdate {
     pub text: String,
-    pub timestamp: String,
+    pub timestamp: String, // Wall-clock time for reference (e.g., "14:30:05")
     pub source: String,
     pub sequence_id: u64,
-    pub chunk_start_time: f64,
+    pub chunk_start_time: f64, // Legacy field, kept for compatibility
     pub is_partial: bool,
     pub confidence: f32,
+    // NEW: Recording-relative timestamps for playback sync
+    pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
+    pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
+    pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
 }
 
 /// Start recording with default devices
@@ -87,10 +94,16 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Set meeting name if provided
-    if let Some(name) = meeting_name.clone() {
-        manager.set_meeting_name(Some(name));
-    }
+    // Always ensure a meeting name is set so incremental saver initializes
+    let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
+        // Example: Meeting 2025-10-03_08-25-23
+        let now = chrono::Local::now();
+        format!(
+            "Meeting {}",
+            now.format("%Y-%m-%d_%H-%M-%S")
+        )
+    });
+    manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
     let app_for_error = app.clone();
@@ -110,9 +123,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         *global_manager = Some(manager);
     }
 
-    // Set recording flag
-    info!("🔍 Setting IS_RECORDING to true");
+    // Set recording flag and reset speech detection flag
+    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst); // Reset for new recording session
+    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 
     // Start optimized parallel transcription task and store handle
     let task_handle = start_transcription_task(app.clone(), transcription_receiver);
@@ -122,15 +137,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
 
     // Emit success event
-    app.emit(
-        "recording-started",
-        serde_json::json!({
-            "message": "Recording started successfully with parallel processing",
-            "devices": ["Default Microphone", "Default System Audio"],
-            "workers": 4
-        }),
-    )
-    .map_err(|e| e.to_string())?;
+    app.emit("recording-started", serde_json::json!({
+        "message": "Recording started successfully with parallel processing",
+        "devices": ["Default Microphone", "Default System Audio"],
+        "workers": 3
+    })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -207,10 +218,15 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Set meeting name if provided
-    if let Some(name) = meeting_name.clone() {
-        manager.set_meeting_name(Some(name));
-    }
+    // Always ensure a meeting name is set so incremental saver initializes
+    let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
+        let now = chrono::Local::now();
+        format!(
+            "Meeting {}",
+            now.format("%Y-%m-%d_%H-%M-%S")
+        )
+    });
+    manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
     let app_for_error = app.clone();
@@ -230,9 +246,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         *global_manager = Some(manager);
     }
 
-    // Set recording flag
-    info!("🔍 Setting IS_RECORDING to true");
+    // Set recording flag and reset speech detection flag
+    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst); // Reset for new recording session
+    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 
     // Start optimized parallel transcription task and store handle
     let task_handle = start_transcription_task(app.clone(), transcription_receiver);
@@ -242,18 +260,14 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 
     // Emit success event
-    app.emit(
-        "recording-started",
-        serde_json::json!({
-            "message": "Recording started with custom devices and parallel processing",
-            "devices": [
-                mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
-                system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
-            ],
-            "workers": 4
-        }),
-    )
-    .map_err(|e| e.to_string())?;
+    app.emit("recording-started", serde_json::json!({
+        "message": "Recording started with custom devices and parallel processing",
+        "devices": [
+            mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
+            system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
+        ],
+        "workers": 3
+    })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -615,7 +629,7 @@ fn start_transcription_task<R: Runtime>(
         };
 
         // Create parallel workers for faster processing while preserving ALL chunks
-        const NUM_WORKERS: usize = 4; // Increased from 3 to ensure better chunk distribution
+        const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
@@ -624,7 +638,7 @@ fn start_transcription_task<R: Runtime>(
         let chunks_completed = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
 
-        info!("📊 Starting {} parallel transcription workers", NUM_WORKERS);
+        info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
 
         // Spawn worker tasks
         let mut worker_handles = Vec::new();
@@ -686,6 +700,7 @@ fn start_transcription_task<R: Runtime>(
                             }
 
                             let chunk_timestamp = chunk.timestamp;
+                            let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
                             // Transcribe with whisper using streaming approach
                             match transcribe_chunk_with_streaming(
@@ -698,32 +713,69 @@ fn start_transcription_task<R: Runtime>(
                                 Ok((transcript, confidence, is_partial)) => {
                                     let confidence_threshold = 0.3; // Display results above 30% confidence
 
-                                    if !transcript.trim().is_empty()
-                                        && confidence >= confidence_threshold
-                                    {
+                                    info!("🔍 Worker {} transcription result: text='{}', confidence={:.2}, partial={}, threshold={:.2}",
+                                          worker_id, transcript, confidence, is_partial, confidence_threshold);
+
+                                    if !transcript.trim().is_empty() && confidence >= confidence_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {:.2}, partial: {})",
                                               worker_id, transcript, confidence, is_partial);
 
-                                        // Save transcript chunk to recording manager (only final results)
-                                        if !is_partial {
-                                            let global_manager = RECORDING_MANAGER.lock().unwrap();
-                                            if let Some(manager) = global_manager.as_ref() {
-                                                manager.add_transcript_chunk(transcript.clone());
+                                        // Emit speech-detected event for frontend UX (only on first detection per session)
+                                        // This is lightweight and provides better user feedback
+                                        let current_flag = SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
+                                        info!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
+
+                                        if !current_flag {
+                                            SPEECH_DETECTED_EMITTED.store(true, Ordering::SeqCst);
+                                            match app_clone.emit("speech-detected", serde_json::json!({
+                                                "message": "Speech activity detected"
+                                            })) {
+                                                Ok(_) => info!("🎤 ✅ First speech detected - successfully emitted speech-detected event"),
+                                                Err(e) => error!("🎤 ❌ Failed to emit speech-detected event: {}", e),
                                             }
+                                        } else {
+                                            info!("🔍 Speech already detected in this session, not re-emitting");
                                         }
 
-                                        // Emit transcript update with partial flag and confidence
-                                        let sequence_id =
-                                            SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        // Generate sequence ID and calculate timestamps FIRST
+                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        let audio_start_time = chunk_timestamp; // Already in seconds from recording start
+                                        let audio_end_time = chunk_timestamp + chunk_duration;
+
+                                        // Save structured transcript segment to recording manager (only final results)
+                                        // Save ALL segments (partial and final) to ensure complete JSON
+                                        // Create structured segment with full timestamp data
+                                        let segment = crate::audio::recording_saver::TranscriptSegment {
+                                            id: format!("seg_{}", sequence_id),
+                                            text: transcript.clone(),
+                                            audio_start_time,
+                                            audio_end_time,
+                                            duration: chunk_duration,
+                                            display_time: format_recording_time(audio_start_time),
+                                            confidence,
+                                            sequence_id,
+                                        };
+
+                                        let global_manager = RECORDING_MANAGER.lock().unwrap();
+                                        if let Some(manager) = global_manager.as_ref() {
+                                            manager.add_transcript_segment(segment);
+                                        }
+
+                                        // Emit transcript update with NEW recording-relative timestamps
+
                                         let update = TranscriptUpdate {
                                             text: transcript,
-                                            timestamp: format_current_timestamp(),
+                                            timestamp: format_current_timestamp(), // Wall-clock for reference
                                             source: "Audio".to_string(),
                                             sequence_id,
-                                            chunk_start_time: chunk_timestamp,
+                                            chunk_start_time: chunk_timestamp, // Legacy compatibility
                                             is_partial,
                                             confidence,
+                                            // NEW: Recording-relative timestamps for sync
+                                            audio_start_time,
+                                            audio_end_time,
+                                            duration: chunk_duration,
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update)
@@ -972,7 +1024,7 @@ async fn transcribe_chunk_with_streaming<R: Runtime>(
 }
 
 /// Validate that Whisper models are ready before starting recording
-async fn validate_whisper_model_ready<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
+async fn validate_whisper_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Ensure whisper engine is initialized first
     if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
         warn!("❌ Failed to initialize Whisper engine: {}", init_error);
@@ -982,8 +1034,8 @@ async fn validate_whisper_model_ready<R: Runtime>(_app: &AppHandle<R>) -> Result
         ));
     }
 
-    // Call the whisper validation command
-    match crate::whisper_engine::commands::whisper_validate_model_ready().await {
+    // Call the whisper validation command with config support
+    match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
         Ok(model_name) => {
             info!("✅ Model validation successful: {} is ready", model_name);
             Ok(())
@@ -1165,7 +1217,8 @@ pub async fn get_or_init_whisper<R: Runtime>(
     Ok(engine)
 }
 
-/// Format current timestamp
+
+/// Format current timestamp (wall-clock time)
 fn format_current_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1176,4 +1229,25 @@ fn format_current_timestamp() -> String {
     let seconds = now.as_secs() % 60;
 
     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+/// Format recording-relative time as [MM:SS]
+fn format_recording_time(seconds: f64) -> String {
+    let total_seconds = seconds.floor() as u64;
+    let minutes = total_seconds / 60;
+    let secs = total_seconds % 60;
+
+    format!("[{:02}:{:02}]", minutes, secs)
+}
+
+/// Get the meeting folder path for the current recording
+/// Returns the path if a meeting name was set and folder structure initialized
+#[tauri::command]
+pub async fn get_meeting_folder_path() -> Result<Option<String>, String> {
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    if let Some(manager) = manager_guard.as_ref() {
+        Ok(manager.get_meeting_folder().map(|p| p.to_string_lossy().to_string()))
+    } else {
+        Ok(None)
+    }
 }

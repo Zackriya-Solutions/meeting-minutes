@@ -53,27 +53,30 @@ impl RecordingManager {
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
 
-        // Start recording saver with RAW audio (not VAD-processed)
-        // This ensures high quality recordings without VAD artifacts
+        // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
+        // Pipeline will mix mic + system audio professionally and send to this channel
         let recording_sender = self.recording_saver.start_accumulation();
 
         // Start recording state first
         self.state.start_recording()?;
 
-        // Start the audio processing pipeline for transcription only
-        // Pipeline applies VAD to transcription path, but recording gets raw audio
+        // Start the audio processing pipeline
+        // Pipeline will: 1) Mix mic+system audio professionally, 2) Send mixed to recording_sender,
+        // 3) Apply VAD and send speech segments to transcription
         self.pipeline_manager.start(
             self.state.clone(),
             transcription_sender,
             0, // Ignored - using dynamic sizing internally
             48000, // 48kHz sample rate
+            Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
         )?;
 
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        // Start audio streams - they send raw chunks to BOTH pipeline (for transcription) and recording saver
-        self.stream_manager.start_streams(microphone_device, system_device, Some(recording_sender)).await?;
+        // Start audio streams - they send RAW unmixed chunks to pipeline for mixing
+        // Pipeline handles mixing and distribution to both recording and transcription
+        self.stream_manager.start_streams(microphone_device, system_device, None).await?;
 
         info!("Recording manager started successfully with {} active streams",
                self.stream_manager.active_stream_count());
@@ -301,7 +304,12 @@ impl RecordingManager {
         self.recording_saver.set_meeting_name(name);
     }
 
-    /// Add a transcript chunk to be saved later
+    /// Add a structured transcript segment to be saved later
+    pub fn add_transcript_segment(&self, segment: super::recording_saver::TranscriptSegment) {
+        self.recording_saver.add_transcript_segment(segment);
+    }
+
+    /// Add a transcript chunk to be saved later (legacy method)
     pub fn add_transcript_chunk(&self, text: String) {
         self.recording_saver.add_transcript_chunk(text);
     }
@@ -325,6 +333,12 @@ impl RecordingManager {
             }
         }
         self.state.cleanup();
+    }
+
+    /// Get the meeting folder path (if available)
+    /// Returns None if no meeting name was set or folder structure not initialized
+    pub fn get_meeting_folder(&self) -> Option<std::path::PathBuf> {
+        self.recording_saver.get_meeting_folder().map(|p| p.clone())
     }
 }
 

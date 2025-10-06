@@ -242,8 +242,8 @@ export default function Home() {
 
       // Add any buffered transcripts that might be out of order
       const now = Date.now();
-      const staleThreshold = 3000; // 3 seconds - reduced for faster processing
-      const recentThreshold = 1000; // 1 second - faster processing of recent transcripts
+      const staleThreshold = 100;  // 100ms safety net only (serial workers = sequential order)
+      const recentThreshold = 0;    // Show immediately - no delay needed with serial processing
       const staleTranscripts: Transcript[] = [];
       const recentTranscripts: Transcript[] = [];
       const forceFlushTranscripts: Transcript[] = [];
@@ -257,14 +257,14 @@ export default function Home() {
         } else {
           const transcriptAge = now - parseInt(transcript.id.split('-')[0]);
           if (transcriptAge > staleThreshold) {
-            // Process truly stale transcripts (>5s old)
+            // Process stale transcripts (>100ms old - safety net)
             staleTranscripts.push(transcript);
             transcriptBuffer.delete(sequenceId);
-          } else if (transcriptAge > recentThreshold) {
-            // Process recent out-of-order transcripts (2-5s old)
+          } else if (transcriptAge >= recentThreshold) {
+            // Process immediately (0ms threshold with serial workers)
             recentTranscripts.push(transcript);
             transcriptBuffer.delete(sequenceId);
-            console.log(`Processing recent out-of-order transcript with sequence_id ${sequenceId}, age: ${transcriptAge}ms`);
+            console.log(`Processing transcript with sequence_id ${sequenceId}, age: ${transcriptAge}ms`);
           }
         }
       }
@@ -344,7 +344,7 @@ export default function Home() {
             return;
           }
 
-          // Create transcript for buffer
+          // Create transcript for buffer with NEW timestamp fields
           const newTranscript: Transcript = {
             id: `${Date.now()}-${transcriptCounter++}`,
             text: event.payload.text,
@@ -353,6 +353,10 @@ export default function Home() {
             chunk_start_time: event.payload.chunk_start_time,
             is_partial: event.payload.is_partial,
             confidence: event.payload.confidence,
+            // NEW: Recording-relative timestamps for playback sync
+            audio_start_time: event.payload.audio_start_time,
+            audio_end_time: event.payload.audio_end_time,
+            duration: event.payload.duration,
           };
 
           // Add to buffer
@@ -363,9 +367,9 @@ export default function Home() {
           if (processingTimer) {
             clearTimeout(processingTimer);
           }
-          
-          // Process buffer with optimized delay for better UI responsiveness
-          processingTimer = setTimeout(processBufferedTranscripts, 50);
+
+          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
+          processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
@@ -514,7 +518,7 @@ export default function Home() {
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const seconds = String(now.getSeconds()).padStart(2, '0');
-      const randomTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+      const randomTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
       setMeetingTitle(randomTitle);
 
       // Update state - the actual recording is already started by RecordingControls
@@ -552,7 +556,7 @@ export default function Home() {
             const hours = String(now.getHours()).padStart(2, '0');
             const minutes = String(now.getMinutes()).padStart(2, '0');
             const seconds = String(now.getSeconds()).padStart(2, '0');
-            const generatedMeetingTitle = `Meeting_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+            const generatedMeetingTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
             
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
             const result = await invoke('start_recording_with_devices_and_meeting', {
@@ -769,9 +773,12 @@ export default function Home() {
         console.log('💾 Saving transcript to database with fresh state...', {
           fresh_transcript_count: freshTranscripts.length,
           sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
-          last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none'
+          last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none',
+          // DEBUG: Check if timestamp fields are present
+          first_has_audio_start_time: freshTranscripts.length > 0 ? freshTranscripts[0].audio_start_time : 'N/A',
+          first_audio_start_time_value: freshTranscripts.length > 0 ? freshTranscripts[0].audio_start_time : undefined,
         });
-        
+
         const responseData = await invoke('api_save_transcript', {
           meetingTitle: meetingTitle,
           transcripts: freshTranscripts, // Use fresh state, not stale closure
@@ -1138,8 +1145,17 @@ export default function Home() {
   }, [originalTranscript, modelConfig]);
 
   const handleCopyTranscript = useCallback(() => {
+    // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
+    const formatTime = (seconds: number | undefined): string => {
+      if (seconds === undefined) return '[--:--]';
+      const totalSecs = Math.floor(seconds);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
+    };
+
     const fullTranscript = transcripts
-      .map(t => `${t.timestamp}: ${t.text}`)
+      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
   }, [transcripts]);
@@ -1430,7 +1446,7 @@ export default function Home() {
 
           {/* Transcript content */}
           <div className="flex-1 overflow-y-auto pb-32">
-            <TranscriptView transcripts={transcripts} />
+            <TranscriptView transcripts={transcripts} isRecording={isRecording} />
           </div>
           
           {/* Custom prompt input at bottom of transcript section */}
