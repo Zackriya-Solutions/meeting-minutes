@@ -208,7 +208,8 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     match store.get("authToken") {
         Some(token) => {
             if let Some(token_str) = token.as_str() {
-                log_info!("Found auth token: {}", &token_str[..std::cmp::min(20, token_str.len())]);
+                let truncated = token_str.chars().take(20).collect::<String>();
+                log_info!("Found auth token: {}", truncated);
                 Some(token_str.to_string())
             } else {
                 log_warn!("Auth token is not a string");
@@ -295,7 +296,12 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
         error_msg
     })?;
     
-    log_info!("Response body: {}", &response_text[..std::cmp::min(200, response_text.len())]);
+    // Safely truncate response for logging, respecting UTF-8 character boundaries
+    let truncated = response_text
+        .chars()
+        .take(200)
+        .collect::<String>();
+    log_info!("Response body: {}", truncated);
     
     serde_json::from_str(&response_text).map_err(|e| {
         let error_msg = format!("Failed to parse JSON: {}", e);
