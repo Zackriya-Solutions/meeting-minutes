@@ -53,9 +53,17 @@ class DatabaseManager:
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    folder_path TEXT
                 )
             """)
+
+            # Migration: Add folder_path column to existing meetings table
+            try:
+                cursor.execute("ALTER TABLE meetings ADD COLUMN folder_path TEXT")
+                logger.info("Added folder_path column to meetings table")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
             # Create transcripts table
             cursor.execute("""
@@ -67,9 +75,26 @@ class DatabaseManager:
                     summary TEXT,
                     action_items TEXT,
                     key_points TEXT,
+                    audio_start_time REAL,
+                    audio_end_time REAL,
+                    duration REAL,
                     FOREIGN KEY (meeting_id) REFERENCES meetings(id)
                 )
             """)
+
+            # Add new columns to existing transcripts table (migration for old databases)
+            try:
+                cursor.execute("ALTER TABLE transcripts ADD COLUMN audio_start_time REAL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cursor.execute("ALTER TABLE transcripts ADD COLUMN audio_end_time REAL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cursor.execute("ALTER TABLE transcripts ADD COLUMN duration REAL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
             # Create summary_processes table (keeping existing functionality)
             cursor.execute("""
@@ -335,22 +360,23 @@ class DatabaseManager:
                     return dict(zip([col[0] for col in cursor.description], row))
                 return None
 
-    async def save_meeting(self, meeting_id: str, title: str):
+    async def save_meeting(self, meeting_id: str, title: str, folder_path: str = None):
         """Save or update a meeting"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
+
                 # Check if meeting exists
                 cursor.execute("SELECT id FROM meetings WHERE id = ? OR title = ?", (meeting_id, title))
                 existing_meeting = cursor.fetchone()
-                
+
                 if not existing_meeting:
-                    # Create new meeting
+                    # Create new meeting with local timestamp and folder path
                     cursor.execute("""
-                        INSERT INTO meetings (id, title, created_at, updated_at)
-                        VALUES (?, ?, datetime('now'), datetime('now'))
-                    """, (meeting_id, title))
+                        INSERT INTO meetings (id, title, created_at, updated_at, folder_path)
+                        VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?)
+                    """, (meeting_id, title, folder_path))
+                    logger.info(f"Saved meeting {meeting_id} with folder_path: {folder_path}")
                 else:
                     # If we get here and meeting exists, throw error since we don't want duplicates
                     raise Exception(f"Meeting with ID {meeting_id} already exists")
@@ -360,19 +386,23 @@ class DatabaseManager:
             logger.error(f"Error saving meeting: {str(e)}")
             raise
 
-    async def save_meeting_transcript(self, meeting_id: str, transcript: str, timestamp: str, summary: str = "", action_items: str = "", key_points: str = ""):
-        """Save a transcript for a meeting"""
+    async def save_meeting_transcript(self, meeting_id: str, transcript: str, timestamp: str,
+                                     summary: str = "", action_items: str = "", key_points: str = "",
+                                     audio_start_time: float = None, audio_end_time: float = None, duration: float = None):
+        """Save a transcript for a meeting with optional recording-relative timestamps"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
-                # Save transcript
+
+                # Save transcript with NEW timestamp fields for playback sync
                 cursor.execute("""
                     INSERT INTO transcripts (
-                        meeting_id, transcript, timestamp, summary, action_items, key_points
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                """, (meeting_id, transcript, timestamp, summary, action_items, key_points))
-                
+                        meeting_id, transcript, timestamp, summary, action_items, key_points,
+                        audio_start_time, audio_end_time, duration
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (meeting_id, transcript, timestamp, summary, action_items, key_points,
+                      audio_start_time, audio_end_time, duration))
+
                 conn.commit()
                 return True
         except Exception as e:
@@ -394,14 +424,14 @@ class DatabaseManager:
                 if not meeting:
                     return None
                 
-                # Get all transcripts for this meeting
+                # Get all transcripts for this meeting with NEW timestamp fields
                 cursor = await conn.execute("""
-                    SELECT transcript, timestamp
+                    SELECT transcript, timestamp, audio_start_time, audio_end_time, duration
                     FROM transcripts
                     WHERE meeting_id = ?
                 """, (meeting_id,))
                 transcripts = await cursor.fetchall()
-                
+
                 return {
                     'id': meeting[0],
                     'title': meeting[1],
@@ -410,7 +440,11 @@ class DatabaseManager:
                     'transcripts': [{
                         'id': meeting_id,
                         'text': transcript[0],
-                        'timestamp': transcript[1]
+                        'timestamp': transcript[1],
+                        # NEW: Recording-relative timestamps for playback sync
+                        'audio_start_time': transcript[2],
+                        'audio_end_time': transcript[3],
+                        'duration': transcript[4]
                     } for transcript in transcripts]
                 }
         except Exception as e:

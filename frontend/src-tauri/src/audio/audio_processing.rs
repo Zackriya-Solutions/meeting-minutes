@@ -23,6 +23,30 @@ pub fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
+/// Create a meeting folder with timestamp and return the path
+/// Creates structure: base_path/MeetingName_YYYY-MM-DD_HH-MM/
+///                    ├── .checkpoints/  (for incremental saves)
+pub fn create_meeting_folder(
+    base_path: &PathBuf,
+    meeting_name: &str,
+) -> Result<PathBuf> {
+    let timestamp = Utc::now().format("%Y-%m-%d_%H-%M").to_string();
+    let sanitized_name = sanitize_filename(meeting_name);
+    let folder_name = format!("{}_{}", sanitized_name, timestamp);
+    let meeting_folder = base_path.join(folder_name);
+
+    // Create main meeting folder
+    std::fs::create_dir_all(&meeting_folder)?;
+
+    // Create hidden .checkpoints subfolder for temporary checkpoint files
+    let checkpoints_dir = meeting_folder.join(".checkpoints");
+    std::fs::create_dir_all(&checkpoints_dir)?;
+
+    log::info!("Created meeting folder: {}", meeting_folder.display());
+
+    Ok(meeting_folder)
+}
+
 pub fn normalize_v2(audio: &[f32]) -> Vec<f32> {
     let rms = (audio.iter().map(|&x| x * x).sum::<f32>() / audio.len() as f32).sqrt();
     let peak = audio
@@ -243,7 +267,7 @@ pub fn write_audio_to_file_with_meeting_name(
     Ok(file_path_clone)
 }
 
-/// Write transcript text to a file alongside the recording
+/// Write transcript text to a file alongside the recording (legacy plain text format)
 pub fn write_transcript_to_file(
     transcript_text: &str,
     output_path: &PathBuf,
@@ -270,6 +294,52 @@ pub fn write_transcript_to_file(
 
     // Write transcript to file
     std::fs::write(&file_path, transcript_text)?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+/// Write structured transcript with timestamps to JSON file
+pub fn write_transcript_json_to_file(
+    segments: &[super::recording_saver::TranscriptSegment],
+    output_path: &PathBuf,
+    meeting_name: Option<&str>,
+    audio_filename: &str,
+    recording_duration: f64,
+) -> Result<String> {
+    use serde_json::json;
+
+    let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+
+    // Create meeting folder if meeting name is provided
+    let final_output_path = if let Some(name) = meeting_name {
+        let sanitized_meeting_name = sanitize_filename(name);
+        let meeting_folder = output_path.join(&sanitized_meeting_name);
+
+        if !meeting_folder.exists() {
+            std::fs::create_dir_all(&meeting_folder)?;
+        }
+
+        meeting_folder
+    } else {
+        output_path.clone()
+    };
+
+    let file_path = final_output_path.join(format!("transcript_{}.json", timestamp));
+
+    // Create structured JSON transcript
+    let transcript_json = json!({
+        "version": "1.0",
+        "recording_duration": recording_duration,
+        "audio_file": audio_filename,
+        "sample_rate": 48000,
+        "created_at": Utc::now().to_rfc3339(),
+        "meeting_name": meeting_name,
+        "segments": segments,
+    });
+
+    // Write JSON to file with pretty formatting
+    let json_string = serde_json::to_string_pretty(&transcript_json)?;
+    std::fs::write(&file_path, json_string)?;
 
     Ok(file_path.to_string_lossy().to_string())
 }
