@@ -44,6 +44,7 @@ pub mod notifications;
 pub mod ollama;
 pub mod openrouter;
 pub mod state;
+pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
@@ -598,13 +599,14 @@ pub fn run() {
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_save_meeting_title,
-            api::api_save_meeting_summary,
-            api::api_get_summary,
             api::api_save_transcript,
-            api::api_process_transcript,
             api::test_backend_connection,
             api::debug_backend_connection,
             api::open_external_url,
+            // Summary commands
+            summary::api_process_transcript,
+            summary::api_get_summary,
+            summary::api_save_meeting_summary,
             openrouter::get_openrouter_models,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,

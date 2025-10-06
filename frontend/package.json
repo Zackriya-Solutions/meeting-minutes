@@ -28,6 +28,9 @@
         "lint": "next lint"
     },
     "dependencies": {
+        "@blocknote/core": "0.36.0",
+        "@blocknote/react": "0.36.0",
+        "@blocknote/shadcn": "0.36.0",
         "@heroicons/react": "^2.2.0",
         "@hookform/resolvers": "^5.1.1",
         "@radix-ui/react-dialog": "^1.1.14",
@@ -64,6 +67,8 @@
         "react-dom": "^18.2.0",
         "react-hook-form": "^7.59.0",
         "react-markdown": "^9.0.1",
+        "remark-gfm": "^4.0.1",
+        "sonner": "^2.0.7",
         "tailwind-merge": "^3.3.1",
         "tailwindcss-animate": "^1.0.7",
         "zod": "^3.25.71"

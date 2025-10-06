@@ -8,9 +8,10 @@ pub struct MeetingsRepository;
 
 impl MeetingsRepository {
     pub async fn get_meetings(pool: &SqlitePool) -> Result<Vec<MeetingModel>, sqlx::Error> {
-        let meetings = sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings")
-            .fetch_all(pool)
-            .await?;
+        let meetings =
+            sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings ORDER BY created_at DESC")
+                .fetch_all(pool)
+                .await?;
         Ok(meetings)
     }
 

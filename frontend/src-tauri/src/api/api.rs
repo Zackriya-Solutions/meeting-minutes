@@ -140,18 +140,6 @@ pub struct SaveMeetingSummaryRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SummaryResponse {
-    pub status: String,
-    #[serde(rename = "meetingName")]
-    pub meeting_name: Option<String>,
-    pub meeting_id: String,
-    pub start: Option<String>,
-    pub end: Option<String>,
-    pub data: Option<serde_json::Value>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct SaveTranscriptRequest {
     pub meeting_title: String,
     pub transcripts: Vec<TranscriptSegment>,
@@ -162,23 +150,6 @@ pub struct TranscriptSegment {
     pub id: String,
     pub text: String,
     pub timestamp: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProcessTranscriptRequest {
-    pub text: String,
-    pub model: String,
-    pub model_name: String,
-    pub meeting_id: Option<String>,
-    pub chunk_size: Option<i32>,
-    pub overlap: Option<i32>,
-    pub custom_prompt: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProcessTranscriptResponse {
-    pub message: String,
-    pub process_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -811,150 +782,103 @@ pub async fn api_save_meeting_title<R: Runtime>(
     }
 }
 
-// TODO: summary
-#[tauri::command]
-pub async fn api_save_meeting_summary<R: Runtime>(
-    app: AppHandle<R>,
-    meeting_id: String,
-    summary: serde_json::Value,
-    auth_token: Option<String>,
-) -> Result<serde_json::Value, String> {
-    log_info!(
-        "api_save_meeting_summary called for meeting_id: {}, auth_token: {}",
-        meeting_id,
-        auth_token.is_some()
-    );
-
-    let save_request = SaveMeetingSummaryRequest {
-        meeting_id,
-        summary,
-    };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-
-    make_api_request::<R, serde_json::Value>(
-        &app,
-        "/save-meeting-summary",
-        "POST",
-        Some(&body),
-        None,
-        auth_token,
-    )
-    .await
-}
-
-// TODO: summary
-#[tauri::command]
-pub async fn api_get_summary<R: Runtime>(
-    app: AppHandle<R>,
-    meeting_id: String,
-    auth_token: Option<String>,
-) -> Result<SummaryResponse, String> {
-    log_debug!("=== api_get_summary DEBUG ===");
-    log_debug!("meeting_id: {}", meeting_id);
-    log_debug!("auth_token present: {}", auth_token.is_some());
-    if let Some(ref token) = auth_token {
-        log_debug!("auth_token length: {}", token.len());
-    }
-
-    let result = make_api_request::<R, SummaryResponse>(
-        &app,
-        &format!("/get-summary/{}", meeting_id),
-        "GET",
-        None,
-        None,
-        auth_token,
-    )
-    .await;
-
-    match &result {
-        Ok(_summary) => log_debug!("✓ api_get_summary successful"),
-        Err(e) => log_error!("✗ api_get_summary failed: {}", e),
-    }
-
-    result
-}
-
-// TODO: transcript
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
+        "api_save_transcript called for meeting_title: {}, with {} transcripts, auth_token: {}",
         meeting_title,
         transcripts.len(),
         auth_token.is_some()
     );
 
-    // Convert serde_json::Value to TranscriptSegment
-    let transcript_segments: Result<Vec<TranscriptSegment>, _> = transcripts
+    let typed_transcripts: Result<Vec<TranscriptSegment>, _> = transcripts
         .into_iter()
-        .map(|t| serde_json::from_value(t))
+        .map(serde_json::from_value)
         .collect();
 
-    let transcript_segments = transcript_segments.map_err(|e| e.to_string())?;
-
-    let save_request = SaveTranscriptRequest {
-        meeting_title,
-        transcripts: transcript_segments,
+    // Check if the conversion was successful. If not, return an error to the frontend.
+    let transcripts_to_save = match typed_transcripts {
+        Ok(segments) => segments,
+        Err(e) => {
+            log_error!("Failed to deserialize transcript data from frontend: {}", e);
+            // Return a descriptive error to the frontend about the malformed data.
+            return Err(format!(
+                "Invalid transcript data format: {}. Please check the data structure.",
+                e
+            ));
+        }
     };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
 
-    make_api_request::<R, serde_json::Value>(
-        &app,
-        "/save-transcript",
-        "POST",
-        Some(&body),
-        None,
-        auth_token,
-    )
-    .await
+    let pool = state.db_manager.pool();
+
+    // Now, call the repository with the correctly typed data.
+    match TranscriptsRepository::save_transcript(pool, &meeting_title, &transcripts_to_save).await {
+        Ok(meeting_id) => {
+            log_info!(
+                "Successfully saved transcript and created meeting with id: {}",
+                meeting_id
+            );
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Transcript saved successfully",
+                "meeting_id": meeting_id
+            }))
+        }
+        Err(e) => {
+            log_error!(
+                "Error saving transcript for meeting '{}': {}",
+                meeting_title,
+                e
+            );
+            Err(format!("Failed to save transcript: {}", e))
+        }
+    }
 }
 
-// TODO: summary(Not sure)
-#[tauri::command]
-pub async fn api_process_transcript<R: Runtime>(
-    app: AppHandle<R>,
-    text: String,
-    model: String,
-    model_name: String,
-    meeting_id: Option<String>,
-    chunk_size: Option<i32>,
-    overlap: Option<i32>,
-    custom_prompt: Option<String>,
-    auth_token: Option<String>,
-) -> Result<ProcessTranscriptResponse, String> {
-    log_info!(
-        "api_process_transcript called for meeting_id: {:?}, model: {}, auth_token: {}",
-        meeting_id,
-        model,
-        auth_token.is_some()
-    );
-
-    let process_request = ProcessTranscriptRequest {
-        text,
-        model,
-        model_name,
-        meeting_id,
-        chunk_size,
-        overlap,
-        custom_prompt,
-    };
-    let body = serde_json::to_string(&process_request).map_err(|e| e.to_string())?;
-
-    make_api_request::<R, ProcessTranscriptResponse>(
-        &app,
-        "/process-transcript",
-        "POST",
-        Some(&body),
-        None,
-        auth_token,
-    )
-    .await
-}
+// #[tauri::command]
+// pub async fn api_save_transcript<R: Runtime>(
+//     app: AppHandle<R>,
+//     meeting_title: String,
+//     transcripts: Vec<serde_json::Value>,
+//     auth_token: Option<String>,
+// ) -> Result<serde_json::Value, String> {
+//     log_info!(
+//         "api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
+//         meeting_title,
+//         transcripts.len(),
+//         auth_token.is_some()
+//     );
+//
+//     // Convert serde_json::Value to TranscriptSegment
+//     let transcript_segments: Result<Vec<TranscriptSegment>, _> = transcripts
+//         .into_iter()
+//         .map(|t| serde_json::from_value(t))
+//         .collect();
+//
+//     let transcript_segments = transcript_segments.map_err(|e| e.to_string())?;
+//
+//     let save_request = SaveTranscriptRequest {
+//         meeting_title,
+//         transcripts: transcript_segments,
+//     };
+//     let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
+//
+//     make_api_request::<R, serde_json::Value>(
+//         &app,
+//         "/save-transcript",
+//         "POST",
+//         Some(&body),
+//         None,
+//         auth_token,
+//     )
+//     .await
+// }
 
 // Simple test command to check backend connectivity
 #[tauri::command]

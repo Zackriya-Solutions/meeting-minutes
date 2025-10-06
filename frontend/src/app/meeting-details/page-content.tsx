@@ -1,14 +1,15 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
-import { debounce, invoke } from 'lodash';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Transcript, Summary, SummaryResponse } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
 import { AISummary } from '@/components/AISummary';
+import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { BlockNoteBlock } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '@/components/SettingTabs';
-import {TranscriptModelProps } from '@/components/TranscriptSettings';
+import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import {
   Dialog,
   DialogContent,
@@ -20,13 +21,22 @@ import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { MessageToast } from '@/components/MessageToast';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { Button } from '@/components/ui/button';
+import { Copy, Sparkles, Settings, Save, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
-export default function PageContent({ meeting, summaryData }: { meeting: any, summaryData: Summary }) {
+export default function PageContent({ meeting, summaryData, onMeetingUpdated }: { meeting: any, summaryData: Summary, onMeetingUpdated?: () => Promise<void> }) {
+  console.log('📄 PAGE CONTENT: Initializing with data:', {
+    meetingId: meeting.id,
+    summaryDataKeys: summaryData ? Object.keys(summaryData) : null,
+    transcriptsCount: meeting.transcripts?.length
+  });
+
   const [transcripts, setTranscripts] = useState<Transcript[]>(meeting.transcripts);
-  
+
 
   const [showSummary, setShowSummary] = useState(false);
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
@@ -52,8 +62,12 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
   const [error, setError] = useState<string>('');
   const [meetings, setLocalMeetings] = useState<CurrentMeeting[]>([]);
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
-  const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings , serverAddress} = useSidebar();
-  
+  const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings, serverAddress, startSummaryPolling } = useSidebar();
+
+  // Ref for BlockNoteSummaryView to access its save method
+  const blockNoteSummaryRef = useRef<BlockNoteSummaryViewRef>(null);
+  const [isSummaryDirty, setIsSummaryDirty] = useState(false);
+
   // Keep local meetings state in sync with sidebar meetings
   useEffect(() => {
     setLocalMeetings(sidebarMeetings);
@@ -103,7 +117,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
         console.log('Waiting for server address to load before fetching configurations');
         return;
       }
-      
+
       try {
         const data = await invokeTauri('api_get_transcript_config', {}) as any;
         if (data && data.provider !== null) {
@@ -123,7 +137,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
   //     const timer = setTimeout(() => {
   //       setSettingsSaveSuccess(null);
   //     }, 3000); // Same duration as toast
-      
+
   //     return () => clearTimeout(timer);
   //   }
   // }, [settingsSaveSuccess]);
@@ -139,21 +153,21 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       }
 
       setOriginalTranscript(fullTranscript);
-      
+
       console.log('Generating summary for transcript length:', fullTranscript.length);
-      
+
       // Track summary generation started
       await Analytics.trackSummaryGenerationStarted(
         modelConfig.provider,
         modelConfig.model,
         fullTranscript.length
       );
-      
+
       // Track custom prompt usage if present
       if (customPrompt.trim().length > 0) {
         await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
       }
-      
+
       // Process transcript and get process_id
       console.log('Processing transcript...');
       const result = await invokeTauri('api_process_transcript', {
@@ -169,204 +183,219 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       const process_id = result.process_id;
       console.log('Process ID:', process_id);
 
-      // Poll for summary status
-      const pollInterval = setInterval(async () => {
-        try {
-          const result = await invokeTauri('api_get_summary', {
-            meetingId: process_id,
-          }) as any;
-          console.log('Summary status:', result);
-          console.log('Error from backend:', result.error);
+      // Start global polling via context
+      startSummaryPolling(meeting.id, process_id, async (pollingResult) => {
+        console.log('Summary status:', pollingResult);
+        console.log('Error from backend:', pollingResult.error);
 
-          if (result.status === 'error') {
-            console.error('Backend returned error:', result.error);
-            setSummaryError(result.error || 'Unknown error');
-            setSummaryStatus('error');
-            clearInterval(pollInterval);
-            
-            // Track summary generation error
-            await Analytics.trackSummaryGenerationCompleted(
-              modelConfig.provider,
-              modelConfig.model,
-              false,
-              undefined,
-              result.error || 'Unknown error'
-            );
-            return;
-          }
-
-          if (result.status === 'completed' && result.data) {
-            // Defensive: check if all sections are empty
-            const summarySections = Object.entries(result.data).filter(([key]) => key !== 'MeetingName');
-            const allEmpty = summarySections.every(([, section]) => !(section as any).blocks || (section as any).blocks.length === 0);
-            if (allEmpty) {
-              console.error('Summary completed but all sections empty. Backend error:', result.error);
-              const transcriptLength = transcripts?.map(t => t.text).join('\n').length || 0;
-              let errorMsg = result.error;
-              if (!errorMsg) {
-                if (transcriptLength < 500) {
-                  errorMsg = 'Transcript is too short for meaningful summary generation. Please add more content or use a longer transcript.';
-                } else {
-                  errorMsg = 'Summary generation completed but returned empty content. Try adjusting your model settings or using a different model.';
-                }
-              }
-              setSummaryError(errorMsg);
-              setSummaryStatus('error');
-              clearInterval(pollInterval);
-              
-              // Track summary generation failure
-              await Analytics.trackSummaryGenerationCompleted(
-                modelConfig.provider,
-                modelConfig.model,
-                false,
-                undefined,
-                'Empty summary generated'
-              );
-              return;
-            }
-            clearInterval(pollInterval);
-
-            // Remove MeetingName from data before formatting
-            const { MeetingName, ...summaryData } = result.data;
-
-            // Update meeting title if available
-            if (MeetingName) {
-              setMeetingTitle(MeetingName);
-              // Update meetings with new title
-              const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) => 
-                m.id === meeting.id ? { id: m.id, title: MeetingName } : m
-              );
-              setMeetings(updatedMeetings);
-              setCurrentMeeting({ id: meeting.id, title: MeetingName });
-            }
-            
-            // Format the summary data with consistent styling - PRESERVE ORDER
-            const formattedSummary: Summary = {};
-            
-            // Use section order if available to maintain exact order and handle duplicates
-            const sectionKeys = result.data._section_order || Object.keys(summaryData);
-            
-            for (const key of sectionKeys) {
-              try {
-                const section = summaryData[key];
-                // Comprehensive null checks to prevent errors
-                if (section && 
-                    typeof section === 'object' && 
-                    'title' in section && 
-                    'blocks' in section) {
-                  
-                  const typedSection = section as { title?: string; blocks?: any[] };
-                  
-                  // Ensure blocks is an array before mapping
-                  if (Array.isArray(typedSection.blocks)) {
-                    formattedSummary[key] = {
-                      title: typedSection.title || key,
-                      blocks: typedSection.blocks.map((block: any) => ({
-                        ...block,
-                        // type: 'bullet',
-                        color: 'default',
-                        content: block?.content?.trim() || '' // Remove trailing newlines and handle null content
-                      }))
-                    };
-                  } else {
-                    // Handle case where blocks is not an array
-                    console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
-                    formattedSummary[key] = {
-                      title: typedSection.title || key,
-                      blocks: []
-                    };
-                  }
-                } else {
-                  console.warn(`Skipping invalid section ${key}:`, section);
-                }
-              } catch (error) {
-                console.warn(`Error processing section ${key}:`, error);
-                // Continue processing other sections
-              }
-            }
-
-            setAiSummary(formattedSummary);
-            setSummaryStatus('completed');
-            
-            // Track successful summary generation
-            await Analytics.trackSummaryGenerationCompleted(
-              modelConfig.provider,
-              modelConfig.model,
-              true
-            );
-          }
-        } catch (error) {
-          console.error('Failed to get summary status:', error);
-          if (error instanceof Error) {
-            setSummaryError(`Failed to get summary status: ${error.message}`);
-          } else {
-            setSummaryError('Failed to get summary status: Unknown error');
-          }
+        if (pollingResult.status === 'error' || pollingResult.status === 'failed') {
+          console.error('Backend returned error:', pollingResult.error);
+          const errorMessage = pollingResult.error || 'Summary generation failed';
+          setSummaryError(errorMessage);
           setSummaryStatus('error');
-          clearInterval(pollInterval);
-          
+
+          // Show error toast to user
+          toast.error('Failed to generate summary', {
+            description: errorMessage.includes('Connection refused')
+              ? 'Could not connect to LLM service. Please ensure Ollama or your configured LLM provider is running.'
+              : errorMessage,
+          });
+
           // Track summary generation error
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,
             modelConfig.model,
             false,
             undefined,
-            error instanceof Error ? error.message : 'Unknown error'
+            errorMessage
+          );
+          return;
+        }
+
+        if (pollingResult.status === 'completed' && pollingResult.data) {
+          console.log('✅ Summary generation completed:', pollingResult.data);
+
+          // Check if backend returned markdown format (new flow)
+          if (pollingResult.data.markdown) {
+            console.log('📝 Received markdown format from backend');
+
+            // Update meeting title if available (check both data.MeetingName and top-level meetingName)
+            const meetingName = pollingResult.data.MeetingName || pollingResult.meetingName;
+            if (meetingName) {
+              console.log('📝 Updating meeting title to:', meetingName);
+              setMeetingTitle(meetingName);
+              const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
+                m.id === meeting.id ? { id: m.id, title: meetingName } : m
+              );
+              setMeetings(updatedMeetings);
+              setCurrentMeeting({ id: meeting.id, title: meetingName });
+            }
+
+            // Set markdown data - BlockNoteSummaryView will parse and render
+            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            setSummaryStatus('completed');
+
+            // Refetch meeting details from backend to sync updated title
+            if (meetingName && onMeetingUpdated) {
+              await onMeetingUpdated();
+            }
+
+            await Analytics.trackSummaryGenerationCompleted(
+              modelConfig.provider,
+              modelConfig.model,
+              true
+            );
+            return;
+          }
+
+          // Legacy format handling (for backwards compatibility)
+          const summarySections = Object.entries(pollingResult.data).filter(([key]) => key !== 'MeetingName');
+          const allEmpty = summarySections.every(([, section]) => !(section as any).blocks || (section as any).blocks.length === 0);
+
+          if (allEmpty) {
+            console.error('Summary completed but all sections empty');
+            setSummaryError('Summary generation completed but returned empty content.');
+            setSummaryStatus('error');
+
+            await Analytics.trackSummaryGenerationCompleted(
+              modelConfig.provider,
+              modelConfig.model,
+              false,
+              undefined,
+              'Empty summary generated'
+            );
+            return;
+          }
+
+          // Remove MeetingName from data before formatting
+          const { MeetingName, ...summaryData } = pollingResult.data;
+
+          // Update meeting title if available (check both data.MeetingName and top-level meetingName)
+          const meetingName = MeetingName || pollingResult.meetingName;
+          if (meetingName) {
+            console.log('📝 Updating meeting title to:', meetingName);
+            setMeetingTitle(meetingName);
+            const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
+              m.id === meeting.id ? { id: m.id, title: meetingName } : m
+            );
+            setMeetings(updatedMeetings);
+            setCurrentMeeting({ id: meeting.id, title: meetingName });
+          }
+
+          // Format legacy summary data
+          const formattedSummary: Summary = {};
+          const sectionKeys = pollingResult.data._section_order || Object.keys(summaryData);
+
+          for (const key of sectionKeys) {
+            try {
+              const section = summaryData[key];
+              if (section && typeof section === 'object' && 'title' in section && 'blocks' in section) {
+                const typedSection = section as { title?: string; blocks?: any[] };
+
+                if (Array.isArray(typedSection.blocks)) {
+                  formattedSummary[key] = {
+                    title: typedSection.title || key,
+                    blocks: typedSection.blocks.map((block: any) => ({
+                      ...block,
+                      color: 'default',
+                      content: block?.content?.trim() || ''
+                    }))
+                  };
+                } else {
+                  formattedSummary[key] = {
+                    title: typedSection.title || key,
+                    blocks: []
+                  };
+                }
+              }
+            } catch (error) {
+              console.warn(`Error processing section ${key}:`, error);
+            }
+          }
+
+          setAiSummary(formattedSummary);
+          setSummaryStatus('completed');
+
+          // Track successful summary generation
+          await Analytics.trackSummaryGenerationCompleted(
+            modelConfig.provider,
+            modelConfig.model,
+            true
           );
 
+          // Refetch meeting details from backend to sync updated title
+          if (meetingName && onMeetingUpdated) {
+            await onMeetingUpdated();
+          }
         }
-      }, 5000); // Poll every 5 seconds
-
-      // Cleanup interval on component unmount
-      return () => clearInterval(pollInterval);
+      });
     } catch (error) {
       console.error('Failed to generate summary:', error);
-      if (error instanceof Error) {
-        setSummaryError(`Failed to generate summary: ${error.message}`);
-      } else {
-        setSummaryError('Failed to generate summary: Unknown error');
-      }
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const fullError = `Failed to generate summary: ${errorMessage}`;
+      setSummaryError(fullError);
       setSummaryStatus('error');
-      
+
+      // Show error toast to user
+      toast.error('Failed to generate summary', {
+        description: errorMessage,
+      });
+
       // Track summary generation error
       await Analytics.trackSummaryGenerationCompleted(
         modelConfig.provider,
         modelConfig.model,
         false,
         undefined,
-        error instanceof Error ? error.message : 'Unknown error'
+        errorMessage
       );
     }
-  }, [transcripts, modelConfig, meeting.id]);
+  }, [transcripts, modelConfig, meeting.id, startSummaryPolling, sidebarMeetings, setMeetings, setCurrentMeeting]);
 
 
-  const handleSaveSummary = async (summary: Summary) => {
+  const handleSaveSummary = async (summary: Summary | { markdown?: string; summary_json?: BlockNoteBlock[] }) => {
+    console.log('📄 PAGE CONTENT: handleSaveSummary called with:', {
+      hasMarkdown: 'markdown' in summary,
+      hasSummaryJson: 'summary_json' in summary,
+      summaryKeys: Object.keys(summary)
+    });
+
     try {
-      // Format the summary in a structure that the backend expects
-      const formattedSummary = {
-        MeetingName: meetingTitle,
-        MeetingNotes: {
-          sections: Object.entries(summary).map(([, section]) => ({
-            title: section.title,
-            blocks: section.blocks
-          }))
-        }
-      };
-      
+      let formattedSummary: any;
+
+      // Check if it's the new BlockNote format
+      if ('markdown' in summary || 'summary_json' in summary) {
+        console.log('📄 PAGE CONTENT: Saving new format (markdown/blocknote)');
+        // New format: save as-is with markdown and/or summary_json keys
+        formattedSummary = summary;
+      } else {
+        console.log('📄 PAGE CONTENT: Saving legacy format');
+        // Legacy format: structure for backward compatibility
+        formattedSummary = {
+          MeetingName: meetingTitle,
+          MeetingNotes: {
+            sections: Object.entries(summary).map(([, section]) => ({
+              title: section.title,
+              blocks: section.blocks
+            }))
+          }
+        };
+      }
+
       const payload = {
         meetingId: meeting.id,
         summary: formattedSummary
       };
-      console.log('Saving meeting summary with payload:', payload);
-      
+      console.log('📄 PAGE CONTENT: Saving summary payload:', payload);
+
       await invokeTauri('api_save_meeting_summary', {
         meetingId: payload.meetingId,
         summary: payload.summary,
       });
 
-      console.log('Save meeting summary success');
+      console.log('✅ PAGE CONTENT: Save meeting summary success');
     } catch (error) {
-      console.error('Failed to save meeting summary:', error);
+      console.error('❌ PAGE CONTENT: Failed to save meeting summary:', error);
       if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -375,18 +404,8 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
     }
   };
 
-  // Create a debounced version of the save function to avoid excessive API calls
-  const debouncedSaveSummary = useCallback(
-    debounce((summary: Summary) => {
-      handleSaveSummary(summary);
-    }, 2000),
-    [meeting.id, handleSaveSummary]
-  );
-
   const handleSummaryChange = (newSummary: Summary) => {
     setAiSummary(newSummary);
-    debouncedSaveSummary(newSummary);
-    
     // Track summary editing
     Analytics.trackFeatureUsed('summary_edited');
   };
@@ -423,14 +442,14 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
 
     try {
       console.log('Regenerating summary with original transcript...');
-      
+
       // Track summary regeneration started
       await Analytics.trackSummaryGenerationStarted(
         modelConfig.provider,
         modelConfig.model,
         originalTranscript.length
       );
-      
+
       // Process transcript and get process_id
       console.log('Processing transcript...');
       const result = await invokeTauri('api_process_transcript', {
@@ -445,172 +464,250 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       const process_id = result.process_id;
       console.log('Process ID:', process_id);
 
-      // Poll for summary status
-      const pollInterval = setInterval(async () => {
-        try {
-          const result = await invokeTauri('api_get_summary', {
-            meetingId: process_id,
-          }) as any;
-          console.log('Summary status:', result);
-          console.log('Error from backend:', result.error);
+      // Start global polling via context
+      startSummaryPolling(meeting.id, process_id, async (pollingResult) => {
+        console.log('Summary status:', pollingResult);
+        console.log('Error from backend:', pollingResult.error);
 
-          if (result.status === 'error') {
-            console.error('Backend returned error:', result.error);
-            setSummaryError(result.error || 'Unknown error');
-            setSummaryStatus('error');
-            clearInterval(pollInterval);
-            return;
-          }
-
-          if (result.status === 'completed' && result.data) {
-            clearInterval(pollInterval);
-            
-            // Remove MeetingName from data before formatting
-            const { MeetingName, ...summaryData } = result.data;
-            
-            // Update meeting title if available
-            if (MeetingName) {
-              setMeetingTitle(MeetingName);
-              // Update meetings with new title
-              const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) => 
-                m.id === meeting.id ? { id: m.id, title: MeetingName } : m
-              );
-              setMeetings(updatedMeetings);
-              setCurrentMeeting({ id: meeting.id, title: MeetingName });
-            }
-
-            // Format the summary data with consistent styling - PRESERVE ORDER
-            const formattedSummary: Summary = {};
-            
-            // Use section order if available to maintain exact order and handle duplicates
-            const sectionKeys = result.data._section_order || Object.keys(summaryData);
-            
-            for (const key of sectionKeys) {
-              try {
-                const section = summaryData[key];
-                // Comprehensive null checks to prevent errors
-                if (section && 
-                    typeof section === 'object' && 
-                    'title' in section && 
-                    'blocks' in section) {
-                  
-                  const typedSection = section as { title?: string; blocks?: any[] };
-                  
-                  // Ensure blocks is an array before mapping
-                  if (Array.isArray(typedSection.blocks)) {
-                    formattedSummary[key] = {
-                      title: typedSection.title || key,
-                      blocks: typedSection.blocks.map((block: any) => ({
-                        ...block,
-                        // type: 'bullet',
-                        color: 'default',
-                        content: block?.content?.trim() || '' // Handle null content
-                      }))
-                    };
-                  } else {
-                    // Handle case where blocks is not an array
-                    console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
-                    formattedSummary[key] = {
-                      title: typedSection.title || key,
-                      blocks: []
-                    };
-                  }
-                } else {
-                  console.warn(`Skipping invalid section ${key}:`, section);
-                }
-              } catch (error) {
-                console.warn(`Error processing section ${key}:`, error);
-                // Continue processing other sections
-              }
-            }
-
-            setAiSummary(formattedSummary);
-            setSummaryStatus('completed');
-            
-            // Track successful summary regeneration
-            await Analytics.trackSummaryGenerationCompleted(
-              modelConfig.provider,
-              modelConfig.model,
-              true
-            );
-          } else if (result.status === 'error') {
-            clearInterval(pollInterval);
-            
-            // Track summary regeneration error
-            await Analytics.trackSummaryGenerationCompleted(
-              modelConfig.provider,
-              modelConfig.model,
-              false,
-              undefined,
-              result.error || 'Failed to generate summary'
-            );
-            throw new Error(result.error || 'Failed to generate summary');
-          }
-        } catch (error) {
-          clearInterval(pollInterval);
-          console.error('Failed to get summary status:', error);
-          if (error instanceof Error) {
-            setSummaryError(error.message);
-          } else {
-            setSummaryError('An unexpected error occurred');
-          }
+        if (pollingResult.status === 'error' || pollingResult.status === 'failed') {
+          console.error('Backend returned error:', pollingResult.error);
+          const errorMessage = pollingResult.error || 'Summary regeneration failed';
+          setSummaryError(errorMessage);
           setSummaryStatus('error');
-          setAiSummary(null);
-          
+
+          // Show error toast to user
+          toast.error('Failed to regenerate summary', {
+            description: errorMessage.includes('Connection refused')
+              ? 'Could not connect to LLM service. Please ensure Ollama or your configured LLM provider is running.'
+              : errorMessage,
+          });
+
           // Track summary regeneration error
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,
             modelConfig.model,
             false,
             undefined,
-            error instanceof Error ? error.message : 'An unexpected error occurred'
+            errorMessage
           );
+          return;
         }
-      }, 10000);
 
-      return () => clearInterval(pollInterval);
+        if (pollingResult.status === 'completed' && pollingResult.data) {
+          // Remove MeetingName from data before formatting
+          const { MeetingName, ...summaryData } = pollingResult.data;
+
+          // Update meeting title if available (check both data.MeetingName and top-level meetingName)
+          const meetingName = MeetingName || pollingResult.meetingName;
+          if (meetingName) {
+            console.log('📝 Updating meeting title to:', meetingName);
+            setMeetingTitle(meetingName);
+            // Update meetings with new title
+            const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
+              m.id === meeting.id ? { id: m.id, title: meetingName } : m
+            );
+            setMeetings(updatedMeetings);
+            setCurrentMeeting({ id: meeting.id, title: meetingName });
+          }
+
+          // Format the summary data with consistent styling - PRESERVE ORDER
+          const formattedSummary: Summary = {};
+
+          // Use section order if available to maintain exact order and handle duplicates
+          const sectionKeys = pollingResult.data._section_order || Object.keys(summaryData);
+
+          for (const key of sectionKeys) {
+            try {
+              const section = summaryData[key];
+              // Comprehensive null checks to prevent errors
+              if (section &&
+                typeof section === 'object' &&
+                'title' in section &&
+                'blocks' in section) {
+
+                const typedSection = section as { title?: string; blocks?: any[] };
+
+                // Ensure blocks is an array before mapping
+                if (Array.isArray(typedSection.blocks)) {
+                  formattedSummary[key] = {
+                    title: typedSection.title || key,
+                    blocks: typedSection.blocks.map((block: any) => ({
+                      ...block,
+                      // type: 'bullet',
+                      color: 'default',
+                      content: block?.content?.trim() || '' // Handle null content
+                    }))
+                  };
+                } else {
+                  // Handle case where blocks is not an array
+                  console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
+                  formattedSummary[key] = {
+                    title: typedSection.title || key,
+                    blocks: []
+                  };
+                }
+              } else {
+                console.warn(`Skipping invalid section ${key}:`, section);
+              }
+            } catch (error) {
+              console.warn(`Error processing section ${key}:`, error);
+              // Continue processing other sections
+            }
+          }
+
+          setAiSummary(formattedSummary);
+          setSummaryStatus('completed');
+
+          // Track successful summary regeneration
+          await Analytics.trackSummaryGenerationCompleted(
+            modelConfig.provider,
+            modelConfig.model,
+            true
+          );
+
+          // Refetch meeting details from backend to sync updated title
+          if (meetingName && onMeetingUpdated) {
+            await onMeetingUpdated();
+          }
+        }
+      });
     } catch (error) {
       console.error('Failed to regenerate summary:', error);
-      if (error instanceof Error) {
-        setSummaryError(error.message);
-      } else {
-        setSummaryError('An unexpected error occurred');
-      }
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      setSummaryError(errorMessage);
       setSummaryStatus('error');
       setAiSummary(null);
-      
+
+      // Show error toast to user
+      toast.error('Failed to regenerate summary', {
+        description: errorMessage,
+      });
+
       // Track summary regeneration error
       await Analytics.trackSummaryGenerationCompleted(
         modelConfig.provider,
         modelConfig.model,
         false,
         undefined,
-        error instanceof Error ? error.message : 'An unexpected error occurred'
+        errorMessage
       );
     }
-  }, [originalTranscript, modelConfig, meeting.id]);
+  }, [originalTranscript, modelConfig, meeting.id, startSummaryPolling, sidebarMeetings, setMeetings, setCurrentMeeting]);
 
   const handleCopyTranscript = useCallback(() => {
-    const header = `# Transcript of the Meeting: ${meeting.id} - ${meetingTitle??meeting.title}\n\n`;
+    const header = `# Transcript of the Meeting: ${meeting.id} - ${meetingTitle ?? meeting.title}\n\n`;
     const date = `## Date: ${new Date(meeting.created_at).toLocaleDateString()}\n\n`;
     const fullTranscript = transcripts
       .map(t => `${t.timestamp}: ${t.text}`)
       .join('\n');
     navigator.clipboard.writeText(header + date + fullTranscript);
+
+    toast.success("Transcript copied to clipboard")
   }, [transcripts, meeting, meetingTitle]);
+
+  const handleCopySummary = useCallback(async () => {
+    try {
+      let summaryMarkdown = '';
+
+      console.log('🔍 Copy Summary - Starting...');
+      console.log('🔍 aiSummary:', aiSummary);
+      console.log('🔍 aiSummary type:', typeof aiSummary);
+      console.log('🔍 aiSummary keys:', aiSummary ? Object.keys(aiSummary) : 'null');
+      console.log('🔍 blockNoteSummaryRef.current:', blockNoteSummaryRef.current);
+
+      // Try to get markdown from BlockNote editor first
+      if (blockNoteSummaryRef.current?.getMarkdown) {
+        console.log('📝 Trying to get markdown from ref...');
+        summaryMarkdown = await blockNoteSummaryRef.current.getMarkdown();
+        console.log('📝 Got markdown from ref, length:', summaryMarkdown.length);
+      }
+
+      // Fallback: Check if aiSummary has markdown property
+      if (!summaryMarkdown && aiSummary && 'markdown' in aiSummary) {
+        console.log('📝 Using markdown from aiSummary');
+        summaryMarkdown = (aiSummary as any).markdown || '';
+        console.log('📝 Markdown from aiSummary, length:', summaryMarkdown.length);
+      }
+
+      // Fallback: Check for legacy format
+      if (!summaryMarkdown && aiSummary) {
+        console.log('📝 Converting legacy format to markdown');
+        const sections = Object.entries(aiSummary)
+          .filter(([key]) => {
+            // Skip non-section keys
+            return key !== 'markdown' && key !== 'summary_json' && key !== '_section_order' && key !== 'MeetingName';
+          })
+          .map(([key, section]) => {
+            if (section && typeof section === 'object' && 'title' in section && 'blocks' in section) {
+              const sectionTitle = `## ${section.title}\n\n`;
+              const sectionContent = section.blocks
+                .map((block: any) => `- ${block.content}`)
+                .join('\n');
+              return sectionTitle + sectionContent;
+            }
+            return '';
+          })
+          .filter(s => s.trim())
+          .join('\n\n');
+        summaryMarkdown = sections;
+        console.log('📝 Converted legacy format, length:', summaryMarkdown.length);
+      }
+
+      // If still no summary content, show message
+      if (!summaryMarkdown.trim()) {
+        console.error('❌ No summary content available to copy');
+        console.error('❌ Debug - aiSummary:', JSON.stringify(aiSummary, null, 2));
+        setSaveSuccess(false);
+        setTimeout(() => setSaveSuccess(null), 2000);
+        return;
+      }
+
+      // Build metadata header
+      const header = `# Meeting Summary: ${meetingTitle}\n\n`;
+      const metadata = `**Meeting ID:** ${meeting.id}\n**Date:** ${new Date(meeting.created_at).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })}\n**Copied on:** ${new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })}\n\n---\n\n`;
+
+      const fullMarkdown = header + metadata + summaryMarkdown;
+      await navigator.clipboard.writeText(fullMarkdown);
+
+      console.log('✅ Successfully copied to clipboard!');
+      toast.success("Summary copied to clipboard")
+
+      // Track analytics
+      Analytics.trackFeatureUsed('summary_copied');
+    } catch (error) {
+      console.error('❌ Failed to copy summary:', error);
+      toast.error("Failed to copy summary")
+    }
+  }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef]);
 
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
     if (!transcripts.length) {
-      console.log('No transcripts available for summary');
+      let error_msg = 'No transcripts available for summary';
+      console.log(error_msg);
+      toast.error(error_msg)
       return;
     }
-    
+
     try {
       await generateAISummary(customPrompt);
     } catch (error) {
-      console.error('Failed to generate summary:', error);
+      let error_msg = "Failed to generate summary"
+      console.error(error_msg, error);
       if (error instanceof Error) {
         setSummaryError(error.message);
+        toast.error(error_msg, { description: error.message })
       } else {
         setSummaryError('Failed to generate summary: Unknown error');
       }
@@ -624,7 +721,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
         title: meetingTitle
       };
       console.log('Saving meeting title with payload:', payload);
-      
+
       await invokeTauri('api_save_meeting_title', {
         meetingId: meeting.id,
         title: meetingTitle,
@@ -632,9 +729,9 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
 
       console.log('Save meeting title success');
 
-      
+
       // Update meetings with new title
-      const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) => 
+      const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
         m.id === meeting.id ? { id: m.id, title: meetingTitle } : m
       );
       setMeetings(updatedMeetings);
@@ -650,34 +747,30 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
       return false;
     }
   };
-  
+
   // Function to save all changes (title and summary)
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean | null>(null);
-  
+
   const saveAllChanges = async () => {
     setIsSaving(true);
-    setSaveSuccess(null);
-    
     try {
       // Save meeting title
-      const titleSaved = await handleSaveMeetingTitle();
-      
-      // Save summary if it exists
-      let summarySaved = true;
-      if (aiSummary) {
+      await handleSaveMeetingTitle();
+
+      // Save BlockNote editor changes if dirty
+      if (blockNoteSummaryRef.current?.isDirty) {
+        console.log('💾 Saving BlockNote editor changes...');
+        await blockNoteSummaryRef.current.saveSummary();
+      } else if (aiSummary) {
+        // Fallback for legacy summary format
         await handleSaveSummary(aiSummary);
       }
-      
-      setSaveSuccess(titleSaved && summarySaved);
-      
-      // Show success message briefly
-      setTimeout(() => {
-        setSaveSuccess(null);
-      }, 3000);
+
+      toast.success("Changes saved successfully")
     } catch (error) {
       console.error('Failed to save changes:', error);
-      setSaveSuccess(false);
+      toast.error("Failed to save changes", { description: String(error) })
     } finally {
       setIsSaving(false);
     }
@@ -693,10 +786,10 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
         apiKey: configToSave.apiKey ?? null
       };
       console.log('Saving model config with payload:', payload);
-      
+
       // Track model configuration change
       if (updatedConfig && (
-        updatedConfig.provider !== modelConfig.provider || 
+        updatedConfig.provider !== modelConfig.provider ||
         updatedConfig.model !== modelConfig.model
       )) {
         await Analytics.trackModelChanged(
@@ -706,7 +799,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
           updatedConfig.model
         );
       }
-      
+
       await invokeTauri('api_save_model_config', {
         provider: payload.provider,
         model: payload.model,
@@ -720,7 +813,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
 
       await Analytics.trackSettingsChanged('model_config', `${payload.provider}_${payload.model}`);
 
-      
+
     } catch (error) {
       console.error('Failed to save model config:', error);
       setSettingsSaveSuccess(false);
@@ -728,7 +821,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
         setError(error.message);
       } else {
         setError('Failed to save model config: Unknown error');
-      } 
+      }
     }
   };
 
@@ -741,15 +834,15 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
         apiKey: configToSave.apiKey ?? null
       };
       console.log('Saving transcript config with payload:', payload);
-      
-      
+
+
       await invokeTauri('api_save_transcript_config', {
         provider: payload.provider,
         model: payload.model,
         api_key: payload.apiKey,
       });
 
-      
+
       console.log('Save transcript config success');
       setSettingsSaveSuccess(true);
       const transcriptConfigToSave = updatedConfig || transcriptModelConfig;
@@ -776,38 +869,29 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
             <div className="flex flex-col space-y-3">
 
               <div className="flex items-center space-x-2">
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     Analytics.trackButtonClick('copy_transcript', 'meeting_details');
                     handleCopyTranscript();
                   }}
                   disabled={transcripts?.length === 0}
-                  className={`px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm ${
-                    transcripts?.length === 0
-                      ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 active:bg-blue-200'
-                  }`}
-                  title={transcripts?.length === 0 ? 'No transcript available' : 'Copy'}
+                  title={transcripts?.length === 0 ? 'No transcript available' : 'Copy Transcript'}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V7.5l-3.75-3.612z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 3v3.75a.75.75 0 0 0 .75.75H18" />
-                  </svg>
-                  <span className="text-sm">Copy</span>
-                </button>
+                  <Copy />
+                  Copy
+                </Button>
                 {transcripts?.length > 0 && (
                   <>
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => {
                         Analytics.trackButtonClick('generate_summary', 'meeting_details');
                         handleGenerateSummary(customPrompt);
                       }}
                       disabled={summaryStatus === 'processing'}
-                      className={`px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm ${
-                        summaryStatus === 'processing'
-                          ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
-                          : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100 hover:border-green-300 active:bg-green-200'
-                      }`}
                       title={
                         summaryStatus === 'processing'
                           ? 'Generating summary...'
@@ -816,35 +900,28 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                     >
                       {summaryStatus === 'processing' ? (
                         <>
-                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <span className="text-sm">Processing...</span>
+                          <Loader2 className="animate-spin" />
+                          Processing...
                         </>
                       ) : (
                         <>
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                          <span className="text-sm">Generate Note</span>
+                          <Sparkles />
+                          Generate Note
                         </>
                       )}
-                    </button>
+                    </Button>
                     <Dialog>
                       <DialogTrigger asChild>
-                        <button
-                        className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
-                        title="Summary"
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Settings"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                        </button>
+                          <Settings />
+                        </Button>
                       </DialogTrigger>
                       <DialogContent
-                      aria-describedby={undefined}
+                        aria-describedby={undefined}
                       >
                         <VisuallyHidden>
                           <DialogTitle>Model Settings</DialogTitle>
@@ -860,19 +937,19 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                         />
                         {settingsSaveSuccess !== null && (
                           <DialogFooter>
-                            <MessageToast 
-                              message={settingsSaveSuccess ? 'Settings saved successfully' : 'Failed to save settings'} 
-                              type={settingsSaveSuccess ? 'success' : 'error'} 
+                            <MessageToast
+                              message={settingsSaveSuccess ? 'Settings saved successfully' : 'Failed to save settings'}
+                              type={settingsSaveSuccess ? 'success' : 'error'}
                               show={settingsSaveSuccess !== null}
                               setShow={() => setSettingsSaveSuccess(null)}
                             />
                           </DialogFooter>
                         )}
                       </DialogContent>
-                      
+
 
                     </Dialog>
-                  
+
                   </>
                 )}
               </div>
@@ -883,7 +960,7 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
           <div className="flex-1 overflow-y-auto pb-4">
             <TranscriptView transcripts={transcripts} />
           </div>
-          
+
           {/* Custom prompt input at bottom of transcript section */}
           {!isRecording && transcripts.length > 0 && (
             <div className="p-1 border-t border-gray-200">
@@ -911,48 +988,45 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                   onChange={handleTitleChange}
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <button
+              <div className="flex flex-col items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     Analytics.trackButtonClick('save_changes', 'meeting_details');
                     saveAllChanges();
                   }}
                   disabled={isSaving}
-                  className={`px-3 py-1.5 rounded-md transition-all duration-200 flex items-center gap-1.5 text-sm ${isSaving ? 'bg-gray-200 text-gray-500' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                 >
                   {isSaving ? (
                     <>
-                      <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <span>Saving...</span>
+                      <Loader2 className="animate-spin" />
+                      Saving...
                     </>
                   ) : (
                     <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                      </svg>
-                      <span>Save Changes</span>
+                      <Save />
+                      Save Changes
                     </>
                   )}
-                </button>
-                {saveSuccess === true && (
-                  <span className="text-green-500 flex items-center gap-1 text-sm">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Saved
-                  </span>
-                )}
-                {saveSuccess === false && (
-                  <span className="text-red-500 flex items-center gap-1 text-sm">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    Failed to save
-                  </span>
-                )}
+                </Button>
+                {
+
+                  <Button
+                    variant='outline'
+                    size={"sm"}
+                    title='Copy Summary'
+                    onClick={() => {
+                      Analytics.trackButtonClick('copy_summary', 'meeting_details');
+                      handleCopySummary();
+                    }}
+                    disabled={!aiSummary || summaryStatus === 'processing'}
+                    className='cursor-pointer'
+                  >
+                    <Copy />
+                    Copy summary
+                  </Button>
+                }
               </div>
             </div>
           </div>
@@ -1010,12 +1084,15 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                   ) : null}
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto p-4">
-                <AISummary 
-                  summary={aiSummary} 
-                  status={summaryStatus} 
-                  error={summaryError}
+              <div className="flex-1 overflow-y-auto">
+                <BlockNoteSummaryView
+                  ref={blockNoteSummaryRef}
+                  summaryData={aiSummary}
+                  onSave={handleSaveSummary}
                   onSummaryChange={handleSummaryChange}
+                  onDirtyChange={setIsSummaryDirty}
+                  status={summaryStatus}
+                  error={summaryError}
                   onRegenerateSummary={() => {
                     Analytics.trackButtonClick('regenerate_summary', 'meeting_details');
                     handleRegenerateSummary();
@@ -1028,11 +1105,10 @@ export default function PageContent({ meeting, summaryData }: { meeting: any, su
                 />
               </div>
               {summaryStatus !== 'idle' && (
-                <div className={`mt-4 p-4 rounded-lg ${
-                  summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
+                <div className={`mt-4 p-4 rounded-lg ${summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
                   summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
-                  'bg-blue-100 text-blue-700'
-                }`}>
+                    'bg-blue-100 text-blue-700'
+                  }`}>
                   <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
                 </div>
               )}

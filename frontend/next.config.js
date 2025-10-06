@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false, // Disabled for BlockNote compatibility
   output: 'export',
   images: {
     unoptimized: true,
@@ -8,7 +8,7 @@ const nextConfig = {
   // Add basePath configuration
   basePath: '',
   assetPrefix: '/',
-  
+
   // Add webpack configuration for Tauri
   webpack: (config, { isServer }) => {
     if (!isServer) {
