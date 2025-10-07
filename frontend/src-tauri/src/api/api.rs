@@ -280,14 +280,11 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
         log_error!("{}", error_msg);
         error_msg
     })?;
-    
+
     // Safely truncate response for logging, respecting UTF-8 character boundaries
-    let truncated = response_text
-        .chars()
-        .take(200)
-        .collect::<String>();
+    let truncated = response_text.chars().take(200).collect::<String>();
     log_info!("Response body: {}", truncated);
-    
+
     serde_json::from_str(&response_text).map_err(|e| {
         let error_msg = format!("Failed to parse JSON: {}", e);
         log_error!("{}", error_msg);
@@ -804,46 +801,39 @@ pub async fn api_save_transcript<R: Runtime>(
     transcripts: Vec<serde_json::Value>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
-             meeting_title, transcripts.len(), auth_token.is_some());
+    log_info!(
+        "api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
+        meeting_title,
+        transcripts.len(),
+        auth_token.is_some()
+    );
 
     // Log first transcript for debugging
     if let Some(first) = transcripts.first() {
-        log_debug!("First transcript data: {}", serde_json::to_string_pretty(first).unwrap_or_default());
+        log_debug!(
+            "First transcript data: {}",
+            serde_json::to_string_pretty(first).unwrap_or_default()
+        );
     }
 
     // Convert serde_json::Value to TranscriptSegment
-    let transcript_segments: Result<Vec<TranscriptSegment>, _> = transcripts
+    let transcripts_to_save: Vec<TranscriptSegment> = transcripts
         .into_iter()
         .map(serde_json::from_value)
-        .collect();
-
-    let transcript_segments = transcript_segments.map_err(|e| {
-        log_error!("Failed to parse transcript segments: {}", e);
-        e.to_string()
-    })?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            log_error!("Failed to parse transcript segments: {}", e);
+            format!("Invalid transcript data format: {}. Please check the data structure.", e)
+        })?;
 
     // Log parsed segments count and first segment details
-    if let Some(first_seg) = transcript_segments.first() {
+    if let Some(first_seg) = transcripts_to_save.first() {
         log_debug!("First parsed segment: text='{}', audio_start_time={:?}, audio_end_time={:?}, duration={:?}",
                    first_seg.text.chars().take(50).collect::<String>(),
                    first_seg.audio_start_time,
                    first_seg.audio_end_time,
                    first_seg.duration);
     }
-
-    // Check if the conversion was successful. If not, return an error to the frontend.
-    let transcripts_to_save = match transcript_segments {
-        Ok(segments) => segments,
-        Err(e) => {
-            log_error!("Failed to deserialize transcript data from frontend: {}", e);
-            // Return a descriptive error to the frontend about the malformed data.
-            return Err(format!(
-                "Invalid transcript data format: {}. Please check the data structure.",
-                e
-            ));
-        }
-    };
 
     let pool = state.db_manager.pool();
 

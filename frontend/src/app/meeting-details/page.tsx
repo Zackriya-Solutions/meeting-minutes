@@ -6,6 +6,7 @@ import PageContent from "./page-content";
 import { useRouter } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
+import { LoaderIcon } from "lucide-react";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -188,7 +189,9 @@ export default function MeetingDetails() {
   // }
 
   if (!meetingDetails || !meetingSummary) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    return <div className="flex items-center justify-center h-screen">
+      <LoaderIcon className="animate-spin size-6 " />
+    </div>;
   }
 
   return <PageContent

@@ -1,6 +1,6 @@
+use crate::whisper_engine::{ModelInfo, WhisperEngine};
 use std::sync::{Arc, Mutex};
-use tauri::{command, Emitter};
-use crate::whisper_engine::{WhisperEngine, ModelInfo};
+use tauri::{command, Emitter, Manager};
 
 // Global whisper engine
 pub static WHISPER_ENGINE: Mutex<Option<Arc<WhisperEngine>>> = Mutex::new(None);
@@ -11,9 +11,9 @@ pub async fn whisper_init() -> Result<(), String> {
     if guard.is_some() {
         return Ok(());
     }
-    
-    let engine = WhisperEngine::new()
-        .map_err(|e| format!("Failed to initialize whisper engine: {}", e))?;
+
+    let engine =
+        WhisperEngine::new().map_err(|e| format!("Failed to initialize whisper engine: {}", e))?;
     *guard = Some(Arc::new(engine));
     Ok(())
 }
@@ -24,9 +24,11 @@ pub async fn whisper_get_available_models() -> Result<Vec<ModelInfo>, String> {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
-        engine.discover_models().await
+        engine
+            .discover_models()
+            .await
             .map_err(|e| format!("Failed to discover models: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())
@@ -39,9 +41,11 @@ pub async fn whisper_load_model(model_name: String) -> Result<(), String> {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
-        engine.load_model(&model_name).await
+        engine
+            .load_model(&model_name)
+            .await
             .map_err(|e| format!("Failed to load model: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())
@@ -54,7 +58,7 @@ pub async fn whisper_get_current_model() -> Result<Option<String>, String> {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
         Ok(engine.get_current_model().await)
     } else {
@@ -84,11 +88,14 @@ pub async fn whisper_has_available_models() -> Result<bool, String> {
     };
 
     if let Some(engine) = engine {
-        let models = engine.discover_models().await
+        let models = engine
+            .discover_models()
+            .await
             .map_err(|e| format!("Failed to discover models: {}", e))?;
 
         // Check if at least one model is available
-        let available_models: Vec<_> = models.iter()
+        let available_models: Vec<_> = models
+            .iter()
             .filter(|model| matches!(model.status, crate::whisper_engine::ModelStatus::Available))
             .collect();
 
@@ -114,20 +121,28 @@ pub async fn whisper_validate_model_ready() -> Result<String, String> {
         }
 
         // No model loaded, check if any models are available to load
-        let models = engine.discover_models().await
+        let models = engine
+            .discover_models()
+            .await
             .map_err(|e| format!("Failed to discover models: {}", e))?;
 
-        let available_models: Vec<_> = models.iter()
+        let available_models: Vec<_> = models
+            .iter()
             .filter(|model| matches!(model.status, crate::whisper_engine::ModelStatus::Available))
             .collect();
 
         if available_models.is_empty() {
-            return Err("No Whisper models are available. Please download a model to enable transcription.".to_string());
+            return Err(
+                "No Whisper models are available. Please download a model to enable transcription."
+                    .to_string(),
+            );
         }
 
         // Try to load the first available model
         let first_model = &available_models[0];
-        engine.load_model(&first_model.name).await
+        engine
+            .load_model(&first_model.name)
+            .await
             .map_err(|e| format!("Failed to load model {}: {}", first_model.name, e))?;
 
         Ok(first_model.name.clone())
@@ -138,7 +153,7 @@ pub async fn whisper_validate_model_ready() -> Result<String, String> {
 
 /// Internal version of whisper_validate_model_ready that respects user's transcript config
 pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>
+    app: &tauri::AppHandle<R>,
 ) -> Result<String, String> {
     let engine = {
         let guard = WHISPER_ENGINE.lock().unwrap();
@@ -155,14 +170,27 @@ pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
         }
 
         // No model loaded - try to load user's configured model from transcript config
-        let model_to_load = match crate::api::api::api_get_transcript_config(app.clone(), None).await {
+        let model_to_load = match crate::api::api::api_get_transcript_config(
+            app.clone(),
+            app.state(),
+            None,
+        )
+        .await
+        {
             Ok(Some(config)) => {
-                log::info!("Got transcript config from API - provider: {}, model: {}", config.provider, config.model);
+                log::info!(
+                    "Got transcript config from API - provider: {}, model: {}",
+                    config.provider,
+                    config.model
+                );
                 if config.provider == "localWhisper" && !config.model.is_empty() {
                     log::info!("Using user's configured model: {}", config.model);
                     Some(config.model)
                 } else {
-                    log::info!("API config uses non-local provider ({}) or empty model, will auto-select", config.provider);
+                    log::info!(
+                        "API config uses non-local provider ({}) or empty model, will auto-select",
+                        config.provider
+                    );
                     None
                 }
             }
@@ -171,21 +199,30 @@ pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
                 None
             }
             Err(e) => {
-                log::warn!("Failed to get transcript config from API: {}, will auto-select model", e);
+                log::warn!(
+                    "Failed to get transcript config from API: {}, will auto-select model",
+                    e
+                );
                 None
             }
         };
 
         // Check available models
-        let models = engine.discover_models().await
+        let models = engine
+            .discover_models()
+            .await
             .map_err(|e| format!("Failed to discover models: {}", e))?;
 
-        let available_models: Vec<_> = models.iter()
+        let available_models: Vec<_> = models
+            .iter()
             .filter(|model| matches!(model.status, crate::whisper_engine::ModelStatus::Available))
             .collect();
 
         if available_models.is_empty() {
-            return Err("No Whisper models are available. Please download a model to enable transcription.".to_string());
+            return Err(
+                "No Whisper models are available. Please download a model to enable transcription."
+                    .to_string(),
+            );
         }
 
         // Try to load user's configured model if specified
@@ -195,17 +232,25 @@ pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
                 log::info!("Loading user's configured model: {}", configured_model);
                 configured_model
             } else {
-                log::warn!("Configured model '{}' not found, falling back to first available: {}",
-                          configured_model, available_models[0].name);
+                log::warn!(
+                    "Configured model '{}' not found, falling back to first available: {}",
+                    configured_model,
+                    available_models[0].name
+                );
                 available_models[0].name.clone()
             }
         } else {
             // No configured model, use first available
-            log::info!("No configured model, loading first available: {}", available_models[0].name);
+            log::info!(
+                "No configured model, loading first available: {}",
+                available_models[0].name
+            );
             available_models[0].name.clone()
         };
 
-        engine.load_model(&model_name).await
+        engine
+            .load_model(&model_name)
+            .await
             .map_err(|e| format!("Failed to load model {}: {}", model_name, e))?;
 
         Ok(model_name)
@@ -224,7 +269,9 @@ pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, St
     if let Some(engine) = engine {
         // Get language preference
         let language = crate::get_language_preference_internal();
-        engine.transcribe_audio(audio_data, language).await
+        engine
+            .transcribe_audio(audio_data, language)
+            .await
             .map_err(|e| format!("Transcription failed: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())
@@ -237,7 +284,7 @@ pub async fn whisper_get_models_directory() -> Result<String, String> {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
         let path = engine.get_models_directory().await;
         Ok(path.to_string_lossy().to_string())
@@ -247,48 +294,61 @@ pub async fn whisper_get_models_directory() -> Result<String, String> {
 }
 
 #[command]
-pub async fn whisper_download_model(app_handle: tauri::AppHandle, model_name: String) -> Result<(), String> {
-    
+pub async fn whisper_download_model(
+    app_handle: tauri::AppHandle,
+    model_name: String,
+) -> Result<(), String> {
     let engine = {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(engine) = engine {
         // Create progress callback that emits events
         let app_handle_clone = app_handle.clone();
         let model_name_clone = model_name.clone();
-        
+
         let progress_callback = Box::new(move |progress: u8| {
             log::info!("Download progress for {}: {}%", model_name_clone, progress);
-            
+
             // Emit download progress event
-            if let Err(e) = app_handle_clone.emit("model-download-progress", serde_json::json!({
-                "modelName": model_name_clone,
-                "progress": progress
-            })) {
+            if let Err(e) = app_handle_clone.emit(
+                "model-download-progress",
+                serde_json::json!({
+                    "modelName": model_name_clone,
+                    "progress": progress
+                }),
+            ) {
                 log::error!("Failed to emit download progress event: {}", e);
             }
         });
-        
-        let result = engine.download_model(&model_name, Some(progress_callback)).await;
-        
+
+        let result = engine
+            .download_model(&model_name, Some(progress_callback))
+            .await;
+
         match result {
             Ok(()) => {
                 // Emit completion event
-                if let Err(e) = app_handle.emit("model-download-complete", serde_json::json!({
-                    "modelName": model_name
-                })) {
+                if let Err(e) = app_handle.emit(
+                    "model-download-complete",
+                    serde_json::json!({
+                        "modelName": model_name
+                    }),
+                ) {
                     log::error!("Failed to emit download complete event: {}", e);
                 }
                 Ok(())
-            },
+            }
             Err(e) => {
                 // Emit error event
-                if let Err(emit_e) = app_handle.emit("model-download-error", serde_json::json!({
-                    "modelName": model_name,
-                    "error": e.to_string()
-                })) {
+                if let Err(emit_e) = app_handle.emit(
+                    "model-download-error",
+                    serde_json::json!({
+                        "modelName": model_name,
+                        "error": e.to_string()
+                    }),
+                ) {
                     log::error!("Failed to emit download error event: {}", emit_e);
                 }
                 Err(format!("Failed to download model: {}", e))
@@ -307,7 +367,9 @@ pub async fn whisper_cancel_download(model_name: String) -> Result<(), String> {
     };
 
     if let Some(engine) = engine {
-        engine.cancel_download(&model_name).await
+        engine
+            .cancel_download(&model_name)
+            .await
             .map_err(|e| format!("Failed to cancel download: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())
@@ -322,7 +384,9 @@ pub async fn whisper_delete_corrupted_model(model_name: String) -> Result<String
     };
 
     if let Some(engine) = engine {
-        engine.delete_model(&model_name).await
+        engine
+            .delete_model(&model_name)
+            .await
             .map_err(|e| format!("Failed to delete model: {}", e))
     } else {
         Err("Whisper engine not initialized".to_string())

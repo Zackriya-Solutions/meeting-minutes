@@ -607,7 +607,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
       return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
     };
 
-    const header = `# Transcript of the Meeting: ${meeting.id} - ${meetingTitle??meeting.title}\n\n`;
+    const header = `# Transcript of the Meeting: ${meeting.id} - ${meetingTitle ?? meeting.title}\n\n`;
     const date = `## Date: ${new Date(meeting.created_at).toLocaleDateString()}\n\n`;
     const fullTranscript = transcripts
       .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
@@ -990,7 +990,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
         {/* Right side - AI Summary */}
         <div className="flex-1 overflow-y-auto bg-white">
           <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
+            <div className=" items-center justify-between">
               <div className="flex-1">
                 <EditableTitle
                   title={meetingTitle}
@@ -1000,10 +1000,10 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                   onChange={handleTitleChange}
                 />
               </div>
-              <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center justify-center border-t w-full pt-4 gap-2 ">
                 <Button
                   variant="outline"
-                  size="sm"
+                  title={isSaving ? "Saving" : "Save Changes"}
                   onClick={() => {
                     Analytics.trackButtonClick('save_changes', 'meeting_details');
                     saveAllChanges();
@@ -1013,20 +1013,22 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                   {isSaving ? (
                     <>
                       <Loader2 className="animate-spin" />
-                      Saving...
+                      <span className='hidden md:inline'>
+                        Saving...
+                      </span>
                     </>
                   ) : (
                     <>
                       <Save />
-                      Save Changes
+                      <span className='hidden md:inline'>
+                        Save Changes
+                      </span>
                     </>
                   )}
                 </Button>
                 {
-
                   <Button
                     variant='outline'
-                    size={"sm"}
                     title='Copy Summary'
                     onClick={() => {
                       Analytics.trackButtonClick('copy_summary', 'meeting_details');
@@ -1036,7 +1038,9 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                     className='cursor-pointer'
                   >
                     <Copy />
-                    Copy summary
+                    <span className='hidden md:inline'>
+                      Copy summary
+                    </span>
                   </Button>
                 }
               </div>
