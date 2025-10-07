@@ -42,6 +42,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [meetingTitle, setMeetingTitle] = useState(meeting.title || '+ New Call');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isTitleDirty, setIsTitleDirty] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [summaryResponse, setSummaryResponse] = useState<SummaryResponse | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -412,6 +413,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
 
   const handleTitleChange = (newTitle: string) => {
     setMeetingTitle(newTitle);
+    setIsTitleDirty(true);  // Mark as dirty when user manually edits title
   };
 
   const getSummaryStatusMessage = (status: SummaryStatus) => {
@@ -741,6 +743,8 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
 
       console.log('Save meeting title success');
 
+      // Reset dirty flag after successful save
+      setIsTitleDirty(false);
 
       // Update meetings with new title
       const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
@@ -767,8 +771,10 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
   const saveAllChanges = async () => {
     setIsSaving(true);
     try {
-      // Save meeting title
-      await handleSaveMeetingTitle();
+      // Save meeting title only if changed
+      if (isTitleDirty) {
+        await handleSaveMeetingTitle();
+      }
 
       // Save BlockNote editor changes if dirty
       if (blockNoteSummaryRef.current?.isDirty) {
@@ -1003,6 +1009,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
               <div className="flex items-center justify-center border-t w-full pt-4 gap-2 ">
                 <Button
                   variant="outline"
+                  className={`${isTitleDirty || blockNoteSummaryRef.current?.isDirty ? 'bg-green-200' : ""}`}
                   title={isSaving ? "Saving" : "Save Changes"}
                   onClick={() => {
                     Analytics.trackButtonClick('save_changes', 'meeting_details');

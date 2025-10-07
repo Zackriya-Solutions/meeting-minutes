@@ -56,8 +56,6 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
-use crate::database::manager::DatabaseManager;
-use crate::state::AppState;
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
@@ -468,6 +466,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -508,12 +507,11 @@ pub fn run() {
                 });
             }
 
-            let db_manager = tauri::async_runtime::block_on(async {
-                DatabaseManager::new_from_app_handle(&_app.handle()).await
+            // Initialize database (handles first launch detection and conditional setup)
+            tauri::async_runtime::block_on(async {
+                database::setup::initialize_database_on_startup(&_app.handle()).await
             })
-            .expect("Failed to initialize Database manager");
-
-            _app.manage(AppState { db_manager });
+            .expect("Failed to initialize database");
 
             Ok(())
         })
@@ -582,7 +580,6 @@ pub fn run() {
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
-
             console_utils::show_console,
             console_utils::hide_console,
             console_utils::toggle_console,
@@ -651,6 +648,12 @@ pub fn run() {
             audio::permissions::check_screen_recording_permission_command,
             audio::permissions::request_screen_recording_permission_command,
             audio::permissions::trigger_system_audio_permission_command,
+            // Database import commands
+            database::commands::check_first_launch,
+            database::commands::select_legacy_database_path,
+            database::commands::detect_legacy_database,
+            database::commands::import_and_initialize_database,
+            database::commands::initialize_fresh_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
