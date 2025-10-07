@@ -53,7 +53,7 @@ use audio::{list_audio_devices, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);

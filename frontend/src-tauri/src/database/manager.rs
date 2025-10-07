@@ -1,4 +1,3 @@
-use log::info;
 use sqlx::{migrate::MigrateDatabase, Result, Sqlite, SqlitePool, Transaction};
 use std::fs;
 use std::path::Path;
