@@ -7,7 +7,7 @@ import { AISummary } from '@/components/AISummary';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { BlockNoteBlock } from '@/types';
-import { ModelConfig } from '@/components/ModelSettingsModal';
+import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '@/components/SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import {
@@ -62,7 +62,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string>('');
   const [meetings, setLocalMeetings] = useState<CurrentMeeting[]>([]);
-  const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
+  // const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
   const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings, serverAddress, startSummaryPolling } = useSidebar();
 
   // Ref for BlockNoteSummaryView to access its save method
@@ -826,15 +826,15 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
       });
 
       console.log('Save model config success');
-      setSettingsSaveSuccess(true);
       setModelConfig(payload);
+      toast.success("Summary settings Saved successfully")
 
       await Analytics.trackSettingsChanged('model_config', `${payload.provider}_${payload.model}`);
 
 
     } catch (error) {
       console.error('Failed to save model config:', error);
-      setSettingsSaveSuccess(false);
+      toast.error("Failed to save summary settings", { description: String(error) })
       if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -862,12 +862,12 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
 
 
       console.log('Save transcript config success');
-      setSettingsSaveSuccess(true);
+      toast.success("Transcript Settings saved successfully")
       const transcriptConfigToSave = updatedConfig || transcriptModelConfig;
       await Analytics.trackSettingsChanged('transcript_config', `${transcriptConfigToSave.provider}_${transcriptConfigToSave.model}`);
     } catch (error) {
       console.error('Failed to save transcript config:', error);
-      setSettingsSaveSuccess(false);
+      toast.error("Couldn't save transcripts settings", { description: String(error) })
       if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -933,7 +933,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                         <Button
                           variant="ghost"
                           size="icon"
-                          title="Settings"
+                          title="Summary Settings"
                         >
                           <Settings />
                         </Button>
@@ -944,25 +944,26 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                         <VisuallyHidden>
                           <DialogTitle>Model Settings</DialogTitle>
                         </VisuallyHidden>
-                        <SettingTabs
-                          modelConfig={modelConfig}
-                          setModelConfig={setModelConfig}
-                          onSave={handleSaveModelConfig}
-                          transcriptModelConfig={transcriptModelConfig}
-                          setTranscriptModelConfig={setTranscriptModelConfig}
-                          onSaveTranscript={handleSaveTranscriptConfig}
-                          setSaveSuccess={setSettingsSaveSuccess}
-                        />
-                        {settingsSaveSuccess !== null && (
-                          <DialogFooter>
-                            <MessageToast
-                              message={settingsSaveSuccess ? 'Settings saved successfully' : 'Failed to save settings'}
-                              type={settingsSaveSuccess ? 'success' : 'error'}
-                              show={settingsSaveSuccess !== null}
-                              setShow={() => setSettingsSaveSuccess(null)}
-                            />
-                          </DialogFooter>
-                        )}
+                        <ModelSettingsModal onSave={handleSaveModelConfig} modelConfig={modelConfig} setModelConfig={setModelConfig} />
+                        {/* <SettingTabs */}
+                        {/*   modelConfig={modelConfig} */}
+                        {/*   setModelConfig={setModelConfig} */}
+                        {/*   onSave={handleSaveModelConfig} */}
+                        {/*   transcriptModelConfig={transcriptModelConfig} */}
+                        {/*   setTranscriptModelConfig={setTranscriptModelConfig} */}
+                        {/*   onSaveTranscript={handleSaveTranscriptConfig} */}
+                        {/*   setSaveSuccess={setSettingsSaveSuccess} */}
+                        {/* /> */}
+                        {/* {settingsSaveSuccess !== null && ( */}
+                        {/*   <DialogFooter> */}
+                        {/*     <MessageToast */}
+                        {/*       message={settingsSaveSuccess ? 'Settings saved successfully' : 'Failed to save settings'} */}
+                        {/*       type={settingsSaveSuccess ? 'success' : 'error'} */}
+                        {/*       show={settingsSaveSuccess !== null} */}
+                        {/*       setShow={() => setSettingsSaveSuccess(null)} */}
+                        {/*     /> */}
+                        {/*   </DialogFooter> */}
+                        {/* )} */}
                       </DialogContent>
 
 
