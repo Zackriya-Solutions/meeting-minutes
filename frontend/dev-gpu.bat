@@ -25,84 +25,6 @@ echo   Meetily GPU-Accelerated Dev Mode
 echo ========================================
 echo.
 
-REM Detect GPU capabilities
-echo 🔍 Detecting GPU capabilities...
-
-set "GPU_FEATURES="
-set "GPU_DETECTED=0"
-
-REM Check for NVIDIA GPU
-where nvidia-smi >nul 2>&1
-if %errorlevel% equ 0 (
-    echo ✅ NVIDIA GPU detected
-    for /f "delims=" %%a in ('nvidia-smi --query-gpu^=name --format^=csv,noheader 2^>nul') do (
-        echo    %%a
-        goto :nvidia_detected
-    )
-    :nvidia_detected
-    REM Check if CUDA is installed
-    if defined CUDA_PATH (
-        set "GPU_FEATURES=cuda"
-        set "GPU_DETECTED=1"
-        echo    Building with CUDA acceleration
-    ) else (
-        echo    ⚠️  CUDA_PATH not set - falling back to CPU
-        echo    Install CUDA Toolkit to enable GPU acceleration
-        set "GPU_DETECTED=0"
-    )
-    goto :gpu_check_done
-)
-
-REM Check for Vulkan support (AMD/Intel GPUs)
-if exist "C:\VulkanSDK" (
-    echo ℹ️  Vulkan SDK detected
-    REM Check if required environment variables are set
-    if defined VULKAN_SDK (
-        if defined BLAS_INCLUDE_DIRS (
-            set "GPU_FEATURES=vulkan"
-            set "GPU_DETECTED=1"
-            echo    Building with Vulkan acceleration
-        ) else (
-            echo    ⚠️  BLAS_INCLUDE_DIRS not set - falling back to CPU
-            echo    Install OpenBLAS and set BLAS_INCLUDE_DIRS
-            set "GPU_DETECTED=0"
-        )
-    ) else (
-        echo    ⚠️  VULKAN_SDK not set - falling back to CPU
-        set "GPU_DETECTED=0"
-    )
-    goto :gpu_check_done
-)
-
-where vulkaninfo >nul 2>&1
-if %errorlevel% equ 0 (
-    echo ℹ️  Vulkan support detected
-    REM Check if required environment variables are set
-    if defined VULKAN_SDK (
-        if defined BLAS_INCLUDE_DIRS (
-            set "GPU_FEATURES=vulkan"
-            set "GPU_DETECTED=1"
-            echo    Building with Vulkan acceleration
-        ) else (
-            echo    ⚠️  BLAS_INCLUDE_DIRS not set - falling back to CPU
-            echo    Install OpenBLAS and set BLAS_INCLUDE_DIRS
-            set "GPU_DETECTED=0"
-        )
-    ) else (
-        echo    ⚠️  VULKAN_SDK not set - falling back to CPU
-        set "GPU_DETECTED=0"
-    )
-    goto :gpu_check_done
-)
-
-REM No GPU found
-if %GPU_DETECTED% equ 0 (
-    echo ℹ️  No GPU detected
-    echo    Building with CPU optimization (OpenBLAS)
-)
-
-:gpu_check_done
-
 echo.
 
 REM Kill any existing processes on port 3118
@@ -192,22 +114,14 @@ if %USE_PNPM% equ 0 (
     )
 )
 
-REM Run tauri dev with GPU features using npm/pnpm
-if "%GPU_FEATURES%" == "" (
-    echo    Running: tauri dev
-    if %USE_PNPM% equ 1 (
-        pnpm tauri dev
-    ) else (
-        npm run tauri dev
-    )
+REM Run tauri dev using npm scripts (which handle GPU detection automatically)
+echo    Starting complete Tauri application with automatic GPU detection...
+echo.
+
+if %USE_PNPM% equ 1 (
+    pnpm run tauri:dev
 ) else (
-    echo    Running: tauri dev (features: %GPU_FEATURES%)
-    set CARGO_BUILD_FEATURES=--features %GPU_FEATURES%
-    if %USE_PNPM% equ 1 (
-        pnpm tauri dev -- -- --features %GPU_FEATURES%
-    ) else (
-        npm run tauri dev -- -- --features %GPU_FEATURES%
-    )
+    npm run tauri:dev
 )
 
 if errorlevel 1 (

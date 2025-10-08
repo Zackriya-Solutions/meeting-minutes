@@ -27,53 +27,6 @@ echo   Meetily GPU-Accelerated Build
 echo ========================================
 echo.
 
-REM Detect GPU capabilities
-echo 🔍 Detecting GPU capabilities...
-
-set "GPU_FEATURES="
-set "GPU_DETECTED=0"
-
-REM Check for NVIDIA GPU
-where nvidia-smi >nul 2>&1
-if %errorlevel% equ 0 (
-    echo ✅ NVIDIA GPU detected
-    for /f "delims=" %%a in ('nvidia-smi --query-gpu^=name --format^=csv,noheader 2^>nul') do (
-        echo    %%a
-        goto :nvidia_detected
-    )
-    :nvidia_detected
-    set "GPU_FEATURES=cuda"
-    set "GPU_DETECTED=1"
-    echo    Building with CUDA acceleration
-    goto :gpu_check_done
-)
-
-REM Check for Vulkan support (AMD/Intel GPUs)
-if exist "C:\VulkanSDK" (
-    echo ⚠️  Vulkan SDK detected (AMD/Intel GPU)
-    set "GPU_FEATURES=vulkan"
-    set "GPU_DETECTED=1"
-    echo    Building with Vulkan acceleration
-    goto :gpu_check_done
-)
-
-where vulkaninfo >nul 2>&1
-if %errorlevel% equ 0 (
-    echo ⚠️  Vulkan detected (AMD/Intel GPU)
-    set "GPU_FEATURES=vulkan"
-    set "GPU_DETECTED=1"
-    echo    Building with Vulkan acceleration
-    goto :gpu_check_done
-)
-
-REM No GPU found
-if %GPU_DETECTED% equ 0 (
-    echo ⚠️  No GPU detected
-    echo    Building with CPU optimization (OpenBLAS)
-)
-
-:gpu_check_done
-
 echo.
 
 REM Kill any existing processes on port 3118
@@ -129,28 +82,48 @@ echo.
 echo 📦 Building Meetily...
 echo.
 
-REM Find Cargo.toml location
-if exist "src-tauri\Cargo.toml" (
-    echo    Found Cargo.toml in src-tauri
-    cd src-tauri
-) else if exist "frontend\src-tauri\Cargo.toml" (
-    echo    Found Cargo.toml in frontend\src-tauri
-    cd frontend\src-tauri
-) else if exist "Cargo.toml" (
-    echo    Found Cargo.toml in current directory
+REM Find package.json location
+if exist "package.json" (
+    echo    Found package.json in current directory
+) else if exist "frontend\package.json" (
+    echo    Found package.json in frontend directory
+    cd frontend
 ) else (
-    echo    ❌ Error: Could not find Cargo.toml
+    echo    ❌ Error: Could not find package.json
     echo    Make sure you're in the project root or frontend directory
     exit /b 1
 )
 
-REM Build based on GPU detection
-if "%GPU_FEATURES%" == "" (
-    echo    Building with default features (OpenBLAS CPU optimization)
-    cargo build --release
+REM Check if pnpm or npm is available
+where pnpm >nul 2>&1
+if %errorlevel% equ 0 (
+    set "USE_PNPM=1"
 ) else (
-    echo    Building with GPU features: %GPU_FEATURES%
-    cargo build --release --features %GPU_FEATURES%
+    set "USE_PNPM=0"
+)
+
+where npm >nul 2>&1
+if %errorlevel% equ 0 (
+    set "USE_NPM=1"
+) else (
+    set "USE_NPM=0"
+)
+
+if %USE_PNPM% equ 0 (
+    if %USE_NPM% equ 0 (
+        echo    ❌ Error: Neither npm nor pnpm found
+        exit /b 1
+    )
+)
+
+REM Build using npm scripts (which handle GPU detection automatically)
+echo    Building complete Tauri application with automatic GPU detection...
+echo.
+
+if %USE_PNPM% equ 1 (
+    pnpm run tauri:build
+) else (
+    npm run tauri:build
 )
 
 if errorlevel 1 (
@@ -164,15 +137,7 @@ echo ========================================
 echo ✅ Build completed successfully!
 echo ========================================
 echo.
-echo Build configuration:
-echo   OS: Windows
-if "%GPU_FEATURES%" == "" (
-    echo   Features: default (CPU optimized with OpenBLAS)
-) else (
-    echo   Features: %GPU_FEATURES%
-)
-echo.
-echo 🎉 You can now run Meetily with GPU acceleration!
+echo 🎉 Complete Tauri application built with GPU acceleration!
 echo.
 exit /b 0
 
