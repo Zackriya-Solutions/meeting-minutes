@@ -56,11 +56,16 @@ export default function MeetingDetails() {
   }, [currentMeeting?.id]);
 
   useEffect(() => {
+    console.log('🔍 MeetingDetails useEffect triggered - currentMeeting:', currentMeeting);
+
     if (!currentMeeting?.id || currentMeeting.id === 'intro-call') {
+      console.warn('⚠️ No valid meeting selected - currentMeeting:', currentMeeting);
       setError("No meeting selected");
       Analytics.trackPageView('meeting_details');
       return;
     }
+
+    console.log('✅ Valid meeting found, fetching details for:', currentMeeting.id);
 
     setMeetingDetails(null);
     setMeetingSummary(null);
@@ -74,9 +79,9 @@ export default function MeetingDetails() {
 
         console.log('🔍 FETCH SUMMARY: Raw response:', summary);
 
-        // Check if the summary request failed with 404 or error status
-        if (summary.status === 'error' || summary.error) {
-          console.warn('Meeting summary not found or error occurred:', summary.error);
+        // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
+        if (summary.status === 'error' || summary.error || summary.status === 'idle') {
+          console.warn('Meeting summary not found, error occurred, or no summary generated yet:', summary.error || 'idle');
           setMeetingSummary(sampleSummary);
           return;
         }
