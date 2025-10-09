@@ -1,9 +1,9 @@
 "use client"
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
@@ -23,8 +23,10 @@ const sampleSummary: Summary = {
   main_topics: { title: "Main Topics", blocks: [] }
 };
 
-export default function MeetingDetails() {
-  const { currentMeeting, serverAddress, refetchMeetings } = useSidebar();
+function MeetingDetailsContent() {
+  const searchParams = useSearchParams();
+  const meetingId = searchParams.get('id');
+  const { setCurrentMeeting, refetchMeetings } = useSidebar();
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
@@ -32,40 +34,43 @@ export default function MeetingDetails() {
 
   // Extract fetchMeetingDetails so it can be called from child components
   const fetchMeetingDetails = useCallback(async () => {
-    if (!currentMeeting?.id || currentMeeting.id === 'intro-call') {
+    if (!meetingId || meetingId === 'intro-call') {
       return;
     }
 
     try {
       const data = await invoke('api_get_meeting', {
-        meetingId: currentMeeting.id,
+        meetingId: meetingId,
       }) as any;
       console.log('Meeting details:', data);
       setMeetingDetails(data);
+
+      // Sync with sidebar context
+      setCurrentMeeting({ id: data.id, title: data.title });
     } catch (error) {
       console.error('Error fetching meeting details:', error);
       setError("Failed to load meeting details");
     }
-  }, [currentMeeting?.id]);
+  }, [meetingId, setCurrentMeeting]);
 
-  // Reset states when currentMeeting changes
+  // Reset states when meetingId changes
   useEffect(() => {
     setMeetingDetails(null);
     setMeetingSummary(null);
     setError(null);
-  }, [currentMeeting?.id]);
+  }, [meetingId]);
 
   useEffect(() => {
-    console.log('🔍 MeetingDetails useEffect triggered - currentMeeting:', currentMeeting);
+    console.log('🔍 MeetingDetails useEffect triggered - meetingId:', meetingId);
 
-    if (!currentMeeting?.id || currentMeeting.id === 'intro-call') {
-      console.warn('⚠️ No valid meeting selected - currentMeeting:', currentMeeting);
+    if (!meetingId || meetingId === 'intro-call') {
+      console.warn('⚠️ No valid meeting ID in URL - meetingId:', meetingId);
       setError("No meeting selected");
       Analytics.trackPageView('meeting_details');
       return;
     }
 
-    console.log('✅ Valid meeting found, fetching details for:', currentMeeting.id);
+    console.log('✅ Valid meeting ID found, fetching details for:', meetingId);
 
     setMeetingDetails(null);
     setMeetingSummary(null);
@@ -74,7 +79,7 @@ export default function MeetingDetails() {
     const fetchMeetingSummary = async () => {
       try {
         const summary = await invoke('api_get_summary', {
-          meetingId: currentMeeting.id,
+          meetingId: meetingId,
         }) as any;
 
         console.log('🔍 FETCH SUMMARY: Raw response:', summary);
@@ -175,23 +180,23 @@ export default function MeetingDetails() {
 
     fetchMeetingDetails();
     fetchMeetingSummary();
-  }, [currentMeeting?.id, serverAddress, fetchMeetingDetails]);
+  }, [meetingId, fetchMeetingDetails]);
 
-  // if (error) {
-  //   return (
-  //     <div className="flex items-center justify-center h-screen">
-  //       <div className="text-center">
-  //         <p className="text-red-500 mb-4">{error}</p>
-  //         <button
-  //           onClick={() => router.push('/')}
-  //           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-  //         >
-  //           Go Back
-  //         </button>
-  //       </div>
-  //     </div>
-  //   );
-  // }
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-red-500 mb-4">{error}</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!meetingDetails || !meetingSummary) {
     return <div className="flex items-center justify-center h-screen">
@@ -209,4 +214,16 @@ export default function MeetingDetails() {
       await refetchMeetings();
     }}
   />;
+}
+
+export default function MeetingDetails() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-screen">
+        <LoaderIcon className="animate-spin size-6" />
+      </div>
+    }>
+      <MeetingDetailsContent />
+    </Suspense>
+  );
 }

@@ -10,6 +10,8 @@ import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { LanguageSelection } from '@/components/LanguageSelection';
+import { PermissionWarning } from '@/components/PermissionWarning';
+import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -83,6 +85,9 @@ export default function Home() {
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
+
+  // Permission check hook
+  const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -804,7 +809,7 @@ export default function Home() {
         console.log('Setting current meeting and navigating to details page');
         setCurrentMeeting({ id: meetingId, title: meetingTitle });
         setIsMeetingActive(false);
-        router.push('/meeting-details');
+        router.push(`/meeting-details?id=${meetingId}`);
       }
       setIsMeetingActive(false);
       // isRecordingState already set to false at function start
@@ -1441,6 +1446,18 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* Permission Warning */}
+          {!isRecording && !isCheckingPermissions && (
+            <div className="px-4 pt-4">
+              <PermissionWarning
+                hasMicrophone={hasMicrophone}
+                hasSystemAudio={hasSystemAudio}
+                onRecheck={checkPermissions}
+                isRechecking={isCheckingPermissions}
+              />
+            </div>
+          )}
 
           {/* Transcript content */}
           <div className="flex-1 overflow-y-auto pb-32">

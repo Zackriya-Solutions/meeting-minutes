@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { Play, Pause, Square, Mic } from 'lucide-react';
+import { Play, Pause, Square, Mic, AlertCircle, X } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -50,7 +50,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [transcriptionErrors, setTranscriptionErrors] = useState(0);
   const [isValidatingModel, setIsValidatingModel] = useState(false);
   const [speechDetected, setSpeechDetected] = useState(false);
-
+  const [deviceError, setDeviceError] = useState<{title: string, message: string} | null>(null);
 
   const currentTime = 0;
   const duration = 0;
@@ -144,7 +144,32 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         name: error instanceof Error ? error.name : 'Unknown',
         stack: error instanceof Error ? error.stack : undefined
       });
-      alert('Failed to start recording. Please check the console for details.');
+
+      // Parse error message to provide user-friendly feedback
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Check for device-related errors
+      if (errorMsg.includes('microphone') || errorMsg.includes('mic') || errorMsg.includes('input')) {
+        setDeviceError({
+          title: 'Microphone Not Available',
+          message: 'Unable to access your microphone. Please check that:\n• Your microphone is connected\n• The app has microphone permissions\n• No other app is using the microphone'
+        });
+      } else if (errorMsg.includes('system audio') || errorMsg.includes('speaker') || errorMsg.includes('output')) {
+        setDeviceError({
+          title: 'System Audio Not Available',
+          message: 'Unable to capture system audio. Please check that:\n• A virtual audio device (like BlackHole) is installed\n• The app has screen recording permissions (macOS)\n• System audio is properly configured'
+        });
+      } else if (errorMsg.includes('permission')) {
+        setDeviceError({
+          title: 'Permission Required',
+          message: 'Recording permissions are required. Please:\n• Grant microphone access in System Settings\n• Grant screen recording access for system audio (macOS)\n• Restart the app after granting permissions'
+        });
+      } else {
+        setDeviceError({
+          title: 'Recording Failed',
+          message: 'Unable to start recording. Please check your audio device settings and try again.'
+        });
+      }
     } finally {
       setIsStarting(false);
       setIsValidatingModel(false);
@@ -515,6 +540,30 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         <div className="text-xs text-gray-600 text-center mt-2">
           Validating speech recognition...
         </div>
+      )}
+
+      {/* Device error alert */}
+      {deviceError && (
+        <Alert variant="destructive" className="mt-4 border-red-300 bg-red-50">
+          <AlertCircle className="h-5 w-5 text-red-600" />
+          <button
+            onClick={() => setDeviceError(null)}
+            className="absolute right-3 top-3 text-red-600 hover:text-red-800 transition-colors"
+            aria-label="Close alert"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <AlertTitle className="text-red-800 font-semibold mb-2">
+            {deviceError.title}
+          </AlertTitle>
+          <AlertDescription className="text-red-700">
+            {deviceError.message.split('\n').map((line, i) => (
+              <div key={i} className={i > 0 ? 'ml-2' : ''}>
+                {line}
+              </div>
+            ))}
+          </AlertDescription>
+        </Alert>
       )}
 
             {/* {showPlayback && recordingPath && (

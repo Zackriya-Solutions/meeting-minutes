@@ -468,10 +468,10 @@ const Sidebar: React.FC = () => {
               if (isDisabled) {
                 return;
               }
-              
+
               setCurrentMeeting({ id: item.id, title: item.title });
-              const basePath = item.id.startsWith('intro-call') ? '/' : 
-                item.id.includes('-') ? '/meeting-details' : `/notes/${item.id}`;
+              const basePath = item.id.startsWith('intro-call') ? '/' :
+                item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
               router.push(basePath);
             }
           }}
