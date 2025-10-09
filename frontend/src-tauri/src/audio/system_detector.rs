@@ -1,8 +1,5 @@
-
-
 #[cfg(target_os = "macos")]
 use std::time::Duration;
-use std::time::Instant;
 
 #[cfg(target_os = "macos")]
 use cidre::{core_audio as ca, os};
@@ -33,7 +30,12 @@ pub struct BackgroundTask {
 impl BackgroundTask {
     pub fn start<F>(&mut self, task: F)
     where
-        F: FnOnce(std::sync::Arc<std::sync::atomic::AtomicBool>, tokio::sync::oneshot::Receiver<()>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static,
+        F: FnOnce(
+                std::sync::Arc<std::sync::atomic::AtomicBool>,
+                tokio::sync::oneshot::Receiver<()>,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            + Send
+            + 'static,
     {
         if self.handle.is_some() {
             return; // Already running

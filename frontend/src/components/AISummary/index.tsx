@@ -25,21 +25,28 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   };
 
   const ensureUniqueBlockIds = (summary: Summary): Summary => {
-    const updatedSummary = { ...summary };
-    
-    Object.entries(updatedSummary).forEach(([sectionKey, section]) => {
+    // Deep clone to avoid mutating readonly props
+    const updatedSummary: Summary = {};
+
+    Object.entries(summary).forEach(([sectionKey, section]) => {
       // Ensure section has blocks array before mapping
       if (section && Array.isArray(section.blocks)) {
-        section.blocks = section.blocks.map(block => ({
-          ...block,
-          id: block.id.includes(sectionKey) ? block.id : generateUniqueId(sectionKey)
-        }));
+        updatedSummary[sectionKey] = {
+          ...section,
+          blocks: section.blocks.map(block => ({
+            ...block,
+            id: block.id.includes(sectionKey) ? block.id : generateUniqueId(sectionKey)
+          }))
+        };
       } else {
         // Initialize empty blocks array if missing or invalid
-        section.blocks = [];
+        updatedSummary[sectionKey] = {
+          title: section?.title || sectionKey,
+          blocks: []
+        };
       }
     });
-    
+
     return updatedSummary;
   };
 

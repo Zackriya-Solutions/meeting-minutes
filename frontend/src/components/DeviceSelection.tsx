@@ -185,18 +185,19 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-medium text-gray-900">Audio Devices</h4>
         <div className="flex items-center space-x-2">
-          <button
-            onClick={toggleAudioLevelMonitoring}
-            disabled={disabled || inputDevices.length === 0}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              isMonitoring
-                ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                : 'bg-green-100 text-green-700 hover:bg-green-200'
-            } disabled:pointer-events-none disabled:opacity-50`}
-            title={inputDevices.length === 0 ? 'No microphones available to test' : ''}
-          >
-            {isMonitoring ? 'Stop Test' : 'Test Mic'}
-          </button>
+          {/* TODO: Monitoring */}
+          {/* <button */}
+          {/*   onClick={toggleAudioLevelMonitoring} */}
+          {/*   disabled={disabled || inputDevices.length === 0} */}
+          {/*   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${ */}
+          {/*     isMonitoring */}
+          {/*       ? 'bg-red-100 text-red-700 hover:bg-red-200' */}
+          {/*       : 'bg-green-100 text-green-700 hover:bg-green-200' */}
+          {/*   } disabled:pointer-events-none disabled:opacity-50`} */}
+          {/*   title={inputDevices.length === 0 ? 'No microphones available to test' : ''} */}
+          {/* > */}
+          {/*   {isMonitoring ? 'Stop Test' : 'Test Mic'} */}
+          {/* </button> */}
           <button
             onClick={handleRefresh}
             disabled={refreshing || disabled}

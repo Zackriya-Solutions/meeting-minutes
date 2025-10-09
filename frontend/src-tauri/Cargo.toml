@@ -127,6 +127,8 @@ ringbuf = "0.3"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
+
 # Common Tauri configuration
 tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
 tauri-plugin-fs = "2.4.0"

@@ -20,6 +20,9 @@ import { useRouter } from 'next/navigation';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
+import { Button } from '@/components/ui/button';
+import { Copy, GlobeIcon } from 'lucide-react';
+import { MicrophoneIcon } from '@heroicons/react/24/outline';
 
 
 
@@ -81,16 +84,16 @@ export default function Home() {
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
 
-  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording , serverAddress} = useSidebar();
+  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
   const router = useRouter();
-  
+
   // Ref for final buffer flush functionality
   const finalFlushRef = useRef<(() => void) | null>(null);
-  
+
   // Ref to avoid stale closure issues with transcripts
   const transcriptsRef = useRef<Transcript[]>(transcripts);
-  
+
   // Keep ref updated with current transcripts
   useEffect(() => {
     transcriptsRef.current = transcripts;
@@ -152,12 +155,12 @@ export default function Home() {
 
   useEffect(() => {
     setCurrentMeeting({ id: 'intro-call', title: meetingTitle });
-    
+
   }, [meetingTitle, setCurrentMeeting]);
 
   useEffect(() => {
     console.log('Setting up recording state check effect, current isRecording:', isRecording);
-    
+
     const checkRecordingState = async () => {
       try {
         console.log('checkRecordingState called');
@@ -165,7 +168,7 @@ export default function Home() {
         console.log('About to call is_recording command');
         const isCurrentlyRecording = await invoke('is_recording');
         console.log('checkRecordingState: backend recording =', isCurrentlyRecording, 'UI recording =', isRecording);
-        
+
         if (isCurrentlyRecording && !isRecording) {
           console.log('Recording is active in backend but not in UI, synchronizing state...');
           setIsRecordingState(true);
@@ -184,10 +187,10 @@ export default function Home() {
     if (typeof window !== 'undefined' && (window as any).__TAURI__) {
       console.log('Tauri is available, starting state check');
       checkRecordingState();
-      
+
       // Set up a polling interval to periodically check recording state
       const interval = setInterval(checkRecordingState, 1000); // Check every 1 second
-      
+
       return () => {
         console.log('Cleaning up recording state check interval');
         clearInterval(interval);
@@ -196,7 +199,7 @@ export default function Home() {
       console.log('Tauri is not available, skipping state check');
     }
   }, [setIsMeetingActive]);
-  
+
 
 
   useEffect(() => {
@@ -214,7 +217,7 @@ export default function Home() {
       return () => clearInterval(interval);
     }
   }, [isRecording]);
-  
+
   // Update sidebar recording state when local recording state changes
   useEffect(() => {
     setSidebarIsRecording(isRecording);
@@ -229,7 +232,7 @@ export default function Home() {
 
     const processBufferedTranscripts = (forceFlush = false) => {
       const sortedTranscripts: Transcript[] = [];
-      
+
       // Process all available sequential transcripts
       let nextSequence = lastProcessedSequence + 1;
       while (transcriptBuffer.has(nextSequence)) {
@@ -247,7 +250,7 @@ export default function Home() {
       const staleTranscripts: Transcript[] = [];
       const recentTranscripts: Transcript[] = [];
       const forceFlushTranscripts: Transcript[] = [];
-      
+
       for (const [sequenceId, transcript] of transcriptBuffer.entries()) {
         if (forceFlush) {
           // Force flush mode: process ALL remaining transcripts regardless of timing
@@ -268,7 +271,7 @@ export default function Home() {
           }
         }
       }
-      
+
       // Sort both stale and recent transcripts by chunk_start_time, then by sequence_id
       const sortTranscripts = (transcripts: Transcript[]) => {
         return transcripts.sort((a, b) => {
@@ -283,28 +286,28 @@ export default function Home() {
       const sortedForceFlushTranscripts = sortTranscripts(forceFlushTranscripts);
 
       const allNewTranscripts = [...sortedTranscripts, ...sortedRecentTranscripts, ...sortedStaleTranscripts, ...sortedForceFlushTranscripts];
-      
+
       if (allNewTranscripts.length > 0) {
         setTranscripts(prev => {
           // Create a set of existing sequence_ids for deduplication
           const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-          
+
           // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript => 
+          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
             transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
           );
-          
+
           // Only combine if we have unique new transcripts
           if (uniqueNewTranscripts.length === 0) {
             console.log('No unique transcripts to add - all were duplicates');
             return prev; // No new unique transcripts to add
           }
-          
+
           console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
-          
+
           // Merge with existing transcripts, maintaining chronological order
           const combined = [...prev, ...uniqueNewTranscripts];
-          
+
           // Sort by chunk_start_time first, then by sequence_id
           return combined.sort((a, b) => {
             const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
@@ -312,9 +315,9 @@ export default function Home() {
             return (a.sequence_id || 0) - (b.sequence_id || 0);
           });
         });
-        
+
         // Log the processing summary
-        const logMessage = forceFlush 
+        const logMessage = forceFlush
           ? `Force flush processed ${allNewTranscripts.length} transcripts (${sortedTranscripts.length} sequential, ${forceFlushTranscripts.length} forced)`
           : `Processed ${allNewTranscripts.length} transcripts (${sortedTranscripts.length} sequential, ${recentTranscripts.length} recent, ${staleTranscripts.length} stale)`;
         console.log(logMessage);
@@ -337,7 +340,7 @@ export default function Home() {
             received_at: new Date(now).toISOString(),
             buffer_size_before: transcriptBuffer.size
           });
-          
+
           // Check for duplicate sequence_id before processing
           if (transcriptBuffer.has(event.payload.sequence_id)) {
             console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', event.payload.sequence_id);
@@ -434,7 +437,7 @@ export default function Home() {
     const setupTranscriptionErrorListener = async () => {
       try {
         console.log('Setting up transcription-error listener...');
-        unlistenFn = await listen<{error: string, userMessage: string, actionable: boolean}>('transcription-error', (event) => {
+        unlistenFn = await listen<{ error: string, userMessage: string, actionable: boolean }>('transcription-error', (event) => {
           console.log('Transcription error received:', event.payload);
           const { userMessage, actionable } = event.payload;
 
@@ -510,7 +513,7 @@ export default function Home() {
   const handleRecordingStart = async () => {
     try {
       console.log('handleRecordingStart called - setting up meeting title and state');
-      
+
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -534,7 +537,7 @@ export default function Home() {
       Analytics.trackButtonClick('start_recording_error', 'home_page');
     }
   };
-  
+
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
     const checkAutoStartRecording = async () => {
@@ -543,11 +546,11 @@ export default function Home() {
         if (shouldAutoStart === 'true' && !isRecording && !isMeetingActive) {
           console.log('Auto-starting recording from navigation...');
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
-          
+
           // Start the actual backend recording
           try {
             const { invoke } = await import('@tauri-apps/api/core');
-            
+
             // Generate meeting title
             const now = new Date();
             const day = String(now.getDate()).padStart(2, '0');
@@ -557,7 +560,7 @@ export default function Home() {
             const minutes = String(now.getMinutes()).padStart(2, '0');
             const seconds = String(now.getSeconds()).padStart(2, '0');
             const generatedMeetingTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
-            
+
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
             const result = await invoke('start_recording_with_devices_and_meeting', {
               mic_device_name: selectedDevices?.micDevice || null,
@@ -565,7 +568,7 @@ export default function Home() {
               meeting_name: generatedMeetingTitle
             });
             console.log('Auto-start backend recording result:', result);
-            
+
             // Update UI state after successful backend start
             setMeetingTitle(generatedMeetingTitle);
             setIsRecordingState(true);
@@ -580,7 +583,7 @@ export default function Home() {
         }
       }
     };
-    
+
     checkAutoStartRecording();
   }, [isRecording, isMeetingActive, selectedDevices]);
 
@@ -589,15 +592,15 @@ export default function Home() {
       console.log('Stopping recording...');
       const { invoke } = await import('@tauri-apps/api/core');
       const { appDataDir } = await import('@tauri-apps/api/path');
-      
+
       const dataDir = await appDataDir();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const transcriptPath = `${dataDir}transcript-${timestamp}.txt`;
       const audioPath = `${dataDir}recording-${timestamp}.wav`;
 
       // Stop recording and save audio
-      await invoke('stop_recording', { 
-        args: { 
+      await invoke('stop_recording', {
+        args: {
           save_path: audioPath,
           model_config: modelConfig
         }
@@ -619,7 +622,7 @@ export default function Home() {
       // console.log('Transcript saved to:', transcriptPath);
 
       setIsRecordingState(false);
-      
+
       // Show summary button if we have transcript content
       if (formattedTranscript.trim()) {
         setShowSummary(true);
@@ -657,50 +660,50 @@ export default function Home() {
       // Note: stop_recording is already called by RecordingControls.stopRecordingAction
       // This function only handles post-stop processing (transcription wait, API call, navigation)
       console.log('Recording already stopped by RecordingControls, processing transcription...');
-   
+
       // Wait for transcription to complete
       setSummaryStatus('processing');
       console.log('Waiting for transcription to complete...');
-      
+
       const MAX_WAIT_TIME = 60000; // 60 seconds maximum wait (increased for longer processing)
       const POLL_INTERVAL = 500; // Check every 500ms
       let elapsedTime = 0;
       let transcriptionComplete = false;
-      
+
       // Listen for transcription-complete event
       const unlistenComplete = await listen('transcription-complete', () => {
         console.log('Received transcription-complete event');
         transcriptionComplete = true;
       });
-      
+
       // Removed LATE transcript listener - relying on main buffered transcript system instead
-      
+
       // Poll for transcription status
       while (elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
         try {
-          const status = await invoke<{chunks_in_queue: number, is_processing: boolean, last_activity_ms: number}>('get_transcription_status');
+          const status = await invoke<{ chunks_in_queue: number, is_processing: boolean, last_activity_ms: number }>('get_transcription_status');
           console.log('Transcription status:', status);
-          
+
           // Check if transcription is complete
           if (!status.is_processing && status.chunks_in_queue === 0) {
             console.log('Transcription complete - no active processing and no chunks in queue');
             transcriptionComplete = true;
             break;
           }
-          
+
           // If no activity for more than 8 seconds and no chunks in queue, consider it done (increased from 5s to 8s)
           if (status.last_activity_ms > 8000 && status.chunks_in_queue === 0) {
             console.log('Transcription likely complete - no recent activity and empty queue');
             transcriptionComplete = true;
             break;
           }
-          
+
           // Update user with current status
           if (status.chunks_in_queue > 0) {
             console.log(`Processing ${status.chunks_in_queue} remaining audio chunks...`);
             setSummaryStatus('processing');
           }
-          
+
           // Wait before next check
           await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
           elapsedTime += POLL_INTERVAL;
@@ -709,11 +712,11 @@ export default function Home() {
           break;
         }
       }
-      
+
       // Clean up listener
       console.log('🧹 CLEANUP: Cleaning up transcription-complete listener');
       unlistenComplete();
-      
+
       if (!transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
         console.warn('⏰ Transcription wait timeout reached after', elapsedTime, 'ms');
       } else {
@@ -722,9 +725,9 @@ export default function Home() {
         console.log('⏳ Waiting for late transcript segments...');
         await new Promise(resolve => setTimeout(resolve, 4000));
       }
-      
+
       // LATE transcript listener removed - no cleanup needed
-      
+
       // Final buffer flush: process ALL remaining transcripts regardless of timing
       const flushStartTime = Date.now();
       console.log('🔄 Final buffer flush: forcing processing of any remaining transcripts...', {
@@ -743,7 +746,7 @@ export default function Home() {
       } else {
         console.log('⚠️ Final flush function not available');
       }
-      
+
       setSummaryStatus('idle');
 
       // Wait a bit more to ensure all transcript state updates have been processed
@@ -758,18 +761,18 @@ export default function Home() {
 
         // Fix stale closure issue: Use ref to get fresh transcript state
         console.log('🔄 Solving stale closure - getting fresh transcript state at save time...');
-        
+
         // // Force final buffer flush to capture any remaining transcripts
         // if (finalFlushRef.current) {
         //   finalFlushRef.current();
         // }
-        
+
         // // Wait a moment for any final state updates to propagate
         // await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // Get fresh transcript state using ref (avoids stale closure)
         const freshTranscripts = [...transcriptsRef.current];
-        
+
         console.log('💾 Saving transcript to database with fresh state...', {
           fresh_transcript_count: freshTranscripts.length,
           sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
@@ -789,14 +792,14 @@ export default function Home() {
           console.error('No meeting_id in response:', responseData);
           throw new Error('No meeting ID received from save operation');
         }
-        
+
         console.log('Successfully saved transcript with meeting ID:', meetingId);
         setMeetings([{ id: meetingId, title: meetingTitle }, ...meetings]);
-        
+
         // Wait a moment to ensure backend has fully processed the save
         console.log('Waiting for backend processing to complete...');
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         // Set current meeting and navigate
         console.log('Setting current meeting and navigating to details page');
         setCurrentMeeting({ id: meetingId, title: meetingTitle });
@@ -828,17 +831,17 @@ export default function Home() {
       timestamp: update.timestamp,
       is_partial: update.is_partial
     });
-    
+
     const newTranscript = {
       id: update.sequence_id ? update.sequence_id.toString() : Date.now().toString(),
       text: update.text,
       timestamp: update.timestamp,
       sequence_id: update.sequence_id || 0,
     };
-    
+
     setTranscripts(prev => {
       console.log('📊 Current transcripts count before update:', prev.length);
-      
+
       // Check if this transcript already exists
       const exists = prev.some(
         t => t.text === update.text && t.timestamp === update.timestamp
@@ -847,18 +850,18 @@ export default function Home() {
         console.log('🚫 Duplicate transcript detected, skipping:', update.text.substring(0, 30) + '...');
         return prev;
       }
-      
+
       // Add new transcript and sort by sequence_id to maintain order
       const updated = [...prev, newTranscript];
       const sorted = updated.sort((a, b) => (a.sequence_id || 0) - (b.sequence_id || 0));
-      
+
       console.log('✅ Added new transcript. New count:', sorted.length);
       console.log('📝 Latest transcript:', {
         id: newTranscript.id,
         text: newTranscript.text.substring(0, 30) + '...',
         sequence_id: newTranscript.sequence_id
       });
-      
+
       return sorted;
     });
   };
@@ -872,12 +875,12 @@ export default function Home() {
       if (!fullTranscript.trim()) {
         throw new Error('No transcript text available. Please add some text first.');
       }
-      
+
       // Store the original transcript for regeneration
       setOriginalTranscript(fullTranscript);
-      
+
       console.log('Generating summary for transcript length:', fullTranscript.length);
-      
+
       // Process transcript and get process_id
       console.log('Processing transcript...');
       const result = await invoke('api_process_transcript', {
@@ -891,7 +894,7 @@ export default function Home() {
 
       const process_id = result.process_id;
       console.log('Process ID:', process_id);
-   
+
 
       // Poll for summary status
       const pollInterval = setInterval(async () => {
@@ -910,10 +913,10 @@ export default function Home() {
 
           if (result.status === 'completed' && result.data) {
             clearInterval(pollInterval);
-            
+
             // Remove MeetingName from data before formatting
             const { MeetingName, ...summaryData } = result.data;
-            
+
             // Update meeting title if available
             if (MeetingName) {
               setMeetingTitle(MeetingName);
@@ -950,7 +953,7 @@ export default function Home() {
 
       // Cleanup interval on component unmount
       return () => clearInterval(pollInterval);
-      
+
     } catch (error) {
       console.error('Failed to generate summary:', error);
       if (error instanceof Error) {
@@ -1007,10 +1010,10 @@ export default function Home() {
       // Generate filename
       const sanitizedTitle = meetingTitle.replace(/[^a-zA-Z0-9]/g, '_');
       const filename = `${sanitizedTitle}_transcript.json`;
-      
+
       // Get download directory path
       const downloadPath = await downloadDir();
-      
+
       // Write file to downloads directory
       await writeTextFile(`${downloadPath}/${filename}`, JSON.stringify(transcriptData, null, 2));
 
@@ -1029,7 +1032,7 @@ export default function Home() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      
+
       // Validate the uploaded file structure
       if (!data.transcripts || !Array.isArray(data.transcripts)) {
         throw new Error('Invalid transcript file format');
@@ -1038,7 +1041,7 @@ export default function Home() {
       // Update state with uploaded data
       setMeetingTitle(data.title || 'Uploaded Transcript');
       setTranscripts(data.transcripts);
-      
+
       // Generate summary for the uploaded transcript
       handleSummary(data.transcripts);
     } catch (error) {
@@ -1058,7 +1061,7 @@ export default function Home() {
 
     try {
       console.log('Regenerating summary with original transcript...');
-      
+
       // Process transcript and get process_id
       console.log('Processing transcript...');
       const result = await invoke('api_process_transcript', {
@@ -1089,10 +1092,10 @@ export default function Home() {
 
           if (result.status === 'completed' && result.data) {
             clearInterval(pollInterval);
-            
+
             // Remove MeetingName from data before formatting
             const { MeetingName, ...summaryData } = result.data;
-            
+
             // Update meeting title if available
             if (MeetingName) {
               setMeetingTitle(MeetingName);
@@ -1165,7 +1168,7 @@ export default function Home() {
       console.log('No transcripts available for summary');
       return;
     }
-    
+
     try {
       await generateAISummary(customPrompt);
     } catch (error) {
@@ -1187,7 +1190,7 @@ export default function Home() {
     handleRecordingStop2Ref.current = handleRecordingStop2;
     handleRecordingStartRef.current = handleRecordingStart;
   });
-  
+
   // Expose handleRecordingStop and handleRecordingStart functions to rust using refs for stale closure issues
   useEffect(() => {
     (window as any).handleRecordingStop = (callApi: boolean = true) => {
@@ -1199,7 +1202,7 @@ export default function Home() {
       delete (window as any).handleRecordingStop;
     };
   }, []);
-  
+
   useEffect(() => {
     // Honor saved model settings from backend (including OpenRouter)
     const fetchModelConfig = async () => {
@@ -1295,51 +1298,46 @@ export default function Home() {
         {/* Left side - Transcript */}
         <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-white flex flex-col relative">
           {/* Title area */}
-          <div className="p-4 border-b border-gray-200">
+          <div className="p-4  border-b border-gray-200">
             <div className="flex flex-col space-y-3">
-              <div className="flex flex-col space-y-2">
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={handleCopyTranscript}
-                    disabled={transcripts.length === 0}
-                    className={`px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm ${
-                      transcripts.length === 0
-                        ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 active:bg-blue-200'
-                    }`}
-                    title={transcripts.length === 0 ? 'No transcript available' : 'Copy'}
+              <div className="flex  flex-col space-y-2">
+                <div className="flex justify-center  items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      handleCopyTranscript();
+                    }}
+                    disabled={transcripts?.length === 0}
+                    title={transcripts?.length === 0 ? 'No transcript available' : 'Copy Transcript'}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V7.5l-3.75-3.612z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 3v3.75a.75.75 0 0 0 .75.75H18" />
-                    </svg>
-                    <span className="text-sm">Copy</span>
-                  </button>
-                  <button
+                    <Copy />
+                    <span className='hidden md:inline'>
+                      Copy
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowDeviceSettings(true)}
-                    className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
-                    title="Audio Device Settings"
+                    title="Input/Output devices selection"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                      <line x1="12" y1="19" x2="12" y2="23"/>
-                      <line x1="8" y1="23" x2="16" y2="23"/>
-                    </svg>
-                    <span className="text-sm">Devices</span>
-                  </button>
-                  <button
+                    <MicrophoneIcon />
+                    <span className='hidden md:inline'>
+                      Devices
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowLanguageSettings(true)}
-                    className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
-                    title="Language Settings"
+                    title="Language"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"/>
-                      <line x1="2" y1="12" x2="22" y2="12"/>
-                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                    </svg>
-                    <span className="text-sm">Language</span>
-                  </button>
+                    <GlobeIcon />
+                    <span className='hidden md:inline'>
+                      Language
+                    </span>
+                  </Button>
                   {/* {showSummary && !isRecording && (
                     <>
                       <button
@@ -1448,7 +1446,7 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto pb-32">
             <TranscriptView transcripts={transcripts} isRecording={isRecording} />
           </div>
-          
+
           {/* Custom prompt input at bottom of transcript section */}
           {/* {!isRecording && transcripts.length > 0 && !isMeetingActive && (
             <div className="p-4 border-t border-gray-200">
@@ -1562,9 +1560,8 @@ export default function Home() {
                         {models.map((model) => (
                           <div
                             key={model.id}
-                            className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${
-                              modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
-                            }`}
+                            className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
+                              }`}
                             onClick={() => setModelConfig(prev => ({ ...prev, model: model.name }))}
                           >
                             <h3 className="font-bold">{model.name}</h3>
@@ -1798,6 +1795,6 @@ export default function Home() {
           )} */}
         </div>
       </div>
-    </div>
+    </div >
   );
 }

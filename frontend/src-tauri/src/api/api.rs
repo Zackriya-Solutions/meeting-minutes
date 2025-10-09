@@ -1,8 +1,19 @@
+use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
-use log::{info as log_info, error as log_error, debug as log_debug, warn as log_warn};
+
+use crate::{
+    database::{
+        models::MeetingModel,
+        repositories::{
+            meeting::MeetingsRepository, setting::SettingsRepository,
+            transcript::TranscriptsRepository,
+        },
+    },
+    state::AppState,
+};
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
@@ -136,18 +147,6 @@ pub struct SaveMeetingSummaryRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SummaryResponse {
-    pub status: String,
-    #[serde(rename = "meetingName")]
-    pub meeting_name: Option<String>,
-    pub meeting_id: String,
-    pub start: Option<String>,
-    pub end: Option<String>,
-    pub data: Option<serde_json::Value>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct SaveTranscriptRequest {
     pub meeting_title: String,
     pub transcripts: Vec<TranscriptSegment>,
@@ -165,23 +164,6 @@ pub struct TranscriptSegment {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProcessTranscriptRequest {
-    pub text: String,
-    pub model: String,
-    pub model_name: String,
-    pub meeting_id: Option<String>,
-    pub chunk_size: Option<i32>,
-    pub overlap: Option<i32>,
-    pub custom_prompt: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProcessTranscriptResponse {
-    pub message: String,
-    pub process_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,7 +201,7 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
         None => {
             log_warn!("No auth token found in store");
             None
-        },
+        }
     }
 }
 
@@ -240,10 +222,10 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let client = reqwest::Client::new();
     let server_url = get_server_address(app).await?;
-    
+
     let url = format!("{}{}", server_url, endpoint);
     log_info!("Making {} request to: {}", method, url);
-    
+
     let mut request = match method.to_uppercase().as_str() {
         "GET" => client.get(&url),
         "POST" => client.post(&url),
@@ -251,7 +233,7 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
         "DELETE" => client.delete(&url),
         _ => return Err(format!("Unsupported HTTP method: {}", method)),
     };
-    
+
     // Add authorization header if auth token is provided
     if let Some(token) = auth_token {
         log_info!("Adding authorization header");
@@ -259,50 +241,50 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
     } else {
         log_warn!("No auth token provided, making unauthenticated request");
     }
-    
+
     request = request.header("Content-Type", "application/json");
-    
+
     // Add additional headers if provided
     if let Some(headers) = additional_headers {
         for (key, value) in headers {
             request = request.header(&key, &value);
         }
     }
-    
+
     // Add body if provided
     if let Some(body_str) = body {
         request = request.body(body_str.to_string());
     }
-    
+
     let response = request.send().await.map_err(|e| {
         let error_msg = format!("Request failed: {}", e);
         log_error!("{}", error_msg);
         error_msg
     })?;
-    
+
     let status = response.status();
     log_info!("Response status: {}", status);
-    
+
     if !status.is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         let error_msg = format!("HTTP {}: {}", status, error_text);
         log_error!("{}", error_msg);
         return Err(error_msg);
     }
-    
+
     let response_text = response.text().await.map_err(|e| {
         let error_msg = format!("Failed to read response: {}", e);
         log_error!("{}", error_msg);
         error_msg
     })?;
-    
+
     // Safely truncate response for logging, respecting UTF-8 character boundaries
-    let truncated = response_text
-        .chars()
-        .take(200)
-        .collect::<String>();
+    let truncated = response_text.chars().take(200).collect::<String>();
     log_info!("Response body: {}", truncated);
-    
+
     serde_json::from_str(&response_text).map_err(|e| {
         let error_msg = format!("Failed to parse JSON: {}", e);
         log_error!("{}", error_msg);
@@ -314,39 +296,66 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
 
 #[tauri::command]
 pub async fn api_get_meetings<R: Runtime>(
-    app: AppHandle<R>, 
-    auth_token: Option<String>
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    auth_token: Option<String>,
 ) -> Result<Vec<Meeting>, String> {
-    log_info!("api_get_meetings called with auth_token: {}", auth_token.is_some());
-    
-    let cache_headers = HashMap::from([
-        ("Cache-Control".to_string(), "no-cache, no-store, must-revalidate".to_string()),
-        ("Pragma".to_string(), "no-cache".to_string()),
-        ("Expires".to_string(), "0".to_string()),
-    ]);
-    
-    let result = make_api_request::<R, Vec<Meeting>>(&app, "/get-meetings", "GET", None, Some(cache_headers), auth_token).await;
-    
-    match &result {
-        Ok(meetings) => log_info!("Successfully got {} meetings", meetings.len()),
-        Err(e) => log_error!("Error getting meetings: {}", e),
+    log_info!(
+        "api_get_meetings called with auth_token(native) : {}",
+        auth_token.is_some()
+    );
+    let pool = state.db_manager.pool();
+    let meetings: Result<Vec<MeetingModel>, sqlx::Error> =
+        MeetingsRepository::get_meetings(pool).await;
+
+    match meetings {
+        Ok(meeting_models) => {
+            log_info!("Successfully got {} meetings", meeting_models.len());
+
+            let result: Vec<Meeting> = meeting_models
+                .into_iter()
+                .map(|m| Meeting {
+                    id: m.id,
+                    title: m.title,
+                })
+                .collect();
+            Ok(result)
+        }
+        Err(e) => {
+            log_error!("Error getting meetings: {}", e);
+            Err(e.to_string())
+        }
     }
-    
-    result
 }
 
 #[tauri::command]
 pub async fn api_search_transcripts<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     query: String,
     auth_token: Option<String>,
 ) -> Result<Vec<TranscriptSearchResult>, String> {
-    log_info!("api_search_transcripts called with query: {}, auth_token: {}", query, auth_token.is_some());
-    
-    let search_request = SearchRequest { query };
-    let body = serde_json::to_string(&search_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, Vec<TranscriptSearchResult>>(&app, "/search-transcripts", "POST", Some(&body), None, auth_token).await
+    log_info!(
+        "api_search_transcripts called with query: '{}', auth_token: {}",
+        query,
+        auth_token.is_some()
+    );
+
+    let pool = state.db_manager.pool();
+
+    match TranscriptsRepository::search_transcripts(pool, &query).await {
+        Ok(results) => {
+            log_info!(
+                "Search completed successfully with {} results.",
+                results.len()
+            );
+            Ok(results)
+        }
+        Err(e) => {
+            log_error!("Error searching transcripts for query '{}': {}", query, e);
+            Err(format!("Failed to search transcripts: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -356,12 +365,17 @@ pub async fn api_get_profile<R: Runtime>(
     license_key: String,
     auth_token: Option<String>,
 ) -> Result<Profile, String> {
-    log_info!("api_get_profile called for email: {}, auth_token: {}", email, auth_token.is_some());
-    
+    log_info!(
+        "api_get_profile called for email: {}, auth_token: {}",
+        email,
+        auth_token.is_some()
+    );
+
     let profile_request = ProfileRequest { email, license_key };
     let body = serde_json::to_string(&profile_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, Profile>(&app, "/get-profile", "POST", Some(&body), None, auth_token).await
+
+    make_api_request::<R, Profile>(&app, "/get-profile", "POST", Some(&body), None, auth_token)
+        .await
 }
 
 #[tauri::command]
@@ -371,12 +385,24 @@ pub async fn api_save_profile<R: Runtime>(
     email: String,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_profile called for email: {}, auth_token: {}", email, auth_token.is_some());
-    
+    log_info!(
+        "api_save_profile called for email: {}, auth_token: {}",
+        email,
+        auth_token.is_some()
+    );
+
     let save_request = SaveProfileRequest { id, email };
     let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/save-profile", "POST", Some(&body), None, auth_token).await
+
+    make_api_request::<R, serde_json::Value>(
+        &app,
+        "/save-profile",
+        "POST",
+        Some(&body),
+        None,
+        auth_token,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -388,281 +414,472 @@ pub async fn api_update_profile<R: Runtime>(
     position: String,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_update_profile called for email: {}, auth_token: {}", email, auth_token.is_some());
-    
-    let update_request = UpdateProfileRequest { 
-        email, 
-        license_key, 
-        company, 
-        position 
+    log_info!(
+        "api_update_profile called for email: {}, auth_token: {}",
+        email,
+        auth_token.is_some()
+    );
+
+    let update_request = UpdateProfileRequest {
+        email,
+        license_key,
+        company,
+        position,
     };
     let body = serde_json::to_string(&update_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/update-profile", "POST", Some(&body), None, auth_token).await
+
+    make_api_request::<R, serde_json::Value>(
+        &app,
+        "/update-profile",
+        "POST",
+        Some(&body),
+        None,
+        auth_token,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn api_get_model_config<R: Runtime>(
-    app: AppHandle<R>,
-    auth_token: Option<String>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
 ) -> Result<Option<ModelConfig>, String> {
-    log_info!("api_get_model_config called with auth_token: {}", auth_token.is_some());
-    
-    make_api_request::<R, Option<ModelConfig>>(&app, "/get-model-config", "GET", None, None, auth_token).await
+    log_info!("api_get_model_config called (native)");
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::get_model_config(pool).await {
+        Ok(Some(config)) => {
+            log_debug!(
+                "Found model config: provider={}, model={}",
+                &config.provider,
+                &config.model
+            );
+            match SettingsRepository::get_api_key(pool, &config.provider).await {
+                Ok(api_key) => {
+                    log_info!("Successfully retrieved model config and API key.");
+                    Ok(Some(ModelConfig {
+                        provider: config.provider,
+                        model: config.model,
+                        whisper_model: config.whisper_model,
+                        api_key,
+                    }))
+                }
+                Err(e) => {
+                    log_error!(
+                        "Failed to get API key for provider {}: {}",
+                        &config.provider,
+                        e
+                    );
+                    Err(e.to_string())
+                }
+            }
+        }
+        Ok(None) => {
+            log_info!("No model config found in database.");
+            Ok(None)
+        }
+        Err(e) => {
+            log_error!("Failed to get model config: {}", e);
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn api_save_model_config<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
     whisper_model: String,
     api_key: Option<String>,
-    auth_token: Option<String>,
+    _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_model_config called for provider: {}, auth_token: {}", provider, auth_token.is_some());
-    
-    let save_request = SaveModelConfigRequest { 
-        provider, 
-        model, 
-        whisper_model, 
-        api_key 
-    };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/save-model-config", "POST", Some(&body), None, auth_token).await
+    log_info!(
+        "api_save_model_config called (native) for provider '{}'",
+        &provider
+    );
+    let pool = state.db_manager.pool();
+
+    if let Err(e) =
+        SettingsRepository::save_model_config(pool, &provider, &model, &whisper_model).await
+    {
+        log_error!("Failed to save model config: {}", e);
+        return Err(e.to_string());
+    }
+
+    if let Some(key) = api_key {
+        if !key.is_empty() {
+            log_info!("API key provided, saving...");
+            if let Err(e) = SettingsRepository::save_api_key(pool, &provider, &key).await {
+                log_error!("Failed to save API key: {}", e);
+                return Err(e.to_string());
+            }
+        }
+    }
+
+    log_info!("Successfully saved model configuration.");
+    Ok(
+        serde_json::json!({ "status": "success", "message": "Model configuration saved successfully" }),
+    )
 }
 
 #[tauri::command]
 pub async fn api_get_api_key<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     provider: String,
-    auth_token: Option<String>,
+    _auth_token: Option<String>,
 ) -> Result<String, String> {
-    log_info!("api_get_api_key called for provider: {}, auth_token: {}", provider, auth_token.is_some());
-    
-    let request = GetApiKeyRequest { provider };
-    let body = serde_json::to_string(&request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, String>(&app, "/get-api-key", "POST", Some(&body), None, auth_token).await
+    log_info!(
+        "api_get_api_key called (native) for provider '{}'",
+        &provider
+    );
+    match SettingsRepository::get_api_key(&state.db_manager.pool(), &provider).await {
+        Ok(key) => {
+            log_info!(
+                "Successfully retrieved API key for provider '{}'.",
+                &provider
+            );
+            Ok(key.unwrap_or_default())
+        }
+        Err(e) => {
+            log_error!("Failed to get API key for provider '{}': {}", &provider, e);
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn api_get_transcript_config<R: Runtime>(
-    app: AppHandle<R>,
-    auth_token: Option<String>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
 ) -> Result<Option<TranscriptConfig>, String> {
-    log_info!("api_get_transcript_config called with auth_token: {}", auth_token.is_some());
-    
-    make_api_request::<R, Option<TranscriptConfig>>(&app, "/get-transcript-config", "GET", None, None, auth_token).await
+    log_info!("api_get_transcript_config called (native)");
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::get_transcript_config(pool).await {
+        Ok(Some(config)) => {
+            log_info!(
+                "Found transcript config: provider={}, model={}",
+                &config.provider,
+                &config.model
+            );
+            match SettingsRepository::get_transcript_api_key(pool, &config.provider).await {
+                Ok(api_key) => {
+                    log_info!("Successfully retrieved transcript config and API key.");
+                    Ok(Some(TranscriptConfig {
+                        provider: config.provider,
+                        model: config.model,
+                        api_key,
+                    }))
+                }
+                Err(e) => {
+                    log_error!(
+                        "Failed to get transcript API key for provider {}: {}",
+                        &config.provider,
+                        e
+                    );
+                    Err(e.to_string())
+                }
+            }
+        }
+        Ok(None) => {
+            log_info!("No transcript config found, returning default.");
+            Ok(Some(TranscriptConfig {
+                provider: "localWhisper".to_string(),
+                model: "large-v3".to_string(),
+                api_key: None,
+            }))
+        }
+        Err(e) => {
+            log_error!("Failed to get transcript config: {}", e);
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn api_save_transcript_config<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
     api_key: Option<String>,
-    auth_token: Option<String>,
+    _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_transcript_config called for provider: {}, auth_token: {}", provider, auth_token.is_some());
-    
-    let save_request = SaveTranscriptConfigRequest { 
-        provider, 
-        model, 
-        api_key 
-    };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/save-transcript-config", "POST", Some(&body), None, auth_token).await
+    log_info!(
+        "api_save_transcript_config called (native) for provider '{}'",
+        &provider
+    );
+    let pool = state.db_manager.pool();
+
+    if let Err(e) = SettingsRepository::save_transcript_config(pool, &provider, &model).await {
+        log_error!("Failed to save transcript config: {}", e);
+        return Err(e.to_string());
+    }
+
+    if let Some(key) = api_key {
+        if !key.is_empty() {
+            log_info!("API key provided, saving for transcript provider...");
+            if let Err(e) = SettingsRepository::save_transcript_api_key(pool, &provider, &key).await
+            {
+                log_error!("Failed to save transcript API key: {}", e);
+                return Err(e.to_string());
+            }
+        }
+    }
+
+    log_info!("Successfully saved transcript configuration.");
+    Ok(
+        serde_json::json!({ "status": "success", "message": "Transcript configuration saved successfully" }),
+    )
 }
 
 #[tauri::command]
 pub async fn api_get_transcript_api_key<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     provider: String,
-    auth_token: Option<String>,
+    _auth_token: Option<String>,
 ) -> Result<String, String> {
-    log_info!("api_get_transcript_api_key called for provider: {}, auth_token: {}", provider, auth_token.is_some());
-    
-    let request = GetApiKeyRequest { provider };
-    let body = serde_json::to_string(&request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, String>(&app, "/get-transcript-api-key", "POST", Some(&body), None, auth_token).await
+    log_info!(
+        "api_get_transcript_api_key called (native) for provider '{}'",
+        &provider
+    );
+    match SettingsRepository::get_transcript_api_key(&state.db_manager.pool(), &provider).await {
+        Ok(key) => {
+            log_info!(
+                "Successfully retrieved transcript API key for provider '{}'.",
+                &provider
+            );
+            Ok(key.unwrap_or_default())
+        }
+        Err(e) => {
+            log_error!(
+                "Failed to get transcript API key for provider '{}': {}",
+                &provider,
+                e
+            );
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn api_delete_api_key<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    provider: String,
+    _auth_token: Option<String>,
+) -> Result<(), String> {
+    log_info!(
+        "log_api_delete_api_key called (native) for provider '{}'",
+        &provider
+    );
+    match SettingsRepository::delete_api_key(&state.db_manager.pool(), &provider).await {
+        Ok(_) => {
+            log_info!("Successfully deleted API key for provider '{}'.", &provider);
+            Ok(())
+        }
+        Err(e) => {
+            log_error!(
+                "Failed to delete API key for provider '{}': {}",
+                &provider,
+                e
+            );
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn api_delete_meeting<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_delete_meeting called for meeting_id: {}, auth_token: {}", meeting_id, auth_token.is_some());
-    
-    let delete_request = DeleteMeetingRequest { meeting_id };
-    let body = serde_json::to_string(&delete_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/delete-meeting", "POST", Some(&body), None, auth_token).await
+    log_info!(
+        "api_delete_meeting called for meeting_id(native): {}, auth_token: {}",
+        meeting_id,
+        auth_token.is_some()
+    );
+
+    let pool = state.db_manager.pool();
+
+    match MeetingsRepository::delete_meeting(pool, &meeting_id).await {
+        Ok(true) => {
+            log_info!("Successfully deleted meeting {}", meeting_id);
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Meeting deleted successfully"
+            }))
+        }
+        Ok(false) => {
+            log_warn!("Meeting not found or already deleted: {}", meeting_id);
+            Err(format!(
+                "Meeting not found or could not be deleted: {}",
+                meeting_id
+            ))
+        }
+        Err(e) => {
+            log_error!("Error deleting meeting {}: {}", meeting_id, e);
+            Err(format!("Failed to delete meeting: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn api_get_meeting<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
     meeting_id: String,
+    state: tauri::State<'_, AppState>,
     auth_token: Option<String>,
 ) -> Result<MeetingDetails, String> {
-    log_info!("api_get_meeting called for meeting_id: {}, auth_token: {}", meeting_id, auth_token.is_some());
-    
-    make_api_request::<R, MeetingDetails>(&app, &format!("/get-meeting/{}", meeting_id), "GET", None, None, auth_token).await
+    log_info!(
+        "api_get_meeting called(native) for meeting_id: {}, auth_token: {}",
+        meeting_id,
+        auth_token.is_some()
+    );
+
+    let pool = state.db_manager.pool();
+
+    match MeetingsRepository::get_meeting(pool, &meeting_id).await {
+        Ok(Some(meeting)) => {
+            log_info!("Successfully retrieved meeting {}", meeting_id);
+            Ok(meeting)
+        }
+        Ok(None) => {
+            log_warn!("Meeting not found: {}", meeting_id);
+            Err(format!("Meeting not found: {}", meeting_id))
+        }
+        Err(e) => {
+            log_error!("Error retrieving meeting {}: {}", meeting_id, e);
+            Err(format!("Failed to retrieve meeting: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn api_save_meeting_title<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     meeting_id: String,
     title: String,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_meeting_title called for meeting_id: {}, auth_token: {}", meeting_id, auth_token.is_some());
-    
-    let save_request = SaveMeetingTitleRequest { meeting_id, title };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/save-meeting-title", "POST", Some(&body), None, auth_token).await
-}
-
-#[tauri::command]
-pub async fn api_save_meeting_summary<R: Runtime>(
-    app: AppHandle<R>,
-    meeting_id: String,
-    summary: serde_json::Value,
-    auth_token: Option<String>,
-) -> Result<serde_json::Value, String> {
-    log_info!("api_save_meeting_summary called for meeting_id: {}, auth_token: {}", meeting_id, auth_token.is_some());
-    
-    let save_request = SaveMeetingSummaryRequest { meeting_id, summary };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/save-meeting-summary", "POST", Some(&body), None, auth_token).await
-}
-
-#[tauri::command]
-pub async fn api_get_summary<R: Runtime>(
-    app: AppHandle<R>,
-    meeting_id: String,
-    auth_token: Option<String>,
-) -> Result<SummaryResponse, String> {
-    log_debug!("=== api_get_summary DEBUG ===");
-    log_debug!("meeting_id: {}", meeting_id);
-    log_debug!("auth_token present: {}", auth_token.is_some());
-    if let Some(ref token) = auth_token {
-        log_debug!("auth_token length: {}", token.len());
+    log_info!(
+        "api_save_meeting_title called for meeting_id: {}, auth_token: {}",
+        meeting_id,
+        auth_token.is_some()
+    );
+    let pool = state.db_manager.pool();
+    match MeetingsRepository::update_meeting_title(pool, &meeting_id, &title).await {
+        Ok(true) => {
+            log_info!("Successfully saved meeting title");
+            Ok(serde_json::json!({"message": "Meeting title saved successfully"}))
+        }
+        Ok(false) => {
+            log_error!("No meeting found with id {}", meeting_id);
+            Err(format!("No meeting found with id {}", meeting_id))
+        }
+        Err(e) => {
+            log_error!("Failed to update meeting {}", e);
+            Err(format!("Failed to update meeting: {}", e))
+        }
     }
-    
-    let result = make_api_request::<R, SummaryResponse>(&app, &format!("/get-summary/{}", meeting_id), "GET", None, None, auth_token).await;
-    
-    match &result {
-        Ok(_summary) => log_debug!("✓ api_get_summary successful"),
-        Err(e) => log_error!("✗ api_get_summary failed: {}", e),
-    }
-    
-    result
 }
 
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!("api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
-             meeting_title, transcripts.len(), auth_token.is_some());
+    log_info!(
+        "api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
+        meeting_title,
+        transcripts.len(),
+        auth_token.is_some()
+    );
 
     // Log first transcript for debugging
     if let Some(first) = transcripts.first() {
-        log_debug!("First transcript data: {}", serde_json::to_string_pretty(first).unwrap_or_default());
+        log_debug!(
+            "First transcript data: {}",
+            serde_json::to_string_pretty(first).unwrap_or_default()
+        );
     }
 
     // Convert serde_json::Value to TranscriptSegment
-    let transcript_segments: Result<Vec<TranscriptSegment>, _> = transcripts
+    let transcripts_to_save: Vec<TranscriptSegment> = transcripts
         .into_iter()
-        .map(|t| serde_json::from_value(t))
-        .collect();
-
-    let transcript_segments = transcript_segments.map_err(|e| {
-        log_error!("Failed to parse transcript segments: {}", e);
-        e.to_string()
-    })?;
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            log_error!("Failed to parse transcript segments: {}", e);
+            format!("Invalid transcript data format: {}. Please check the data structure.", e)
+        })?;
 
     // Log parsed segments count and first segment details
-    if let Some(first_seg) = transcript_segments.first() {
+    if let Some(first_seg) = transcripts_to_save.first() {
         log_debug!("First parsed segment: text='{}', audio_start_time={:?}, audio_end_time={:?}, duration={:?}",
                    first_seg.text.chars().take(50).collect::<String>(),
                    first_seg.audio_start_time,
                    first_seg.audio_end_time,
                    first_seg.duration);
     }
-    
-    let save_request = SaveTranscriptRequest { 
-        meeting_title, 
-        transcripts: transcript_segments 
-    };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, serde_json::Value>(&app, "/save-transcript", "POST", Some(&body), None, auth_token).await
+
+    let pool = state.db_manager.pool();
+
+    // Now, call the repository with the correctly typed data.
+    match TranscriptsRepository::save_transcript(pool, &meeting_title, &transcripts_to_save).await {
+        Ok(meeting_id) => {
+            log_info!(
+                "Successfully saved transcript and created meeting with id: {}",
+                meeting_id
+            );
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Transcript saved successfully",
+                "meeting_id": meeting_id
+            }))
+        }
+        Err(e) => {
+            log_error!(
+                "Error saving transcript for meeting '{}': {}",
+                meeting_title,
+                e
+            );
+            Err(format!("Failed to save transcript: {}", e))
+        }
+    }
 }
-
-#[tauri::command]
-pub async fn api_process_transcript<R: Runtime>(
-    app: AppHandle<R>,
-    text: String,
-    model: String,
-    model_name: String,
-    meeting_id: Option<String>,
-    chunk_size: Option<i32>,
-    overlap: Option<i32>,
-    custom_prompt: Option<String>,
-    auth_token: Option<String>,
-) -> Result<ProcessTranscriptResponse, String> {
-    log_info!("api_process_transcript called for meeting_id: {:?}, model: {}, auth_token: {}", 
-             meeting_id, model, auth_token.is_some());
-    
-    let process_request = ProcessTranscriptRequest {
-        text,
-        model,
-        model_name,
-        meeting_id,
-        chunk_size,
-        overlap,
-        custom_prompt,
-    };
-    let body = serde_json::to_string(&process_request).map_err(|e| e.to_string())?;
-    
-    make_api_request::<R, ProcessTranscriptResponse>(&app, "/process-transcript", "POST", Some(&body), None, auth_token).await
-}
-
-
 
 // Simple test command to check backend connectivity
 #[tauri::command]
 pub async fn test_backend_connection<R: Runtime>(
     app: AppHandle<R>,
-    auth_token: Option<String>
+    auth_token: Option<String>,
 ) -> Result<String, String> {
     log_debug!("Testing backend connection...");
-    
+
     let client = reqwest::Client::new();
     let server_url = get_server_address(&app).await?;
-    
+
     log_debug!("Testing connection to: {}", server_url);
-    
+
     let mut request = client.get(&format!("{}/docs", server_url));
-    
+
     if let Some(token) = auth_token {
         request = request.header("Authorization", format!("Bearer {}", token));
     }
-    
+
     match request.send().await {
         Ok(response) => {
             let status = response.status();
@@ -675,14 +892,12 @@ pub async fn test_backend_connection<R: Runtime>(
             Err(error_msg)
         }
     }
-} 
+}
 
 #[tauri::command]
-pub async fn debug_backend_connection<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<String, String> {
+pub async fn debug_backend_connection<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     log_debug!("=== DEBUG: Testing backend connection ===");
-    
+
     // Test 1: Check server address from store
     let server_url = match get_server_address(&app).await {
         Ok(url) => {
@@ -694,47 +909,44 @@ pub async fn debug_backend_connection<R: Runtime>(
             return Err(format!("Failed to get server URL: {}", e));
         }
     };
-    
+
     // Test 2: Make a simple HTTP request to the backend
     let client = reqwest::Client::new();
     let test_url = format!("{}/docs", server_url); // Try the docs endpoint which should be public
-    
+
     log_debug!("Testing connection to: {}", test_url);
-    
+
     match client.get(&test_url).send().await {
         Ok(response) => {
             let status = response.status();
             log_debug!("✓ Backend responded with status: {}", status);
-            Ok(format!("Backend connection successful! Status: {}, URL: {}", status, server_url))
+            Ok(format!(
+                "Backend connection successful! Status: {}, URL: {}",
+                status, server_url
+            ))
         }
         Err(e) => {
             log_error!("✗ Backend connection failed: {}", e);
             Err(format!("Backend connection failed: {}", e))
         }
     }
-} 
+}
 
 #[tauri::command]
 pub async fn open_external_url(url: String) -> Result<(), String> {
     use std::process::Command;
-    
+
     let result = if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(&["/C", "start", &url])
-            .output()
+        Command::new("cmd").args(&["/C", "start", &url]).output()
     } else if cfg!(target_os = "macos") {
-        Command::new("open")
-            .arg(&url)
-            .output()
+        Command::new("open").arg(&url).output()
     } else {
         // Linux and other Unix-like systems
-        Command::new("xdg-open")
-            .arg(&url)
-            .output()
+        Command::new("xdg-open").arg(&url).output()
     };
-    
+
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to open URL: {}", e))
+        Err(e) => Err(format!("Failed to open URL: {}", e)),
     }
-} 
+}

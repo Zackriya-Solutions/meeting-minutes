@@ -1,11 +1,12 @@
 "use client"
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
 import { useRouter } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
+import { LoaderIcon } from "lucide-react";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -23,11 +24,29 @@ const sampleSummary: Summary = {
 };
 
 export default function MeetingDetails() {
-  const { currentMeeting , serverAddress} = useSidebar();
+  const { currentMeeting, serverAddress, refetchMeetings } = useSidebar();
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
-  const [meetingSummary, setMeetingSummary] = useState<Summary|null>(null);
+  const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Extract fetchMeetingDetails so it can be called from child components
+  const fetchMeetingDetails = useCallback(async () => {
+    if (!currentMeeting?.id || currentMeeting.id === 'intro-call') {
+      return;
+    }
+
+    try {
+      const data = await invoke('api_get_meeting', {
+        meetingId: currentMeeting.id,
+      }) as any;
+      console.log('Meeting details:', data);
+      setMeetingDetails(data);
+    } catch (error) {
+      console.error('Error fetching meeting details:', error);
+      setError("Failed to load meeting details");
+    }
+  }, [currentMeeting?.id]);
 
   // Reset states when currentMeeting changes
   useEffect(() => {
@@ -47,52 +66,71 @@ export default function MeetingDetails() {
     setMeetingSummary(null);
     setError(null);
 
-    const fetchMeetingDetails = async () => {
-      try {
-        const data = await invoke('api_get_meeting', {
-          meetingId: currentMeeting.id,
-        }) as any;
-        console.log('Meeting details:', data);
-        setMeetingDetails(data);
-      } catch (error) {
-        console.error('Error fetching meeting details:', error);
-        setError("Failed to load meeting details");
-      }
-    };
-
     const fetchMeetingSummary = async () => {
       try {
         const summary = await invoke('api_get_summary', {
           meetingId: currentMeeting.id,
         }) as any;
-        
+
+        console.log('🔍 FETCH SUMMARY: Raw response:', summary);
+
         // Check if the summary request failed with 404 or error status
         if (summary.status === 'error' || summary.error) {
           console.warn('Meeting summary not found or error occurred:', summary.error);
           setMeetingSummary(sampleSummary);
           return;
         }
-        
+
         const summaryData = summary.data || {};
-        const { MeetingName, _section_order, ...restSummaryData } = summaryData;
-        
+
+        // Parse if it's a JSON string (backend may return double-encoded JSON)
+        let parsedData = summaryData;
+        if (typeof summaryData === 'string') {
+          try {
+            parsedData = JSON.parse(summaryData);
+          } catch (e) {
+            parsedData = {};
+          }
+        }
+
+        console.log('🔍 FETCH SUMMARY: Parsed data:', parsedData);
+
+        // Priority 1: BlockNote JSON format
+        if (parsedData.summary_json) {
+          setMeetingSummary(parsedData as any);
+          return;
+        }
+
+        // Priority 2: Markdown format
+        if (parsedData.markdown) {
+          setMeetingSummary(parsedData as any);
+          return;
+        }
+
+        // Legacy format - apply formatting
+        console.log('📦 LEGACY FORMAT: Detected legacy format, applying section formatting');
+
+        const { MeetingName, _section_order, ...restSummaryData } = parsedData;
+
         // Format the summary data with consistent styling - PRESERVE ORDER
         const formattedSummary: Summary = {};
-        
+
         // Use section order if available to maintain exact order and handle duplicates
         const sectionKeys = _section_order || Object.keys(restSummaryData);
-        
+
+        console.log('📦 LEGACY FORMAT: Processing sections:', sectionKeys);
+
         for (const key of sectionKeys) {
           try {
             const section = restSummaryData[key];
             // Comprehensive null checks to prevent the error
-            if (section && 
-                typeof section === 'object' && 
-                'title' in section && 
-                'blocks' in section) {
-              
+            if (section &&
+              typeof section === 'object' &&
+              'title' in section &&
+              'blocks' in section) {
+
               const typedSection = section as { title?: string; blocks?: any[] };
-              
+
               // Ensure blocks is an array before mapping
               if (Array.isArray(typedSection.blocks)) {
                 formattedSummary[key] = {
@@ -106,23 +144,25 @@ export default function MeetingDetails() {
                 };
               } else {
                 // Handle case where blocks is not an array
-                console.warn(`Section ${key} has invalid blocks:`, typedSection.blocks);
+                console.warn(`📦 LEGACY FORMAT: Section ${key} has invalid blocks:`, typedSection.blocks);
                 formattedSummary[key] = {
                   title: typedSection.title || key,
                   blocks: []
                 };
               }
             } else {
-              console.warn(`Skipping invalid section ${key}:`, section);
+              console.warn(`📦 LEGACY FORMAT: Skipping invalid section ${key}:`, section);
             }
           } catch (error) {
-            console.warn(`Error processing section ${key}:`, error);
+            console.warn(`📦 LEGACY FORMAT: Error processing section ${key}:`, error);
             // Continue processing other sections
           }
         }
+
+        console.log('📦 LEGACY FORMAT: Formatted summary:', formattedSummary);
         setMeetingSummary(formattedSummary);
       } catch (error) {
-        console.error('Error fetching meeting summary:', error);
+        console.error('❌ FETCH SUMMARY: Error fetching meeting summary:', error);
         // Don't set error state for summary fetch failure, just use sample summary
         setMeetingSummary(sampleSummary);
       }
@@ -130,7 +170,7 @@ export default function MeetingDetails() {
 
     fetchMeetingDetails();
     fetchMeetingSummary();
-  }, [currentMeeting?.id, serverAddress]);
+  }, [currentMeeting?.id, serverAddress, fetchMeetingDetails]);
 
   // if (error) {
   //   return (
@@ -149,8 +189,19 @@ export default function MeetingDetails() {
   // }
 
   if (!meetingDetails || !meetingSummary) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    return <div className="flex items-center justify-center h-screen">
+      <LoaderIcon className="animate-spin size-6 " />
+    </div>;
   }
 
-  return <PageContent meeting={meetingDetails} summaryData={meetingSummary} />;
+  return <PageContent
+    meeting={meetingDetails}
+    summaryData={meetingSummary}
+    onMeetingUpdated={async () => {
+      // Refetch meeting details to get updated title from backend
+      await fetchMeetingDetails();
+      // Refetch meetings list to update sidebar
+      await refetchMeetings();
+    }}
+  />;
 }
