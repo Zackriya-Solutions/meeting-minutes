@@ -8,7 +8,7 @@ use super::recording_state::AudioChunk;
 #[derive(Clone)]
 struct AudioData {
     data: Vec<f32>,
-    sample_rate: u32,
+    // sample_rate: u32,
 }
 
 /// Incremental audio saver that writes checkpoints every 30 seconds
@@ -51,7 +51,7 @@ impl IncrementalAudioSaver {
     pub fn add_chunk(&mut self, chunk: AudioChunk) -> Result<()> {
         let audio_data = AudioData {
             data: chunk.data,
-            sample_rate: chunk.sample_rate,
+            // sample_rate: chunk.sample_rate,
         };
 
         self.checkpoint_buffer.push(audio_data);

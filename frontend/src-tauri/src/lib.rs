@@ -498,14 +498,14 @@ pub fn run() {
             });
 
             // Trigger system audio permission request on startup (similar to microphone permission)
-            #[cfg(target_os = "macos")]
-            {
-                tauri::async_runtime::spawn(async {
-                    if let Err(e) = audio::permissions::trigger_system_audio_permission() {
-                        log::warn!("Failed to trigger system audio permission: {}", e);
-                    }
-                });
-            }
+            // #[cfg(target_os = "macos")]
+            // {
+            //     tauri::async_runtime::spawn(async {
+            //         if let Err(e) = audio::permissions::trigger_system_audio_permission() {
+            //             log::warn!("Failed to trigger system audio permission: {}", e);
+            //         }
+            //     });
+            // }
 
             // Initialize database (handles first launch detection and conditional setup)
             tauri::async_runtime::block_on(async {
@@ -647,7 +647,7 @@ pub fn run() {
             // Screen Recording permission commands
             audio::permissions::check_screen_recording_permission_command,
             audio::permissions::request_screen_recording_permission_command,
-            audio::permissions::trigger_system_audio_permission_command,
+            // audio::permissions::trigger_system_audio_permission_command,
             // Database import commands
             database::commands::check_first_launch,
             database::commands::select_legacy_database_path,
