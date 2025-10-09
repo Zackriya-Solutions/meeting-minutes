@@ -60,6 +60,14 @@ pub fn encode_single_audio(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    // Hide console window on Windows to prevent CMD popup during recording
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
     debug!("FFmpeg command: {:?}", command);
 
     #[allow(clippy::zombie_processes)]
