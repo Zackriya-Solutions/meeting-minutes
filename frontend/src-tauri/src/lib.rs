@@ -662,6 +662,7 @@ pub fn run() {
             database::commands::open_database_folder,
             whisper_engine::commands::open_models_folder,
             // System settings commands
+            #[cfg(target_os = "macos")]
             utils::open_system_settings,
         ])
         .run(tauri::generate_context!())
