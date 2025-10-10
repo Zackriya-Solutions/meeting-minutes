@@ -26,6 +26,7 @@ import Analytics from '@/lib/analytics';
 import { Button } from '@/components/ui/button';
 import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
+import { toast } from 'sonner';
 
 
 
@@ -1167,6 +1168,8 @@ export default function Home() {
       .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
+
+    toast.success("Transcript copied to clipboard");
   }, [transcripts]);
 
   const handleGenerateSummary = useCallback(async () => {
