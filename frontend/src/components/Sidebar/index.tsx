@@ -58,7 +58,8 @@ const Sidebar: React.FC = () => {
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    apiKey: null
+    apiKey: null,
+    ollamaEndpoint: null
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'localWhisper',
@@ -143,17 +144,18 @@ const Sidebar: React.FC = () => {
   // Handle model config save
   const handleSaveModelConfig = async (config: ModelConfig) => {
     try {
-      await invoke('api_save_model_config', { 
+      await invoke('api_save_model_config', {
         provider: config.provider,
         model: config.model,
         whisperModel: config.whisperModel,
         apiKey: config.apiKey,
+        ollamaEndpoint: config.ollamaEndpoint,
       });
 
       setModelConfig(config);
       console.log('Model config saved successfully');
       setSettingsSaveSuccess(true);
-      
+
       // Track settings change
       await Analytics.trackSettingsChanged('model_config', `${config.provider}_${config.model}`);
     } catch (error) {

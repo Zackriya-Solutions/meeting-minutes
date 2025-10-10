@@ -85,6 +85,7 @@ impl LLMProvider {
 /// * `api_key` - API key for the provider (not needed for Ollama)
 /// * `system_prompt` - System instructions for the LLM
 /// * `user_prompt` - User query/content to process
+/// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
 ///
 /// # Returns
 /// The generated summary text or an error message
@@ -95,6 +96,7 @@ pub async fn generate_summary(
     api_key: &str,
     system_prompt: &str,
     user_prompt: &str,
+    ollama_endpoint: Option<&str>,
 ) -> Result<String, String> {
     let (api_url, mut headers) = match provider {
         LLMProvider::OpenAI => (
@@ -110,8 +112,9 @@ pub async fn generate_summary(
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
-            let host = std::env::var("OLLAMA_HOST")
-                .unwrap_or_else(|_| "http://localhost:11434".to_string());
+            let host = ollama_endpoint
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
             (
                 format!("{}/v1/chat/completions", host),
                 header::HeaderMap::new(),

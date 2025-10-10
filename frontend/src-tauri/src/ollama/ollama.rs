@@ -1,7 +1,32 @@
 use std::process::Command;
 use serde::{Deserialize, Serialize};
 use tauri::command;
-use reqwest::blocking::Client;
+use reqwest::Client;
+use tokio::time::{timeout, Duration, sleep};
+
+// Error categorization for better error handling and user feedback
+#[derive(Debug)]
+pub enum OllamaError {
+    Timeout,
+    NetworkError(String),
+    InvalidEndpoint(String),
+    ServerError(String),
+    NoModelsFound,
+    ParseError(String),
+}
+
+impl std::fmt::Display for OllamaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            OllamaError::Timeout => write!(f, "Request timed out after 5 seconds. Please check if the Ollama server is running."),
+            OllamaError::NetworkError(msg) => write!(f, "Network error: {}. Please check your connection and endpoint URL.", msg),
+            OllamaError::InvalidEndpoint(msg) => write!(f, "Invalid endpoint: {}. Please check the URL format.", msg),
+            OllamaError::ServerError(msg) => write!(f, "Ollama server error: {}", msg),
+            OllamaError::NoModelsFound => write!(f, "No models found on the Ollama server. Please pull models using 'ollama pull <model>'."),
+            OllamaError::ParseError(msg) => write!(f, "Failed to parse server response: {}", msg),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OllamaModel {
@@ -24,34 +49,129 @@ struct OllamaApiModel {
     size: i64,
 }
 
-#[command]
-pub fn get_ollama_models() -> Result<Vec<OllamaModel>, String> {
-    // First try the HTTP API
-    match get_models_via_http() {
-        Ok(models) => Ok(models),
-        Err(http_err) => {
-            // Fallback to CLI if HTTP fails
-            get_models_via_cli().map_err(|cli_err| {
-                format!("HTTP API error: {}\nCLI error: {}", http_err, cli_err)
-            })
+// Helper function to check if endpoint is localhost
+fn is_localhost_endpoint(endpoint: Option<&str>) -> bool {
+    match endpoint {
+        None | Some("") => true,
+        Some(url) => {
+            url.contains("localhost") ||
+            url.contains("127.0.0.1") ||
+            url.contains("::1")
         }
     }
 }
 
-fn get_models_via_http() -> Result<Vec<OllamaModel>, String> {
+// Helper function to validate endpoint URL format
+fn validate_endpoint_url(url: &str) -> Result<(), OllamaError> {
+    if url.is_empty() {
+        return Ok(()); // Empty is valid (uses default)
+    }
+
+    // Check if URL starts with http:// or https://
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(OllamaError::InvalidEndpoint(
+            "URL must start with http:// or https://".to_string()
+        ));
+    }
+
+    Ok(())
+}
+
+#[command]
+pub async fn get_ollama_models(endpoint: Option<String>) -> Result<Vec<OllamaModel>, String> {
+    // Validate endpoint format if provided
+    if let Some(ref ep) = endpoint {
+        if let Err(e) = validate_endpoint_url(ep) {
+            return Err(e.to_string());
+        }
+    }
+
+    // Add timeout wrapper (5 seconds max)
+    match timeout(
+        Duration::from_secs(5),
+        get_models_via_http_with_retry(endpoint.as_deref())
+    ).await {
+        Ok(Ok(models)) => {
+            if models.is_empty() {
+                Err(OllamaError::NoModelsFound.to_string())
+            } else {
+                Ok(models)
+            }
+        }
+        Ok(Err(http_err)) => {
+            // Only fallback to CLI if endpoint is localhost/empty
+            if is_localhost_endpoint(endpoint.as_deref()) {
+                get_models_via_cli().map_err(|cli_err| {
+                    format!("{}\n\nAlso tried CLI: {}", http_err, cli_err)
+                })
+            } else {
+                Err(http_err)
+            }
+        }
+        Err(_) => Err(OllamaError::Timeout.to_string()),
+    }
+}
+
+// HTTP request with retry logic and exponential backoff
+async fn get_models_via_http_with_retry(endpoint: Option<&str>) -> Result<Vec<OllamaModel>, String> {
+    const MAX_RETRIES: u32 = 2;
+    const INITIAL_BACKOFF_MS: u64 = 300;
+
+    let mut last_error = String::new();
+
+    for attempt in 0..=MAX_RETRIES {
+        match get_models_via_http_async(endpoint).await {
+            Ok(models) => return Ok(models),
+            Err(e) => {
+                last_error = e.clone();
+
+                // Don't retry on certain errors
+                if e.contains("Invalid endpoint") || e.contains("404") {
+                    return Err(e);
+                }
+
+                // If not the last attempt, wait with exponential backoff
+                if attempt < MAX_RETRIES {
+                    let backoff_duration = INITIAL_BACKOFF_MS * 2_u64.pow(attempt);
+                    sleep(Duration::from_millis(backoff_duration)).await;
+                }
+            }
+        }
+    }
+
+    Err(format!("Failed after {} retries: {}", MAX_RETRIES, last_error))
+}
+
+async fn get_models_via_http_async(endpoint: Option<&str>) -> Result<Vec<OllamaModel>, String> {
     let client = Client::new();
+    let base_url = endpoint.unwrap_or("http://localhost:11434");
+    let url = format!("{}/api/tags", base_url);
+
     let response = client
-        .get("http://localhost:11434/api/tags")
+        .get(&url)
+        .timeout(Duration::from_secs(3)) // Per-request timeout
         .send()
-        .map_err(|e| format!("Failed to make HTTP request: {}", e))?;
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                OllamaError::NetworkError("Connection timed out".to_string()).to_string()
+            } else if e.is_connect() {
+                OllamaError::NetworkError(format!("Cannot connect to {}. Please check if the server is running.", base_url)).to_string()
+            } else {
+                OllamaError::NetworkError(e.to_string()).to_string()
+            }
+        })?;
 
     if !response.status().is_success() {
-        return Err(format!("HTTP request failed with status: {}", response.status()));
+        return Err(OllamaError::ServerError(
+            format!("HTTP {}: Server returned an error", response.status())
+        ).to_string());
     }
 
     let api_response: OllamaApiResponse = response
         .json()
-        .map_err(|e| format!("Failed to parse JSON response: {}", e))?;
+        .await
+        .map_err(|e| OllamaError::ParseError(e.to_string()).to_string())?;
 
     Ok(api_response.models.into_iter().map(|m| OllamaModel {
         name: m.name,
@@ -65,15 +185,22 @@ fn get_models_via_cli() -> Result<Vec<OllamaModel>, String> {
     let output = Command::new("ollama")
         .arg("list")
         .output()
-        .map_err(|e| format!("Failed to execute ollama command: {}", e))?;
+        .map_err(|e| {
+            OllamaError::NetworkError(
+                format!("Ollama CLI not found or not in PATH: {}", e)
+            ).to_string()
+        })?;
 
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(OllamaError::ServerError(
+            format!("Ollama CLI error: {}", stderr)
+        ).to_string());
     }
 
     let output_str = String::from_utf8_lossy(&output.stdout);
     let mut models = Vec::new();
-    
+
     // Skip the header line
     for line in output_str.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -85,6 +212,10 @@ fn get_models_via_cli() -> Result<Vec<OllamaModel>, String> {
                 modified: parts[4..].join(" "),
             });
         }
+    }
+
+    if models.is_empty() {
+        return Err(OllamaError::NoModelsFound.to_string());
     }
 
     Ok(models)

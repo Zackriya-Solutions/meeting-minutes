@@ -801,7 +801,8 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
         provider: configToSave.provider,
         model: configToSave.model,
         whisperModel: configToSave.whisperModel,
-        apiKey: configToSave.apiKey ?? null
+        apiKey: configToSave.apiKey ?? null,
+        ollamaEndpoint: configToSave.ollamaEndpoint ?? null
       };
       console.log('Saving model config with payload:', payload);
 
@@ -823,6 +824,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
         model: payload.model,
         whisperModel: payload.whisperModel,
         apiKey: payload.apiKey,
+        ollamaEndpoint: payload.ollamaEndpoint,
       });
 
       console.log('Save model config success');
