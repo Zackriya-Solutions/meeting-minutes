@@ -27,6 +27,7 @@ pub mod async_logger;
 pub mod batch_processor;
 pub mod system_detector;
 pub mod system_audio_commands;
+pub mod device_monitor;  // NEW: Device disconnect/reconnect monitoring
 
 pub use devices::{
     default_input_device, default_output_device, get_device_and_config, list_audio_devices,
@@ -57,7 +58,7 @@ pub use system_audio_commands::{
 };
 
 // Export new simplified components
-pub use recording_state::{RecordingState, AudioChunk, ProcessedAudioChunk, AudioError};
+pub use recording_state::{RecordingState, AudioChunk, ProcessedAudioChunk, AudioError, DeviceType as RecordingDeviceType};
 pub use pipeline::{AudioPipelineManager};
 pub use stream::{AudioStreamManager};
 pub use recording_manager::{RecordingManager};
@@ -76,6 +77,7 @@ pub use hardware_detector::{HardwareProfile, AdaptiveWhisperConfig, PerformanceT
 pub use encode::{
     encode_single_audio, AudioInput
 };
+pub use device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
 
 pub use vad::{extract_speech_16k};
 

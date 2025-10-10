@@ -254,17 +254,30 @@ impl AudioCapture {
         }
     }
 
-    /// Handle stream errors
+    /// Handle stream errors with enhanced disconnect detection
     pub fn handle_stream_error(&self, error: cpal::StreamError) {
         error!("Audio stream error for {}: {}", self.device.name, error);
 
-        let audio_error = if error.to_string().contains("device is no longer available") {
+        let error_str = error.to_string().to_lowercase();
+
+        // Enhanced error detection for device disconnection
+        let audio_error = if error_str.contains("device is no longer available")
+            || error_str.contains("device not found")
+            || error_str.contains("device disconnected")
+            || error_str.contains("no such device")
+            || error_str.contains("device unavailable")
+            || error_str.contains("device removed")
+        {
+            warn!("🔌 Device disconnect detected for: {}", self.device.name);
             AudioError::DeviceDisconnected
-        } else if error.to_string().contains("permission") {
+        } else if error_str.contains("permission") || error_str.contains("access denied") {
             AudioError::PermissionDenied
-        } else if error.to_string().contains("channel closed") {
+        } else if error_str.contains("channel closed") {
             AudioError::ChannelClosed
+        } else if error_str.contains("stream") && error_str.contains("failed") {
+            AudioError::StreamFailed
         } else {
+            warn!("Unknown audio error: {}", error);
             AudioError::StreamFailed
         };
 

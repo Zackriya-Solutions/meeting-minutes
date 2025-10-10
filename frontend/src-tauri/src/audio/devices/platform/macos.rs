@@ -14,9 +14,11 @@ pub fn configure_macos_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         }
     }
 
-    // Filter function to exclude macOS speakers and AirPods for output devices
+    // Filter function to exclude macOS built-in speakers for output devices
+    // NOTE: AirPods and other Bluetooth devices are now allowed (with device monitoring for disconnect handling)
     fn should_include_output_device(name: &str) -> bool {
-        !name.to_lowercase().contains("speakers") && !name.to_lowercase().contains("airpods")
+        // Only filter out built-in speakers (they don't typically capture system audio properly)
+        !name.to_lowercase().contains("speakers")
     }
 
     if let Ok(host) = cpal::host_from_id(cpal::HostId::ScreenCaptureKit) {

@@ -65,7 +65,8 @@ const Sidebar: React.FC = () => {
     model: 'large-v3',
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
-  
+  const [showRecordingBlockToast, setShowRecordingBlockToast] = useState(false);
+
   // Ensure 'meetings' folder is always expanded
   useEffect(() => {
     if (!expandedFolders.has('meetings')) {
@@ -373,9 +374,19 @@ const Sidebar: React.FC = () => {
         </button>
 
         <button
-          onClick={() => router.push('/settings')}
-          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          title="Settings"
+          onClick={() => {
+            if (isRecording) {
+              setShowRecordingBlockToast(true);
+              setTimeout(() => setShowRecordingBlockToast(false), 3000);
+              return;
+            }
+            router.push('/settings');
+          }}
+          disabled={isRecording}
+          className={`p-2 rounded-lg transition-colors ${
+            isRecording ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
+          }`}
+          title={isRecording ? "Settings unavailable during recording" : "Settings"}
         >
           <Settings className="w-5 h-5 text-gray-600" />
         </button>
@@ -656,8 +667,20 @@ const Sidebar: React.FC = () => {
               </button>
         
               <button
-                onClick={() => router.push('/settings')}
-                className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
+                onClick={() => {
+                  if (isRecording) {
+                    setShowRecordingBlockToast(true);
+                    setTimeout(() => setShowRecordingBlockToast(false), 3000);
+                    return;
+                  }
+                  router.push('/settings');
+                }}
+                disabled={isRecording}
+                className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium ${
+                  isRecording
+                    ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                    : 'text-gray-700 bg-gray-200 hover:bg-gray-300'
+                } rounded-lg transition-colors shadow-sm`}
               >
                 <Settings className="w-4 h-4 mr-2" />
                 <span>Settings</span>
@@ -678,7 +701,13 @@ const Sidebar: React.FC = () => {
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
 
-      
+      {/* Toast notification for recording block */}
+      {showRecordingBlockToast && (
+        <div className="fixed bottom-4 right-4 z-50 bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+          <span className="text-sm font-medium">Can't access other pages while recording is going on</span>
+        </div>
+      )}
+
     </div>
   );
 };

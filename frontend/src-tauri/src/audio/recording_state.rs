@@ -49,10 +49,11 @@ pub enum AudioError {
 }
 
 impl AudioError {
-    /// Check if error is recoverable
+    /// Check if error is recoverable (can attempt reconnection)
     pub fn is_recoverable(&self) -> bool {
         match self {
-            AudioError::DeviceDisconnected => false,
+            // Device disconnect is now recoverable - we can attempt reconnection
+            AudioError::DeviceDisconnected => true,
             AudioError::StreamFailed => true,
             AudioError::ProcessingFailed => true,
             AudioError::TranscriptionFailed => true,
@@ -95,10 +96,13 @@ pub struct RecordingState {
     // Core recording state
     is_recording: AtomicBool,
     is_paused: AtomicBool,
+    is_reconnecting: AtomicBool,  // NEW: Attempting to reconnect to device
 
     // Audio devices
     microphone_device: Mutex<Option<Arc<AudioDevice>>>,
     system_device: Mutex<Option<Arc<AudioDevice>>>,
+    // Track which device is disconnected for reconnection attempts
+    disconnected_device: Mutex<Option<(Arc<AudioDevice>, DeviceType)>>,
 
     // Audio pipeline
     audio_sender: Mutex<Option<mpsc::UnboundedSender<AudioChunk>>>,
@@ -127,8 +131,10 @@ impl RecordingState {
         Arc::new(Self {
             is_recording: AtomicBool::new(false),
             is_paused: AtomicBool::new(false),
+            is_reconnecting: AtomicBool::new(false),
             microphone_device: Mutex::new(None),
             system_device: Mutex::new(None),
+            disconnected_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
             buffer_pool: AudioBufferPool::new(16, 48000), // Pool of 16 buffers with 48kHz samples capacity
             error_count: AtomicU32::new(0),
@@ -202,6 +208,27 @@ impl RecordingState {
 
     pub fn is_active(&self) -> bool {
         self.is_recording() && !self.is_paused()
+    }
+
+    // Reconnection state management
+    pub fn start_reconnecting(&self, device: Arc<AudioDevice>, device_type: DeviceType) {
+        self.is_reconnecting.store(true, Ordering::SeqCst);
+        *self.disconnected_device.lock().unwrap() = Some((device, device_type));
+        log::info!("Started reconnection attempt for device");
+    }
+
+    pub fn stop_reconnecting(&self) {
+        self.is_reconnecting.store(false, Ordering::SeqCst);
+        *self.disconnected_device.lock().unwrap() = None;
+        log::info!("Stopped reconnection attempt");
+    }
+
+    pub fn is_reconnecting(&self) -> bool {
+        self.is_reconnecting.load(Ordering::SeqCst)
+    }
+
+    pub fn get_disconnected_device(&self) -> Option<(Arc<AudioDevice>, DeviceType)> {
+        self.disconnected_device.lock().unwrap().clone()
     }
 
     // Device management
@@ -359,8 +386,10 @@ impl RecordingState {
     // Cleanup
     pub fn cleanup(&self) {
         self.stop_recording();
+        self.stop_reconnecting();
         *self.microphone_device.lock().unwrap() = None;
         *self.system_device.lock().unwrap() = None;
+        *self.disconnected_device.lock().unwrap() = None;
         *self.audio_sender.lock().unwrap() = None;
         *self.last_error.lock().unwrap() = None;
         *self.error_callback.lock().unwrap() = None;
@@ -381,8 +410,10 @@ impl Default for RecordingState {
         Self {
             is_recording: AtomicBool::new(false),
             is_paused: AtomicBool::new(false),
+            is_reconnecting: AtomicBool::new(false),
             microphone_device: Mutex::new(None),
             system_device: Mutex::new(None),
+            disconnected_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
             buffer_pool: AudioBufferPool::new(16, 48000), // Pool of 16 buffers with 48kHz samples capacity
             error_count: AtomicU32::new(0),
