@@ -473,6 +473,11 @@ impl RecordingManager {
     pub fn is_reconnecting(&self) -> bool {
         self.state.is_reconnecting()
     }
+
+    /// Get reference to recording state for external access
+    pub fn get_state(&self) -> &Arc<RecordingState> {
+        &self.state
+    }
 }
 
 impl Default for RecordingManager {

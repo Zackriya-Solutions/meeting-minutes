@@ -67,6 +67,7 @@ impl MonitoredDevice {
     }
 
     /// Get appropriate reconnect check interval
+    #[allow(dead_code)]
     fn reconnect_interval(&self) -> Duration {
         if self.is_bluetooth {
             Duration::from_secs(5) // Check every 5s for Bluetooth
