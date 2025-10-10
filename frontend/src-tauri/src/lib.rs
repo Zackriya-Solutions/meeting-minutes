@@ -490,6 +490,9 @@ pub fn run() {
                 log::info!("Enhanced notification handlers set up for macOS");
             }
 
+            // Set models directory to use app_data_dir (unified storage location)
+            whisper_engine::commands::set_models_directory(&_app.handle());
+
             // Initialize Whisper engine on startup
             tauri::async_runtime::spawn(async {
                 if let Err(e) = whisper_engine::commands::whisper_init().await {
@@ -498,14 +501,14 @@ pub fn run() {
             });
 
             // Trigger system audio permission request on startup (similar to microphone permission)
-            #[cfg(target_os = "macos")]
-            {
-                tauri::async_runtime::spawn(async {
-                    if let Err(e) = audio::permissions::trigger_system_audio_permission() {
-                        log::warn!("Failed to trigger system audio permission: {}", e);
-                    }
-                });
-            }
+            // #[cfg(target_os = "macos")]
+            // {
+            //     tauri::async_runtime::spawn(async {
+            //         if let Err(e) = audio::permissions::trigger_system_audio_permission() {
+            //             log::warn!("Failed to trigger system audio permission: {}", e);
+            //         }
+            //     });
+            // }
 
             // Initialize database (handles first launch detection and conditional setup)
             tauri::async_runtime::block_on(async {
@@ -647,13 +650,20 @@ pub fn run() {
             // Screen Recording permission commands
             audio::permissions::check_screen_recording_permission_command,
             audio::permissions::request_screen_recording_permission_command,
-            audio::permissions::trigger_system_audio_permission_command,
+            // audio::permissions::trigger_system_audio_permission_command,
             // Database import commands
             database::commands::check_first_launch,
             database::commands::select_legacy_database_path,
             database::commands::detect_legacy_database,
             database::commands::import_and_initialize_database,
             database::commands::initialize_fresh_database,
+            // Database and Models path commands
+            database::commands::get_database_directory,
+            database::commands::open_database_folder,
+            whisper_engine::commands::open_models_folder,
+            // System settings commands
+            #[cfg(target_os = "macos")]
+            utils::open_system_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

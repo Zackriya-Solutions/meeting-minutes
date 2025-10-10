@@ -12,7 +12,7 @@ export const useNavigation = (meetingId: string, meetingTitle: string) => {
 
     const handleNavigation = () => {
         setCurrentMeeting({ id: meetingId, title: meetingTitle });
-        router.push(`/meeting-details`);
+        router.push(`/meeting-details?id=${meetingId}`);
     };
 
     return handleNavigation;

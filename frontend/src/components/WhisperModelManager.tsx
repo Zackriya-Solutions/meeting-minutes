@@ -458,7 +458,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
     <div className={`space-y-4 ${className}`}>
       
 
-      <div className="grid gap-4 max-h-[calc(100vh-450px)] overflow-y-auto">
+      <div className="grid gap-4  overflow-y-auto">
         {models.map((model) => {
           const isSelected = selectedModel === model.name;
           const isDownloading = typeof model.status === 'object' && 'Downloading' in model.status;

@@ -128,39 +128,50 @@ export function AudioBackendSelector({
       )}
 
       <div className="space-y-2">
-        {backends.map((backend) => (
-          <label
-            key={backend.id}
-            className={`flex items-start p-3 border rounded-lg cursor-pointer transition-all ${
-              currentBackend === backend.id
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-300 hover:border-gray-400 bg-white'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <input
-              type="radio"
-              name="audioBackend"
-              value={backend.id}
-              checked={currentBackend === backend.id}
-              onChange={() => handleBackendChange(backend.id)}
-              disabled={disabled}
-              className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
-            />
-            <div className="ml-3 flex-1">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-900">
-                  {backend.name}
-                </span>
-                {currentBackend === backend.id && (
-                  <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-                    Active
+        {backends.map((backend) => {
+          // Disable Core Audio option
+          const isCoreAudio = backend.id === 'coreaudio';
+          const isDisabled = disabled || isCoreAudio;
+
+          return (
+            <label
+              key={backend.id}
+              className={`flex items-start p-3 border rounded-lg transition-all ${
+                currentBackend === backend.id
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-300 hover:border-gray-400 bg-white'
+              } ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <input
+                type="radio"
+                name="audioBackend"
+                value={backend.id}
+                checked={currentBackend === backend.id}
+                onChange={() => handleBackendChange(backend.id)}
+                disabled={isDisabled}
+                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+              />
+              <div className="ml-3 flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900">
+                    {backend.name}
                   </span>
-                )}
+                  {currentBackend === backend.id && (
+                    <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                      Active
+                    </span>
+                  )}
+                  {isCoreAudio && (
+                    <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                      Disabled
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-gray-600">{backend.description}</p>
               </div>
-              <p className="mt-1 text-xs text-gray-600">{backend.description}</p>
-            </div>
-          </label>
-        ))}
+            </label>
+          );
+        })}
       </div>
 
       <div className="text-xs text-gray-500 space-y-1">

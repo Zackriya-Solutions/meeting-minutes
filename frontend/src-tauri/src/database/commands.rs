@@ -129,3 +129,58 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
 
     Ok(())
 }
+
+/// Get the database directory path
+#[tauri::command]
+pub async fn get_database_directory(app: AppHandle) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+    Ok(app_data_dir.to_string_lossy().to_string())
+}
+
+/// Open the database folder in the system file explorer
+#[tauri::command]
+pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+    // Ensure directory exists before trying to open it
+    if !app_data_dir.exists() {
+        std::fs::create_dir_all(&app_data_dir)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    let folder_path = app_data_dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    info!("Opened database folder: {}", folder_path);
+    Ok(())
+}

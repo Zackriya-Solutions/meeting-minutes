@@ -25,9 +25,9 @@ impl Default for RecordingPreferences {
         Self {
             save_folder: get_default_recordings_folder(),
             auto_save: true,
-            file_format: "wav".to_string(),
+            file_format: "mp4".to_string(),
             #[cfg(target_os = "macos")]
-            system_audio_backend: Some("coreaudio".to_string()),
+            system_audio_backend: Some("screencapturekit".to_string()),
         }
     }
 }

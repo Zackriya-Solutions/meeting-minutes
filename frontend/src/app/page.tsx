@@ -10,6 +10,9 @@ import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { LanguageSelection } from '@/components/LanguageSelection';
+import { PermissionWarning } from '@/components/PermissionWarning';
+import { PreferenceSettings } from '@/components/PreferenceSettings';
+import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -21,8 +24,9 @@ import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
 import { Button } from '@/components/ui/button';
-import { Copy, GlobeIcon } from 'lucide-react';
+import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
+import { toast } from 'sonner';
 
 
 
@@ -83,6 +87,9 @@ export default function Home() {
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
+
+  // Permission check hook
+  const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -804,7 +811,7 @@ export default function Home() {
         console.log('Setting current meeting and navigating to details page');
         setCurrentMeeting({ id: meetingId, title: meetingTitle });
         setIsMeetingActive(false);
-        router.push('/meeting-details');
+        router.push(`/meeting-details?id=${meetingId}`);
       }
       setIsMeetingActive(false);
       // isRecordingState already set to false at function start
@@ -1161,6 +1168,8 @@ export default function Home() {
       .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
+
+    toast.success("Transcript copied to clipboard");
   }, [transcripts]);
 
   const handleGenerateSummary = useCallback(async () => {
@@ -1302,20 +1311,34 @@ export default function Home() {
             <div className="flex flex-col space-y-3">
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      handleCopyTranscript();
-                    }}
-                    disabled={transcripts?.length === 0}
-                    title={transcripts?.length === 0 ? 'No transcript available' : 'Copy Transcript'}
-                  >
-                    <Copy />
-                    <span className='hidden md:inline'>
-                      Copy
-                    </span>
-                  </Button>
+                  {transcripts?.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        handleCopyTranscript();
+                      }}
+                      title="Copy Transcript"
+                    >
+                      <Copy />
+                      <span className='hidden md:inline'>
+                        Copy
+                      </span>
+                    </Button>
+                  )}
+                  {!isRecording && transcripts?.length === 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowModelSelector(true)}
+                      title="Transcription Model Settings"
+                    >
+                      <Settings />
+                      <span className='hidden md:inline'>
+                        Model
+                      </span>
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -1442,6 +1465,18 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Permission Warning */}
+          {!isRecording && !isCheckingPermissions && (
+            <div className="px-4 pt-4">
+              <PermissionWarning
+                hasMicrophone={hasMicrophone}
+                hasSystemAudio={hasSystemAudio}
+                onRecheck={checkPermissions}
+                isRechecking={isCheckingPermissions}
+              />
+            </div>
+          )}
+
           {/* Transcript content */}
           <div className="flex-1 overflow-y-auto pb-32">
             <TranscriptView transcripts={transcripts} isRecording={isRecording} />
@@ -1460,26 +1495,28 @@ export default function Home() {
             </div>
           )} */}
 
-          {/* Recording controls */}
-          <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
-            <div className="bg-white rounded-full shadow-lg flex items-center">
-              <RecordingControls
-                isRecording={isRecording}
-                onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
-                onRecordingStart={handleRecordingStart}
-                onTranscriptReceived={handleTranscriptUpdate}
-                barHeights={barHeights}
-                onTranscriptionError={(message) => {
-                  setErrorMessage(message);
-                  setShowErrorAlert(true);
-                }}
-                isRecordingDisabled={isRecordingDisabled}
-                isParentProcessing={isProcessingStop}
-                selectedDevices={selectedDevices}
-                meetingName={meetingTitle}
-              />
+          {/* Recording controls - only show when permissions are granted or already recording */}
+          {(hasMicrophone || isRecording) && (
+            <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
+              <div className="bg-white rounded-full shadow-lg flex items-center">
+                <RecordingControls
+                  isRecording={isRecording}
+                  onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
+                  onRecordingStart={handleRecordingStart}
+                  onTranscriptReceived={handleTranscriptUpdate}
+                  barHeights={barHeights}
+                  onTranscriptionError={(message) => {
+                    setErrorMessage(message);
+                    setShowErrorAlert(true);
+                  }}
+                  isRecordingDisabled={isRecordingDisabled}
+                  isParentProcessing={isProcessingStop}
+                  selectedDevices={selectedDevices}
+                  meetingName={meetingTitle}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Processing status overlay */}
           {summaryStatus === 'processing' && !isRecording && (
@@ -1495,12 +1532,13 @@ export default function Home() {
             </div>
           )}
 
-          {/* Model Settings Modal */}
+          {/* Preferences Modal (Settings) */}
           {showModelSettings && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Model Settings</h3>
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                {/* Header */}
+                <div className="flex justify-between items-center p-6 border-b">
+                  <h3 className="text-xl font-semibold text-gray-900">Preferences</h3>
                   <button
                     onClick={() => setShowModelSettings(false)}
                     className="text-gray-500 hover:text-gray-700"
@@ -1511,7 +1549,15 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                {/* Content - Scrollable */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                  {/* General Preferences Section */}
+                  <PreferenceSettings />
+
+                  {/* Divider */}
+                  <div className="border-t pt-8">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">AI Model Configuration</h4>
+                    <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Summarization Model
@@ -1572,9 +1618,12 @@ export default function Home() {
                       </div>
                     </div>
                   )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="mt-6 flex justify-end">
+                {/* Footer */}
+                <div className="border-t p-6 flex justify-end">
                   <button
                     onClick={() => setShowModelSettings(false)}
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"

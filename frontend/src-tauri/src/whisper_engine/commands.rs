@@ -1,9 +1,40 @@
 use crate::whisper_engine::{ModelInfo, WhisperEngine};
 use std::sync::{Arc, Mutex};
-use tauri::{command, Emitter, Manager};
+use std::path::PathBuf;
+use tauri::{command, Emitter, Manager, AppHandle, Runtime};
 
 // Global whisper engine
 pub static WHISPER_ENGINE: Mutex<Option<Arc<WhisperEngine>>> = Mutex::new(None);
+
+// Global models directory path (set during app initialization)
+static MODELS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Initialize the models directory path using app_data_dir
+/// This should be called during app setup before whisper_init
+pub fn set_models_directory<R: Runtime>(app: &AppHandle<R>) {
+    let app_data_dir = app.path().app_data_dir()
+        .expect("Failed to get app data dir");
+
+    let models_dir = app_data_dir.join("models");
+
+    // Create directory if it doesn't exist
+    if !models_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&models_dir) {
+            log::error!("Failed to create models directory: {}", e);
+            return;
+        }
+    }
+
+    log::info!("Models directory set to: {}", models_dir.display());
+
+    let mut guard = MODELS_DIR.lock().unwrap();
+    *guard = Some(models_dir);
+}
+
+/// Get the configured models directory
+fn get_models_directory() -> Option<PathBuf> {
+    MODELS_DIR.lock().unwrap().clone()
+}
 
 #[command]
 pub async fn whisper_init() -> Result<(), String> {
@@ -12,8 +43,9 @@ pub async fn whisper_init() -> Result<(), String> {
         return Ok(());
     }
 
-    let engine =
-        WhisperEngine::new().map_err(|e| format!("Failed to initialize whisper engine: {}", e))?;
+    let models_dir = get_models_directory();
+    let engine = WhisperEngine::new_with_models_dir(models_dir)
+        .map_err(|e| format!("Failed to initialize whisper engine: {}", e))?;
     *guard = Some(Arc::new(engine));
     Ok(())
 }
@@ -391,4 +423,46 @@ pub async fn whisper_delete_corrupted_model(model_name: String) -> Result<String
     } else {
         Err("Whisper engine not initialized".to_string())
     }
+}
+
+/// Open the models folder in the system file explorer
+#[command]
+pub async fn open_models_folder() -> Result<(), String> {
+    let models_dir = get_models_directory()
+        .ok_or_else(|| "Models directory not initialized".to_string())?;
+
+    // Ensure directory exists before trying to open it
+    if !models_dir.exists() {
+        std::fs::create_dir_all(&models_dir)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    let folder_path = models_dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    log::info!("Opened models folder: {}", folder_path);
+    Ok(())
 }
