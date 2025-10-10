@@ -1477,26 +1477,28 @@ export default function Home() {
             </div>
           )} */}
 
-          {/* Recording controls */}
-          <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
-            <div className="bg-white rounded-full shadow-lg flex items-center">
-              <RecordingControls
-                isRecording={isRecording}
-                onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
-                onRecordingStart={handleRecordingStart}
-                onTranscriptReceived={handleTranscriptUpdate}
-                barHeights={barHeights}
-                onTranscriptionError={(message) => {
-                  setErrorMessage(message);
-                  setShowErrorAlert(true);
-                }}
-                isRecordingDisabled={isRecordingDisabled}
-                isParentProcessing={isProcessingStop}
-                selectedDevices={selectedDevices}
-                meetingName={meetingTitle}
-              />
+          {/* Recording controls - only show when permissions are granted or already recording */}
+          {(hasMicrophone || isRecording) && (
+            <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
+              <div className="bg-white rounded-full shadow-lg flex items-center">
+                <RecordingControls
+                  isRecording={isRecording}
+                  onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
+                  onRecordingStart={handleRecordingStart}
+                  onTranscriptReceived={handleTranscriptUpdate}
+                  barHeights={barHeights}
+                  onTranscriptionError={(message) => {
+                    setErrorMessage(message);
+                    setShowErrorAlert(true);
+                  }}
+                  isRecordingDisabled={isRecordingDisabled}
+                  isParentProcessing={isProcessingStop}
+                  selectedDevices={selectedDevices}
+                  meetingName={meetingTitle}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Processing status overlay */}
           {summaryStatus === 'processing' && !isRecording && (
