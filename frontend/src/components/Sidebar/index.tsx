@@ -371,48 +371,14 @@ const Sidebar: React.FC = () => {
         >
           <StickyNote className="w-5 h-5 text-gray-600" />
         </button>
-        {/* <button
-          onClick={() => setShowModelSettings(true)}
+
+        <button
+          onClick={() => router.push('/settings')}
           className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
           title="Settings"
         >
           <Settings className="w-5 h-5 text-gray-600" />
-        </button> */}
-        <Dialog open={showModelSettings} onOpenChange={setShowModelSettings}>
-          <DialogTrigger asChild>
-            <button
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-5 h-5 text-gray-600" />
-            </button>
-          </DialogTrigger>
-          <DialogContent aria-describedby={undefined}>
-            <VisuallyHidden>
-              <DialogTitle>Settings</DialogTitle>
-            </VisuallyHidden>
-            <SettingTabs
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSave={handleSaveModelConfig}
-              transcriptModelConfig={transcriptModelConfig}
-              setTranscriptModelConfig={setTranscriptModelConfig}
-              onSaveTranscript={handleSaveTranscriptConfig}
-              setSaveSuccess={setSettingsSaveSuccess}
-            />
-            <DialogFooter>
-                    {settingsSaveSuccess !== null && (
-                      <MessageToast 
-                        message={settingsSaveSuccess ? 'Settings saved successfully' : 'Failed to save settings'} 
-                        type={settingsSaveSuccess ? 'success' : 'error'} 
-                        show={settingsSaveSuccess !== null}
-                        setShow={() => setSettingsSaveSuccess(null)}
-                      />
-                    )}
-                  </DialogFooter>
-          </DialogContent>
-          
-        </Dialog>
+        </button>
         {/* <button
           onClick={() => {
             if (isCollapsed) toggleCollapse();
@@ -689,43 +655,13 @@ const Sidebar: React.FC = () => {
                 )}
               </button>
         
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                  onClick={() => setShowModelSettings(true)}
-                  className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-200 rounded-lg transition-colors shadow-sm"
-                  >
-                    <Settings className="w-4 h-4 mr-2" />
-                    <span>Settings</span>
-                  </button>
-                </DialogTrigger>
-                <DialogContent aria-describedby={undefined}>
-                  <VisuallyHidden>
-                    <DialogTitle>Settings</DialogTitle>
-                  </VisuallyHidden>
-                  <SettingTabs
-                    modelConfig={modelConfig}
-                    setModelConfig={setModelConfig}
-                    onSave={handleSaveModelConfig}
-                    transcriptModelConfig={transcriptModelConfig}
-                    setTranscriptModelConfig={setTranscriptModelConfig}
-                    onSaveTranscript={handleSaveTranscriptConfig}
-                    setSaveSuccess={setSettingsSaveSuccess}
-                  />
-                  <DialogFooter>
-                    {settingsSaveSuccess !== null && (
-                      <MessageToast 
-                        message={settingsSaveSuccess ? 'Settings saved successfully' : 'Failed to save settings'} 
-                        type={settingsSaveSuccess ? 'success' : 'error'} 
-                        show={settingsSaveSuccess !== null}
-                        setShow={() => setSettingsSaveSuccess(null)}
-                      />
-                    )}
-                  </DialogFooter>
-
-                </DialogContent>
-
-              </Dialog>
+              <button
+                onClick={() => router.push('/settings')}
+                className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
+              >
+                <Settings className="w-4 h-4 mr-2" />
+                <span>Settings</span>
+              </button>
               <Info isCollapsed={isCollapsed} />
               <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
               v0.0.5 - Pre Release
