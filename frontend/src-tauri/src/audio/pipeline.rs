@@ -137,11 +137,12 @@ impl ProfessionalAudioMixer {
 pub struct AudioCapture {
     device: Arc<AudioDevice>,
     state: Arc<RecordingState>,
-    sample_rate: u32,
+    sample_rate: u32,        // Original device sample rate
     channels: u16,
     chunk_counter: Arc<std::sync::atomic::AtomicU64>,
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    needs_resampling: bool,  // NEW: Flag if resampling is required
     // Note: Using global recording timestamp for synchronization
 }
 
@@ -154,6 +155,30 @@ impl AudioCapture {
         device_type: DeviceType,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     ) -> Self {
+        // CRITICAL FIX: Detect if resampling is needed
+        // Pipeline expects 48kHz, but Bluetooth devices often report 8kHz, 16kHz, or 44.1kHz
+        const TARGET_SAMPLE_RATE: u32 = 48000;
+        let needs_resampling = sample_rate != TARGET_SAMPLE_RATE;
+
+        if needs_resampling {
+            warn!(
+                "⚠️ SAMPLE RATE MISMATCH DETECTED ⚠️"
+            );
+            warn!(
+                "🔄 [{:?}] Audio device '{}' reports {} Hz (pipeline expects {} Hz)",
+                device_type, device.name, sample_rate, TARGET_SAMPLE_RATE
+            );
+            warn!(
+                "🔄 Automatic resampling will be applied: {} Hz → {} Hz",
+                sample_rate, TARGET_SAMPLE_RATE
+            );
+        } else {
+            info!(
+                "✅ [{:?}] Audio device '{}' uses {} Hz (matches pipeline)",
+                device_type, device.name, sample_rate
+            );
+        }
+
         Self {
             device,
             state,
@@ -162,6 +187,7 @@ impl AudioCapture {
             chunk_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             device_type,
             recording_sender,
+            needs_resampling,
             // Using global recording time for sync
         }
     }
@@ -174,11 +200,37 @@ impl AudioCapture {
         }
 
         // Convert to mono if needed
-        let mono_data = if self.channels > 1 {
+        let mut mono_data = if self.channels > 1 {
             audio_to_mono(data, self.channels)
         } else {
             data.to_vec()
         };
+
+        // CRITICAL FIX: Resample to 48kHz if device uses different sample rate
+        // This fixes Bluetooth devices (like Sony WH-1000XM4) that report 16kHz
+        // Without this, audio is sped up 3x and VAD fails
+        const TARGET_SAMPLE_RATE: u32 = 48000;
+        if self.needs_resampling {
+            mono_data = super::audio_processing::resample_audio(
+                &mono_data,
+                self.sample_rate,
+                TARGET_SAMPLE_RATE,
+            );
+
+            // Log resampling only occasionally to avoid spam
+            let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+            if chunk_id % 100 == 0 {
+                debug!(
+                    "🔄 [{:?}] Resampled chunk {}: {} → {} Hz ({} → {} samples)",
+                    self.device_type,
+                    chunk_id,
+                    self.sample_rate,
+                    TARGET_SAMPLE_RATE,
+                    data.len() / self.channels as usize,
+                    mono_data.len()
+                );
+            }
+        }
 
         // Create audio chunk with stream-specific timestamp (get ID first for logging)
         let chunk_id = self.chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -215,9 +267,10 @@ impl AudioCapture {
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
 
         // RAW AUDIO CHUNK: No gain applied - will be mixed and gained downstream
+        // Use 48kHz if we resampled, otherwise use original rate
         let audio_chunk = AudioChunk {
-            data: mono_data,  // Raw audio, no gain yet
-            sample_rate: self.sample_rate,
+            data: mono_data,  // Raw audio (resampled if needed), no gain yet
+            sample_rate: if self.needs_resampling { 48000 } else { self.sample_rate },
             timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
@@ -254,17 +307,30 @@ impl AudioCapture {
         }
     }
 
-    /// Handle stream errors
+    /// Handle stream errors with enhanced disconnect detection
     pub fn handle_stream_error(&self, error: cpal::StreamError) {
         error!("Audio stream error for {}: {}", self.device.name, error);
 
-        let audio_error = if error.to_string().contains("device is no longer available") {
+        let error_str = error.to_string().to_lowercase();
+
+        // Enhanced error detection for device disconnection
+        let audio_error = if error_str.contains("device is no longer available")
+            || error_str.contains("device not found")
+            || error_str.contains("device disconnected")
+            || error_str.contains("no such device")
+            || error_str.contains("device unavailable")
+            || error_str.contains("device removed")
+        {
+            warn!("🔌 Device disconnect detected for: {}", self.device.name);
             AudioError::DeviceDisconnected
-        } else if error.to_string().contains("permission") {
+        } else if error_str.contains("permission") || error_str.contains("access denied") {
             AudioError::PermissionDenied
-        } else if error.to_string().contains("channel closed") {
+        } else if error_str.contains("channel closed") {
             AudioError::ChannelClosed
+        } else if error_str.contains("stream") && error_str.contains("failed") {
+            AudioError::StreamFailed
         } else {
+            warn!("Unknown audio error: {}", error);
             AudioError::StreamFailed
         };
 
@@ -306,7 +372,7 @@ impl AudioPipeline {
         // Redemption time: 500ms bridges natural pauses while maintaining responsiveness
         // Too long (2000ms): Delays transcription after speech ends
         // Too short (200ms): Fragments continuous speech into tiny segments
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 500) {
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 2000) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor

@@ -11,19 +11,54 @@ interface StorageLocations {
   recordings: string
 }
 
+interface NotificationSettings {
+  recording_notifications: boolean
+  time_based_reminders: boolean
+  meeting_reminders: boolean
+  respect_do_not_disturb: boolean
+  notification_sound: boolean
+  system_permission_granted: boolean
+  consent_given: boolean
+  manual_dnd_mode: boolean
+  notification_preferences: {
+    show_recording_started: boolean
+    show_recording_stopped: boolean
+    show_recording_paused: boolean
+    show_recording_resumed: boolean
+    show_transcription_complete: boolean
+    show_meeting_reminders: boolean
+    show_system_errors: boolean
+    meeting_reminder_minutes: number[]
+  }
+}
+
 export function PreferenceSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
   const [storageLocations, setStorageLocations] = useState<StorageLocations | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
     const loadPreferences = async () => {
-      // Load notification preference
-      const savedPreference = localStorage.getItem('notificationsEnabled')
-      setNotificationsEnabled(savedPreference !== null ? savedPreference === 'true' : true);
-
-      // Load storage locations
       try {
+        // Load notification settings from backend
+        let settings: NotificationSettings | null = null;
+        try {
+          settings = await invoke<NotificationSettings>('get_notification_settings');
+          setNotificationSettings(settings);
+          // Notification enabled means both started and stopped notifications are enabled
+          setNotificationsEnabled(
+            settings.notification_preferences.show_recording_started &&
+            settings.notification_preferences.show_recording_stopped
+          );
+        } catch (notifError) {
+          console.error('Failed to load notification settings, using defaults:', notifError);
+          // Use default values if notification settings fail to load
+          setNotificationsEnabled(true);
+        }
+
+        // Load storage locations
         const [dbDir, modelsDir, recordingsDir] = await Promise.all([
           invoke<string>('get_database_directory'),
           invoke<string>('whisper_get_models_directory'),
@@ -36,9 +71,10 @@ export function PreferenceSettings() {
           recordings: recordingsDir
         });
       } catch (error) {
-        console.error('Failed to load storage locations:', error);
+        console.error('Failed to load preferences:', error);
       } finally {
         setLoading(false);
+        setIsInitialLoad(false);
       }
     };
 
@@ -46,12 +82,39 @@ export function PreferenceSettings() {
   }, [])
 
   useEffect(() => {
-    if (notificationsEnabled === null) return;
+    // Skip update on initial load
+    if (isInitialLoad) return;
 
-    localStorage.setItem('notificationsEnabled', String(notificationsEnabled));
-    console.log("Setting notificationsEnabled", notificationsEnabled)
-    invoke('set_notification_enabled', { enabled: notificationsEnabled })
-  }, [notificationsEnabled])
+    const updateNotificationSettings = async () => {
+      if (notificationsEnabled === null || !notificationSettings) {
+        console.log("Skipping update: notificationsEnabled or notificationSettings is null");
+        return;
+      }
+
+      console.log("Updating notification settings to:", notificationsEnabled);
+
+      try {
+        // Update the notification preferences
+        const updatedSettings: NotificationSettings = {
+          ...notificationSettings,
+          notification_preferences: {
+            ...notificationSettings.notification_preferences,
+            show_recording_started: notificationsEnabled,
+            show_recording_stopped: notificationsEnabled,
+          }
+        };
+
+        console.log("Calling set_notification_settings with:", updatedSettings);
+        await invoke('set_notification_settings', { settings: updatedSettings });
+        setNotificationSettings(updatedSettings);
+        console.log("Successfully updated notification settings to:", notificationsEnabled);
+      } catch (error) {
+        console.error('Failed to update notification settings:', error);
+      }
+    };
+
+    updateNotificationSettings();
+  }, [notificationsEnabled, isInitialLoad])
 
   const handleOpenFolder = async (folderType: 'database' | 'models' | 'recordings') => {
     try {

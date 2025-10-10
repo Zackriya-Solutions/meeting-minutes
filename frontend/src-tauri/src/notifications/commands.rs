@@ -301,15 +301,6 @@ pub async fn show_recording_started_notification<R: Runtime>(
     let manager_lock = manager_state.read().await;
     if let Some(manager) = manager_lock.as_ref() {
         log_info!("Notification manager found, showing recording started notification");
-
-        // For testing/development, automatically grant consent and permissions
-        if let Err(e) = manager.set_consent(true).await {
-            log_error!("Failed to set consent: {}", e);
-        }
-        if let Err(e) = manager.request_permission().await {
-            log_error!("Failed to request permission: {}", e);
-        }
-
         manager.show_recording_started(meeting_name).await
     } else {
         drop(manager_lock);
@@ -328,13 +319,6 @@ pub async fn show_recording_started_notification<R: Runtime>(
                 // Now use the initialized manager
                 let manager_lock = manager_state.read().await;
                 if let Some(manager) = manager_lock.as_ref() {
-                    // For testing/development, automatically grant consent and permissions
-                    if let Err(e) = manager.set_consent(true).await {
-                        log_error!("Failed to set consent: {}", e);
-                    }
-                    if let Err(e) = manager.request_permission().await {
-                        log_error!("Failed to request permission: {}", e);
-                    }
                     manager.show_recording_started(meeting_name).await
                 } else {
                     log_error!("Manager still not available after initialization");
@@ -344,11 +328,21 @@ pub async fn show_recording_started_notification<R: Runtime>(
             Err(e) => {
                 log_error!("Failed to initialize notification manager: {}", e);
 
+                // Check settings before showing fallback notification
+                use crate::notifications::settings::ConsentManager;
+                let consent_manager = ConsentManager::new(app_handle.clone())?;
+                let settings = consent_manager.load_settings().await.unwrap_or_default();
+
+                if !settings.notification_preferences.show_recording_started {
+                    log_info!("Recording started notification is disabled in settings, skipping fallback");
+                    return Ok(());
+                }
+
                 // Fallback: Use Tauri's notification API directly
                 let title = "Meetily";
                 let body = match meeting_name {
                     Some(name) => format!("Recording started for meeting: {}", name),
-                    None => "Recording has started".to_string(),
+                    None => "Recording has started. Please inform others in the meeting that you are recording.".to_string(),
                 };
 
                 log_info!("Using direct Tauri notification fallback: {} - {}", title, body);
@@ -383,6 +377,16 @@ pub async fn show_recording_stopped_notification<R: Runtime>(
     } else {
         drop(manager_lock);
         log_info!("Notification manager not initialized for stop notification, using fallback...");
+
+        // Check settings before showing fallback notification
+        use crate::notifications::settings::ConsentManager;
+        let consent_manager = ConsentManager::new(app_handle.clone())?;
+        let settings = consent_manager.load_settings().await.unwrap_or_default();
+
+        if !settings.notification_preferences.show_recording_stopped {
+            log_info!("Recording stopped notification is disabled in settings, skipping fallback");
+            return Ok(());
+        }
 
         // Use direct Tauri notification as fallback for stop notification
         let title = "Meetily";
@@ -467,10 +471,23 @@ pub async fn show_system_error_notification(
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn show_enhanced_recording_confirmation(
+    app: AppHandle<Wry>,
     meeting_name: Option<String>,
     action_url: Option<String>,
 ) -> Result<(), String> {
     log_info!("Showing enhanced recording confirmation for meeting: {:?}", meeting_name);
+
+    // Check notification settings before showing
+    use crate::notifications::settings::ConsentManager;
+    let consent_manager = ConsentManager::new(app.clone())
+        .map_err(|e| format!("Failed to access settings: {}", e))?;
+    let settings = consent_manager.load_settings().await
+        .unwrap_or_default();
+
+    if !settings.notification_preferences.show_recording_started {
+        log_info!("Recording started notification is disabled in settings, skipping enhanced confirmation");
+        return Ok(());
+    }
 
     let notification = if let Some(url) = action_url {
         EnhancedNotification::recording_confirmation(meeting_name)
@@ -555,6 +572,30 @@ pub async fn show_enhanced_recording_confirmation_internal<R: Runtime>(
     app_handle: &AppHandle<R>,
     meeting_name: Option<String>,
 ) -> Result<()> {
+    // Check notification settings first
+    log_info!("🔍 Enhanced confirmation: Checking notification settings...");
+    let notification_manager_state = app_handle.state::<NotificationManagerState<R>>();
+    let manager_lock = notification_manager_state.read().await;
+
+    let should_show = if let Some(manager) = manager_lock.as_ref() {
+        let settings = manager.get_settings().await;
+        log_info!("🔍 Enhanced confirmation: show_recording_started = {}", settings.notification_preferences.show_recording_started);
+        settings.notification_preferences.show_recording_started
+    } else {
+        // If manager not initialized, default to not showing
+        log_info!("⚠️  Notification manager not initialized, skipping enhanced confirmation");
+        return Ok(());
+    };
+
+    drop(manager_lock);
+
+    if !should_show {
+        log_info!("🚫 Enhanced confirmation: Recording started notification is disabled in settings, skipping");
+        return Ok(());
+    }
+
+    log_info!("✅ Enhanced confirmation: Notification enabled, will show");
+
     #[cfg(target_os = "macos")]
     {
         log_info!("Showing enhanced recording confirmation notification internally");

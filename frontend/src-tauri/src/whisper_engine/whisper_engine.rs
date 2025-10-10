@@ -541,6 +541,12 @@ impl WhisperEngine {
         params.set_language(language_code);
         params.set_translate(should_translate);
 
+        // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
+        // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
+        // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
+        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
+        params.set_token_timestamps(true);  // Keep for any timestamp-aware features
+
         // PERFORMANCE: Disable ALL whisper.cpp internal printing
         // This reduces C library log spam significantly
         params.set_print_special(false);      // Don't print special tokens
@@ -648,6 +654,13 @@ impl WhisperEngine {
         };
         params.set_language(language_code);
         params.set_translate(should_translate);
+
+        // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
+        // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
+        // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
+        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
+        params.set_token_timestamps(true);  // Keep for any timestamp-aware features
+
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
