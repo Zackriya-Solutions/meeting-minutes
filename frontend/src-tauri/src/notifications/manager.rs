@@ -100,10 +100,14 @@ impl<R: Runtime> NotificationManager<R> {
     /// Show a recording started notification
     pub async fn show_recording_started(&self, meeting_name: Option<String>) -> Result<()> {
         let settings = self.settings.read().await;
+        log_info!("🔔 Checking notification settings - show_recording_started: {}", settings.notification_preferences.show_recording_started);
+
         if !settings.notification_preferences.show_recording_started {
+            log_info!("🚫 Recording started notification is disabled, skipping");
             return Ok(());
         }
 
+        log_info!("✅ Recording started notification is enabled, showing notification");
         let notification = Notification::recording_started(meeting_name);
         self.show_notification(notification).await
     }
@@ -192,17 +196,22 @@ impl<R: Runtime> NotificationManager<R> {
 
     /// Update notification settings
     pub async fn update_settings(&self, new_settings: NotificationSettings) -> Result<()> {
+        log_info!("📝 Updating notification settings:");
+        log_info!("   show_recording_started: {}", new_settings.notification_preferences.show_recording_started);
+        log_info!("   show_recording_stopped: {}", new_settings.notification_preferences.show_recording_stopped);
+
         // Validate settings
         crate::notifications::settings::validate_settings(&new_settings)?;
 
         // Save to disk
         self.consent_manager.save_settings(&new_settings).await?;
+        log_info!("💾 Settings saved to disk");
 
         // Update in-memory settings
         let mut settings = self.settings.write().await;
         *settings = new_settings;
 
-        log_info!("Notification settings updated successfully");
+        log_info!("✅ Notification settings updated successfully");
         Ok(())
     }
 

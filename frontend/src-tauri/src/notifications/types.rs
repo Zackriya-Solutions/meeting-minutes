@@ -116,7 +116,7 @@ impl Notification {
     pub fn recording_started(meeting_name: Option<String>) -> Self {
         let body = match meeting_name {
             Some(name) => format!("Recording started for meeting: {}", name),
-            None => "Recording has started".to_string(),
+            None => "Recording has started. Please inform others in the meeting that you are recording.".to_string(),
         };
 
         Notification::new("Meetily", body, NotificationType::RecordingStarted)

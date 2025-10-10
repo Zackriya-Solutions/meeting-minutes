@@ -53,7 +53,7 @@ use audio::{list_audio_devices, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
@@ -108,60 +108,22 @@ async fn start_recording<R: Runtime>(
 
             log_info!("Recording started successfully");
 
-            // Show enhanced recording started notification
-            if let Err(e) = notifications::commands::show_enhanced_recording_confirmation_internal(
+            // Show recording started notification through NotificationManager
+            // This respects user's notification preferences
+            let notification_manager_state = app.state::<NotificationManagerState<R>>();
+            if let Err(e) = notifications::commands::show_recording_started_notification(
                 &app,
+                &notification_manager_state,
                 meeting_name.clone(),
             )
             .await
             {
                 log_error!(
-                    "Failed to show enhanced recording started notification: {}",
+                    "Failed to show recording started notification: {}",
                     e
                 );
-
-                // Fallback to basic notification
-                let title = "Meetily";
-                let body = match meeting_name.as_ref() {
-                    Some(name) => format!("Recording started for meeting: {}", name),
-                    None => "Recording has started".to_string(),
-                };
-
-                #[cfg(target_os = "macos")]
-                {
-                    // Use native macOS notification as fallback
-                    let result = tokio::task::spawn_blocking({
-                        let title = title.to_string();
-                        let body = body.clone();
-                        move || {
-                            mac_notification_sys::send_notification(
-                                &title,
-                                None, // No subtitle
-                                &body,
-                                Some(mac_notification_sys::Notification::new().sound("default")),
-                            )
-                        }
-                    })
-                    .await;
-
-                    match result {
-                        Ok(Ok(_)) => log_info!(
-                            "Successfully showed fallback macOS recording started notification"
-                        ),
-                        Ok(Err(e)) => log_error!(
-                            "Failed to show fallback macOS recording started notification: {:?}",
-                            e
-                        ),
-                        Err(e) => log_error!("Task join error for macOS notification: {}", e),
-                    }
-                }
-
-                #[cfg(not(target_os = "macos"))]
-                {
-                    log_info!("Would show notification: {} - {}", title, body);
-                }
             } else {
-                log_info!("Successfully showed enhanced recording confirmation notification");
+                log_info!("Successfully showed recording started notification");
             }
 
             Ok(())
@@ -208,34 +170,21 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
                 }
             }
 
-            // Show recording stopped notification using native system
-            #[cfg(target_os = "macos")]
+            // Show recording stopped notification through NotificationManager
+            // This respects user's notification preferences
+            let notification_manager_state = app.state::<NotificationManagerState<R>>();
+            if let Err(e) = notifications::commands::show_recording_stopped_notification(
+                &app,
+                &notification_manager_state,
+            )
+            .await
             {
-                let result = tokio::task::spawn_blocking(|| {
-                    mac_notification_sys::send_notification(
-                        "Meetily",
-                        None, // No subtitle
-                        "Recording has stopped",
-                        Some(mac_notification_sys::Notification::new().sound("default")),
-                    )
-                })
-                .await;
-
-                match result {
-                    Ok(Ok(_)) => {
-                        log_info!("Successfully showed native macOS recording stopped notification")
-                    }
-                    Ok(Err(e)) => log_error!(
-                        "Failed to show native macOS recording stopped notification: {:?}",
-                        e
-                    ),
-                    Err(e) => log_error!("Task join error for macOS notification: {}", e),
-                }
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                log_info!("Would show notification: Meetily - Recording has stopped");
+                log_error!(
+                    "Failed to show recording stopped notification: {}",
+                    e
+                );
+            } else {
+                log_info!("Successfully showed recording stopped notification");
             }
 
             Ok(())
@@ -386,44 +335,20 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
         Ok(_) => {
             log_info!("Recording started successfully via tauri command");
 
-            // Show recording started notification using native system
-            let title = "Meetily";
-            let body = match meeting_name_for_notification.as_ref() {
-                Some(name) => format!("Recording started for meeting: {}", name),
-                None => "Recording has started".to_string(),
-            };
-
-            #[cfg(target_os = "macos")]
+            // Show recording started notification through NotificationManager
+            // This respects user's notification preferences
+            let notification_manager_state = app.state::<NotificationManagerState<R>>();
+            if let Err(e) = notifications::commands::show_recording_started_notification(
+                &app,
+                &notification_manager_state,
+                meeting_name_for_notification.clone(),
+            )
+            .await
             {
-                let result = tokio::task::spawn_blocking({
-                    let title = title.to_string();
-                    let body = body.clone();
-                    move || {
-                        mac_notification_sys::send_notification(
-                            &title,
-                            None, // No subtitle
-                            &body,
-                            Some(mac_notification_sys::Notification::new().sound("default")),
-                        )
-                    }
-                })
-                .await;
-
-                match result {
-                    Ok(Ok(_)) => {
-                        log_info!("Successfully showed native macOS recording started notification")
-                    }
-                    Ok(Err(e)) => log_error!(
-                        "Failed to show native macOS recording started notification: {:?}",
-                        e
-                    ),
-                    Err(e) => log_error!("Task join error for macOS notification: {}", e),
-                }
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                log_info!("Would show notification: {} - {}", title, body);
+                log_error!(
+                    "Failed to show recording started notification: {}",
+                    e
+                );
             }
 
             Ok(())
@@ -480,8 +405,31 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
-            // Initialize notification system (will be done on first use)
-            log::info!("Notification system will be initialized on first use");
+            // Initialize notification system with proper defaults
+            log::info!("Initializing notification system...");
+            let app_for_notif = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let notif_state = app_for_notif.state::<NotificationManagerState<tauri::Wry>>();
+                match notifications::commands::initialize_notification_manager(app_for_notif.clone()).await {
+                    Ok(manager) => {
+                        // Set default consent and permissions on first launch
+                        if let Err(e) = manager.set_consent(true).await {
+                            log::error!("Failed to set initial consent: {}", e);
+                        }
+                        if let Err(e) = manager.request_permission().await {
+                            log::error!("Failed to request initial permission: {}", e);
+                        }
+
+                        // Store the initialized manager
+                        let mut state_lock = notif_state.write().await;
+                        *state_lock = Some(manager);
+                        log::info!("Notification system initialized with default permissions");
+                    }
+                    Err(e) => {
+                        log::error!("Failed to initialize notification manager: {}", e);
+                    }
+                }
+            });
 
             // Setup enhanced notification handlers (macOS only)
             #[cfg(target_os = "macos")]

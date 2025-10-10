@@ -146,20 +146,13 @@ impl<R: Runtime> SystemNotificationHandler<R> {
         log_info!("Requesting notification permission");
 
         // On most platforms with Tauri, permissions are handled automatically
-        // But we can still check if notifications are working
-        match self.show_test_notification().await {
-            Ok(_) => {
-                log_info!("Notification permission appears to be granted");
-                Ok(true)
-            }
-            Err(e) => {
-                log_error!("Notification permission may be denied: {}", e);
-                Ok(false)
-            }
-        }
+        // We don't need to show a test notification during initialization
+        log_info!("Notification permission granted (automatic for Tauri apps)");
+        Ok(true)
     }
 
     /// Show a test notification to verify the system is working
+    #[allow(dead_code)] // Used by show_test_notification command for manual testing
     async fn show_test_notification(&self) -> Result<()> {
         let test_notification = Notification::test_notification();
         self.show_notification(test_notification).await

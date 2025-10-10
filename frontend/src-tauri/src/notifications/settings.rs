@@ -81,8 +81,8 @@ impl Default for NotificationSettings {
 impl Default for NotificationPreferences {
     fn default() -> Self {
         Self {
-            show_recording_started: true,
-            show_recording_stopped: true,
+            show_recording_started: false,
+            show_recording_stopped: false,
             show_recording_paused: true,
             show_recording_resumed: true,
             show_transcription_complete: true,
