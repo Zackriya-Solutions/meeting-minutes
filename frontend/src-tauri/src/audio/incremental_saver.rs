@@ -168,16 +168,25 @@ impl IncrementalAudioSaver {
 
         // Run FFmpeg concat command
         // Using concat demuxer with copy codec for fast merging (no re-encoding)
-        let ffmpeg_output = std::process::Command::new("ffmpeg")
-            .args(&[
-                "-f", "concat",          // Use concat demuxer
-                "-safe", "0",            // Allow absolute paths
-                "-i", list_file.to_str().unwrap(),
-                "-c", "copy",            // Copy codec - no re-encoding!
-                "-y",                    // Overwrite output file
-                output.to_str().unwrap()
-            ])
-            .output()?;
+        let mut command = std::process::Command::new("ffmpeg");
+        command.args(&[
+            "-f", "concat",          // Use concat demuxer
+            "-safe", "0",            // Allow absolute paths
+            "-i", list_file.to_str().unwrap(),
+            "-c", "copy",            // Copy codec - no re-encoding!
+            "-y",                    // Overwrite output file
+            output.to_str().unwrap()
+        ]);
+
+        // Hide console window on Windows to prevent CMD popup during finalization
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let ffmpeg_output = command.output()?;
 
         if !ffmpeg_output.status.success() {
             let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
