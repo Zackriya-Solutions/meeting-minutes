@@ -583,6 +583,10 @@ pub fn run() {
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
+            // Device monitoring commands (AirPods/Bluetooth disconnect/reconnect)
+            audio::recording_commands::poll_audio_device_events,
+            audio::recording_commands::get_reconnection_status,
+            audio::recording_commands::attempt_device_reconnect,
             console_utils::show_console,
             console_utils::hide_console,
             console_utils::toggle_console,
