@@ -71,39 +71,51 @@ impl WhisperEngine {
     }
 
     pub fn new() -> Result<Self> {
+        Self::new_with_models_dir(None)
+    }
+
+    /// Create a new WhisperEngine with optional custom models directory
+    /// If models_dir is None, uses default location (app data dir for production, local for dev)
+    pub fn new_with_models_dir(models_dir: Option<PathBuf>) -> Result<Self> {
         // PERFORMANCE: Suppress verbose whisper.cpp and Metal logs
         // These C library logs bypass Rust logging and clutter output
         // Set environment variables to reduce C library verbosity
         std::env::set_var("GGML_METAL_LOG_LEVEL", "1"); // 0=off, 1=error, 2=warn, 3=info
         std::env::set_var("WHISPER_LOG_LEVEL", "1");    // Reduce whisper.cpp verbosity
 
-        // Use backend/models directory to preserve existing models
-        let current_dir = std::env::current_dir()
-            .map_err(|e| anyhow!("Failed to get current directory: {}", e))?;
-        
-        // Development: Use frontend/models or backend directories
-        // Production: Use system directories like ~/Library/Application Support/Meetily/models
-        let models_dir = if cfg!(debug_assertions) {
-            // Development mode - try frontend and backend directories
-            if current_dir.join("models").exists() {
-                current_dir.join("models")
-            } else if current_dir.join("../models").exists() {
-                current_dir.join("../models")
-            } else if current_dir.join("backend/whisper-server-package/models").exists() {
-                current_dir.join("backend/whisper-server-package/models")
-            } else if current_dir.join("../backend/whisper-server-package/models").exists() {
-                current_dir.join("../backend/whisper-server-package/models")
-            } else {
-                // Create models directory in current directory for development
-                current_dir.join("models")
-            }
+        let models_dir = if let Some(dir) = models_dir {
+            // Use provided directory (for production with app_data_dir)
+            dir
         } else {
-            // Production mode - use system directories
-            dirs::data_dir()
-                .or_else(|| dirs::home_dir())
-                .ok_or_else(|| anyhow!("Could not find system data directory"))?
-                .join("Meetily")
-                .join("models")
+            // Fallback: determine based on debug/release mode
+            let current_dir = std::env::current_dir()
+                .map_err(|e| anyhow!("Failed to get current directory: {}", e))?;
+
+            // Development: Use frontend/models or backend directories
+            // Production: Use system directories (should be overridden by caller)
+            if cfg!(debug_assertions) {
+                // Development mode - try frontend and backend directories
+                if current_dir.join("models").exists() {
+                    current_dir.join("models")
+                } else if current_dir.join("../models").exists() {
+                    current_dir.join("../models")
+                } else if current_dir.join("backend/whisper-server-package/models").exists() {
+                    current_dir.join("backend/whisper-server-package/models")
+                } else if current_dir.join("../backend/whisper-server-package/models").exists() {
+                    current_dir.join("../backend/whisper-server-package/models")
+                } else {
+                    // Create models directory in current directory for development
+                    current_dir.join("models")
+                }
+            } else {
+                // Production mode fallback (shouldn't reach here, caller should provide path)
+                log::warn!("WhisperEngine: No models directory provided, using fallback path");
+                dirs::data_dir()
+                    .or_else(|| dirs::home_dir())
+                    .ok_or_else(|| anyhow!("Could not find system data directory"))?
+                    .join("Meetily")
+                    .join("models")
+            }
         };
         
         log::info!("WhisperEngine using models directory: {}", models_dir.display());
