@@ -1,7 +1,7 @@
 // Audio playback device monitoring for Bluetooth detection
 use serde::Serialize;
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::debug;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AudioOutputInfo {

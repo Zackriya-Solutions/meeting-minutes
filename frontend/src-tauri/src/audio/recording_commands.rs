@@ -1352,6 +1352,15 @@ pub async fn get_reconnection_status() -> Result<ReconnectionStatus, String> {
     }
 }
 
+/// Get information about the active audio output device
+/// Used to warn users about Bluetooth playback issues
+#[tauri::command]
+pub async fn get_active_audio_output() -> Result<super::playback_monitor::AudioOutputInfo, String> {
+    super::playback_monitor::get_active_audio_output()
+        .await
+        .map_err(|e| format!("Failed to get audio output info: {}", e))
+}
+
 /// Manually trigger device reconnection attempt
 /// Useful for UI "Retry" button
 #[tauri::command]

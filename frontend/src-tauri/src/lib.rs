@@ -587,6 +587,8 @@ pub fn run() {
             audio::recording_commands::poll_audio_device_events,
             audio::recording_commands::get_reconnection_status,
             audio::recording_commands::attempt_device_reconnect,
+            // Playback device detection (Bluetooth warning)
+            audio::recording_commands::get_active_audio_output,
             console_utils::show_console,
             console_utils::hide_console,
             console_utils::toggle_console,
