@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use log::{info, warn, error};
 use super::encode::encode_single_audio;
 use super::recording_state::AudioChunk;
+use super::ffmpeg::find_ffmpeg_path;
 
 /// Audio data without device type (we only store mixed audio)
 #[derive(Clone)]
@@ -166,9 +167,15 @@ impl IncrementalAudioSaver {
 
         std::fs::write(&list_file, list_content)?;
 
+        // Find FFmpeg using the app's discovery system (works in both dev and release builds)
+        let ffmpeg_path = find_ffmpeg_path()
+            .ok_or_else(|| anyhow!("FFmpeg not found. Please install FFmpeg to finalize recordings."))?;
+
+        info!("Using FFmpeg at: {:?}", ffmpeg_path);
+
         // Run FFmpeg concat command
         // Using concat demuxer with copy codec for fast merging (no re-encoding)
-        let mut command = std::process::Command::new("ffmpeg");
+        let mut command = std::process::Command::new(ffmpeg_path);
         command.args(&[
             "-f", "concat",          // Use concat demuxer
             "-safe", "0",            // Allow absolute paths

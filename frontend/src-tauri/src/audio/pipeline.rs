@@ -372,7 +372,7 @@ impl AudioPipeline {
         // Redemption time: 500ms bridges natural pauses while maintaining responsiveness
         // Too long (2000ms): Delays transcription after speech ends
         // Too short (200ms): Fragments continuous speech into tiny segments
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 2000) {
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 700) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor
