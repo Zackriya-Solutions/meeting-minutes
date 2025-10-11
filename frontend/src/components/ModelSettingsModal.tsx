@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
@@ -65,6 +65,8 @@ export function ModelSettingsModal({
   const [isLoadingOllama, setIsLoadingOllama] = useState<boolean>(false);
   const [lastFetchedEndpoint, setLastFetchedEndpoint] = useState<string>(modelConfig.ollamaEndpoint || '');
   const [endpointValidationState, setEndpointValidationState] = useState<'valid' | 'invalid' | 'none'>('none');
+  const [hasAutoFetched, setHasAutoFetched] = useState<boolean>(false);
+  const hasSyncedFromParent = useRef<boolean>(false);
 
   // URL validation helper
   const validateOllamaEndpoint = (url: string): boolean => {
@@ -175,10 +177,12 @@ export function ModelSettingsModal({
 
   // Sync ollamaEndpoint state when modelConfig.ollamaEndpoint changes from parent
   useEffect(() => {
-    if (modelConfig.ollamaEndpoint && modelConfig.ollamaEndpoint !== ollamaEndpoint) {
-      setOllamaEndpoint(modelConfig.ollamaEndpoint);
-      setLastFetchedEndpoint(modelConfig.ollamaEndpoint); // Mark as already fetched
+    const endpoint = modelConfig.ollamaEndpoint || '';
+    if (endpoint !== ollamaEndpoint) {
+      setOllamaEndpoint(endpoint);
+      setLastFetchedEndpoint(endpoint); // Mark as synced with parent
     }
+    hasSyncedFromParent.current = true; // Mark that we've received prop value
   }, [modelConfig.ollamaEndpoint]);
 
   // Manual fetch function for Ollama models
@@ -212,14 +216,22 @@ export function ModelSettingsModal({
     }
   };
 
-  // Auto-load models only on initial load
+  // Auto-load models only on initial load, AFTER endpoint sync
   useEffect(() => {
     let mounted = true;
 
     const initialLoad = async () => {
-      // Auto-fetch once on mount if provider is ollama (regardless of endpoint)
-      if (modelConfig.provider === 'ollama' && mounted) {
+      // Only fetch if:
+      // 1. Provider is ollama
+      // 2. Endpoint has been synced from parent
+      // 3. Haven't auto-fetched yet
+      // 4. Component is still mounted
+      if (modelConfig.provider === 'ollama' &&
+          hasSyncedFromParent.current &&
+          !hasAutoFetched &&
+          mounted) {
         await fetchOllamaModels();
+        setHasAutoFetched(true);
       }
     };
 
@@ -228,7 +240,7 @@ export function ModelSettingsModal({
     return () => {
       mounted = false;
     };
-  }, []); // Empty deps - only run once on mount
+  }, [ollamaEndpoint, hasAutoFetched]); // Trigger after endpoint changes
 
   const loadOpenRouterModels = async () => {
     if (openRouterModels.length > 0) return; // Already loaded

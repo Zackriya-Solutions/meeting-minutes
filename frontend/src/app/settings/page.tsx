@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
+import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 
-type SettingsTab = 'general' | 'recording' | 'Transcriptionmodels';
+type SettingsTab = 'general' | 'recording' | 'Transcriptionmodels' | 'summaryModels';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function SettingsPage() {
     { id: 'general' as const, label: 'General', icon: <Settings2 className="w-4 h-4" /> },
     { id: 'recording' as const, label: 'Recordings', icon: <Mic className="w-4 h-4" /> },
     { id: 'Transcriptionmodels' as const, label: 'Transcription', icon: <DatabaseIcon className="w-4 h-4" /> },
+    { id: 'summaryModels' as const, label: 'Summary', icon: <SparkleIcon className="w-4 h-4" /> }
   ];
 
   return (
@@ -74,6 +76,7 @@ export default function SettingsPage() {
                   />
                 </div>
               )}
+              {activeTab === 'summaryModels' && <SummaryModelSettings />}
             </div>
           </div>
         </div>
