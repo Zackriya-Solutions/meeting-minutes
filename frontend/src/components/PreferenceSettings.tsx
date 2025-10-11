@@ -39,6 +39,7 @@ export function PreferenceSettings() {
   const [storageLocations, setStorageLocations] = useState<StorageLocations | null>(null);
   const [loading, setLoading] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -71,6 +72,11 @@ export function PreferenceSettings() {
           models: modelsDir,
           recordings: recordingsDir
         });
+
+        // Track preferences page view
+        await Analytics.track('preferences_viewed', {
+          notifications_enabled: settings?.notification_preferences.show_recording_started ? 'true' : 'false'
+        });
       } catch (error) {
         console.error('Failed to load preferences:', error);
       } finally {
@@ -83,15 +89,11 @@ export function PreferenceSettings() {
   }, [])
 
   useEffect(() => {
-    // Skip update on initial load
-    if (isInitialLoad) return;
+    // Skip update on initial load or if value hasn't actually changed
+    if (isInitialLoad || notificationsEnabled === null || notificationsEnabled === previousNotificationsEnabled) return;
+    if (!notificationSettings) return;
 
     const updateNotificationSettings = async () => {
-      if (notificationsEnabled === null || !notificationSettings) {
-        console.log("Skipping update: notificationsEnabled or notificationSettings is null");
-        return;
-      }
-
       console.log("Updating notification settings to:", notificationsEnabled);
 
       try {
@@ -108,10 +110,11 @@ export function PreferenceSettings() {
         console.log("Calling set_notification_settings with:", updatedSettings);
         await invoke('set_notification_settings', { settings: updatedSettings });
         setNotificationSettings(updatedSettings);
+        setPreviousNotificationsEnabled(notificationsEnabled);
         console.log("Successfully updated notification settings to:", notificationsEnabled);
 
-        // Track notification preference change
-        await Analytics.trackFeatureUsedEnhanced('notification_settings', {
+        // Track notification preference change - only fires when user manually toggles
+        await Analytics.track('notification_settings_changed', {
           notifications_enabled: notificationsEnabled.toString()
         });
       } catch (error) {
@@ -120,7 +123,7 @@ export function PreferenceSettings() {
     };
 
     updateNotificationSettings();
-  }, [notificationsEnabled, isInitialLoad])
+  }, [notificationsEnabled])
 
   const handleOpenFolder = async (folderType: 'database' | 'models' | 'recordings') => {
     try {
@@ -136,8 +139,8 @@ export function PreferenceSettings() {
           break;
       }
 
-      // Track folder access
-      await Analytics.trackFeatureUsedEnhanced('folder_access', {
+      // Track storage folder access
+      await Analytics.track('storage_folder_opened', {
         folder_type: folderType
       });
     } catch (error) {
