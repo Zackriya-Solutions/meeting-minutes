@@ -73,6 +73,8 @@ pub struct ModelConfig {
     pub whisper_model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "ollamaEndpoint")]
+    pub ollama_endpoint: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,6 +85,8 @@ pub struct SaveModelConfigRequest {
     pub whisper_model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "ollamaEndpoint")]
+    pub ollama_endpoint: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -463,6 +467,7 @@ pub async fn api_get_model_config<R: Runtime>(
                         model: config.model,
                         whisper_model: config.whisper_model,
                         api_key,
+                        ollama_endpoint: config.ollama_endpoint,
                     }))
                 }
                 Err(e) => {
@@ -494,6 +499,7 @@ pub async fn api_save_model_config<R: Runtime>(
     model: String,
     whisper_model: String,
     api_key: Option<String>,
+    ollama_endpoint: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -502,8 +508,14 @@ pub async fn api_save_model_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    if let Err(e) =
-        SettingsRepository::save_model_config(pool, &provider, &model, &whisper_model).await
+    if let Err(e) = SettingsRepository::save_model_config(
+        pool,
+        &provider,
+        &model,
+        &whisper_model,
+        ollama_endpoint.as_deref(),
+    )
+    .await
     {
         log_error!("Failed to save model config: {}", e);
         return Err(e.to_string());

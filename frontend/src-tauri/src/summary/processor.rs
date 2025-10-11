@@ -126,6 +126,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `text` - Full transcript text to summarize
 /// * `custom_prompt` - Optional user-provided context
 /// * `token_threshold` - Token limit for single-pass processing (default 4000)
+/// * `ollama_endpoint` - Optional custom Ollama endpoint
 ///
 /// # Returns
 /// Tuple of (final_summary_markdown, number_of_chunks_processed)
@@ -137,6 +138,7 @@ pub async fn generate_meeting_summary(
     text: &str,
     custom_prompt: &str,
     token_threshold: usize,
+    ollama_endpoint: Option<&str>,
 ) -> Result<(String, i64), String> {
     info!(
         "Starting summary generation with provider: {:?}, model: {}",
@@ -184,6 +186,7 @@ pub async fn generate_meeting_summary(
                 api_key,
                 system_prompt_chunk,
                 &user_prompt_chunk,
+                ollama_endpoint,
             )
             .await
             {
@@ -228,6 +231,7 @@ pub async fn generate_meeting_summary(
                 api_key,
                 system_prompt_combine,
                 &user_prompt_combine,
+                ollama_endpoint,
             )
             .await?
         } else {
@@ -347,6 +351,7 @@ pub async fn generate_meeting_summary(
         api_key,
         &final_system_prompt,
         &final_user_prompt,
+        ollama_endpoint,
     )
     .await?;
 

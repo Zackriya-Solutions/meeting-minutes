@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,16 @@ import {
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Lock, Unlock, Eye, EyeOff } from 'lucide-react';
+import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
+  ollamaEndpoint?: string | null;
 }
 
 interface OllamaModel {
@@ -42,12 +44,14 @@ interface ModelSettingsModalProps {
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSave: (config: ModelConfig) => void;
+  skipInitialFetch?: boolean; // Optional: skip fetching config from backend if parent manages it
 }
 
 export function ModelSettingsModal({
   modelConfig,
   setModelConfig,
   onSave,
+  skipInitialFetch = false,
 }: ModelSettingsModalProps) {
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
@@ -59,6 +63,44 @@ export function ModelSettingsModal({
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [openRouterError, setOpenRouterError] = useState<string>('');
   const [isLoadingOpenRouter, setIsLoadingOpenRouter] = useState<boolean>(false);
+  const [ollamaEndpoint, setOllamaEndpoint] = useState<string>(modelConfig.ollamaEndpoint || '');
+  const [isLoadingOllama, setIsLoadingOllama] = useState<boolean>(false);
+  const [lastFetchedEndpoint, setLastFetchedEndpoint] = useState<string>(modelConfig.ollamaEndpoint || '');
+  const [endpointValidationState, setEndpointValidationState] = useState<'valid' | 'invalid' | 'none'>('none');
+  const [hasAutoFetched, setHasAutoFetched] = useState<boolean>(false);
+  const hasSyncedFromParent = useRef<boolean>(false);
+  const hasLoadedInitialConfig = useRef<boolean>(false);
+
+  // Cache models by endpoint to avoid refetching when reverting endpoint changes
+  const modelsCache = useRef<Map<string, OllamaModel[]>>(new Map());
+
+  // URL validation helper
+  const validateOllamaEndpoint = (url: string): boolean => {
+    if (!url.trim()) return true; // Empty is valid (uses default)
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
+  // Debounced URL validation with visual feedback
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const trimmed = ollamaEndpoint.trim();
+
+      if (!trimmed) {
+        setEndpointValidationState('none');
+      } else if (validateOllamaEndpoint(trimmed)) {
+        setEndpointValidationState('valid');
+      } else {
+        setEndpointValidationState('invalid');
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timer);
+  }, [ollamaEndpoint]);
 
   const fetchApiKey = async (provider: string) => {
     try {
@@ -71,6 +113,13 @@ export function ModelSettingsModal({
       setApiKey(null);
     }
   };
+
+  // Sync apiKey from parent when it changes
+  useEffect(() => {
+    if (modelConfig.apiKey !== apiKey) {
+      setApiKey(modelConfig.apiKey || null);
+    }
+  }, [modelConfig.apiKey]);
 
   const modelOptions = {
     ollama: models.map((model) => model.name),
@@ -109,41 +158,166 @@ export function ModelSettingsModal({
     modelConfig.provider === 'groq' ||
     modelConfig.provider === 'openai' ||
     modelConfig.provider === 'openrouter';
+
+  // Check if Ollama endpoint has changed but models haven't been fetched yet
+  const ollamaEndpointChanged = modelConfig.provider === 'ollama' &&
+    ollamaEndpoint.trim() !== lastFetchedEndpoint.trim();
+
   const isDoneDisabled =
-    requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()));
+    (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
+    (modelConfig.provider === 'ollama' && ollamaEndpointChanged);
 
   useEffect(() => {
     const fetchModelConfig = async () => {
+      // If parent component manages config, skip fetch and just mark as loaded
+      if (skipInitialFetch) {
+        hasLoadedInitialConfig.current = true;
+        return;
+      }
+
       try {
         const data = (await invoke('api_get_model_config')) as any;
         if (data && data.provider !== null) {
           setModelConfig(data);
+
+          // Fetch API key if not included in response and provider requires it
+          if (data.provider !== 'ollama' && !data.apiKey) {
+            try {
+              const apiKeyData = await invoke('api_get_api_key', {
+                provider: data.provider
+              }) as string;
+              data.apiKey = apiKeyData;
+              setApiKey(apiKeyData);
+            } catch (err) {
+              console.error('Failed to fetch API key:', err);
+            }
+          }
+
+          // Sync ollamaEndpoint state with fetched config
+          if (data.ollamaEndpoint) {
+            setOllamaEndpoint(data.ollamaEndpoint);
+            // Don't set lastFetchedEndpoint here - it will be set after successful model fetch
+          }
+          hasLoadedInitialConfig.current = true; // Mark that initial config is loaded
         }
       } catch (error) {
         console.error('Failed to fetch model config:', error);
+        hasLoadedInitialConfig.current = true; // Mark as loaded even on error
       }
     };
 
     fetchModelConfig();
-  }, []);
+  }, [skipInitialFetch]);
 
+  // Sync ollamaEndpoint state when modelConfig.ollamaEndpoint changes from parent
   useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const modelList = (await invoke('get_ollama_models')) as OllamaModel[];
-        setModels(modelList);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load Ollama models');
-        console.error('Error loading models:', err);
+    const endpoint = modelConfig.ollamaEndpoint || '';
+    if (endpoint !== ollamaEndpoint) {
+      setOllamaEndpoint(endpoint);
+      // Don't set lastFetchedEndpoint here - only after successful model fetch
+    }
+    // Only mark as synced if we have a valid provider (prevents race conditions during init)
+    if (modelConfig.provider) {
+      hasSyncedFromParent.current = true; // Mark that we've received prop value
+    }
+  }, [modelConfig.ollamaEndpoint, modelConfig.provider]);
+
+  // Reset hasAutoFetched flag and clear models when switching away from Ollama
+  useEffect(() => {
+    if (modelConfig.provider !== 'ollama') {
+      setHasAutoFetched(false); // Reset flag so it can auto-fetch again if user switches back
+      setModels([]); // Clear models list
+      setError(''); // Clear any error state
+    }
+  }, [modelConfig.provider]);
+
+  // Handle endpoint changes - restore cached models or clear
+  useEffect(() => {
+    if (modelConfig.provider === 'ollama' &&
+      ollamaEndpoint.trim() !== lastFetchedEndpoint.trim()) {
+
+      // Check if we have cached models for this endpoint (including empty endpoint = default)
+      const cachedModels = modelsCache.current.get(ollamaEndpoint.trim());
+
+      if (cachedModels && cachedModels.length > 0) {
+        // Restore cached models and update tracking
+        setModels(cachedModels);
+        setLastFetchedEndpoint(ollamaEndpoint.trim());
+        setError('');
+      } else {
+        // No cache - clear models and allow refetch
+        setHasAutoFetched(false);
+        setModels([]);
+        setError('');
+      }
+    }
+  }, [ollamaEndpoint, lastFetchedEndpoint, modelConfig.provider]);
+
+  // Manual fetch function for Ollama models
+  const fetchOllamaModels = async (silent = false) => {
+    const trimmedEndpoint = ollamaEndpoint.trim();
+
+    // Validate URL if provided
+    if (trimmedEndpoint && !validateOllamaEndpoint(trimmedEndpoint)) {
+      const errorMsg = 'Invalid Ollama endpoint URL. Must start with http:// or https://';
+      setError(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
+      return;
+    }
+
+    setIsLoadingOllama(true);
+    setError(''); // Clear previous errors
+
+    try {
+      const endpoint = trimmedEndpoint || null;
+      const modelList = (await invoke('get_ollama_models', { endpoint })) as OllamaModel[];
+      setModels(modelList);
+      setLastFetchedEndpoint(trimmedEndpoint); // Track successful fetch
+
+      // Cache the fetched models for this endpoint
+      modelsCache.current.set(trimmedEndpoint, modelList);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to load Ollama models';
+      setError(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
+      console.error('Error loading models:', err);
+    } finally {
+      setIsLoadingOllama(false);
+    }
+  };
+
+  // Auto-fetch models on initial load only (not on endpoint changes)
+  useEffect(() => {
+    let mounted = true;
+
+    const initialLoad = async () => {
+      // Only auto-fetch on initial load if:
+      // 1. Provider is ollama
+      // 2. Haven't fetched yet
+      // 3. Component is still mounted
+      // If skipInitialFetch is true, fetch silently (no error toasts)
+      if (modelConfig.provider === 'ollama' &&
+        !hasAutoFetched &&
+        mounted) {
+        await fetchOllamaModels(skipInitialFetch); // Silent if skipInitialFetch=true
+        setHasAutoFetched(true);
       }
     };
 
-    loadModels();
-  }, []);
+    initialLoad();
+
+    return () => {
+      mounted = false;
+    };
+  }, [modelConfig.provider]); // Only depend on provider, NOT endpoint
 
   const loadOpenRouterModels = async () => {
     if (openRouterModels.length > 0) return; // Already loaded
-    
+
     try {
       setIsLoadingOpenRouter(true);
       setOpenRouterError('');
@@ -163,6 +337,9 @@ export function ModelSettingsModal({
     const updatedConfig = {
       ...modelConfig,
       apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
+      ollamaEndpoint: modelConfig.provider === 'ollama' && ollamaEndpoint.trim()
+        ? ollamaEndpoint.trim()
+        : null,
     };
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
@@ -190,13 +367,23 @@ export function ModelSettingsModal({
               value={modelConfig.provider}
               onValueChange={(value) => {
                 const provider = value as ModelConfig['provider'];
+
+                // Clear error state when switching providers
+                setError('');
+
+                // Get safe default model
+                const providerModels = modelOptions[provider];
+                const defaultModel = providerModels && providerModels.length > 0
+                  ? providerModels[0]
+                  : ''; // Fallback to empty string instead of undefined
+
                 setModelConfig({
                   ...modelConfig,
                   provider,
-                  model: modelOptions[provider][0],
+                  model: defaultModel,
                 });
                 fetchApiKey(provider);
-                
+
                 // Load OpenRouter models only when OpenRouter is selected
                 if (provider === 'openrouter') {
                   loadOpenRouterModels();
@@ -285,12 +472,94 @@ export function ModelSettingsModal({
 
         {modelConfig.provider === 'ollama' && (
           <div>
-            <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
-            {error ? (
-              <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{error}</AlertDescription>
+            <Label>Ollama Endpoint (optional)</Label>
+            <p className="text-sm text-muted-foreground mt-1 mb-2">
+              Leave empty to use http://localhost:11434 or enter a custom endpoint (e.g., http://192.168.1.100:11434)
+            </p>
+            <div className="flex gap-2 mt-1">
+              <div className="relative flex-1">
+                <Input
+                  type="url"
+                  value={ollamaEndpoint}
+                  onChange={(e) => {
+                    setOllamaEndpoint(e.target.value);
+                    // Clear models and errors when endpoint changes to avoid showing stale data
+                    if (e.target.value.trim() !== lastFetchedEndpoint.trim()) {
+                      setModels([]);
+                      setError(''); // Clear error state
+                    }
+                  }}
+                  placeholder="http://localhost:11434"
+                  className={cn(
+                    "pr-10",
+                    endpointValidationState === 'invalid' && "border-red-500"
+                  )}
+                />
+                {endpointValidationState === 'valid' && (
+                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
+                )}
+                {endpointValidationState === 'invalid' && (
+                  <XCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-red-500" />
+                )}
+              </div>
+              <Button
+                type="button"
+                size={'sm'}
+                onClick={fetchOllamaModels}
+                disabled={isLoadingOllama}
+                variant="outline"
+                className="whitespace-nowrap"
+              >
+                {isLoadingOllama ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Fetching...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Fetch Models
+                  </>
+                )}
+              </Button>
+            </div>
+            {ollamaEndpointChanged && !error && (
+              <Alert className="mt-3 border-yellow-500 bg-yellow-50">
+                <AlertDescription className="text-yellow-800">
+                  Endpoint changed. Please click "Fetch Models" to load models from the new endpoint before saving.
+                </AlertDescription>
               </Alert>
-            ) : (
+            )}
+          </div>
+        )}
+
+        {modelConfig.provider === 'ollama' && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-bold">Available Ollama Models</h4>
+              {lastFetchedEndpoint && models.length > 0 && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">Using:</span>
+                  <code className="px-2 py-1 bg-muted rounded text-xs">
+                    {lastFetchedEndpoint || 'http://localhost:11434'}
+                  </code>
+                </div>
+              )}
+            </div>
+            {isLoadingOllama ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <RefreshCw className="mx-auto h-8 w-8 animate-spin mb-2" />
+                Loading models...
+              </div>
+            ) : models.length === 0 ? (
+              <Alert className="mb-4">
+                <AlertDescription>
+                  {ollamaEndpointChanged
+                    ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
+                    : 'No models found. Click "Fetch Models" to load available Ollama models.'}
+                </AlertDescription>
+              </Alert>
+            ) : !ollamaEndpointChanged && (
               <ScrollArea className="max-h-[calc(100vh-450px)] overflow-y-auto pr-4">
                 <div className="grid gap-4">
                   {models.map((model) => (
@@ -319,10 +588,14 @@ export function ModelSettingsModal({
       </div>
 
       <div className="mt-6 flex justify-end">
-        <Button className={`px-4 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${isDoneDisabled
-          ? 'bg-gray-400 cursor-not-allowed'
-          : 'bg-blue-600 hover:bg-blue-700'
-          }`} onClick={handleSave} disabled={isDoneDisabled}>
+        <Button
+          className={cn(
+            'px-4 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
+            isDoneDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+          )}
+          onClick={handleSave}
+          disabled={isDoneDisabled}
+        >
           Save
         </Button>
       </div>

@@ -71,6 +71,20 @@ impl SummaryService {
             }
         };
 
+        // Get Ollama endpoint if provider is Ollama
+        let ollama_endpoint = if provider == LLMProvider::Ollama {
+            match SettingsRepository::get_model_config(&pool).await {
+                Ok(Some(config)) => config.ollama_endpoint,
+                Ok(None) => None,
+                Err(e) => {
+                    info!("Failed to retrieve Ollama endpoint: {}, using default", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Generate summary
         let client = reqwest::Client::new();
         let result = generate_meeting_summary(
@@ -81,6 +95,7 @@ impl SummaryService {
             &text,
             &custom_prompt,
             TOKEN_THRESHOLD,
+            ollama_endpoint.as_deref(),
         )
         .await;
 
