@@ -803,6 +803,57 @@ export default function Home() {
         console.log('Successfully saved transcript with meeting ID:', meetingId);
         setMeetings([{ id: meetingId, title: meetingTitle }, ...meetings]);
 
+        // Track meeting completion analytics
+        try {
+          // Calculate meeting duration from transcript timestamps
+          let durationSeconds = 0;
+          if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
+            // Use audio_end_time of last transcript if available
+            const lastTranscript = freshTranscripts[freshTranscripts.length - 1];
+            durationSeconds = lastTranscript.audio_end_time || lastTranscript.audio_start_time || 0;
+          }
+
+          // Calculate word count
+          const transcriptWordCount = freshTranscripts
+            .map(t => t.text.split(/\s+/).length)
+            .reduce((a, b) => a + b, 0);
+
+          // Calculate words per minute
+          const wordsPerMinute = durationSeconds > 0 ? transcriptWordCount / (durationSeconds / 60) : 0;
+
+          // Get meetings count today
+          const meetingsToday = await Analytics.getMeetingsCountToday();
+
+          // Track meeting completed
+          await Analytics.trackMeetingCompleted(meetingId, {
+            duration_seconds: durationSeconds,
+            transcript_segments: freshTranscripts.length,
+            transcript_word_count: transcriptWordCount,
+            words_per_minute: wordsPerMinute,
+            meetings_today: meetingsToday
+          });
+
+          // Update meeting count in analytics.json
+          await Analytics.updateMeetingCount();
+
+          // Check for activation (first meeting)
+          const { Store } = await import('@tauri-apps/plugin-store');
+          const store = await Store.load('analytics.json');
+          const totalMeetings = await store.get<number>('total_meetings');
+
+          if (totalMeetings === 1) {
+            const daysSinceInstall = await Analytics.calculateDaysSince('first_launch_date');
+            await Analytics.track('user_activated', {
+              meetings_count: '1',
+              days_since_install: daysSinceInstall?.toString() || 'null',
+              first_meeting_duration_seconds: durationSeconds.toString()
+            });
+          }
+        } catch (analyticsError) {
+          console.error('Failed to track meeting completion analytics:', analyticsError);
+          // Don't block user flow on analytics errors
+        }
+
         // Wait a moment to ensure backend has fully processed the save
         console.log('Waiting for backend processing to complete...');
         await new Promise(resolve => setTimeout(resolve, 1000));

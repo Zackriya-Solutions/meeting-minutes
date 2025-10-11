@@ -158,11 +158,15 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
 
       console.log('Generating summary for transcript length:', fullTranscript.length);
 
+      // Calculate time since recording
+      const timeSinceRecording = (Date.now() - new Date(meeting.created_at).getTime()) / 60000; // minutes
+
       // Track summary generation started
       await Analytics.trackSummaryGenerationStarted(
         modelConfig.provider,
         modelConfig.model,
-        fullTranscript.length
+        fullTranscript.length,
+        timeSinceRecording
       );
 
       // Track custom prompt usage if present
@@ -446,11 +450,15 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
     try {
       console.log('Regenerating summary with original transcript...');
 
+      // Calculate time since recording
+      const timeSinceRecording = (Date.now() - new Date(meeting.created_at).getTime()) / 60000; // minutes
+
       // Track summary regeneration started
       await Analytics.trackSummaryGenerationStarted(
         modelConfig.provider,
         modelConfig.model,
-        originalTranscript.length
+        originalTranscript.length,
+        timeSinceRecording
       );
 
       // Process transcript and get process_id
@@ -597,7 +605,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
     }
   }, [originalTranscript, modelConfig, meeting.id, startSummaryPolling, sidebarMeetings, setMeetings, setCurrentMeeting]);
 
-  const handleCopyTranscript = useCallback(() => {
+  const handleCopyTranscript = useCallback(async () => {
     // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
     const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
       if (seconds === undefined) {
@@ -618,6 +626,17 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
     navigator.clipboard.writeText(header + date + fullTranscript);
 
     toast.success("Transcript copied to clipboard")
+
+    // Track copy analytics
+    const wordCount = transcripts
+      .map(t => t.text.split(/\s+/).length)
+      .reduce((a, b) => a + b, 0);
+
+    await Analytics.trackCopy('transcript', {
+      meeting_id: meeting.id,
+      transcript_length: transcripts.length.toString(),
+      word_count: wordCount.toString()
+    });
   }, [transcripts, meeting, meetingTitle]);
 
   const handleCopySummary = useCallback(async () => {
@@ -699,8 +718,11 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
       console.log('✅ Successfully copied to clipboard!');
       toast.success("Summary copied to clipboard")
 
-      // Track analytics
-      Analytics.trackFeatureUsed('summary_copied');
+      // Track copy analytics
+      await Analytics.trackCopy('summary', {
+        meeting_id: meeting.id,
+        has_markdown: (!!aiSummary && 'markdown' in aiSummary).toString()
+      });
     } catch (error) {
       console.error('❌ Failed to copy summary:', error);
       toast.error("Failed to copy summary")

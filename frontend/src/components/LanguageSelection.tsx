@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Globe } from 'lucide-react';
+import Analytics from '@/lib/analytics';
 
 export interface Language {
   code: string;
@@ -132,6 +133,15 @@ export function LanguageSelection({
       await invoke('set_language_preference', { language: languageCode });
       onLanguageChange(languageCode);
       console.log('Language preference saved:', languageCode);
+
+      // Track language selection analytics
+      const selectedLang = LANGUAGES.find(lang => lang.code === languageCode);
+      await Analytics.track('language_selected', {
+        language_code: languageCode,
+        language_name: selectedLang?.name || 'Unknown',
+        is_auto_detect: (languageCode === 'auto').toString(),
+        is_auto_translate: (languageCode === 'auto-translate').toString()
+      });
     } catch (error) {
       console.error('Failed to save language preference:', error);
     } finally {
