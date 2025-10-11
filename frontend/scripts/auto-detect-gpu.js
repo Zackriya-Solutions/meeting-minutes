@@ -81,8 +81,8 @@ function detectGPU() {
     }
   }
 
-  console.log('💻 No GPU acceleration available - using CPU-only mode');
-  return null;
+  console.log('💻 No GPU detected - enabling OpenMP multi-threading for CPU optimization');
+  return 'openmp';
 }
 
 // Redirect console.log to stderr so only the feature goes to stdout

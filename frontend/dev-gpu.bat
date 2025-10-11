@@ -156,7 +156,7 @@ echo   acceleration features:
 echo.
 echo   - NVIDIA GPU    : Runs with CUDA acceleration
 echo   - AMD/Intel GPU : Runs with Vulkan acceleration
-echo   - No GPU        : Runs with OpenBLAS CPU optimization
+echo   - No GPU        : Runs with OpenMP multi-threading (uses all CPU cores)
 echo.
 echo REQUIREMENTS:
 echo   - Visual Studio 2022 Build Tools

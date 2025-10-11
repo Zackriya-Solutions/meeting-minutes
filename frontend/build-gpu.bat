@@ -162,7 +162,7 @@ echo   Meetily with optimal hardware acceleration features:
 echo.
 echo   - NVIDIA GPU    : Builds with CUDA acceleration
 echo   - AMD/Intel GPU : Builds with Vulkan acceleration
-echo   - No GPU        : Builds with OpenBLAS CPU optimization
+echo   - No GPU        : Builds with OpenMP multi-threading (uses all CPU cores)
 echo.
 echo REQUIREMENTS:
 echo   - Visual Studio 2022 Build Tools

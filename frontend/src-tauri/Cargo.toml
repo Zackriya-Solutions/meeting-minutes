@@ -36,7 +36,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 #   .\build-gpu.ps1 (Windows PowerShell)
 #
 [features]
-default = ["platform-default"]  # Automatically enables best backend per platform
+default = ["platform-default", "openmp"]  # Automatically enables best backend per platform + OpenMP multi-threading
 
 # Platform-appropriate defaults - see target-specific dependencies below
 platform-default = []
