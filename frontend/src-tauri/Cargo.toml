@@ -133,7 +133,7 @@ sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
 tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
 tauri-plugin-fs = "2.4.0"
 tauri-plugin-dialog = "2.3.0"
-tauri-plugin-store = "2.3.0"
+tauri-plugin-store = "2.4.0"
 tauri-plugin-notification = "2.3.1"
 
 # macOS-specific dependencies with Metal GPU acceleration
