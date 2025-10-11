@@ -172,8 +172,7 @@ impl IncrementalAudioSaver {
         #[cfg(target_os = "macos")]
         let ffmpeg_path = find_ffmpeg_path()
             .ok_or_else(|| anyhow!("FFmpeg not found. Please install FFmpeg to finalize recordings."))?;
-        info!("Using FFmpeg at: {:?}", ffmpeg_path);
-
+        
         #[cfg(not(target_os = "macos"))]
         let ffmpeg_path = "ffmpeg";  // Assume ffmpeg is in PATH on Windows/Linux
         info!("Using FFmpeg at: {:?}", ffmpeg_path);
