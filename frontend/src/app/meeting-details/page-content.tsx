@@ -91,6 +91,17 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
       try {
         const data = await invokeTauri('api_get_model_config', {}) as any;
         if (data && data.provider !== null) {
+          // Fetch API key if not included and provider requires it
+          if (data.provider !== 'ollama' && !data.apiKey) {
+            try {
+              const apiKeyData = await invokeTauri('api_get_api_key', {
+                provider: data.provider
+              }) as string;
+              data.apiKey = apiKeyData;
+            } catch (err) {
+              console.error('Failed to fetch API key:', err);
+            }
+          }
           setModelConfig(data);
         }
       } catch (error) {
@@ -106,7 +117,6 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
   }, [modelConfig]);
 
   useEffect(() => {
-
     setTranscriptModelConfig({
       provider: 'localWhisper',
       model: 'large-v3',
@@ -131,6 +141,26 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
 
     fetchConfigurations();
   }, [serverAddress]);
+
+  // Listen for model config updates from other components
+  useEffect(() => {
+    const setupListener = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
+        console.log('Meeting details received model-config-updated event:', event.payload);
+        setModelConfig(event.payload);
+      });
+
+      return unlisten;
+    };
+
+    let cleanup: (() => void) | undefined;
+    setupListener().then(fn => cleanup = fn);
+
+    return () => {
+      cleanup?.();
+    };
+  }, []);
 
   // // Reset settings save success after showing toast
   // useEffect(() => {
@@ -829,6 +859,11 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
 
       console.log('Save model config success');
       setModelConfig(payload);
+
+      // Emit event to sync other components
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('model-config-updated', payload);
+
       toast.success("Summary settings Saved successfully")
 
       await Analytics.trackSettingsChanged('model_config', `${payload.provider}_${payload.model}`);

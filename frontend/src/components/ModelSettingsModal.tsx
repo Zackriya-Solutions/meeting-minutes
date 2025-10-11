@@ -71,6 +71,9 @@ export function ModelSettingsModal({
   const hasSyncedFromParent = useRef<boolean>(false);
   const hasLoadedInitialConfig = useRef<boolean>(false);
 
+  // Cache models by endpoint to avoid refetching when reverting endpoint changes
+  const modelsCache = useRef<Map<string, OllamaModel[]>>(new Map());
+
   // URL validation helper
   const validateOllamaEndpoint = (url: string): boolean => {
     if (!url.trim()) return true; // Empty is valid (uses default)
@@ -110,6 +113,13 @@ export function ModelSettingsModal({
       setApiKey(null);
     }
   };
+
+  // Sync apiKey from parent when it changes
+  useEffect(() => {
+    if (modelConfig.apiKey !== apiKey) {
+      setApiKey(modelConfig.apiKey || null);
+    }
+  }, [modelConfig.apiKey]);
 
   const modelOptions = {
     ollama: models.map((model) => model.name),
@@ -155,7 +165,7 @@ export function ModelSettingsModal({
 
   const isDoneDisabled =
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
-    ollamaEndpointChanged;
+    (modelConfig.provider === 'ollama' && ollamaEndpointChanged);
 
   useEffect(() => {
     const fetchModelConfig = async () => {
@@ -169,10 +179,24 @@ export function ModelSettingsModal({
         const data = (await invoke('api_get_model_config')) as any;
         if (data && data.provider !== null) {
           setModelConfig(data);
+
+          // Fetch API key if not included in response and provider requires it
+          if (data.provider !== 'ollama' && !data.apiKey) {
+            try {
+              const apiKeyData = await invoke('api_get_api_key', {
+                provider: data.provider
+              }) as string;
+              data.apiKey = apiKeyData;
+              setApiKey(apiKeyData);
+            } catch (err) {
+              console.error('Failed to fetch API key:', err);
+            }
+          }
+
           // Sync ollamaEndpoint state with fetched config
           if (data.ollamaEndpoint) {
             setOllamaEndpoint(data.ollamaEndpoint);
-            setLastFetchedEndpoint(data.ollamaEndpoint); // Mark as already fetched
+            // Don't set lastFetchedEndpoint here - it will be set after successful model fetch
           }
           hasLoadedInitialConfig.current = true; // Mark that initial config is loaded
         }
@@ -190,7 +214,7 @@ export function ModelSettingsModal({
     const endpoint = modelConfig.ollamaEndpoint || '';
     if (endpoint !== ollamaEndpoint) {
       setOllamaEndpoint(endpoint);
-      setLastFetchedEndpoint(endpoint); // Mark as synced with parent
+      // Don't set lastFetchedEndpoint here - only after successful model fetch
     }
     // Only mark as synced if we have a valid provider (prevents race conditions during init)
     if (modelConfig.provider) {
@@ -207,15 +231,39 @@ export function ModelSettingsModal({
     }
   }, [modelConfig.provider]);
 
+  // Handle endpoint changes - restore cached models or clear
+  useEffect(() => {
+    if (modelConfig.provider === 'ollama' &&
+      ollamaEndpoint.trim() !== lastFetchedEndpoint.trim()) {
+
+      // Check if we have cached models for this endpoint (including empty endpoint = default)
+      const cachedModels = modelsCache.current.get(ollamaEndpoint.trim());
+
+      if (cachedModels && cachedModels.length > 0) {
+        // Restore cached models and update tracking
+        setModels(cachedModels);
+        setLastFetchedEndpoint(ollamaEndpoint.trim());
+        setError('');
+      } else {
+        // No cache - clear models and allow refetch
+        setHasAutoFetched(false);
+        setModels([]);
+        setError('');
+      }
+    }
+  }, [ollamaEndpoint, lastFetchedEndpoint, modelConfig.provider]);
+
   // Manual fetch function for Ollama models
-  const fetchOllamaModels = async () => {
+  const fetchOllamaModels = async (silent = false) => {
     const trimmedEndpoint = ollamaEndpoint.trim();
 
     // Validate URL if provided
     if (trimmedEndpoint && !validateOllamaEndpoint(trimmedEndpoint)) {
       const errorMsg = 'Invalid Ollama endpoint URL. Must start with http:// or https://';
       setError(errorMsg);
-      toast.error(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
       return;
     }
 
@@ -227,33 +275,35 @@ export function ModelSettingsModal({
       const modelList = (await invoke('get_ollama_models', { endpoint })) as OllamaModel[];
       setModels(modelList);
       setLastFetchedEndpoint(trimmedEndpoint); // Track successful fetch
+
+      // Cache the fetched models for this endpoint
+      modelsCache.current.set(trimmedEndpoint, modelList);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to load Ollama models';
       setError(errorMsg);
-      toast.error(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
       console.error('Error loading models:', err);
     } finally {
       setIsLoadingOllama(false);
     }
   };
 
-  // Auto-load models only on initial load, AFTER endpoint sync
+  // Auto-fetch models on initial load only (not on endpoint changes)
   useEffect(() => {
     let mounted = true;
 
     const initialLoad = async () => {
-      // Only fetch if:
-      // 1. Initial config has been loaded from backend (prevents race condition)
-      // 2. Provider is ollama
-      // 3. Endpoint has been synced from parent
-      // 4. Haven't auto-fetched yet
-      // 5. Component is still mounted
-      if (hasLoadedInitialConfig.current &&
-        modelConfig.provider === 'ollama' &&
-        hasSyncedFromParent.current &&
+      // Only auto-fetch on initial load if:
+      // 1. Provider is ollama
+      // 2. Haven't fetched yet
+      // 3. Component is still mounted
+      // If skipInitialFetch is true, fetch silently (no error toasts)
+      if (modelConfig.provider === 'ollama' &&
         !hasAutoFetched &&
         mounted) {
-        await fetchOllamaModels();
+        await fetchOllamaModels(skipInitialFetch); // Silent if skipInitialFetch=true
         setHasAutoFetched(true);
       }
     };
@@ -263,7 +313,7 @@ export function ModelSettingsModal({
     return () => {
       mounted = false;
     };
-  }, [ollamaEndpoint, hasAutoFetched, modelConfig.provider]); // Trigger after endpoint or provider changes
+  }, [modelConfig.provider]); // Only depend on provider, NOT endpoint
 
   const loadOpenRouterModels = async () => {
     if (openRouterModels.length > 0) return; // Already loaded
@@ -473,22 +523,6 @@ export function ModelSettingsModal({
                 )}
               </Button>
             </div>
-            {error && (
-              <Alert variant="destructive" className="mt-3">
-                <AlertDescription className="flex items-center justify-between">
-                  <span>{error}</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={fetchOllamaModels}
-                    className="ml-4 border-red-300 hover:bg-red-50"
-                  >
-                    Retry
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            )}
             {ollamaEndpointChanged && !error && (
               <Alert className="mt-3 border-yellow-500 bg-yellow-50">
                 <AlertDescription className="text-yellow-800">
@@ -520,7 +554,9 @@ export function ModelSettingsModal({
             ) : models.length === 0 ? (
               <Alert className="mb-4">
                 <AlertDescription>
-                  No models found. Click "Fetch Models" to load available Ollama models.
+                  {ollamaEndpointChanged
+                    ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
+                    : 'No models found. Click "Fetch Models" to load available Ollama models.'}
                 </AlertDescription>
               </Alert>
             ) : !ollamaEndpointChanged && (

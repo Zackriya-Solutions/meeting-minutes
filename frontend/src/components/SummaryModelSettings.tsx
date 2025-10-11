@@ -23,6 +23,17 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     try {
       const data = await invoke('api_get_model_config') as any;
       if (data && data.provider !== null) {
+        // Fetch API key if not included and provider requires it
+        if (data.provider !== 'ollama' && !data.apiKey) {
+          try {
+            const apiKeyData = await invoke('api_get_api_key', {
+              provider: data.provider
+            }) as string;
+            data.apiKey = apiKeyData;
+          } catch (err) {
+            console.error('Failed to fetch API key:', err);
+          }
+        }
         setModelConfig(data);
       }
     } catch (error) {
@@ -43,6 +54,26 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     }
   }, [refetchTrigger, fetchModelConfig]);
 
+  // Listen for model config updates from other components
+  useEffect(() => {
+    const setupListener = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
+        console.log('SummaryModelSettings received model-config-updated event:', event.payload);
+        setModelConfig(event.payload);
+      });
+
+      return unlisten;
+    };
+
+    let cleanup: (() => void) | undefined;
+    setupListener().then(fn => cleanup = fn);
+
+    return () => {
+      cleanup?.();
+    };
+  }, []);
+
   // Save handler
   const handleSaveModelConfig = async (config: ModelConfig) => {
     try {
@@ -55,6 +86,11 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       });
 
       setModelConfig(config);
+
+      // Emit event to sync other components
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('model-config-updated', config);
+
       toast.success('Model settings saved successfully');
     } catch (error) {
       console.error('Error saving model config:', error);

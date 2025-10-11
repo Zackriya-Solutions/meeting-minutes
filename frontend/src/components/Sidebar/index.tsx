@@ -99,11 +99,21 @@ const Sidebar: React.FC = () => {
         console.log('Waiting for server address to load before fetching model config');
         return;
       }
-      
+
       try {
         const data = await invoke('api_get_model_config') as any;
         if (data && data.provider !== null) {
-
+          // Fetch API key if not included and provider requires it
+          if (data.provider !== 'ollama' && !data.apiKey) {
+            try {
+              const apiKeyData = await invoke('api_get_api_key', {
+                provider: data.provider
+              }) as string;
+              data.apiKey = apiKeyData;
+            } catch (err) {
+              console.error('Failed to fetch API key:', err);
+            }
+          }
           setModelConfig(data);
         }
       } catch (error) {
@@ -126,7 +136,7 @@ const Sidebar: React.FC = () => {
         console.log('Waiting for server address to load before fetching transcript settings');
         return;
       }
-      
+
       try {
         const data = await invoke('api_get_transcript_config') as any;
         if (data && data.provider !== null) {
@@ -138,6 +148,26 @@ const Sidebar: React.FC = () => {
     };
     fetchTranscriptSettings();
   }, [serverAddress]);
+
+  // Listen for model config updates from other components
+  useEffect(() => {
+    const setupListener = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
+        console.log('Sidebar received model-config-updated event:', event.payload);
+        setModelConfig(event.payload);
+      });
+
+      return unlisten;
+    };
+
+    let cleanup: (() => void) | undefined;
+    setupListener().then(fn => cleanup = fn);
+
+    return () => {
+      cleanup?.();
+    };
+  }, []);
   
   
   
@@ -155,6 +185,10 @@ const Sidebar: React.FC = () => {
       setModelConfig(config);
       console.log('Model config saved successfully');
       setSettingsSaveSuccess(true);
+
+      // Emit event to sync other components
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('model-config-updated', config);
 
       // Track settings change
       await Analytics.trackSettingsChanged('model_config', `${config.provider}_${config.model}`);
