@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { RefreshCw, Mic, Speaker } from 'lucide-react';
 import { AudioLevelMeter, CompactAudioLevelMeter } from './AudioLevelMeter';
 import { AudioBackendSelector } from './AudioBackendSelector';
+import Analytics from '@/lib/analytics';
 
 export interface AudioDevice {
   name: string;
@@ -116,6 +117,13 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
       micDevice: deviceName === 'default' ? null : deviceName
     };
     onDeviceChange(newDevices);
+
+    // Track device selection analytics
+    Analytics.trackFeatureUsedEnhanced('device_selection', {
+      device_type: 'microphone',
+      has_microphone: (deviceName !== 'default').toString(),
+      has_system_audio: (!!selectedDevices.systemDevice).toString()
+    }).catch(err => console.error('Failed to track device selection:', err));
   };
 
   // Handle system audio device selection
@@ -125,6 +133,13 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
       systemDevice: deviceName === 'default' ? null : deviceName
     };
     onDeviceChange(newDevices);
+
+    // Track device selection analytics
+    Analytics.trackFeatureUsedEnhanced('device_selection', {
+      device_type: 'system_audio',
+      has_microphone: (!!selectedDevices.micDevice).toString(),
+      has_system_audio: (deviceName !== 'default').toString()
+    }).catch(err => console.error('Failed to track device selection:', err));
   };
 
   // Start audio level monitoring

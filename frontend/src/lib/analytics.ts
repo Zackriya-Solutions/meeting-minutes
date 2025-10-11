@@ -4,6 +4,12 @@ export interface AnalyticsProperties {
   [key: string]: string;
 }
 
+export interface DeviceInfo {
+  platform: string;
+  os_version: string;
+  architecture: string;
+}
+
 export interface UserSession {
   session_id: string;
   user_id: string;
@@ -16,6 +22,9 @@ export class Analytics {
   private static initialized = false;
   private static currentUserId: string | null = null;
   private static initializationPromise: Promise<void> | null = null;
+  private static sessionStartTime: number | null = null;
+  private static meetingsInSession: number = 0;
+  private static deviceInfo: DeviceInfo | null = null;
 
   static async init(): Promise<void> {
     // Prevent duplicate initialization
@@ -228,6 +237,299 @@ export class Analytics {
     return this.currentUserId;
   }
 
+  // Platform/Device detection methods
+  static async getPlatform(): Promise<string> {
+    try {
+      // Use browser's user agent as fallback
+      const userAgent = navigator.userAgent.toLowerCase();
+      if (userAgent.includes('mac')) return 'macOS';
+      if (userAgent.includes('win')) return 'Windows';
+      if (userAgent.includes('linux')) return 'Linux';
+      return 'unknown';
+    } catch (error) {
+      console.error('Failed to get platform:', error);
+      return 'unknown';
+    }
+  }
+
+  static async getOSVersion(): Promise<string> {
+    try {
+      const platform = await this.getPlatform();
+      // Use navigator.userAgent for version info
+      const userAgent = navigator.userAgent;
+      return `${platform} (${userAgent})`;
+    } catch (error) {
+      console.error('Failed to get OS version:', error);
+      return 'unknown';
+    }
+  }
+
+  static async getDeviceInfo(): Promise<DeviceInfo> {
+    if (this.deviceInfo) return this.deviceInfo;
+
+    try {
+      const platform = await this.getPlatform();
+      const osVersion = await this.getOSVersion();
+
+      // Detect architecture from user agent
+      const userAgent = navigator.userAgent.toLowerCase();
+      let architecture = 'unknown';
+      if (userAgent.includes('arm') || userAgent.includes('aarch64')) {
+        architecture = 'aarch64';
+      } else if (userAgent.includes('x86_64') || userAgent.includes('x64')) {
+        architecture = 'x86_64';
+      } else if (userAgent.includes('x86')) {
+        architecture = 'x86';
+      }
+
+      this.deviceInfo = {
+        platform: platform,
+        os_version: osVersion,
+        architecture: architecture
+      };
+
+      return this.deviceInfo;
+    } catch (error) {
+      console.error('Failed to get device info:', error);
+      return {
+        platform: 'unknown',
+        os_version: 'unknown',
+        architecture: 'unknown'
+      };
+    }
+  }
+
+  // Helper methods for analytics.json store
+  static async calculateDaysSince(dateKey: string): Promise<number | null> {
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+      const dateStr = await store.get<string>(dateKey);
+      if (!dateStr) return null;
+      const diffMs = Date.now() - new Date(dateStr).getTime();
+      return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    } catch (error) {
+      console.error(`Failed to calculate days since ${dateKey}:`, error);
+      return null;
+    }
+  }
+
+  static async updateMeetingCount(): Promise<void> {
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+
+      const totalMeetings = (await store.get<number>('total_meetings') || 0) + 1;
+      await store.set('total_meetings', totalMeetings);
+      await store.set('last_meeting_date', new Date().toISOString());
+
+      // Update daily count
+      const today = new Date().toISOString().split('T')[0];
+      const dailyCounts = await store.get<Record<string, number>>('daily_meeting_counts') || {};
+      dailyCounts[today] = (dailyCounts[today] || 0) + 1;
+      await store.set('daily_meeting_counts', dailyCounts);
+      await store.save();
+    } catch (error) {
+      console.error('Failed to update meeting count:', error);
+    }
+  }
+
+  static async getMeetingsCountToday(): Promise<number> {
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+      const today = new Date().toISOString().split('T')[0];
+      const dailyCounts = await store.get<Record<string, number>>('daily_meeting_counts') || {};
+      return dailyCounts[today] || 0;
+    } catch (error) {
+      console.error('Failed to get meetings count today:', error);
+      return 0;
+    }
+  }
+
+  static async hasUsedFeatureBefore(featureName: string): Promise<boolean> {
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+      const features = await store.get<Record<string, any>>('features_used') || {};
+      return !!features[featureName];
+    } catch (error) {
+      console.error(`Failed to check feature usage for ${featureName}:`, error);
+      return false;
+    }
+  }
+
+  static async markFeatureUsed(featureName: string): Promise<void> {
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+      const features = await store.get<Record<string, any>>('features_used') || {};
+
+      if (!features[featureName]) {
+        features[featureName] = {
+          first_used: new Date().toISOString(),
+          use_count: 1
+        };
+      } else {
+        features[featureName].use_count++;
+      }
+
+      await store.set('features_used', features);
+      await store.save();
+    } catch (error) {
+      console.error(`Failed to mark feature used for ${featureName}:`, error);
+    }
+  }
+
+  // Enhanced session tracking with platform info
+  static async trackSessionStarted(sessionId: string): Promise<void> {
+    if (!this.initialized) return;
+
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+      const daysSinceLast = await this.calculateDaysSince('last_meeting_date');
+
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+      const totalMeetings = await store.get<number>('total_meetings') || 0;
+
+      this.sessionStartTime = Date.now();
+      this.meetingsInSession = 0;
+
+      await this.track('session_started', {
+        session_id: sessionId,
+        days_since_last_meeting: daysSinceLast?.toString() || 'null',
+        total_meetings: totalMeetings.toString(),
+        platform: deviceInfo.platform,
+        os_version: deviceInfo.os_version,
+        architecture: deviceInfo.architecture
+      });
+    } catch (error) {
+      console.error('Failed to track session started:', error);
+    }
+  }
+
+  static async trackSessionEnded(sessionId: string): Promise<void> {
+    if (!this.initialized || !this.sessionStartTime) return;
+
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+      const sessionDuration = (Date.now() - this.sessionStartTime) / 1000; // seconds
+
+      await this.track('session_ended', {
+        session_id: sessionId,
+        session_duration_seconds: sessionDuration.toString(),
+        meetings_in_session: this.meetingsInSession.toString(),
+        platform: deviceInfo.platform,
+        os_version: deviceInfo.os_version
+      });
+    } catch (error) {
+      console.error('Failed to track session ended:', error);
+    }
+  }
+
+  // Enhanced meeting completion tracking
+  static async trackMeetingCompleted(meetingId: string, metrics: {
+    duration_seconds: number;
+    transcript_segments: number;
+    transcript_word_count: number;
+    words_per_minute: number;
+    meetings_today: number;
+  }): Promise<void> {
+    if (!this.initialized) return;
+
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+
+      await this.track('meeting_completed', {
+        meeting_id: meetingId,
+        duration_seconds: metrics.duration_seconds.toString(),
+        transcript_segments: metrics.transcript_segments.toString(),
+        transcript_word_count: metrics.transcript_word_count.toString(),
+        words_per_minute: metrics.words_per_minute.toFixed(2),
+        meetings_today: metrics.meetings_today.toString(),
+        day_of_week: new Date().getDay().toString(),
+        hour_of_day: new Date().getHours().toString(),
+        platform: deviceInfo.platform,
+        os_version: deviceInfo.os_version
+      });
+
+      this.meetingsInSession++;
+    } catch (error) {
+      console.error('Failed to track meeting completed:', error);
+    }
+  }
+
+  // Feature usage tracking with platform info
+  static async trackFeatureUsedEnhanced(featureName: string, properties?: Record<string, any>): Promise<void> {
+    if (!this.initialized) return;
+
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+      const isFirstUse = !(await this.hasUsedFeatureBefore(featureName));
+      await this.markFeatureUsed(featureName);
+
+      const trackingProperties: AnalyticsProperties = {
+        feature_name: featureName,
+        is_first_use: isFirstUse.toString(),
+        platform: deviceInfo.platform,
+        os_version: deviceInfo.os_version
+      };
+
+      // Add additional properties if provided
+      if (properties) {
+        Object.entries(properties).forEach(([key, value]) => {
+          trackingProperties[key] = String(value);
+        });
+      }
+
+      await this.track('feature_used', trackingProperties);
+    } catch (error) {
+      console.error(`Failed to track feature used: ${featureName}`, error);
+    }
+  }
+
+  // Copy tracking with frequency
+  static async trackCopy(copyType: 'transcript' | 'summary', properties?: Record<string, any>): Promise<void> {
+    if (!this.initialized) return;
+
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('analytics.json');
+
+      // Get today's date
+      const today = new Date().toISOString().split('T')[0];
+      const copyCounts = await store.get<Record<string, any>>('copy_counts') || {};
+      const todayCounts = copyCounts[today] || {};
+      const copyCount = todayCounts[copyType] || 0;
+
+      // Update copy count
+      todayCounts[copyType] = copyCount + 1;
+      copyCounts[today] = todayCounts;
+      await store.set('copy_counts', copyCounts);
+      await store.save();
+
+      const trackingProperties: AnalyticsProperties = {
+        copy_type: copyType,
+        copy_count_today: (copyCount + 1).toString(),
+        platform: deviceInfo.platform,
+        os_version: deviceInfo.os_version
+      };
+
+      // Add additional properties if provided
+      if (properties) {
+        Object.entries(properties).forEach(([key, value]) => {
+          trackingProperties[key] = String(value);
+        });
+      }
+
+      await this.track(`${copyType}_copied`, trackingProperties);
+    } catch (error) {
+      console.error(`Failed to track ${copyType} copy:`, error);
+    }
+  }
+
   // Meeting-specific tracking methods
   static async trackMeetingStarted(meetingId: string, meetingTitle: string): Promise<void> {
     if (!this.initialized) return;
@@ -419,19 +721,39 @@ export class Analytics {
   }
 
   // Summary generation analytics
-  static async trackSummaryGenerationStarted(modelProvider: string, modelName: string, transcriptLength: number) {
+  static async trackSummaryGenerationStarted(
+    modelProvider: string,
+    modelName: string,
+    transcriptLength: number,
+    timeSinceRecordingMinutes?: number
+  ) {
     if (!this.initialized) {
       console.warn('Analytics not initialized, skipping summary generation started tracking');
       return;
     }
 
     try {
-      console.log('Tracking summary generation started event:', { modelProvider, modelName, transcriptLength });
-      await invoke('track_summary_generation_started', {
+      const deviceInfo = await this.getDeviceInfo();
+      console.log('Tracking summary generation started event:', {
         modelProvider,
         modelName,
-        transcriptLength
+        transcriptLength,
+        timeSinceRecordingMinutes
       });
+
+      const properties: AnalyticsProperties = {
+        model_provider: modelProvider,
+        model_name: modelName,
+        transcript_length: transcriptLength.toString(),
+        platform: deviceInfo.platform,
+        os_version: deviceInfo.os_version
+      };
+
+      if (timeSinceRecordingMinutes !== undefined) {
+        properties.time_since_recording_minutes = timeSinceRecordingMinutes.toFixed(2);
+      }
+
+      await this.track('summary_generation_started', properties);
       console.log('Summary generation started event tracked successfully');
     } catch (error) {
       console.error('Failed to track summary generation started:', error);

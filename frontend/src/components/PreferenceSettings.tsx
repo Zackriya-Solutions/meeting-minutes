@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Switch } from "./ui/switch"
 import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
+import Analytics from "@/lib/analytics"
 
 interface StorageLocations {
   database: string
@@ -108,6 +109,11 @@ export function PreferenceSettings() {
         await invoke('set_notification_settings', { settings: updatedSettings });
         setNotificationSettings(updatedSettings);
         console.log("Successfully updated notification settings to:", notificationsEnabled);
+
+        // Track notification preference change
+        await Analytics.trackFeatureUsedEnhanced('notification_settings', {
+          notifications_enabled: notificationsEnabled.toString()
+        });
       } catch (error) {
         console.error('Failed to update notification settings:', error);
       }
@@ -129,6 +135,11 @@ export function PreferenceSettings() {
           await invoke('open_recordings_folder');
           break;
       }
+
+      // Track folder access
+      await Analytics.trackFeatureUsedEnhanced('folder_access', {
+        folder_type: folderType
+      });
     } catch (error) {
       console.error(`Failed to open ${folderType} folder:`, error);
     }
