@@ -67,6 +67,7 @@ export function ModelSettingsModal({
   const [endpointValidationState, setEndpointValidationState] = useState<'valid' | 'invalid' | 'none'>('none');
   const [hasAutoFetched, setHasAutoFetched] = useState<boolean>(false);
   const hasSyncedFromParent = useRef<boolean>(false);
+  const hasLoadedInitialConfig = useRef<boolean>(false);
 
   // URL validation helper
   const validateOllamaEndpoint = (url: string): boolean => {
@@ -165,10 +166,11 @@ export function ModelSettingsModal({
             setOllamaEndpoint(data.ollamaEndpoint);
             setLastFetchedEndpoint(data.ollamaEndpoint); // Mark as already fetched
           }
-          console.log(data)
+          hasLoadedInitialConfig.current = true; // Mark that initial config is loaded
         }
       } catch (error) {
         console.error('Failed to fetch model config:', error);
+        hasLoadedInitialConfig.current = true; // Mark as loaded even on error
       }
     };
 
@@ -182,8 +184,20 @@ export function ModelSettingsModal({
       setOllamaEndpoint(endpoint);
       setLastFetchedEndpoint(endpoint); // Mark as synced with parent
     }
-    hasSyncedFromParent.current = true; // Mark that we've received prop value
-  }, [modelConfig.ollamaEndpoint]);
+    // Only mark as synced if we have a valid provider (prevents race conditions during init)
+    if (modelConfig.provider) {
+      hasSyncedFromParent.current = true; // Mark that we've received prop value
+    }
+  }, [modelConfig.ollamaEndpoint, modelConfig.provider]);
+
+  // Reset hasAutoFetched flag and clear models when switching away from Ollama
+  useEffect(() => {
+    if (modelConfig.provider !== 'ollama') {
+      setHasAutoFetched(false); // Reset flag so it can auto-fetch again if user switches back
+      setModels([]); // Clear models list
+      setError(''); // Clear any error state
+    }
+  }, [modelConfig.provider]);
 
   // Manual fetch function for Ollama models
   const fetchOllamaModels = async () => {
@@ -222,11 +236,13 @@ export function ModelSettingsModal({
 
     const initialLoad = async () => {
       // Only fetch if:
-      // 1. Provider is ollama
-      // 2. Endpoint has been synced from parent
-      // 3. Haven't auto-fetched yet
-      // 4. Component is still mounted
-      if (modelConfig.provider === 'ollama' &&
+      // 1. Initial config has been loaded from backend (prevents race condition)
+      // 2. Provider is ollama
+      // 3. Endpoint has been synced from parent
+      // 4. Haven't auto-fetched yet
+      // 5. Component is still mounted
+      if (hasLoadedInitialConfig.current &&
+          modelConfig.provider === 'ollama' &&
           hasSyncedFromParent.current &&
           !hasAutoFetched &&
           mounted) {
@@ -240,7 +256,7 @@ export function ModelSettingsModal({
     return () => {
       mounted = false;
     };
-  }, [ollamaEndpoint, hasAutoFetched]); // Trigger after endpoint changes
+  }, [ollamaEndpoint, hasAutoFetched, modelConfig.provider]); // Trigger after endpoint or provider changes
 
   const loadOpenRouterModels = async () => {
     if (openRouterModels.length > 0) return; // Already loaded
