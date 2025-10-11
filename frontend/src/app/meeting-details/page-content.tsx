@@ -946,7 +946,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                         <VisuallyHidden>
                           <DialogTitle>Model Settings</DialogTitle>
                         </VisuallyHidden>
-                        <ModelSettingsModal onSave={handleSaveModelConfig} modelConfig={modelConfig} setModelConfig={setModelConfig} />
+                        <ModelSettingsModal onSave={handleSaveModelConfig} modelConfig={modelConfig} setModelConfig={setModelConfig} skipInitialFetch={true} />
                         {/* <SettingTabs */}
                         {/*   modelConfig={modelConfig} */}
                         {/*   setModelConfig={setModelConfig} */}

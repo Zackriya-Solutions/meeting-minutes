@@ -44,12 +44,14 @@ interface ModelSettingsModalProps {
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSave: (config: ModelConfig) => void;
+  skipInitialFetch?: boolean; // Optional: skip fetching config from backend if parent manages it
 }
 
 export function ModelSettingsModal({
   modelConfig,
   setModelConfig,
   onSave,
+  skipInitialFetch = false,
 }: ModelSettingsModalProps) {
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
@@ -157,6 +159,12 @@ export function ModelSettingsModal({
 
   useEffect(() => {
     const fetchModelConfig = async () => {
+      // If parent component manages config, skip fetch and just mark as loaded
+      if (skipInitialFetch) {
+        hasLoadedInitialConfig.current = true;
+        return;
+      }
+
       try {
         const data = (await invoke('api_get_model_config')) as any;
         if (data && data.provider !== null) {
@@ -175,7 +183,7 @@ export function ModelSettingsModal({
     };
 
     fetchModelConfig();
-  }, []);
+  }, [skipInitialFetch]);
 
   // Sync ollamaEndpoint state when modelConfig.ollamaEndpoint changes from parent
   useEffect(() => {
@@ -219,7 +227,6 @@ export function ModelSettingsModal({
       const modelList = (await invoke('get_ollama_models', { endpoint })) as OllamaModel[];
       setModels(modelList);
       setLastFetchedEndpoint(trimmedEndpoint); // Track successful fetch
-      toast.success(`Successfully loaded ${modelList.length} Ollama models`);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to load Ollama models';
       setError(errorMsg);
@@ -242,10 +249,10 @@ export function ModelSettingsModal({
       // 4. Haven't auto-fetched yet
       // 5. Component is still mounted
       if (hasLoadedInitialConfig.current &&
-          modelConfig.provider === 'ollama' &&
-          hasSyncedFromParent.current &&
-          !hasAutoFetched &&
-          mounted) {
+        modelConfig.provider === 'ollama' &&
+        hasSyncedFromParent.current &&
+        !hasAutoFetched &&
+        mounted) {
         await fetchOllamaModels();
         setHasAutoFetched(true);
       }

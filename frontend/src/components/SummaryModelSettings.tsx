@@ -72,6 +72,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         modelConfig={modelConfig}
         setModelConfig={setModelConfig}
         onSave={handleSaveModelConfig}
+        skipInitialFetch={true}
       />
     </div>
   );
