@@ -505,7 +505,7 @@ export function ModelSettingsModal({
               <Button
                 type="button"
                 size={'sm'}
-                onClick={fetchOllamaModels}
+                onClick={() => fetchOllamaModels()}
                 disabled={isLoadingOllama}
                 variant="outline"
                 className="whitespace-nowrap"
