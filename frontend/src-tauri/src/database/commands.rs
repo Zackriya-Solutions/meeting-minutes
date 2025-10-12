@@ -1,9 +1,16 @@
 use log::{error, info};
+use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::manager::DatabaseManager;
 use crate::state::AppState;
+
+#[derive(Serialize)]
+pub struct DatabaseCheckResult {
+    pub exists: bool,
+    pub size: u64,
+}
 
 /// Check if this is the first launch (no database exists yet)
 #[tauri::command]
@@ -73,6 +80,44 @@ pub async fn detect_legacy_database(selected_path: String) -> Result<Option<Stri
 
     info!("No legacy database found at path: {}", selected_path);
     Ok(None)
+}
+
+/// Check if the Homebrew database exists and return its size
+/// This is specifically for detecting old Python backend installations
+#[tauri::command]
+pub async fn check_homebrew_database(path: String) -> Result<Option<DatabaseCheckResult>, String> {
+    let db_path = PathBuf::from(&path);
+    
+    info!("Checking for Homebrew database at: {}", path);
+    
+    // Check if file exists and is a regular file
+    if db_path.exists() && db_path.is_file() {
+        // Get file metadata to check size
+        match std::fs::metadata(&db_path) {
+            Ok(metadata) => {
+                let size = metadata.len();
+                info!("Found Homebrew database: {} ({} bytes)", path, size);
+                
+                // Only consider it valid if it has content (not empty)
+                if size > 0 {
+                    Ok(Some(DatabaseCheckResult {
+                        exists: true,
+                        size,
+                    }))
+                } else {
+                    info!("Database file exists but is empty");
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                error!("Failed to read database metadata: {}", e);
+                Ok(None)
+            }
+        }
+    } else {
+        info!("No database found at Homebrew location");
+        Ok(None)
+    }
 }
 
 /// Import legacy database and initialize the database manager

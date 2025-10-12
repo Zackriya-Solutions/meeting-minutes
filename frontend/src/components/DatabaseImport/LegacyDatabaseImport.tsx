@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Loader2, FolderOpen, Database, CheckCircle2, XCircle } from 'lucide-react';
+import { HomebrewDatabaseDetector } from './HomebrewDatabaseDetector';
 
 interface LegacyDatabaseImportProps {
   isOpen: boolean;
@@ -105,9 +106,13 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
   const isLoading = ['selecting', 'detecting', 'importing'].includes(importState);
   const canImport = detectedPath && importState === 'idle';
 
+  const handleHomebrewDatabaseFound = (path: string) => {
+    setDetectedPath(path);
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-[500px]" onPointerDownOutside={(e) => e.preventDefault()}>
+      <DialogContent className="sm:max-w-[600px]" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="text-2xl">Welcome to Meetily!</DialogTitle>
           <DialogDescription className="text-base pt-2">
@@ -116,6 +121,9 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
         </DialogHeader>
 
         <div className="space-y-6 py-4">
+          {/* Homebrew Database Auto-Detection */}
+          <HomebrewDatabaseDetector onDatabaseFound={handleHomebrewDatabaseFound} />
+
           {/* Browse Section */}
           <div className="space-y-3">
             <p className="text-sm text-gray-600">
