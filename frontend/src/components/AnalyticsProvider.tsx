@@ -30,7 +30,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     }
 
     const initAnalytics = async () => {
-      const store = await load('analytics.json', { autoSave: false, defaults: { analyticsOptedIn: true } });
+      const store = await load('analytics.json', { autoSave: false });
       if (!(await store.has('analyticsOptedIn'))) {
         await store.set('analyticsOptedIn', true);
       }
