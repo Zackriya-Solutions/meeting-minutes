@@ -8,12 +8,17 @@ interface HomebrewDatabaseDetectorProps {
   onDatabaseFound: (path: string) => void;
 }
 
-const HOMEBREW_DB_PATH = '/opt/homebrew/var/meetily/meeting_minutes.db';
+// Homebrew paths differ between Intel and Apple Silicon Macs
+const HOMEBREW_PATHS = [
+  '/opt/homebrew/var/meetily/meeting_minutes.db',  // Apple Silicon (M1/M2/M3)
+  '/usr/local/var/meetily/meeting_minutes.db',      // Intel Macs
+];
 
 export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDetectorProps) {
   const [isChecking, setIsChecking] = useState(true);
   const [homebrewDbExists, setHomebrewDbExists] = useState(false);
   const [dbSize, setDbSize] = useState<number>(0);
+  const [detectedPath, setDetectedPath] = useState<string>('');
 
   useEffect(() => {
     checkHomebrewDatabase();
@@ -23,16 +28,20 @@ export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDe
     try {
       setIsChecking(true);
 
-      // Check if the homebrew database exists and get its size
-      const result = await invoke<{ exists: boolean; size: number } | null>('check_homebrew_database', {
-        path: HOMEBREW_DB_PATH,
-      });
+      // Check all possible Homebrew locations
+      for (const path of HOMEBREW_PATHS) {
+        const result = await invoke<{ exists: boolean; size: number } | null>('check_homebrew_database', {
+          path,
+        });
 
-      if (result && result.exists && result.size > 0) {
-        setHomebrewDbExists(true);
-        setDbSize(result.size);
-        // Auto-populate the detected path
-        onDatabaseFound(HOMEBREW_DB_PATH);
+        if (result && result.exists && result.size > 0) {
+          setHomebrewDbExists(true);
+          setDbSize(result.size);
+          setDetectedPath(path);
+          // Auto-populate the detected path
+          onDatabaseFound(path);
+          break; // Stop checking once we find a valid database
+        }
       }
     } catch (error) {
       console.error('Error checking homebrew database:', error);
@@ -72,7 +81,7 @@ export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDe
           </p>
           <div className="bg-white/50 rounded p-2 mb-2">
             <p className="text-xs text-blue-700 font-mono break-all">
-              {HOMEBREW_DB_PATH}
+              {detectedPath}
             </p>
             <p className="text-xs text-blue-600 mt-1">
               Size: {formatFileSize(dbSize)}
