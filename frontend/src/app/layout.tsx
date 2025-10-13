@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { LegacyDatabaseImport } from '@/components/DatabaseImport/LegacyDatabaseImport'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 const sourceSans3 = Source_Sans_3({
   subsets: ['latin'],
@@ -65,11 +66,13 @@ export default function RootLayout({
       <body className={`${sourceSans3.variable} font-sans`}>
         <AnalyticsProvider>
           <SidebarProvider>
-            {/* <div className="titlebar h-8 w-full fixed top-0 left-0 bg-transparent" /> */}
-            <div className="flex">
-              <Sidebar />
-              <MainContent>{children}</MainContent>
-            </div>
+            <TooltipProvider>
+              {/* <div className="titlebar h-8 w-full fixed top-0 left-0 bg-transparent" /> */}
+              <div className="flex">
+                <Sidebar />
+                <MainContent>{children}</MainContent>
+              </div>
+            </TooltipProvider>
           </SidebarProvider>
         </AnalyticsProvider>
         <Toaster position="bottom-center" richColors />

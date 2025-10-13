@@ -1569,8 +1569,12 @@ export default function Home() {
           )}
 
           {/* Transcript content */}
-          <div className="flex-1 overflow-y-auto pb-32">
-            <TranscriptView transcripts={transcripts} isRecording={isRecording} />
+          <div className="overflow-y-auto pb-32">
+            <div className="flex justify-center">
+              <div className="w-2/3 max-w-[750px]">
+                <TranscriptView transcripts={transcripts} isRecording={isRecording} />
+              </div>
+            </div>
           </div>
 
           {/* Custom prompt input at bottom of transcript section */}
