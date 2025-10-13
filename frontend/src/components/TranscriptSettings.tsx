@@ -160,6 +160,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             <ModelManager
                                 selectedModel={selectedWhisperModel}
                                 onModelSelect={handleWhisperModelSelect}
+                                autoSave={true}
                             />
                         </div>
                     )}

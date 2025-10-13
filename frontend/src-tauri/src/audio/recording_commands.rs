@@ -1066,11 +1066,62 @@ pub async fn get_or_init_whisper<R: Runtime>(
                 .get_current_model()
                 .await
                 .unwrap_or_else(|| "unknown".to_string());
-            info!(
-                "✅ Whisper engine already initialized with model: '{}'",
-                current_model
-            );
-            return Ok(engine);
+
+            // NEW: Check if loaded model matches saved config
+            let configured_model = match crate::api::api::api_get_transcript_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            {
+                Ok(Some(config)) => {
+                    info!(
+                        "📝 Saved transcript config - provider: {}, model: {}",
+                        config.provider, config.model
+                    );
+                    if config.provider == "localWhisper" && !config.model.is_empty() {
+                        Some(config.model)
+                    } else {
+                        None
+                    }
+                }
+                Ok(None) => {
+                    info!("📝 No transcript config found in database");
+                    None
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to get transcript config: {}", e);
+                    None
+                }
+            };
+
+            // If loaded model matches config, reuse it
+            if let Some(ref expected_model) = configured_model {
+                if current_model == *expected_model {
+                    info!(
+                        "✅ Loaded model '{}' matches saved config, reusing",
+                        current_model
+                    );
+                    return Ok(engine);
+                } else {
+                    info!(
+                        "🔄 Loaded model '{}' doesn't match saved config '{}', reloading correct model...",
+                        current_model, expected_model
+                    );
+                    // Unload the incorrect model
+                    engine.unload_model().await;
+                    info!("📉 Unloaded incorrect model '{}'", current_model);
+                    // Continue to model loading logic below
+                }
+            } else {
+                // No specific config saved, accept currently loaded model
+                info!(
+                    "✅ No specific model configured, using currently loaded model: '{}'",
+                    current_model
+                );
+                return Ok(engine);
+            }
         } else {
             info!("🔄 Whisper engine exists but no model loaded, will load model from config");
         }

@@ -1785,12 +1785,15 @@ export default function Home() {
                 <ModelManager
                   selectedModel={modelConfig.whisperModel}
                   onModelSelect={(modelName) => {
+                    console.log('[HomePage] Model selected:', modelName);
                     setModelConfig(prev => ({ ...prev, whisperModel: modelName }));
                     // Close the modal once a model is selected
                     if (modelName) {
+                      console.log('[HomePage] Closing modal after model selection');
                       setShowModelSelector(false);
                     }
                   }}
+                  autoSave={true}
                 />
 
                 <div className="mt-6 flex justify-end space-x-3">
