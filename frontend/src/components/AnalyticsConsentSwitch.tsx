@@ -17,7 +17,9 @@ export default function AnalyticsConsentSwitch() {
       try {
         const store = await load('analytics.json', {
           autoSave: false,
-          defaults: { analyticsOptedIn: true }
+          defaults: {
+            analyticsOptedIn: true
+          }
         });
         const saved = await store.get<boolean>('analyticsOptedIn');
         setIsAnalyticsOptedIn(saved ?? true);
@@ -37,7 +39,9 @@ export default function AnalyticsConsentSwitch() {
     try {
       const store = await load('analytics.json', {
         autoSave: false,
-        defaults: { analyticsOptedIn: true }
+        defaults: {
+          analyticsOptedIn: true
+        }
       });
       await store.set('analyticsOptedIn', enabled);
       await store.save();
@@ -51,7 +55,7 @@ export default function AnalyticsConsentSwitch() {
         
         // Identify user with enhanced properties immediately after init
         await Analytics.identify(userId, {
-          app_version: '0.0.5',
+          app_version: '0.0.6',
           platform: 'tauri',
           first_seen: new Date().toISOString(),
           os: navigator.platform,

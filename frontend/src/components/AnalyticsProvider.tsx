@@ -30,7 +30,12 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     }
 
     const initAnalytics = async () => {
-      const store = await load('analytics.json', { autoSave: false, defaults: { analyticsOptedIn: true } });
+      const store = await load('analytics.json', { 
+        autoSave: false,
+        defaults: {
+          analyticsOptedIn: true
+        }
+      });
       if (!(await store.has('analyticsOptedIn'))) {
         await store.set('analyticsOptedIn', true);
       }
@@ -57,7 +62,12 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
         const deviceInfo = await Analytics.getDeviceInfo();
 
         // Store platform info in analytics.json for quick access
-        const store = await load('analytics.json');
+        const store = await load('analytics.json', {
+          autoSave: false,
+          defaults: {
+            analyticsOptedIn: true
+          }
+        });
         await store.set('platform', deviceInfo.platform);
         await store.set('os_version', deviceInfo.os_version);
         await store.set('architecture', deviceInfo.architecture);
@@ -71,7 +81,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
 
         // Identify user with enhanced properties immediately after init
         await Analytics.identify(userId, {
-          app_version: '0.0.5',
+          app_version: '0.0.6',
           platform: deviceInfo.platform,
           os_version: deviceInfo.os_version,
           architecture: deviceInfo.architecture,
