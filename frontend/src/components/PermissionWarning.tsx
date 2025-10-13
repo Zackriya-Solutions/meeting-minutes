@@ -44,7 +44,7 @@ export function PermissionWarning({
   };
 
   return (
-    <div className="mb-4 space-y-3">
+    <div className="max-w-md mb-4 space-y-3">
       {/* Combined Permission Warning - Show when either permission is missing */}
       {(!hasMicrophone || !hasSystemAudio) && (
         <Alert variant="destructive" className="border-amber-400 bg-amber-50">
@@ -57,34 +57,34 @@ export function PermissionWarning({
             </div>
           </AlertTitle>
           {/* Action Buttons */}
-            <div className="mt-4 flex flex-wrap gap-2">
-              {isMacOS && !hasMicrophone && (
-                <button
-                  onClick={openMicrophoneSettings}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
-                >
-                  <Mic className="h-4 w-4" />
-                  Open Microphone Settings
-                </button>
-              )}
-              {isMacOS && !hasSystemAudio && (
-                <button
-                  onClick={openScreenRecordingSettings}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-                >
-                  <Speaker className="h-4 w-4" />
-                  Open Screen Recording Settings
-                </button>
-              )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {isMacOS && !hasMicrophone && (
               <button
-                onClick={onRecheck}
-                disabled={isRechecking}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
+                onClick={openMicrophoneSettings}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
               >
-                <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
-                Recheck
+                <Mic className="h-4 w-4" />
+                Open Microphone Settings
               </button>
-            </div>
+            )}
+            {isMacOS && !hasSystemAudio && (
+              <button
+                onClick={openScreenRecordingSettings}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              >
+                <Speaker className="h-4 w-4" />
+                Open Screen Recording Settings
+              </button>
+            )}
+            <button
+              onClick={onRecheck}
+              disabled={isRechecking}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
+              Recheck
+            </button>
+          </div>
           <AlertDescription className="text-amber-800 mt-2">
             {/* Microphone Warning */}
             {!hasMicrophone && (
@@ -124,7 +124,7 @@ export function PermissionWarning({
               </>
             )}
 
-            
+
           </AlertDescription>
         </Alert>
       )}

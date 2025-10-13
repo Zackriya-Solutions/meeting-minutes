@@ -1396,7 +1396,7 @@ export default function Home() {
       )}
       <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
-        <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-white flex flex-col relative">
+        <div className="w-full border-r border-gray-200 bg-white flex flex-col relative">
           {/* Title area */}
           <div className="p-4  border-b border-gray-200">
             <div className="flex flex-col space-y-3">
@@ -1558,7 +1558,7 @@ export default function Home() {
 
           {/* Permission Warning */}
           {!isRecording && !isCheckingPermissions && (
-            <div className="px-4 pt-4">
+            <div className="flex justify-center px-4 pt-4">
               <PermissionWarning
                 hasMicrophone={hasMicrophone}
                 hasSystemAudio={hasSystemAudio}
@@ -1649,66 +1649,66 @@ export default function Home() {
                   <div className="border-t pt-8">
                     <h4 className="text-lg font-semibold text-gray-900 mb-4">AI Model Configuration</h4>
                     <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Summarization Model
-                    </label>
-                    <div className="flex space-x-2">
-                      <select
-                        className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        value={modelConfig.provider}
-                        onChange={(e) => {
-                          const provider = e.target.value as ModelConfig['provider'];
-                          setModelConfig({
-                            ...modelConfig,
-                            provider,
-                            model: modelOptions[provider][0]
-                          });
-                        }}
-                      >
-                        <option value="claude">Claude</option>
-                        <option value="groq">Groq</option>
-                        <option value="ollama">Ollama</option>
-                        <option value="openrouter">OpenRouter</option>
-                      </select>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Summarization Model
+                        </label>
+                        <div className="flex space-x-2">
+                          <select
+                            className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            value={modelConfig.provider}
+                            onChange={(e) => {
+                              const provider = e.target.value as ModelConfig['provider'];
+                              setModelConfig({
+                                ...modelConfig,
+                                provider,
+                                model: modelOptions[provider][0]
+                              });
+                            }}
+                          >
+                            <option value="claude">Claude</option>
+                            <option value="groq">Groq</option>
+                            <option value="ollama">Ollama</option>
+                            <option value="openrouter">OpenRouter</option>
+                          </select>
 
-                      <select
-                        className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        value={modelConfig.model}
-                        onChange={(e) => setModelConfig(prev => ({ ...prev, model: e.target.value }))}
-                      >
-                        {modelOptions[modelConfig.provider].map(model => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  {modelConfig.provider === 'ollama' && (
-                    <div>
-                      <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
-                      {error && (
-                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                          {error}
+                          <select
+                            className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            value={modelConfig.model}
+                            onChange={(e) => setModelConfig(prev => ({ ...prev, model: e.target.value }))}
+                          >
+                            {modelOptions[modelConfig.provider].map(model => (
+                              <option key={model} value={model}>
+                                {model}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      {modelConfig.provider === 'ollama' && (
+                        <div>
+                          <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
+                          {error && (
+                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                              {error}
+                            </div>
+                          )}
+                          <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
+                            {models.map((model) => (
+                              <div
+                                key={model.id}
+                                className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
+                                  }`}
+                                onClick={() => setModelConfig(prev => ({ ...prev, model: model.name }))}
+                              >
+                                <h3 className="font-bold">{model.name}</h3>
+                                <p className="text-gray-600">Size: {model.size}</p>
+                                <p className="text-gray-600">Modified: {model.modified}</p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
-                      <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
-                        {models.map((model) => (
-                          <div
-                            key={model.id}
-                            className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
-                              }`}
-                            onClick={() => setModelConfig(prev => ({ ...prev, model: model.name }))}
-                          >
-                            <h3 className="font-bold">{model.name}</h3>
-                            <p className="text-gray-600">Size: {model.size}</p>
-                            <p className="text-gray-600">Modified: {model.modified}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                     </div>
                   </div>
                 </div>
@@ -1842,93 +1842,92 @@ export default function Home() {
         </div>
 
         {/* Right side - AI Summary */}
-        <div className="flex-1 overflow-y-auto bg-white">
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center">
-              <EditableTitle
-                title={meetingTitle}
-                isEditing={isEditingTitle}
-                onStartEditing={() => setIsEditingTitle(true)}
-                onFinishEditing={() => setIsEditingTitle(false)}
-                onChange={handleTitleChange}
-              />
-            </div>
-          </div>
-          {/* {isSummaryLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                <p className="text-gray-600">Generating AI Summary...</p>
-              </div>
-            </div>
-          ) : showSummary && (
-            <div className="max-w-4xl mx-auto p-6">
-              {summaryResponse && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
-                  <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white p-4 rounded-lg shadow-sm">
-                      <h4 className="font-medium mb-1">Key Points</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.key_points.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Action Items</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.action_items.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Decisions</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.decisions.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Main Topics</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.main_topics.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                  {summaryResponse.raw_summary ? (
-                    <div className="mt-4">
-                      <h4 className="font-medium mb-1">Full Summary</h4>
-                      <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              <div className="flex-1 overflow-y-auto p-4">
-                <AISummary 
-                  summary={aiSummary} 
-                  status={summaryStatus} 
-                  error={summaryError}
-                  onSummaryChange={(newSummary) => setAiSummary(newSummary)}
-                  onRegenerateSummary={handleRegenerateSummary}
-                />
-              </div>
-              {summaryStatus !== 'idle' && (
-                <div className={`mt-4 p-4 rounded-lg ${
-                  summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
-                  summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
-                  'bg-blue-100 text-blue-700'
-                }`}>
-                  <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
-                </div>
-              )}
-            </div>
-          )} */}
-        </div>
+        {/* <div className="flex-1 overflow-y-auto bg-white"> */}
+        {/*   <div className="p-4 border-b border-gray-200"> */}
+        {/*     <div className="flex items-center"> */}
+        {/*       <EditableTitle */}
+        {/*         title={meetingTitle} */}
+        {/*         isEditing={isEditingTitle} */}
+        {/*         onStartEditing={() => setIsEditingTitle(true)} */}
+        {/*         onFinishEditing={() => setIsEditingTitle(false)} */}
+        {/*         onChange={handleTitleChange} */}
+        {/*       /> */}
+        {/*     </div> */}
+        {/*   </div> */}
+        {/*   {/* {isSummaryLoading ? ( */}
+        {/*     <div className="flex items-center justify-center h-full"> */}
+        {/*       <div className="text-center"> */}
+        {/*         <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div> */}
+        {/*         <p className="text-gray-600">Generating AI Summary...</p> */}
+        {/*       </div> */}
+        {/*     </div> */}
+        {/*   ) : showSummary && ( */}
+        {/*     <div className="max-w-4xl mx-auto p-6"> */}
+        {/*       {summaryResponse && ( */}
+        {/*         <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto"> */}
+        {/*           <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3> */}
+        {/*           <div className="grid grid-cols-2 gap-4"> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm"> */}
+        {/*               <h4 className="font-medium mb-1">Key Points</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.key_points.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Action Items</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.action_items.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Decisions</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.decisions.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Main Topics</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.main_topics.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*           </div> */}
+        {/*           {summaryResponse.raw_summary ? ( */}
+        {/*             <div className="mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Full Summary</h4> */}
+        {/*               <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p> */}
+        {/*             </div> */}
+        {/*           ) : null} */}
+        {/*         </div> */}
+        {/*       )} */}
+        {/*       <div className="flex-1 overflow-y-auto p-4"> */}
+        {/*         <AISummary  */}
+        {/*           summary={aiSummary}  */}
+        {/*           status={summaryStatus}  */}
+        {/*           error={summaryError} */}
+        {/*           onSummaryChange={(newSummary) => setAiSummary(newSummary)} */}
+        {/*           onRegenerateSummary={handleRegenerateSummary} */}
+        {/*         /> */}
+        {/*       </div> */}
+        {/*       {summaryStatus !== 'idle' && ( */}
+        {/*         <div className={`mt-4 p-4 rounded-lg ${ */}
+        {/*           summaryStatus === 'error' ? 'bg-red-100 text-red-700' : */}
+        {/*           summaryStatus === 'completed' ? 'bg-green-100 text-green-700' : */}
+        {/*           'bg-blue-100 text-blue-700' */}
+        {/*         }`}> */}
+        {/*           <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p> */}
+        {/*         </div> */}
+        {/*       )} */}
+        {/*     </div> */}
+        {/*   )} */}        {/* </div> */}
       </div>
     </div >
   );
