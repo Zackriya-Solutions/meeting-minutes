@@ -115,12 +115,18 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
         console.log('Received model-download-progress event:', event);
         const { modelName, progress } = event.payload;
         console.log(`Download progress for ${modelName}: ${progress}%`);
-        
+
         setModels(prevModels => prevModels.map(model => {
           if (model.name === modelName) {
+            // Ensure progress only increases (monotonic progress)
+            const currentProgress = typeof model.status === 'object' && 'Downloading' in model.status
+              ? model.status.Downloading
+              : 0;
+            const newProgress = Math.max(currentProgress, progress);
+
             return {
               ...model,
-              status: { Downloading: progress } as ModelStatus
+              status: { Downloading: newProgress } as ModelStatus
             };
           }
           return model;
