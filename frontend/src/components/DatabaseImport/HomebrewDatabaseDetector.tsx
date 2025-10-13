@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Database, AlertCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import { Database, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 
 interface HomebrewDatabaseDetectorProps {
-  onDatabaseFound: (path: string) => void;
+  onImportSuccess: () => void;
+  onDecline: () => void;
 }
 
 // Homebrew paths differ between Intel and Apple Silicon Macs
@@ -14,11 +16,13 @@ const HOMEBREW_PATHS = [
   '/usr/local/var/meetily/meeting_minutes.db',      // Intel Macs
 ];
 
-export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDetectorProps) {
+export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: HomebrewDatabaseDetectorProps) {
   const [isChecking, setIsChecking] = useState(true);
+  const [isImporting, setIsImporting] = useState(false);
   const [homebrewDbExists, setHomebrewDbExists] = useState(false);
   const [dbSize, setDbSize] = useState<number>(0);
   const [detectedPath, setDetectedPath] = useState<string>('');
+  const [isDismissed, setIsDismissed] = useState(false);
 
   useEffect(() => {
     checkHomebrewDatabase();
@@ -38,8 +42,6 @@ export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDe
           setHomebrewDbExists(true);
           setDbSize(result.size);
           setDetectedPath(path);
-          // Auto-populate the detected path
-          onDatabaseFound(path);
           break; // Stop checking once we find a valid database
         }
       }
@@ -51,12 +53,34 @@ export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDe
     }
   };
 
-  if (isChecking) {
-    return null; // Don't show anything while checking
-  }
+  const handleYes = async () => {
+    try {
+      setIsImporting(true);
 
-  if (!homebrewDbExists) {
-    return null; // Don't show if no database found
+      await invoke('import_and_initialize_database', {
+        legacyDbPath: detectedPath,
+      });
+
+      toast.success('Database imported successfully! Reloading...');
+
+      // Wait 1 second for user to see success, then reload window to refresh all data
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (error) {
+      console.error('Error importing database:', error);
+      toast.error(`Import failed: ${error}`);
+      setIsImporting(false);
+    }
+  };
+
+  const handleNo = () => {
+    setIsDismissed(true);
+    onDecline();
+  };
+
+  if (isChecking || !homebrewDbExists || isDismissed) {
+    return null;
   }
 
   const formatFileSize = (bytes: number): string => {
@@ -79,7 +103,7 @@ export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDe
           <p className="text-sm text-blue-800 mb-2">
             We found an existing database from your previous Meetily installation (Python backend version).
           </p>
-          <div className="bg-white/50 rounded p-2 mb-2">
+          <div className="bg-white/50 rounded p-2 mb-3">
             <p className="text-xs text-blue-700 font-mono break-all">
               {detectedPath}
             </p>
@@ -87,9 +111,38 @@ export function HomebrewDatabaseDetector({ onDatabaseFound }: HomebrewDatabaseDe
               Size: {formatFileSize(dbSize)}
             </p>
           </div>
-          <p className="text-xs text-blue-700">
-            Click <span className="font-semibold">"Import Database"</span> below to migrate your meetings, transcripts, and summaries to the new Rust-powered backend.
+          <p className="text-sm text-blue-800 mb-3">
+            Would you like to import your previous meetings, transcripts, and summaries?
           </p>
+          
+          {/* Yes/No Buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleYes}
+              disabled={isImporting}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Importing...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>Yes, Import</span>
+                </>
+              )}
+            </button>
+            
+            <button
+              onClick={handleNo}
+              disabled={isImporting}
+              className="flex-1 px-4 py-2 border-2 border-blue-400 text-blue-700 rounded-lg hover:bg-blue-100 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
+            >
+              No, Browse Manually
+            </button>
+          </div>
         </div>
       </div>
     </div>

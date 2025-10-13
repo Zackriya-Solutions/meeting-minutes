@@ -106,8 +106,13 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
   const isLoading = ['selecting', 'detecting', 'importing'].includes(importState);
   const canImport = detectedPath && importState === 'idle';
 
-  const handleHomebrewDatabaseFound = (path: string) => {
-    setDetectedPath(path);
+  const handleHomebrewImportSuccess = () => {
+    // The HomebrewDatabaseDetector handles the reload itself
+    onComplete();
+  };
+
+  const handleHomebrewDecline = () => {
+    // User declined homebrew import, they can continue with manual browse
   };
 
   return (
@@ -122,7 +127,10 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
 
         <div className="space-y-6 py-4">
           {/* Homebrew Database Auto-Detection */}
-          <HomebrewDatabaseDetector onDatabaseFound={handleHomebrewDatabaseFound} />
+          <HomebrewDatabaseDetector 
+            onImportSuccess={handleHomebrewImportSuccess}
+            onDecline={handleHomebrewDecline}
+          />
 
           {/* Browse Section */}
           <div className="space-y-3">
