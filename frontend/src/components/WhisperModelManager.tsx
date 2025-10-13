@@ -411,16 +411,24 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
   };
 
   const selectModel = async (modelName: string) => {
-    console.log(`User selected model: ${modelName}`);
+    console.log(`[ModelManager] User selected model: ${modelName}`);
+    console.log(`[ModelManager] autoSave enabled: ${autoSave}`);
+    console.log(`[ModelManager] onModelSelect callback exists: ${!!onModelSelect}`);
+
     setHasUserSelection(true); // FIX 3: Mark that user made a selection
 
+    // Always call the parent callback if it exists
     if (onModelSelect) {
+      console.log(`[ModelManager] Calling onModelSelect callback for: ${modelName}`);
       onModelSelect(modelName);
     }
 
-    // FIX 1: Auto-save if enabled
+    // FIX 1: Auto-save if enabled (for components that don't have their own save logic)
     if (autoSave) {
+      console.log(`[ModelManager] Auto-save enabled, saving model: ${modelName}`);
       await saveModelSelection(modelName);
+    } else {
+      console.log(`[ModelManager] Auto-save disabled, parent should handle save`);
     }
   };
 
