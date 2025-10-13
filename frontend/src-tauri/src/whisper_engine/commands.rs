@@ -68,17 +68,54 @@ pub async fn whisper_get_available_models() -> Result<Vec<ModelInfo>, String> {
 }
 
 #[command]
-pub async fn whisper_load_model(model_name: String) -> Result<(), String> {
+pub async fn whisper_load_model(
+    app_handle: tauri::AppHandle,
+    model_name: String
+) -> Result<(), String> {
     let engine = {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
 
     if let Some(engine) = engine {
-        engine
+        // FIX 6: Emit model loading started event
+        if let Err(e) = app_handle.emit(
+            "model-loading-started",
+            serde_json::json!({
+                "modelName": model_name
+            }),
+        ) {
+            log::error!("Failed to emit model-loading-started event: {}", e);
+        }
+
+        let result = engine
             .load_model(&model_name)
             .await
-            .map_err(|e| format!("Failed to load model: {}", e))
+            .map_err(|e| format!("Failed to load model: {}", e));
+
+        // FIX 6: Emit model loading completed/failed event
+        if result.is_ok() {
+            if let Err(e) = app_handle.emit(
+                "model-loading-completed",
+                serde_json::json!({
+                    "modelName": model_name
+                }),
+            ) {
+                log::error!("Failed to emit model-loading-completed event: {}", e);
+            }
+        } else if let Err(ref error) = result {
+            if let Err(e) = app_handle.emit(
+                "model-loading-failed",
+                serde_json::json!({
+                    "modelName": model_name,
+                    "error": error
+                }),
+            ) {
+                log::error!("Failed to emit model-loading-failed event: {}", e);
+            }
+        }
+
+        result
     } else {
         Err("Whisper engine not initialized".to_string())
     }

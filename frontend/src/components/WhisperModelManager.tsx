@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ModelInfo,
   ModelStatus,
@@ -15,13 +16,18 @@ interface ModelManagerProps {
   selectedModel?: string;
   onModelSelect?: (modelName: string) => void;
   className?: string;
+  autoSave?: boolean; // NEW: Enable auto-save on model selection
 }
 
-export function ModelManager({ selectedModel, onModelSelect, className = '' }: ModelManagerProps) {
+export function ModelManager({ selectedModel, onModelSelect, className = '', autoSave = false }: ModelManagerProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false); // NEW: Track auto-save state
+  const [lastSavedModel, setLastSavedModel] = useState<string | null>(null); // NEW: Track last saved model
+  const [isRefreshing, setIsRefreshing] = useState(false); // NEW: Prevent concurrent refreshes
+  const [hasUserSelection, setHasUserSelection] = useState(false); // NEW: Track if user manually selected
 
   // Load persisted downloading state from localStorage
   const getPersistedDownloadingModels = (): Set<string> => {
@@ -44,7 +50,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
     });
   };
 
-  // Lazy initialization - only load once
+  // FIX 4: Lazy initialization - only load once, prevent re-initialization on prop changes
   useEffect(() => {
     if (initialized) return;
 
@@ -55,7 +61,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       setInitialized(true);
     };
     initializeModels();
-  }, [initialized]);
+  }, []); // Empty dependency array - only run once on mount
 
   // Check and sync download states with actual model status
   const syncDownloadStates = async () => {
@@ -102,14 +108,35 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
     }
   };
 
-  // Set up download progress event listeners
+  // FIX 6: Set up download progress and model loading event listeners
   useEffect(() => {
     let unlistenProgress: (() => void) | null = null;
     let unlistenComplete: (() => void) | null = null;
     let unlistenError: (() => void) | null = null;
+    let unlistenModelLoadingStarted: (() => void) | null = null;
+    let unlistenModelLoadingCompleted: (() => void) | null = null;
+    let unlistenModelLoadingFailed: (() => void) | null = null;
 
     const setupListeners = async () => {
-      console.log('Setting up download event listeners...');
+      console.log('Setting up download and model loading event listeners...');
+
+      // FIX 6: Listen for model loading events
+      unlistenModelLoadingStarted = await listen<{ modelName: string }>('model-loading-started', (event) => {
+        console.log('Model loading started:', event.payload.modelName);
+        setLoading(true);
+      });
+
+      unlistenModelLoadingCompleted = await listen<{ modelName: string }>('model-loading-completed', (event) => {
+        console.log('Model loading completed:', event.payload.modelName);
+        setLoading(false);
+      });
+
+      unlistenModelLoadingFailed = await listen<{ modelName: string; error: string }>('model-loading-failed', (event) => {
+        console.error('Model loading failed:', event.payload);
+        setLoading(false);
+        setError(`Failed to load model: ${event.payload.error}`);
+      });
+
       // Listen for download progress updates
       unlistenProgress = await listen<{ modelName: string; progress: number }>('model-download-progress', (event) => {
         console.log('Received model-download-progress event:', event);
@@ -187,17 +214,27 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
       if (unlistenError) unlistenError();
+      if (unlistenModelLoadingStarted) unlistenModelLoadingStarted();
+      if (unlistenModelLoadingCompleted) unlistenModelLoadingCompleted();
+      if (unlistenModelLoadingFailed) unlistenModelLoadingFailed();
     };
   }, []);
 
   const loadAvailableModels = async () => {
+    // Prevent concurrent refreshes
+    if (isRefreshing) {
+      console.log('Model refresh already in progress, skipping...');
+      return;
+    }
+
     try {
+      setIsRefreshing(true);
       setLoading(true);
       setError(null);
-      
+
       // Initialize Whisper engine if not already done
       await WhisperAPI.init();
-      
+
       // Get actual model list from whisper-rs backend
       const modelList = await WhisperAPI.getAvailableModels();
       console.log(modelList)
@@ -237,24 +274,25 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       });
 
       setModels(modelsWithDownloadState);
-      
-      // Validate current selection and auto-select if needed
-      if (selectedModel) {
-        // Check if the currently selected model is actually available
-        const currentModel = modelsWithDownloadState.find(m => m.name === selectedModel);
-        if (!currentModel || currentModel.status !== 'Available') {
-          // Clear invalid selection
-          if (onModelSelect) {
-            onModelSelect('');
-          }
+
+      // FIX 3: Improved auto-select logic - only auto-select on initial load if no user selection exists
+      if (!hasUserSelection && !selectedModel) {
+        // Only auto-select on very first load when no model is configured
+        const availableModel = modelsWithDownloadState.find(m => m.status === 'Available');
+        if (availableModel && onModelSelect) {
+          console.log(`Auto-selecting first available model on initial load: ${availableModel.name}`);
+          onModelSelect(availableModel.name);
         }
       }
 
-      // Auto-select best available model if none selected or selection was cleared
-      if (!selectedModel || !modelsWithDownloadState.find(m => m.name === selectedModel && m.status === 'Available')) {
-        const availableModel = modelsWithDownloadState.find(m => m.status === 'Available');
-        if (availableModel && onModelSelect) {
-          onModelSelect(availableModel.name);
+      // Validate current selection only - don't auto-select if invalid
+      if (selectedModel) {
+        const currentModel = modelsWithDownloadState.find(m => m.name === selectedModel);
+        if (!currentModel || currentModel.status !== 'Available') {
+          console.log(`Selected model "${selectedModel}" is no longer available, clearing selection`);
+          if (onModelSelect) {
+            onModelSelect('');
+          }
         }
       }
     } catch (err) {
@@ -262,6 +300,31 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       setError(err instanceof Error ? err.message : 'Failed to load models');
     } finally {
       setLoading(false);
+      setIsRefreshing(false); // FIX 2: Reset refreshing flag
+    }
+  };
+
+  // FIX 1: Auto-save function to immediately persist model selection
+  const saveModelSelection = async (modelName: string) => {
+    if (!autoSave || isAutoSaving) return;
+
+    try {
+      setIsAutoSaving(true);
+      console.log(`Auto-saving model selection: ${modelName}`);
+
+      await invoke('api_save_transcript_config', {
+        provider: 'localWhisper',
+        model: modelName,
+        apiKey: null
+      });
+
+      setLastSavedModel(modelName);
+      console.log(`Successfully auto-saved model: ${modelName}`);
+    } catch (error) {
+      console.error('Failed to auto-save model selection:', error);
+      // Don't throw - auto-save failure shouldn't break the UI
+    } finally {
+      setIsAutoSaving(false);
     }
   };
 
@@ -295,9 +358,8 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
       // Wait a moment for file to be written completely
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Refresh model list to get updated status
-      console.log(`Refreshing model list after download of: ${modelName}`);
-      await loadAvailableModels();
+      // FIX 2: Remove redundant loadAvailableModels call - rely on download-complete event instead
+      // The event listener will update the model status to 'Available'
 
       // Verify the model was actually downloaded
       const updatedModels = await WhisperAPI.getAvailableModels();
@@ -315,9 +377,16 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
 
       console.log(`Successfully downloaded and verified model: ${modelName}`);
 
-      // Auto-select the downloaded model only if verification passed
+      // FIX 3: Auto-select the DOWNLOADED model (not just first available)
       if (onModelSelect) {
+        console.log(`Auto-selecting downloaded model: ${modelName}`);
+        setHasUserSelection(true); // Mark that we have a selection
         onModelSelect(modelName);
+
+        // FIX 1: Auto-save if enabled
+        if (autoSave) {
+          await saveModelSelection(modelName);
+        }
       }
     } catch (err) {
       console.error('Failed to download model:', err);
@@ -342,8 +411,16 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
   };
 
   const selectModel = async (modelName: string) => {
+    console.log(`User selected model: ${modelName}`);
+    setHasUserSelection(true); // FIX 3: Mark that user made a selection
+
     if (onModelSelect) {
       onModelSelect(modelName);
+    }
+
+    // FIX 1: Auto-save if enabled
+    if (autoSave) {
+      await saveModelSelection(modelName);
     }
   };
 
@@ -498,9 +575,15 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
                         <h4 className="font-medium text-gray-900 flex items-center space-x-2">
                           <span>Whisper {model.name}</span>
                           {isSelected && (
-                            <span className="bg-blue-600 text-white px-2 py-1 rounded-full text-xs">
+                            <span className="bg-blue-600 text-white px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                              {lastSavedModel === model.name && autoSave && (
+                                <span className="text-white">✓</span>
+                              )}
                               Active
                             </span>
+                          )}
+                          {isAutoSaving && selectedModel === model.name && (
+                            <span className="text-xs text-gray-500 animate-pulse">Saving...</span>
                           )}
                           {isQuantizedModel(model.name) && (
                             <span className={`px-2 py-1 rounded-full text-xs ${

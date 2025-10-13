@@ -168,22 +168,18 @@ impl WhisperEngine {
             ("base", "ggml-base.bin", 142, "Good", "Fast", "Good balance of speed and accuracy"),
             ("small", "ggml-small.bin", 466, "Good", "Medium", "Better accuracy, moderate speed"),
             ("medium", "ggml-medium.bin", 1420, "High", "Slow", "High accuracy for professional use"),
-            ("large-v3", "ggml-large-v3.bin", 2870, "High", "Slow", "Best accuracy, latest large model"),
             ("large-v3-turbo", "ggml-large-v3-turbo.bin", 809, "High", "Medium", "Best accuracy with improved speed"),
+            ("large-v3", "ggml-large-v3.bin", 2870, "High", "Slow", "Best accuracy, latest large model"),
 
             // Q5_0 quantized models (balanced speed/accuracy)
             ("tiny-q5_0", "ggml-tiny-q5_0.bin", 26, "Decent", "Very Fast", "Quantized tiny model, ~50% faster processing"),
             ("base-q5_0", "ggml-base-q5_0.bin", 85, "Good", "Fast", "Quantized base model, good speed/accuracy balance"),
             ("small-q5_0", "ggml-small-q5_0.bin", 280, "Good", "Fast", "Quantized small model, faster than f16 version"),
             ("medium-q5_0", "ggml-medium-q5_0.bin", 852, "High", "Medium", "Quantized medium model, professional quality"),
-            ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1000, "High", "Medium", "Quantized large model, best balance"),
+            ("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 574, "High", "Medium", "Quantized large model, best balance"),
+            ("large-v3-q5_0", "ggml-large-v3-q5_0.bin", 1050, "High", "Slow", "Quantized large model, high accuracy"),
 
-            // Q4_0 quantized models (maximum speed)
-            ("tiny-q4_0", "ggml-tiny-q4_0.bin", 21, "Decent", "Very Fast", "Fastest tiny model, some accuracy loss"),
-            ("base-q4_0", "ggml-base-q4_0.bin", 71, "Good", "Very Fast", "Fastest base model, good for quick transcription"),
-            ("small-q4_0", "ggml-small-q4_0.bin", 233, "Good", "Very Fast", "Fastest small model, rapid processing"),
-            ("medium-q4_0", "ggml-medium-q4_0.bin", 710, "High", "Fast", "Fast medium model, good quality"),
-        ];
+           ];
         
         for (name, filename, size_mb, accuracy, speed, description) in model_configs {
             let model_path = models_dir.join(filename);
@@ -273,9 +269,21 @@ impl WhisperEngine {
         let models = self.available_models.read().await;
         let model_info = models.get(model_name)
             .ok_or_else(|| anyhow!("Model {} not found", model_name))?;
-        
+
         match model_info.status {
             ModelStatus::Available => {
+                // FIX 5: Check if this model is already loaded
+                if let Some(current_model) = self.current_model.read().await.as_ref() {
+                    if current_model == model_name {
+                        log::info!("Model {} is already loaded, skipping reload", model_name);
+                        return Ok(());
+                    }
+
+                    // FIX 5: Unload current model before loading new one
+                    log::info!("Unloading current model '{}' before loading '{}'", current_model, model_name);
+                    self.unload_model().await;
+                }
+
                 log::info!("Loading model: {}", model_name);
 
                 // PERFORMANCE OPTIMIZATION: Use comprehensive hardware profile for optimal GPU configuration
@@ -903,22 +911,15 @@ impl WhisperEngine {
             "base" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
             "small" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
             "medium" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-            "large-v3" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
             "large-v3-turbo" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
-
-            // Q5_0 quantized models
-            "tiny-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_0.bin",
-            "base-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_0.bin",
+            "large-v3" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+            
             "small-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_0.bin",
             "medium-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
+            "large-v3-turbo-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v3-turbo-q5_0.bin",
             "large-v3-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
-
-            // Q4_0 quantized models
-            "tiny-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q4_0.bin",
-            "base-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q4_0.bin",
-            "small-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q4_0.bin",
-            "medium-q4_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q4_0.bin",
-
+            // Quantized int8 models
+            
             _ => return Err(anyhow!("Unsupported model: {}", model_name))
         };
         
