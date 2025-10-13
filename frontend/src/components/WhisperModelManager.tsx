@@ -21,6 +21,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
   // Load persisted downloading state from localStorage
   const getPersistedDownloadingModels = (): Set<string> => {
@@ -43,14 +44,18 @@ export function ModelManager({ selectedModel, onModelSelect, className = '' }: M
     });
   };
 
+  // Lazy initialization - only load once
   useEffect(() => {
+    if (initialized) return;
+
     const initializeModels = async () => {
       await loadAvailableModels();
       // Check if any downloads from previous session are still in progress
       await syncDownloadStates();
+      setInitialized(true);
     };
     initializeModels();
-  }, []);
+  }, [initialized]);
 
   // Check and sync download states with actual model status
   const syncDownloadStates = async () => {

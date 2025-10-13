@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { invoke } from '@tauri-apps/api/core';
 import { ModelManager } from '@/components/WhisperModelManager';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
@@ -13,6 +14,7 @@ type SettingsTab = 'general' | 'recording' | 'Transcriptionmodels' | 'summaryMod
 export default function SettingsPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [selectedWhisperModel, setSelectedWhisperModel] = useState<string>('');
 
   const tabs = [
     { id: 'general' as const, label: 'General', icon: <Settings2 className="w-4 h-4" /> },
@@ -20,6 +22,41 @@ export default function SettingsPage() {
     { id: 'Transcriptionmodels' as const, label: 'Transcription', icon: <DatabaseIcon className="w-4 h-4" /> },
     { id: 'summaryModels' as const, label: 'Summary', icon: <SparkleIcon className="w-4 h-4" /> }
   ];
+
+  // Load saved transcript configuration on mount
+  useEffect(() => {
+    const loadTranscriptConfig = async () => {
+      try {
+        const config = await invoke('api_get_transcript_config') as any;
+        if (config && config.provider === 'localWhisper' && config.model) {
+          console.log('Loaded saved Whisper model:', config.model);
+          setSelectedWhisperModel(config.model);
+        }
+      } catch (error) {
+        console.error('Failed to load transcript config:', error);
+      }
+    };
+    loadTranscriptConfig();
+  }, []);
+
+  // Handle model selection and save to database
+  const handleModelSelect = async (modelName: string) => {
+    try {
+      console.log('Saving Whisper model selection:', modelName);
+      setSelectedWhisperModel(modelName);
+
+      // Save to database
+      await invoke('api_save_transcript_config', {
+        provider: 'localWhisper',
+        model: modelName,
+        apiKey: null
+      });
+
+      console.log('Successfully saved Whisper model:', modelName);
+    } catch (error) {
+      console.error('Failed to save model selection:', error);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -71,8 +108,8 @@ export default function SettingsPage() {
                     Download and manage Whisper speech recognition models for local transcription.
                   </p>
                   <ModelManager
-                    selectedModel=""
-                    onModelSelect={(model) => console.log('Model selected:', model)}
+                    selectedModel={selectedWhisperModel}
+                    onModelSelect={handleModelSelect}
                   />
                 </div>
               )}
