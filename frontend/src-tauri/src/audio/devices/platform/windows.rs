@@ -17,7 +17,7 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
             for device in output_devices {
                 if let Ok(name) = device.name() {
                     // For Windows, we need to mark output devices specifically for loopback
-                    info!("Found Windows output device: {}", name);
+                    // info!("Found Windows output device: {}", name);
                     devices.push(AudioDevice::new(name.clone(), DeviceType::Output));
                 }
             }
@@ -29,7 +29,7 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         if let Ok(input_devices) = wasapi_host.input_devices() {
             for device in input_devices {
                 if let Ok(name) = device.name() {
-                    info!("Found Windows input device: {}", name);
+                    // info!("Found Windows input device: {}", name);
                     devices.push(AudioDevice::new(name.clone(), DeviceType::Input));
                 }
             }
@@ -47,7 +47,7 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         if let Ok(input_devices) = host.input_devices() {
             for device in input_devices {
                 if let Ok(name) = device.name() {
-                    info!("Found fallback input device: {}", name);
+                    // info!("Found fallback input device: {}", name);
                     devices.push(AudioDevice::new(name.clone(), DeviceType::Input));
                 }
             }
@@ -59,7 +59,7 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         if let Ok(output_devices) = host.output_devices() {
             for device in output_devices {
                 if let Ok(name) = device.name() {
-                    info!("Found fallback output device: {}", name);
+                    // info!("Found fallback output device: {}", name);
                     devices.push(AudioDevice::new(name.clone(), DeviceType::Output));
                 }
             }
@@ -75,7 +75,7 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         // Try to add default input device
         if let Some(device) = host.default_input_device() {
             if let Ok(name) = device.name() {
-                info!("Adding default input device: {}", name);
+                // info!("Adding default input device: {}", name);
                 devices.push(AudioDevice::new(name, DeviceType::Input));
             }
         }
@@ -83,7 +83,7 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         // Try to add default output device
         if let Some(device) = host.default_output_device() {
             if let Ok(name) = device.name() {
-                info!("Adding default output device: {}", name);
+                // info!("Adding default output device: {}", name);
                 devices.push(AudioDevice::new(name, DeviceType::Output));
             }
         }
@@ -116,12 +116,12 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                     info!("Checking input device: {}", name);
                     // Check if the device name contains our base name
                     if name == base_name || name.contains(base_name) {
-                        info!("Found matching input device: {}", name);
+                        // info!("Found matching input device: {}", name);
 
                         // Try to get default input config with better error logging
                         match device.default_input_config() {
                             Ok(default_config) => {
-                                info!("Using default input config: {:?}", default_config);
+                                // info!("Using default input config: {:?}", default_config);
                                 return Ok((device, default_config));
                             },
                             Err(e) => {
@@ -133,13 +133,13 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                                     if configs.is_empty() {
                                         warn!("No supported input configurations found for device: {}", name);
                                     } else {
-                                        info!("Found {} supported input configurations", configs.len());
+                                        // info!("Found {} supported input configurations", configs.len());
 
                                         // First try to find F32 format with 2 channels (stereo)
                                         for config in &configs {
                                             if config.sample_format() == cpal::SampleFormat::F32 && config.channels() == 2 {
                                                 let config = config.with_max_sample_rate();
-                                                info!("Using stereo F32 input config: {:?}", config);
+                                                // info!("Using stereo F32 input config: {:?}", config);
                                                 return Ok((device, config));
                                             }
                                         }
@@ -148,7 +148,7 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                                         for config in &configs {
                                             if config.sample_format() == cpal::SampleFormat::F32 {
                                                 let config = config.with_max_sample_rate();
-                                                info!("Using F32 input config: {:?}", config);
+                                                // info!("Using F32 input config: {:?}", config);
                                                 return Ok((device, config));
                                             }
                                         }
@@ -173,7 +173,7 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
             info!("No matching input device found, trying default input device");
             if let Some(default_device) = wasapi_host.default_input_device() {
                 if let Ok(name) = default_device.name() {
-                    info!("Using default input device: {}", name);
+                    // info!("Using default input device: {}", name);
                     if let Ok(config) = default_device.default_input_config() {
                         return Ok((default_device, config));
                     } else if let Ok(supported_configs) = default_device.supported_input_configs() {
@@ -190,7 +190,7 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                     info!("Checking output device: {}", name);
                     // Check if the device name contains our base name
                     if name == base_name || name.contains(base_name) {
-                        info!("Found matching output device: {}", name);
+                        // info!("Found matching output device: {}", name);
 
                         // For output devices, we want to use them in loopback mode
                         if let Ok(supported_configs) = device.supported_output_configs() {
@@ -198,7 +198,7 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                             if configs.is_empty() {
                                 warn!("No supported output configurations found for device: {}", name);
                             } else {
-                                info!("Found {} supported output configurations", configs.len());
+                                // info!("Found {} supported output configurations", configs.len());
 
                                 // Try to find a config that supports f32 format with 2 channels (stereo)
                                 for config in &configs {
@@ -213,14 +213,14 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                                 for config in &configs {
                                     if config.sample_format() == cpal::SampleFormat::F32 {
                                         let config = config.with_max_sample_rate();
-                                        info!("Using F32 output config: {:?}", config);
+                                        // info!("Using F32 output config: {:?}", config);
                                         return Ok((device, config));
                                     }
                                 }
 
                                 // Finally, use the first available config
                                 let config = configs[0].with_max_sample_rate();
-                                info!("Using fallback output config: {:?}", config);
+                                // info!("Using fallback output config: {:?}", config);
                                 return Ok((device, config));
                             }
                         } else {
@@ -229,7 +229,7 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
 
                         // If we couldn't get supported configs, try default
                         if let Ok(default_config) = device.default_output_config() {
-                            info!("Using default output config: {:?}", default_config);
+                            // info!("Using default output config: {:?}", default_config);
                             return Ok((device, default_config));
                         }
                     }
