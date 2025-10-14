@@ -1,27 +1,43 @@
+// audio/recording_commands.rs
+//
+// Slim Tauri command layer for recording functionality.
+// Delegates to transcription and recording modules for actual implementation.
+
 use anyhow::Result;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::task::JoinHandle;
 
-use super::{parse_audio_device, AudioChunk, RecordingManager, DeviceEvent, DeviceMonitorType};
+use super::{parse_audio_device, RecordingManager, DeviceEvent, DeviceMonitorType};
+
+// Import transcription modules
+use super::transcription::{
+    self,
+    reset_speech_detected_flag,
+};
+
+// Re-export TranscriptUpdate for backward compatibility
+pub use super::transcription::TranscriptUpdate;
+
+// ============================================================================
+// GLOBAL STATE
+// ============================================================================
 
 // Simple recording state tracking
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
-// Sequence counter for transcript updates
-static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-// Speech detection flag - reset per recording session
-static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
-
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+
+// ============================================================================
+// PUBLIC TYPES
+// ============================================================================
 
 #[derive(Debug, Deserialize)]
 pub struct RecordingArgs {
@@ -35,20 +51,9 @@ pub struct TranscriptionStatus {
     pub last_activity_ms: u64,
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct TranscriptUpdate {
-    pub text: String,
-    pub timestamp: String, // Wall-clock time for reference (e.g., "14:30:05")
-    pub source: String,
-    pub sequence_id: u64,
-    pub chunk_start_time: f64, // Legacy field, kept for compatibility
-    pub is_partial: bool,
-    pub confidence: f32,
-    // NEW: Recording-relative timestamps for playback sync
-    pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
-    pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
-    pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
-}
+// ============================================================================
+// RECORDING COMMANDS
+// ============================================================================
 
 /// Start recording with default devices
 pub async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
@@ -74,7 +79,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = validate_transcription_model_ready(&app).await {
+    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
         error!("Model validation failed: {}", validation_error);
 
         // Emit actionable error event for frontend to show model selector
@@ -126,11 +131,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
-    SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst); // Reset for new recording session
-    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+    reset_speech_detected_flag(); // Reset for new recording session
 
     // Start optimized parallel transcription task and store handle
-    let task_handle = start_transcription_task(app.clone(), transcription_receiver);
+    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
     {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
@@ -181,7 +185,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = validate_transcription_model_ready(&app).await {
+    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
         error!("Model validation failed: {}", validation_error);
 
         // Emit actionable error event for frontend to show model selector
@@ -249,11 +253,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
-    SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst); // Reset for new recording session
-    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+    reset_speech_detected_flag(); // Reset for new recording session
 
     // Start optimized parallel transcription task and store handle
-    let task_handle = start_transcription_task(app.clone(), transcription_receiver);
+    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
     {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
@@ -401,28 +404,72 @@ pub async fn stop_recording<R: Runtime>(
         }),
     );
 
-    info!("🧠 All transcript chunks processed. Now safely unloading Whisper model...");
-    let engine_clone = {
-        let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
-            .lock()
-            .unwrap();
-        engine_guard.as_ref().cloned()
+    info!("🧠 All transcript chunks processed. Now safely unloading transcription model...");
+
+    // Determine which provider was used and unload the appropriate model
+    let config = match crate::api::api::api_get_transcript_config(
+        app.clone(),
+        app.clone().state(),
+        None,
+    )
+    .await
+    {
+        Ok(Some(config)) => Some(config.provider),
+        _ => None,
     };
 
-    if let Some(engine) = engine_clone {
-        let current_model = engine
-            .get_current_model()
-            .await
-            .unwrap_or_else(|| "unknown".to_string());
-        info!("Current model before unload: '{}'", current_model);
+    match config.as_deref() {
+        Some("parakeet") => {
+            info!("🦜 Unloading Parakeet model...");
+            let engine_clone = {
+                let engine_guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
+                    .lock()
+                    .unwrap();
+                engine_guard.as_ref().cloned()
+            };
 
-        if engine.unload_model().await {
-            info!("✅ Model '{}' unloaded successfully", current_model);
-        } else {
-            warn!("⚠️ Failed to unload model '{}'", current_model);
+            if let Some(engine) = engine_clone {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                info!("Current Parakeet model before unload: '{}'", current_model);
+
+                if engine.unload_model().await {
+                    info!("✅ Parakeet model '{}' unloaded successfully", current_model);
+                } else {
+                    warn!("⚠️ Failed to unload Parakeet model '{}'", current_model);
+                }
+            } else {
+                warn!("⚠️ No Parakeet engine found to unload model");
+            }
         }
-    } else {
-        warn!("⚠️ No whisper engine found to unload model");
+        _ => {
+            // Default to Whisper
+            info!("🎤 Unloading Whisper model...");
+            let engine_clone = {
+                let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
+                    .lock()
+                    .unwrap();
+                engine_guard.as_ref().cloned()
+            };
+
+            if let Some(engine) = engine_clone {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                info!("Current Whisper model before unload: '{}'", current_model);
+
+                if engine.unload_model().await {
+                    info!("✅ Whisper model '{}' unloaded successfully", current_model);
+                } else {
+                    warn!("⚠️ Failed to unload Whisper model '{}'", current_model);
+                }
+            } else {
+                warn!("⚠️ No Whisper engine found to unload model");
+            }
+        }
     }
 
     // Step 4: Finalize recording state and cleanup resources safely
@@ -604,762 +651,6 @@ pub async fn get_recording_state() -> serde_json::Value {
             "current_pause_duration": null
         })
     }
-}
-
-/// Optimized parallel transcription task ensuring ZERO chunk loss
-fn start_transcription_task<R: Runtime>(
-    app: AppHandle<R>,
-    transcription_receiver: tokio::sync::mpsc::UnboundedReceiver<AudioChunk>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
-
-        // Initialize whisper engine
-        let whisper_engine = match get_or_init_whisper(&app).await {
-            Ok(engine) => engine,
-            Err(e) => {
-                error!("Failed to initialize Whisper engine: {}", e);
-                let _ = app.emit("transcription-error", serde_json::json!({
-                    "error": e,
-                    "userMessage": "Recording failed: Unable to initialize speech recognition. Please check your model settings.",
-                    "actionable": true
-                }));
-                return;
-            }
-        };
-
-        // Create parallel workers for faster processing while preserving ALL chunks
-        const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
-        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
-        let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
-
-        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
-        let chunks_queued = Arc::new(AtomicU64::new(0));
-        let chunks_completed = Arc::new(AtomicU64::new(0));
-        let input_finished = Arc::new(AtomicBool::new(false));
-
-        info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
-
-        // Spawn worker tasks
-        let mut worker_handles = Vec::new();
-        for worker_id in 0..NUM_WORKERS {
-            let whisper_engine_clone = whisper_engine.clone();
-            let app_clone = app.clone();
-            let work_receiver_clone = work_receiver.clone();
-            let chunks_completed_clone = chunks_completed.clone();
-            let input_finished_clone = input_finished.clone();
-            let chunks_queued_clone = chunks_queued.clone();
-
-            let worker_handle = tokio::spawn(async move {
-                info!("👷 Worker {} started", worker_id);
-
-                // PRE-VALIDATE Whisper model state to avoid repeated async calls per chunk
-                let initial_model_loaded = whisper_engine_clone.is_model_loaded().await;
-                let current_model = whisper_engine_clone
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                if initial_model_loaded {
-                    info!(
-                        "✅ Worker {} pre-validation: Whisper model '{}' is loaded and ready",
-                        worker_id, current_model
-                    );
-                } else {
-                    warn!("⚠️ Worker {} pre-validation: Whisper model not loaded - chunks may be skipped", worker_id);
-                }
-
-                loop {
-                    // Try to get a chunk to process
-                    let chunk = {
-                        let mut receiver = work_receiver_clone.lock().await;
-                        receiver.recv().await
-                    };
-
-                    match chunk {
-                        Some(chunk) => {
-                            // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
-                            // Only log every 10th chunk per worker to reduce I/O overhead
-                            let should_log_this_chunk = chunk.chunk_id % 10 == 0;
-
-                            if should_log_this_chunk {
-                                info!(
-                                    "👷 Worker {} processing chunk {} with {} samples",
-                                    worker_id,
-                                    chunk.chunk_id,
-                                    chunk.data.len()
-                                );
-                            }
-
-                            // Check if model is still loaded before processing
-                            if !whisper_engine_clone.is_model_loaded().await {
-                                warn!("⚠️ Worker {}: Whisper model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
-                                // Still count as completed even if we can't process
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
-                                continue;
-                            }
-
-                            let chunk_timestamp = chunk.timestamp;
-                            let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
-
-                            // Transcribe with whisper using streaming approach
-                            match transcribe_chunk_with_streaming(
-                                &whisper_engine_clone,
-                                chunk,
-                                &app_clone,
-                            )
-                            .await
-                            {
-                                Ok((transcript, confidence, is_partial)) => {
-                                    let confidence_threshold = 0.3; // Display results above 30% confidence
-
-                                    info!("🔍 Worker {} transcription result: text='{}', confidence={:.2}, partial={}, threshold={:.2}",
-                                          worker_id, transcript, confidence, is_partial, confidence_threshold);
-
-                                    if !transcript.trim().is_empty() && confidence >= confidence_threshold {
-                                        // PERFORMANCE: Only log transcription results, not every processing step
-                                        info!("✅ Worker {} transcribed: {} (confidence: {:.2}, partial: {})",
-                                              worker_id, transcript, confidence, is_partial);
-
-                                        // Emit speech-detected event for frontend UX (only on first detection per session)
-                                        // This is lightweight and provides better user feedback
-                                        let current_flag = SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
-                                        info!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
-
-                                        if !current_flag {
-                                            SPEECH_DETECTED_EMITTED.store(true, Ordering::SeqCst);
-                                            match app_clone.emit("speech-detected", serde_json::json!({
-                                                "message": "Speech activity detected"
-                                            })) {
-                                                Ok(_) => info!("🎤 ✅ First speech detected - successfully emitted speech-detected event"),
-                                                Err(e) => error!("🎤 ❌ Failed to emit speech-detected event: {}", e),
-                                            }
-                                        } else {
-                                            info!("🔍 Speech already detected in this session, not re-emitting");
-                                        }
-
-                                        // Generate sequence ID and calculate timestamps FIRST
-                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
-                                        let audio_start_time = chunk_timestamp; // Already in seconds from recording start
-                                        let audio_end_time = chunk_timestamp + chunk_duration;
-
-                                        // Save structured transcript segment to recording manager (only final results)
-                                        // Save ALL segments (partial and final) to ensure complete JSON
-                                        // Create structured segment with full timestamp data
-                                        let segment = crate::audio::recording_saver::TranscriptSegment {
-                                            id: format!("seg_{}", sequence_id),
-                                            text: transcript.clone(),
-                                            audio_start_time,
-                                            audio_end_time,
-                                            duration: chunk_duration,
-                                            display_time: format_recording_time(audio_start_time),
-                                            confidence,
-                                            sequence_id,
-                                        };
-
-                                        let global_manager = RECORDING_MANAGER.lock().unwrap();
-                                        if let Some(manager) = global_manager.as_ref() {
-                                            manager.add_transcript_segment(segment);
-                                        }
-
-                                        // Emit transcript update with NEW recording-relative timestamps
-
-                                        let update = TranscriptUpdate {
-                                            text: transcript,
-                                            timestamp: format_current_timestamp(), // Wall-clock for reference
-                                            source: "Audio".to_string(),
-                                            sequence_id,
-                                            chunk_start_time: chunk_timestamp, // Legacy compatibility
-                                            is_partial,
-                                            confidence,
-                                            // NEW: Recording-relative timestamps for sync
-                                            audio_start_time,
-                                            audio_end_time,
-                                            duration: chunk_duration,
-                                        };
-
-                                        if let Err(e) = app_clone.emit("transcript-update", &update)
-                                        {
-                                            error!(
-                                                "Worker {}: Failed to emit transcript update: {}",
-                                                worker_id, e
-                                            );
-                                        }
-                                        // PERFORMANCE: Removed verbose logging of every emission
-                                    } else if !transcript.trim().is_empty() && should_log_this_chunk
-                                    {
-                                        // PERFORMANCE: Only log low-confidence results occasionally
-                                        info!("Worker {} low-confidence transcription (confidence: {:.2}), skipping", worker_id, confidence);
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Worker {}: Transcription failed: {}", worker_id, e);
-                                    let _ = app_clone.emit("transcription-warning", e);
-                                }
-                            }
-
-                            // Mark chunk as completed
-                            let completed =
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst) + 1;
-                            let queued = chunks_queued_clone.load(Ordering::SeqCst);
-
-                            // PERFORMANCE: Only log progress every 5th chunk to reduce I/O overhead
-                            if completed % 5 == 0 || should_log_this_chunk {
-                                info!(
-                                    "Worker {}: Progress {}/{} chunks ({:.1}%)",
-                                    worker_id,
-                                    completed,
-                                    queued,
-                                    (completed as f64 / queued.max(1) as f64 * 100.0)
-                                );
-                            }
-
-                            // Emit progress event for frontend
-                            let progress_percentage = if queued > 0 {
-                                (completed as f64 / queued as f64 * 100.0) as u32
-                            } else {
-                                100
-                            };
-
-                            let _ = app_clone.emit("transcription-progress", serde_json::json!({
-                                "worker_id": worker_id,
-                                "chunks_completed": completed,
-                                "chunks_queued": queued,
-                                "progress_percentage": progress_percentage,
-                                "message": format!("Worker {} processing... ({}/{})", worker_id, completed, queued)
-                            }));
-                        }
-                        None => {
-                            // No more chunks available
-                            if input_finished_clone.load(Ordering::SeqCst) {
-                                // Double-check that all queued chunks are actually completed
-                                let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
-                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
-
-                                if final_completed >= final_queued {
-                                    info!(
-                                        "👷 Worker {} finishing - all {}/{} chunks processed",
-                                        worker_id, final_completed, final_queued
-                                    );
-                                    break;
-                                } else {
-                                    warn!("👷 Worker {} detected potential chunk loss: {}/{} completed, waiting...", worker_id, final_completed, final_queued);
-                                    // AGGRESSIVE POLLING: Reduced from 50ms to 5ms for faster chunk detection during shutdown
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-                                }
-                            } else {
-                                // AGGRESSIVE POLLING: Reduced from 10ms to 1ms for faster response during shutdown
-                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                            }
-                        }
-                    }
-                }
-
-                info!("👷 Worker {} completed", worker_id);
-            });
-
-            worker_handles.push(worker_handle);
-        }
-
-        // Main dispatcher: receive chunks and distribute to workers
-        let mut receiver = transcription_receiver;
-        while let Some(chunk) = receiver.recv().await {
-            let queued = chunks_queued.fetch_add(1, Ordering::SeqCst) + 1;
-            info!(
-                "📥 Dispatching chunk {} to workers (total queued: {})",
-                chunk.chunk_id, queued
-            );
-
-            if let Err(_) = work_sender.send(chunk) {
-                error!("❌ Failed to send chunk to workers - this should not happen!");
-                break;
-            }
-        }
-
-        // Signal that input is finished
-        input_finished.store(true, Ordering::SeqCst);
-        drop(work_sender); // Close the channel to signal workers
-
-        let total_chunks_queued = chunks_queued.load(Ordering::SeqCst);
-        info!("📭 Input finished with {} total chunks queued. Waiting for all {} workers to complete...",
-              total_chunks_queued, NUM_WORKERS);
-
-        // Emit final chunk count to frontend
-        let _ = app.emit("transcription-queue-complete", serde_json::json!({
-            "total_chunks": total_chunks_queued,
-            "message": format!("{} chunks queued for processing - waiting for completion", total_chunks_queued)
-        }));
-
-        // Wait for all workers to complete
-        for (worker_id, handle) in worker_handles.into_iter().enumerate() {
-            if let Err(e) = handle.await {
-                error!("❌ Worker {} panicked: {:?}", worker_id, e);
-            } else {
-                info!("✅ Worker {} completed successfully", worker_id);
-            }
-        }
-
-        // Final verification with retry logic to catch any stragglers
-        let mut verification_attempts = 0;
-        const MAX_VERIFICATION_ATTEMPTS: u32 = 10;
-
-        loop {
-            let final_queued = chunks_queued.load(Ordering::SeqCst);
-            let final_completed = chunks_completed.load(Ordering::SeqCst);
-
-            if final_queued == final_completed {
-                info!(
-                    "🎉 ALL {} chunks processed successfully - ZERO chunks lost!",
-                    final_completed
-                );
-                break;
-            } else if verification_attempts < MAX_VERIFICATION_ATTEMPTS {
-                verification_attempts += 1;
-                warn!("⚠️ Chunk count mismatch (attempt {}): {} queued, {} completed - waiting for stragglers...",
-                     verification_attempts, final_queued, final_completed);
-
-                // Wait a bit for any remaining chunks to be processed
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            } else {
-                error!(
-                    "❌ CRITICAL: After {} attempts, chunk loss detected: {} queued, {} completed",
-                    MAX_VERIFICATION_ATTEMPTS, final_queued, final_completed
-                );
-
-                // Emit critical error event
-                let _ = app.emit(
-                    "transcript-chunk-loss-detected",
-                    serde_json::json!({
-                        "chunks_queued": final_queued,
-                        "chunks_completed": final_completed,
-                        "chunks_lost": final_queued - final_completed,
-                        "message": "Some transcript chunks may have been lost during shutdown"
-                    }),
-                );
-                break;
-            }
-        }
-
-        info!("✅ Parallel transcription task completed - all workers finished, ready for model unload");
-    })
-}
-
-/// Transcribe audio chunk with streaming support and confidence scoring
-async fn transcribe_chunk_with_streaming<R: Runtime>(
-    whisper_engine: &Arc<crate::whisper_engine::WhisperEngine>,
-    chunk: AudioChunk,
-    app: &AppHandle<R>,
-) -> Result<(String, f32, bool), String> {
-    // Convert to 16kHz mono for whisper and VAD
-    let whisper_data = if chunk.sample_rate != 16000 {
-        crate::audio::audio_processing::resample_audio(&chunk.data, chunk.sample_rate, 16000)
-    } else {
-        chunk.data
-    };
-
-    // Skip VAD processing here since the pipeline already extracted speech using VAD
-    let speech_samples = whisper_data;
-
-    // PERFORMANCE FIX: Only check for empty samples - trust VAD's decision on audio quality
-    // Redundant energy checking after VAD filtering was too aggressive and rejected valid speech
-    if speech_samples.is_empty() {
-        info!(
-            "Empty audio chunk {}, skipping transcription",
-            chunk.chunk_id
-        );
-        return Ok((String::new(), 0.0, false));
-    }
-
-    // Calculate energy for logging/monitoring only (not filtering)
-    let energy: f32 =
-        speech_samples.iter().map(|&x| x * x).sum::<f32>() / speech_samples.len() as f32;
-    info!(
-        "Processing speech audio chunk {} with {} samples (energy: {:.6})",
-        chunk.chunk_id,
-        speech_samples.len(),
-        energy
-    );
-
-    // Get language preference from global state
-    let language = crate::get_language_preference_internal();
-
-    match whisper_engine
-        .transcribe_audio_with_confidence(speech_samples, language)
-        .await
-    {
-        Ok((text, confidence, is_partial)) => {
-            let cleaned_text = text.trim().to_string();
-            if cleaned_text.is_empty() {
-                return Ok((String::new(), confidence, is_partial));
-            }
-
-            info!(
-                "Transcription complete for chunk {}: '{}' (confidence: {:.2}, partial: {})",
-                chunk.chunk_id, cleaned_text, confidence, is_partial
-            );
-
-            Ok((cleaned_text, confidence, is_partial))
-        }
-        Err(e) => {
-            error!(
-                "Whisper transcription failed for chunk {}: {}",
-                chunk.chunk_id, e
-            );
-
-            let error_msg = format!("Transcription failed: {}", e);
-            if let Err(emit_err) = app.emit(
-                "transcription-error",
-                &serde_json::json!({
-                    "error": e.to_string(),
-                    "userMessage": error_msg.clone(),
-                    "actionable": false
-                }),
-            ) {
-                error!("Failed to emit transcription error: {}", emit_err);
-            }
-
-            Err(error_msg)
-        }
-    }
-}
-
-/// Validate that transcription models (Whisper or Parakeet) are ready before starting recording
-async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    // Check transcript configuration to determine which engine to validate
-    let config = match crate::api::api::api_get_transcript_config(
-        app.clone(),
-        app.clone().state(),
-        None,
-    )
-    .await
-    {
-        Ok(Some(config)) => {
-            info!(
-                "📝 Found transcript config - provider: {}, model: {}",
-                config.provider, config.model
-            );
-            config
-        }
-        Ok(None) => {
-            info!("📝 No transcript config found, defaulting to localWhisper");
-            crate::api::api::TranscriptConfig {
-                provider: "localWhisper".to_string(),
-                model: "large-v3".to_string(),
-                api_key: None,
-            }
-        }
-        Err(e) => {
-            warn!("⚠️ Failed to get transcript config: {}, defaulting to localWhisper", e);
-            crate::api::api::TranscriptConfig {
-                provider: "localWhisper".to_string(),
-                model: "large-v3".to_string(),
-                api_key: None,
-            }
-        }
-    };
-
-    // Validate based on provider
-    match config.provider.as_str() {
-        "localWhisper" => {
-            info!("🔍 Validating Whisper model...");
-            // Ensure whisper engine is initialized first
-            if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
-                warn!("❌ Failed to initialize Whisper engine: {}", init_error);
-                return Err(format!(
-                    "Failed to initialize speech recognition: {}",
-                    init_error
-                ));
-            }
-
-            // Call the whisper validation command with config support
-            match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
-                Ok(model_name) => {
-                    info!("✅ Whisper model validation successful: {} is ready", model_name);
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("❌ Whisper model validation failed: {}", e);
-                    Err(e)
-                }
-            }
-        }
-        "parakeet" => {
-            info!("🔍 Validating Parakeet model...");
-            // Ensure parakeet engine is initialized first
-            if let Err(init_error) = crate::parakeet_engine::commands::parakeet_init().await {
-                warn!("❌ Failed to initialize Parakeet engine: {}", init_error);
-                return Err(format!(
-                    "Failed to initialize Parakeet speech recognition: {}",
-                    init_error
-                ));
-            }
-
-            // Check if the configured model is loaded
-            let loaded = crate::parakeet_engine::commands::parakeet_is_model_loaded().await
-                .map_err(|e| format!("Failed to check Parakeet model status: {}", e))?;
-
-            if !loaded {
-                // Try to load the configured model
-                info!("Loading Parakeet model: {}", config.model);
-                crate::parakeet_engine::commands::parakeet_load_model(app.clone(), config.model.clone()).await
-                    .map_err(|e| format!("Failed to load Parakeet model '{}': {}", config.model, e))?;
-            }
-
-            info!("✅ Parakeet model validation successful");
-            Ok(())
-        }
-        other => {
-            warn!("❌ Unsupported transcription provider for local recording: {}", other);
-            Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
-                other
-            ))
-        }
-    }
-}
-
-/// Get or initialize Whisper engine using API configuration
-pub async fn get_or_init_whisper<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<Arc<crate::whisper_engine::WhisperEngine>, String> {
-    // Check if engine already exists and has a model loaded
-    let existing_engine = {
-        let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
-            .lock()
-            .unwrap();
-        engine_guard.as_ref().cloned()
-    };
-
-    if let Some(engine) = existing_engine {
-        // Check if a model is already loaded
-        if engine.is_model_loaded().await {
-            let current_model = engine
-                .get_current_model()
-                .await
-                .unwrap_or_else(|| "unknown".to_string());
-
-            // NEW: Check if loaded model matches saved config
-            let configured_model = match crate::api::api::api_get_transcript_config(
-                app.clone(),
-                app.clone().state(),
-                None,
-            )
-            .await
-            {
-                Ok(Some(config)) => {
-                    info!(
-                        "📝 Saved transcript config - provider: {}, model: {}",
-                        config.provider, config.model
-                    );
-                    if config.provider == "localWhisper" && !config.model.is_empty() {
-                        Some(config.model)
-                    } else {
-                        None
-                    }
-                }
-                Ok(None) => {
-                    info!("📝 No transcript config found in database");
-                    None
-                }
-                Err(e) => {
-                    warn!("⚠️ Failed to get transcript config: {}", e);
-                    None
-                }
-            };
-
-            // If loaded model matches config, reuse it
-            if let Some(ref expected_model) = configured_model {
-                if current_model == *expected_model {
-                    info!(
-                        "✅ Loaded model '{}' matches saved config, reusing",
-                        current_model
-                    );
-                    return Ok(engine);
-                } else {
-                    info!(
-                        "🔄 Loaded model '{}' doesn't match saved config '{}', reloading correct model...",
-                        current_model, expected_model
-                    );
-                    // Unload the incorrect model
-                    engine.unload_model().await;
-                    info!("📉 Unloaded incorrect model '{}'", current_model);
-                    // Continue to model loading logic below
-                }
-            } else {
-                // No specific config saved, accept currently loaded model
-                info!(
-                    "✅ No specific model configured, using currently loaded model: '{}'",
-                    current_model
-                );
-                return Ok(engine);
-            }
-        } else {
-            info!("🔄 Whisper engine exists but no model loaded, will load model from config");
-        }
-    }
-
-    // Initialize new engine if needed
-    info!("Initializing Whisper engine");
-
-    // First ensure the engine is initialized
-    if let Err(e) = crate::whisper_engine::commands::whisper_init().await {
-        return Err(format!("Failed to initialize Whisper engine: {}", e));
-    }
-
-    // Get the engine reference
-    let engine = {
-        let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
-            .lock()
-            .unwrap();
-        engine_guard
-            .as_ref()
-            .cloned()
-            .ok_or("Failed to get initialized engine")?
-    };
-
-    // Get model configuration from API
-    let model_to_load =
-        match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None)
-            .await
-        {
-            Ok(Some(config)) => {
-                info!(
-                    "Got transcript config from API - provider: {}, model: {}",
-                    config.provider, config.model
-                );
-                if config.provider == "localWhisper" {
-                    info!("Using model from API config: {}", config.model);
-                    config.model
-                } else {
-                    info!(
-                        "API config uses non-local provider ({}), falling back to 'small'",
-                        config.provider
-                    );
-                    "small".to_string()
-                }
-            }
-            Ok(None) => {
-                info!("No transcript config found in API, falling back to 'small'");
-                "small".to_string()
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to get transcript config from API: {}, falling back to 'small'",
-                    e
-                );
-                "small".to_string()
-            }
-        };
-
-    info!("Selected model to load: {}", model_to_load);
-
-    // Discover available models to check if the desired model is downloaded
-    let models = engine
-        .discover_models()
-        .await
-        .map_err(|e| format!("Failed to discover models: {}", e))?;
-
-    info!("Discovered {} models", models.len());
-    for model in &models {
-        info!(
-            "Model: {} - Status: {:?} - Path: {}",
-            model.name,
-            model.status,
-            model.path.display()
-        );
-    }
-
-    // Check if the desired model is available
-    let model_info = models.iter().find(|model| model.name == model_to_load);
-
-    if model_info.is_none() {
-        info!(
-            "Model '{}' not found in discovered models. Available models: {:?}",
-            model_to_load,
-            models.iter().map(|m| &m.name).collect::<Vec<_>>()
-        );
-    }
-
-    match model_info {
-        Some(model) => {
-            match model.status {
-                crate::whisper_engine::ModelStatus::Available => {
-                    info!("Loading model: {}", model_to_load);
-                    engine
-                        .load_model(&model_to_load)
-                        .await
-                        .map_err(|e| format!("Failed to load model '{}': {}", model_to_load, e))?;
-                    info!("✅ Model '{}' loaded successfully", model_to_load);
-                }
-                crate::whisper_engine::ModelStatus::Missing => {
-                    return Err(format!(
-                        "Model '{}' is not downloaded. Please download it first from the settings.",
-                        model_to_load
-                    ));
-                }
-                crate::whisper_engine::ModelStatus::Downloading { progress } => {
-                    return Err(format!("Model '{}' is currently downloading ({}%). Please wait for it to complete.", model_to_load, progress));
-                }
-                crate::whisper_engine::ModelStatus::Error(ref err) => {
-                    return Err(format!("Model '{}' has an error: {}. Please check the model or try downloading it again.", model_to_load, err));
-                }
-                crate::whisper_engine::ModelStatus::Corrupted { .. } => {
-                    return Err(format!("Model '{}' is corrupted. Please delete it and download again from the settings.", model_to_load));
-                }
-            }
-        }
-        None => {
-            // Check if we have any available models and try to load the first one
-            let available_models: Vec<_> = models
-                .iter()
-                .filter(|m| matches!(m.status, crate::whisper_engine::ModelStatus::Available))
-                .collect();
-
-            if let Some(fallback_model) = available_models.first() {
-                warn!(
-                    "Model '{}' not found, falling back to available model: '{}'",
-                    model_to_load, fallback_model.name
-                );
-                engine.load_model(&fallback_model.name).await.map_err(|e| {
-                    format!(
-                        "Failed to load fallback model '{}': {}",
-                        fallback_model.name, e
-                    )
-                })?;
-                info!(
-                    "✅ Fallback model '{}' loaded successfully",
-                    fallback_model.name
-                );
-            } else {
-                return Err(format!("Model '{}' is not supported and no other models are available. Please download a model from the settings.", model_to_load));
-            }
-        }
-    }
-
-    Ok(engine)
-}
-
-
-/// Format current timestamp (wall-clock time)
-fn format_current_timestamp() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-
-    let hours = (now.as_secs() / 3600) % 24;
-    let minutes = (now.as_secs() / 60) % 60;
-    let seconds = now.as_secs() % 60;
-
-    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-}
-
-/// Format recording-relative time as [MM:SS]
-fn format_recording_time(seconds: f64) -> String {
-    let total_seconds = seconds.floor() as u64;
-    let minutes = total_seconds / 60;
-    let secs = total_seconds % 60;
-
-    format!("[{:02}:{:02}]", minutes, secs)
 }
 
 /// Get the meeting folder path for the current recording

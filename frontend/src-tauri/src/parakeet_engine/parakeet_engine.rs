@@ -126,10 +126,10 @@ impl ParakeetEngine {
         let mut models = Vec::new();
 
         // Parakeet model configurations
-        // Model name format: parakeet-v{version}-{quantization}
+        // Model name format: parakeet-tdt-0.6b-v{version}-{quantization}
         let model_configs = [
-            ("parakeet-tdt-0.6b-v3-int8", 200, QuantizationType::Int8, "Ultra Fast", "30x real-time on M4 Max, optimized for speed"),
-            ("parakeet-tdt-0.6b-v3-fp32", 400, QuantizationType::FP32, "Fast", "20x real-time on M4 Max, higher precision"),
+            ("parakeet-tdt-0.6b-v3-int8", 200, QuantizationType::Int8, "Ultra Fast (v3)", "30x real-time on M4 Max, latest version with int8 quantization"),
+            ("parakeet-tdt-0.6b-v2-int8", 180, QuantizationType::Int8, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
         ];
 
         for (name, size_mb, quantization, speed, description) in model_configs {
@@ -407,8 +407,13 @@ impl ParakeetEngine {
             }
         }
 
-        // HuggingFace base URL for Parakeet models
-        let base_url = "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main";
+        // HuggingFace base URL for Parakeet models (version-specific)
+        let base_url = if model_name.contains("-v2-") {
+            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main"
+        } else {
+            // Default to v3 for v3 models
+            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main"
+        };
 
         // Determine which files to download based on quantization
         let files_to_download = match model_info.quantization {
