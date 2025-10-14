@@ -172,8 +172,8 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
             // If we didn't find a matching device, try the default input device as fallback
             info!("No matching input device found, trying default input device");
             if let Some(default_device) = wasapi_host.default_input_device() {
-                if let Ok(name) = default_device.name() {
-                    // info!("Using default input device: {}", name);
+                if let Ok(_name) = default_device.name() {
+                    // info!("Using default input device: {}", _name);
                     if let Ok(config) = default_device.default_input_config() {
                         return Ok((default_device, config));
                     } else if let Ok(supported_configs) = default_device.supported_input_configs() {

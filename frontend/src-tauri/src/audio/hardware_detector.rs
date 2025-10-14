@@ -172,7 +172,7 @@ impl HardwareProfile {
 
     /// Generate adaptive Whisper configuration based on hardware
     pub fn get_whisper_config(&self) -> AdaptiveWhisperConfig {
-        match self.performance_tier {
+        let mut config = match self.performance_tier {
             PerformanceTier::Ultra => AdaptiveWhisperConfig {
                 beam_size: 5,  // Maximum quality
                 temperature: 0.1,
@@ -201,7 +201,19 @@ impl HardwareProfile {
                 max_threads: Some(2),
                 chunk_size_preference: ChunkSizePreference::Fast,
             },
+        };
+
+        // Windows-specific override: Always use beam size 3 for stability
+        #[cfg(target_os = "windows")]
+        {
+            config.beam_size = 2;
+            config.temperature = 0.2;
+            config.use_gpu = self.has_gpu_acceleration;
+            config.max_threads = Some(self.cpu_cores.min(8) as usize);
+            config.chunk_size_preference = ChunkSizePreference::Balanced;
         }
+
+        config
     }
 
     /// Get recommended chunk duration in milliseconds based on performance tier
