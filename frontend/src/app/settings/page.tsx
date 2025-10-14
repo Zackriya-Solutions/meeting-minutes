@@ -109,7 +109,7 @@ export default function SettingsPage() {
                 <TranscriptSettings
                   transcriptModelConfig={transcriptModelConfig}
                   setTranscriptModelConfig={setTranscriptModelConfig}
-                  onSave={handleSaveConfig}
+                  // onSave={handleSaveConfig}
                 />
               )}
               {activeTab === 'summaryModels' && <SummaryModelSettings />}

@@ -1951,7 +1951,7 @@ export default function Home() {
                   <TranscriptSettings
                     transcriptModelConfig={transcriptModelConfig}
                     setTranscriptModelConfig={setTranscriptModelConfig}
-                    onSave={handleSaveTranscriptConfig}
+                    // onSave={handleSaveTranscriptConfig}
                   />
                 </div>
 
