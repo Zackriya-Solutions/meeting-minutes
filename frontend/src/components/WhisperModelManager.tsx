@@ -11,6 +11,7 @@ import {
   WhisperAPI
 } from '../lib/whisper';
 import { ModelDownloadProgress, ProgressRing, DownloadSummary } from './ModelDownloadProgress';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 
 interface ModelManagerProps {
   selectedModel?: string;
@@ -165,7 +166,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
         console.log('Received model-download-complete event:', event);
         const { modelName } = event.payload;
         console.log(`Download completed for ${modelName}`);
-        
+
         setModels(prevModels => prevModels.map(model => {
           if (model.name === modelName) {
             return {
@@ -175,7 +176,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
           }
           return model;
         }));
-        
+
         updateDownloadingModels(prev => {
           const newSet = new Set(prev);
           newSet.delete(modelName);
@@ -188,7 +189,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
         console.log('Received model-download-error event:', event);
         const { modelName, error } = event.payload;
         console.error(`Download failed for ${modelName}:`, error);
-        
+
         setModels(prevModels => prevModels.map(model => {
           if (model.name === modelName) {
             return {
@@ -198,7 +199,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
           }
           return model;
         }));
-        
+
         updateDownloadingModels(prev => {
           const newSet = new Set(prev);
           newSet.delete(modelName);
@@ -517,6 +518,17 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
 
   const availableModels = models.filter(m => m.status === 'Available');
 
+  const basicModelNames = ["base", "small", "large-v3-turbo"];
+  const modelNameMapping: { [key: string]: string } = {
+    "base": "Small",
+    "small": "Medium",
+    "large-v3-turbo": "Large"
+  };
+
+  const basicModels = models.filter(m => basicModelNames.includes(m.name))
+    .sort((a, b) => basicModelNames.indexOf(a.name) - basicModelNames.indexOf(b.name));
+  const advancedModels = models.filter(m => !basicModelNames.includes(m.name));
+
   if (loading) {
     return (
       <div className={`animate-pulse space-y-4 ${className}`}>
@@ -552,27 +564,23 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
 
   return (
     <div className={`space-y-4 ${className}`}>
-      
-
-      <div className="grid gap-4  overflow-y-auto">
-        {models.map((model) => {
+      <div className="grid gap-4">
+        {basicModels.map((model) => {
+          const displayName = modelNameMapping[model.name] || model.name;
           const isSelected = selectedModel === model.name;
           const isDownloading = typeof model.status === 'object' && 'Downloading' in model.status;
           const isAvailable = model.status === 'Available';
-          console.log(model.size_mb)
-          
+
           return (
             <div key={model.name} className="space-y-2 ">
               <div
-                className={`p-4 border rounded-lg transition-all ${
-                  isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'
-                } ${
-                  isSelected
+                className={`p-4 border rounded-lg transition-all ${isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'
+                  } ${isSelected
                     ? 'border-blue-500 bg-blue-50 shadow-sm'
                     : isAvailable
                       ? 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                       : 'border-gray-200'
-                } ${!isAvailable && !isDownloading ? 'opacity-75' : ''}`}
+                  } ${!isAvailable && !isDownloading ? 'opacity-75' : ''}`}
                 onClick={() => isAvailable && selectModel(model.name)}
               >
                 <div className="flex justify-between items-start">
@@ -581,7 +589,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
                       <span className="text-2xl">{getModelIcon(model.accuracy)}</span>
                       <div>
                         <h4 className="font-medium text-gray-900 flex items-center space-x-2">
-                          <span>Whisper {model.name}</span>
+                          <span>{displayName}</span>
                           {isSelected && (
                             <span className="bg-blue-600 text-white px-2 py-1 rounded-full text-xs flex items-center gap-1">
                               {lastSavedModel === model.name && autoSave && (
@@ -593,22 +601,11 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
                           {isAutoSaving && selectedModel === model.name && (
                             <span className="text-xs text-gray-500 animate-pulse">Saving...</span>
                           )}
-                          {isQuantizedModel(model.name) && (
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              getModelPerformanceBadge(model.name).color === 'green'
-                                ? 'bg-green-100 text-green-700'
-                                : getModelPerformanceBadge(model.name).color === 'orange'
-                                ? 'bg-orange-100 text-orange-700'
-                                : 'bg-gray-100 text-gray-700'
-                            }`}>
-                              {getModelPerformanceBadge(model.name).label}
-                            </span>
-                          )}
                         </h4>
                         <p className="text-xs text-gray-600 mt-1">{model.description}</p>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center space-x-4 text-sm text-gray-600">
                       <span className="flex items-center space-x-1">
                         <span>📦</span>
@@ -627,7 +624,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
 
                   <div className="flex flex-col items-end space-y-2">
                     {getStatusBadge(model.status)}
-                    
+
                     {model.status === 'Missing' && (
                       <button
                         onClick={(e) => {
@@ -639,7 +636,7 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
                         Download
                       </button>
                     )}
-                    
+
                     {typeof model.status === 'object' && 'Error' in model.status && (
                       <button
                         onClick={(e) => {
@@ -704,12 +701,169 @@ export function ModelManager({ selectedModel, onModelSelect, className = '', aut
         })}
       </div>
 
+      <Accordion type="single" collapsible className="w-full px-3">
+        <AccordionItem value="advanced-models">
+          <AccordionTrigger>
+            <span className='text-lg'>
+              Advanced Models
+            </span>
+          </AccordionTrigger>
+          <AccordionContent>
+            <div className="grid gap-4 pt-4">
+              {advancedModels.map((model) => {
+                const isSelected = selectedModel === model.name;
+                const isDownloading = typeof model.status === 'object' && 'Downloading' in model.status;
+                const isAvailable = model.status === 'Available';
+
+                return (
+                  <div key={model.name} className="space-y-2 ">
+                    <div
+                      className={`p-4 border rounded-lg transition-all ${isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'
+                        } ${isSelected
+                          ? 'border-blue-500 bg-blue-50 shadow-sm'
+                          : isAvailable
+                            ? 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                            : 'border-gray-200'
+                        } ${!isAvailable && !isDownloading ? 'opacity-75' : ''}`}
+                      onClick={() => isAvailable && selectModel(model.name)}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 pr-4">
+                          <div className="flex items-center space-x-3 mb-2">
+                            <span className="text-2xl">{getModelIcon(model.accuracy)}</span>
+                            <div>
+                              <h4 className="font-medium text-gray-900 flex items-center space-x-2">
+                                <span>Whisper {model.name}</span>
+                                {isSelected && (
+                                  <span className="bg-blue-600 text-white px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                                    {lastSavedModel === model.name && autoSave && (
+                                      <span className="text-white">✓</span>
+                                    )}
+                                    Active
+                                  </span>
+                                )}
+                                {isAutoSaving && selectedModel === model.name && (
+                                  <span className="text-xs text-gray-500 animate-pulse">Saving...</span>
+                                )}
+                                {isQuantizedModel(model.name) && (
+                                  <span className={`px-2 py-1 rounded-full text-xs ${getModelPerformanceBadge(model.name).color === 'green'
+                                    ? 'bg-green-100 text-green-700'
+                                    : getModelPerformanceBadge(model.name).color === 'orange'
+                                      ? 'bg-orange-100 text-orange-700'
+                                      : 'bg-gray-100 text-gray-700'
+                                    }`}>
+                                    {getModelPerformanceBadge(model.name).label}
+                                  </span>
+                                )}
+                              </h4>
+                              <p className="text-xs text-gray-600 mt-1">{model.description}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-4 text-sm text-gray-600">
+                            <span className="flex items-center space-x-1">
+                              <span>📦</span>
+                              <span>{formatFileSize(model.size_mb)}</span>
+                            </span>
+                            <span className="flex items-center space-x-1">
+                              <span>🎯</span>
+                              <span>{model.accuracy} accuracy</span>
+                            </span>
+                            <span className="flex items-center space-x-1">
+                              <span>⚡</span>
+                              <span>{model.speed} processing</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end space-y-2">
+                          {getStatusBadge(model.status)}
+
+                          {model.status === 'Missing' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadModel(model.name);
+                              }}
+                              className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
+                            >
+                              Download
+                            </button>
+                          )}
+
+                          {typeof model.status === 'object' && 'Error' in model.status && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadModel(model.name);
+                              }}
+                              className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition-colors"
+                            >
+                              Retry
+                            </button>
+                          )}
+
+                          {(typeof model.status === 'object' && 'Corrupted' in model.status) && (
+                            <div className="flex flex-col space-y-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteCorruptedModel(model.name);
+                                }}
+                                title="Delete the corrupted model file to free up space"
+                                className="bg-orange-600 text-white px-3 py-1 rounded text-xs hover:bg-orange-700 transition-colors shadow-sm border border-orange-700 font-medium"
+                              >
+                                🗑️ Delete
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadModel(model.name);
+                                }}
+                                title="Download the model again to replace the corrupted file"
+                                className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors shadow-sm border border-blue-700"
+                              >
+                                ↻ Re-download
+                              </button>
+                            </div>
+                          )}
+
+                          {model.status === 'Available' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteCorruptedModel(model.name);
+                              }}
+                              title="Delete this model to free up space"
+                              className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition-colors shadow-sm border border-red-700 font-medium"
+                            >
+                              🗑️ Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {isDownloading && (
+                      <ModelDownloadProgress
+                        status={model.status}
+                        modelName={model.name}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+
       {selectedModel && availableModels.length > 0 && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-3">
           <div className="flex items-center space-x-2">
             <span className="text-green-600">✓</span>
             <p className="text-sm text-green-800">
-              Using <strong>{selectedModel}</strong> model for transcription
+              Using <strong>{modelNameMapping[selectedModel]}({selectedModel})</strong> model for transcription
             </p>
           </div>
         </div>
