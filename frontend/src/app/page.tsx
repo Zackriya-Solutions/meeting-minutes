@@ -116,9 +116,46 @@ export default function Home() {
   // Ref to avoid stale closure issues with transcripts
   const transcriptsRef = useRef<Transcript[]>(transcripts);
 
+  // Ref for the transcript scroll container
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  const isUserAtBottomRef = useRef<boolean>(true);
+
   // Keep ref updated with current transcripts
   useEffect(() => {
     transcriptsRef.current = transcripts;
+  }, [transcripts]);
+
+  // Smart auto-scroll: Track user scroll position
+  useEffect(() => {
+    const container = transcriptScrollRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
+      isUserAtBottomRef.current = isAtBottom;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll when transcripts change (only if user is at bottom)
+  useEffect(() => {
+    const container = transcriptScrollRef.current;
+    if (!container) return;
+
+    // Only auto-scroll if user was at the bottom before new content
+    if (isUserAtBottomRef.current) {
+      // Use double requestAnimationFrame to ensure DOM is fully updated and painted
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight;
+          }
+        });
+      });
+    }
   }, [transcripts]);
 
   const modelOptions = {
@@ -1423,7 +1460,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50 transition-all duration-1000 scroll-smooth">
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
@@ -1628,7 +1665,7 @@ export default function Home() {
           )}
 
           {/* Transcript content */}
-          <div className="overflow-y-auto pb-32">
+          <div ref={transcriptScrollRef} className="overflow-y-auto pb-32">
             <div className="flex justify-center">
               <div className="w-2/3 max-w-[750px]">
                 <TranscriptView

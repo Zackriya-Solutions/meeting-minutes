@@ -30,9 +30,6 @@ function formatRecordingTime(seconds: number | undefined): string {
 }
 
 export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const prevScrollHeightRef = useRef<number>();
-  const isUserAtBottomRef = useRef<boolean>(true);
   const [speechDetected, setSpeechDetected] = useState(false);
 
   // Debug: Log the props to understand what's happening
@@ -98,33 +95,6 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       }
     };
   }, [isRecording]);
-
-  // Smart scrolling - only auto-scroll if user is at bottom
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
-      isUserAtBottomRef.current = isAtBottom;
-    };
-
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current) {
-      container.scrollTop = container.scrollHeight;
-    }
-
-    prevScrollHeightRef.current = container.scrollHeight;
-  }, [transcripts]);
 
   // Streaming effect: animate new transcripts character-by-character
   useEffect(() => {
@@ -205,7 +175,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
   }, []);
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto px-4 py-2">
+    <div className="px-4 py-2">
       {transcripts?.filter(t => t.id !== streamingTranscript?.id).map((transcript, index) => (
         <div
           key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
@@ -266,7 +236,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       )}
 
       {/* Typing indicator - shows when actively recording (not paused, not processing, not stopping) and transcripts exist */}
-      {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && !streamingTranscript && (
+      {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && (
         <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-blue-50/30 border-l-4 border-blue-400 animate-fade-in">
           <div className="flex items-center space-x-2">
             <div className="flex space-x-1">
