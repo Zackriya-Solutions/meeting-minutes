@@ -225,6 +225,124 @@ pub async fn parakeet_validate_model_ready() -> Result<String, String> {
     }
 }
 
+/// Internal version of parakeet_validate_model_ready that respects user's transcript config
+/// This matches whisper_validate_model_ready_with_config for consistency
+pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<String, String> {
+    let engine = {
+        let guard = PARAKEET_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        // Check if a model is currently loaded
+        if engine.is_model_loaded().await {
+            if let Some(current_model) = engine.get_current_model().await {
+                log::info!("Parakeet model already loaded: {}", current_model);
+                return Ok(current_model);
+            }
+        }
+
+        // No model loaded - try to load user's configured model from transcript config
+        let model_to_load = match crate::api::api::api_get_transcript_config(
+            app.clone(),
+            app.state(),
+            None,
+        )
+        .await
+        {
+            Ok(Some(config)) => {
+                log::info!(
+                    "Got transcript config from API - provider: {}, model: {}",
+                    config.provider,
+                    config.model
+                );
+                if config.provider == "parakeet" && !config.model.is_empty() {
+                    log::info!("Using user's configured Parakeet model: {}", config.model);
+                    Some(config.model)
+                } else {
+                    log::info!(
+                        "API config uses non-Parakeet provider ({}) or empty model, will auto-select",
+                        config.provider
+                    );
+                    None
+                }
+            }
+            Ok(None) => {
+                log::info!("No transcript config found in API, will auto-select Parakeet model");
+                None
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to get transcript config from API: {}, will auto-select Parakeet model",
+                    e
+                );
+                None
+            }
+        };
+
+        // Check available models
+        let models = engine
+            .discover_models()
+            .await
+            .map_err(|e| format!("Failed to discover Parakeet models: {}", e))?;
+
+        let available_models: Vec<_> = models
+            .iter()
+            .filter(|model| matches!(model.status, crate::parakeet_engine::ModelStatus::Available))
+            .collect();
+
+        if available_models.is_empty() {
+            return Err(
+                "No Parakeet models are available. Please download a model to enable fast transcription."
+                    .to_string(),
+            );
+        }
+
+        // Try to load user's configured model if specified
+        let model_name = if let Some(configured_model) = model_to_load {
+            // Check if configured model is available
+            if available_models.iter().any(|m| m.name == configured_model) {
+                log::info!("Loading user's configured Parakeet model: {}", configured_model);
+                configured_model
+            } else {
+                log::warn!(
+                    "Configured Parakeet model '{}' not found, falling back to first available int8 model",
+                    configured_model
+                );
+                // Prefer int8 quantization for best speed/quality tradeoff
+                available_models
+                    .iter()
+                    .find(|m| m.quantization == crate::parakeet_engine::QuantizationType::Int8)
+                    .or_else(|| available_models.first())
+                    .unwrap()
+                    .name
+                    .clone()
+            }
+        } else {
+            // No configured model, prefer int8 for best speed/quality balance
+            log::info!("No configured model, loading first available int8 Parakeet model");
+            available_models
+                .iter()
+                .find(|m| m.quantization == crate::parakeet_engine::QuantizationType::Int8)
+                .or_else(|| available_models.first())
+                .unwrap()
+                .name
+                .clone()
+        };
+
+        engine
+            .load_model(&model_name)
+            .await
+            .map_err(|e| format!("Failed to load Parakeet model {}: {}", model_name, e))?;
+
+        Ok(model_name)
+    } else {
+        Err("Parakeet engine not initialized".to_string())
+    }
+}
+
 #[command]
 pub async fn parakeet_transcribe_audio(audio_data: Vec<f32>) -> Result<String, String> {
     let engine = {

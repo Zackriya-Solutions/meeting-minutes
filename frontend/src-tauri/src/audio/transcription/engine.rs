@@ -122,19 +122,18 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 ));
             }
 
-            // Check if the configured model is loaded
-            let loaded = crate::parakeet_engine::commands::parakeet_is_model_loaded().await
-                .map_err(|e| format!("Failed to check Parakeet model status: {}", e))?;
-
-            if !loaded {
-                // Try to load the configured model
-                info!("Loading Parakeet model: {}", config.model);
-                crate::parakeet_engine::commands::parakeet_load_model(app.clone(), config.model.clone()).await
-                    .map_err(|e| format!("Failed to load Parakeet model '{}': {}", config.model, e))?;
+            // Use the validation command that includes auto-discovery and loading
+            // This matches the Whisper behavior for consistency
+            match crate::parakeet_engine::commands::parakeet_validate_model_ready_with_config(app).await {
+                Ok(model_name) => {
+                    info!("✅ Parakeet model validation successful: {} is ready", model_name);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Parakeet model validation failed: {}", e);
+                    Err(e)
+                }
             }
-
-            info!("✅ Parakeet model validation successful");
-            Ok(())
         }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);

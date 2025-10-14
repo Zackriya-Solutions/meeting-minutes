@@ -442,6 +442,54 @@ impl ParakeetEngine {
         let client = reqwest::Client::new();
         let total_files = files_to_download.len();
 
+        // Calculate total download size for weighted progress
+        // Note: These are approximate sizes based on HuggingFace repo inspection
+        use std::collections::HashMap;
+        let file_sizes: HashMap<&str, u64> = match model_info.quantization {
+            QuantizationType::Int8 => {
+                if model_name.contains("-v2-") {
+                    // V2 model sizes
+                    [
+                        ("encoder-model.int8.onnx", 652_000_000u64),       // 652 MB
+                        ("decoder_joint-model.int8.onnx", 9_000_000u64),   // 9 MB
+                        ("nemo128.onnx", 140_000u64),                      // 140 KB
+                        ("vocab.txt", 9_380u64),                           // 9.38 KB
+                    ].iter().cloned().collect()
+                } else {
+                    // V3 model sizes (default)
+                    [
+                        ("encoder-model.int8.onnx", 652_000_000u64),       // 652 MB
+                        ("decoder_joint-model.int8.onnx", 18_200_000u64),  // 18.2 MB
+                        ("nemo128.onnx", 140_000u64),                      // 140 KB
+                        ("vocab.txt", 93_900u64),                          // 93.9 KB
+                    ].iter().cloned().collect()
+                }
+            }
+            QuantizationType::FP32 => {
+                // FP32 model sizes (encoder has .onnx + .onnx.data)
+                [
+                    ("encoder-model.onnx", 41_800_000u64 + 2_440_000_000u64), // 41.8 MB + 2.44 GB
+                    ("decoder_joint-model.onnx", 72_500_000u64),               // 72.5 MB
+                    ("nemo128.onnx", 140_000u64),                              // 140 KB
+                    ("vocab.txt", 93_900u64),                                  // 93.9 KB
+                ].iter().cloned().collect()
+            }
+        };
+
+        // Calculate total expected download size
+        let total_size_bytes: u64 = files_to_download.iter()
+            .filter_map(|f| file_sizes.get(*f))
+            .copied()
+            .sum();
+
+        let mut total_downloaded: u64 = 0;
+
+        log::info!(
+            "Starting weighted download for {} files, total size: {:.2} MB",
+            total_files,
+            total_size_bytes as f64 / 1_048_576.0
+        );
+
         for (index, filename) in files_to_download.iter().enumerate() {
             let file_url = format!("{}/{}", base_url, filename);
             let file_path = model_dir.join(filename);
@@ -464,6 +512,7 @@ impl ParakeetEngine {
             use futures_util::StreamExt;
             let mut stream = response.bytes_stream();
             let mut downloaded = 0u64;
+            let mut last_reported_mb = 0u64;
 
             while let Some(chunk_result) = stream.next().await {
                 let chunk = chunk_result
@@ -473,25 +522,36 @@ impl ParakeetEngine {
                     .map_err(|e| anyhow!("Failed to write chunk to file: {}", e))?;
 
                 downloaded += chunk.len() as u64;
+                total_downloaded += chunk.len() as u64;
 
-                // Calculate overall progress
-                let file_progress = if total_size > 0 {
-                    (downloaded as f64 / total_size as f64) * 100.0
+                // Calculate weighted overall progress based on total bytes downloaded
+                let overall_progress = if total_size_bytes > 0 {
+                    ((total_downloaded as f64 / total_size_bytes as f64) * 100.0).min(99.0) as u8
                 } else {
-                    0.0
+                    // Fallback to per-file progress if total size unknown
+                    ((index as f64 + (downloaded as f64 / total_size.max(1) as f64)) / total_files as f64 * 100.0) as u8
                 };
-                let overall_progress = ((index as f64 + file_progress / 100.0) / total_files as f64 * 100.0) as u8;
 
-                // Report progress
-                if let Some(ref callback) = progress_callback {
-                    callback(overall_progress);
-                }
+                // Report progress every 1MB to reduce event spam (or on first/last chunk)
+                let current_mb = total_downloaded / 1_048_576;
+                let should_report = current_mb > last_reported_mb ||
+                                    downloaded == total_size ||
+                                    downloaded < 65536; // Always report first 64KB
 
-                // Update model status
-                {
-                    let mut models = self.available_models.write().await;
-                    if let Some(model) = models.get_mut(model_name) {
-                        model.status = ModelStatus::Downloading { progress: overall_progress };
+                if should_report {
+                    last_reported_mb = current_mb;
+
+                    // Report progress
+                    if let Some(ref callback) = progress_callback {
+                        callback(overall_progress);
+                    }
+
+                    // Update model status
+                    {
+                        let mut models = self.available_models.write().await;
+                        if let Some(model) = models.get_mut(model_name) {
+                            model.status = ModelStatus::Downloading { progress: overall_progress };
+                        }
                     }
                 }
             }
@@ -499,7 +559,12 @@ impl ParakeetEngine {
             file.flush().await
                 .map_err(|e| anyhow!("Failed to flush file {}: {}", filename, e))?;
 
-            log::info!("Completed download: {}", filename);
+            log::info!(
+                "Completed download: {} ({:.2} MB, overall progress: {:.1}%)",
+                filename,
+                downloaded as f64 / 1_048_576.0,
+                (total_downloaded as f64 / total_size_bytes as f64) * 100.0
+            );
         }
 
         // Report 100% progress

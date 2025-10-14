@@ -133,7 +133,7 @@ impl SettingsRepository {
         Ok(setting)
 
         // TODO: In higher layer if provider is not found(not returned anything from  here),
-        // return default values localWhisper and large-v3
+        // return default values parakeet and parakeet-tdt-0.6b-v3-int8
     }
 
     pub async fn save_transcript_config(
