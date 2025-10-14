@@ -176,64 +176,65 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
 
   return (
     <div className="px-4 py-2">
-      {transcripts?.filter(t => t.id !== streamingTranscript?.id).map((transcript, index) => (
-        <div
-          key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
-          className={`mb-3 p-2 rounded-lg transition-colors duration-200 ${transcript.is_partial
-            ? 'bg-gray-50 border-l-4 border-gray-200'
-            : 'bg-gray-50 border-l-4 border-gray-200'
+      {transcripts?.map((transcript, index) => {
+        const isStreaming = streamingTranscript?.id === transcript.id;
+        const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
+        // Clean up text for display
+        const filteredText = textToShow.replace(/^Thank you\.?\s*$/gi, '').trim();
+        // Show [Silence] only for non-streaming, empty transcripts
+        const displayText = filteredText === '' && !isStreaming ? '[Silence]' : filteredText;
+
+        const sizerText = (isStreaming ? streamingTranscript.fullText : transcript.text)
+          .replace(/^Thank you\.?\s*$/gi, '').trim() || (isStreaming ? '' : '[Silence]');
+
+        return (
+          <div
+            key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
+            className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${
+              isStreaming
+                ? 'bg-blue-50 border-l-4 border-blue-400' // Style for streaming transcript
+                : 'bg-gray-50 border-l-4 border-gray-200' // Default style
             }`}
-        >
-          <p className={`text-md text-gray-800`}>
-            {(() => {
-              // Streaming transcript is filtered out and rendered separately, so this is always full text
-              const filteredText = transcript.text.replace(/^Thank you\.?\s*$/gi, '').trim();
-              return filteredText === '' ? '[Silence]' : filteredText;
-            })()}
-          </p>
-
-          <div className="flex  justify-end items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger>
-                <span className="text-xs h-min text-gray-400">
-                  {transcript.audio_start_time !== undefined
-                    ? formatRecordingTime(transcript.audio_start_time)
-                    : transcript.timestamp
-                  }
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {transcript.duration !== undefined && (
-                  <span className="text-xs text-gray-400">
-                    {transcript.duration.toFixed(1)}s
-                    {transcript.confidence !== undefined && (
-                      <ConfidenceIndicator
-                        confidence={transcript.confidence}
-                        showIndicator={showConfidence}
-                      />
+          >
+            <div className="relative">
+              <p className="text-md text-gray-800" style={{ visibility: 'hidden' }}>
+                {sizerText}
+              </p>
+              <p className="text-md text-gray-800 absolute top-0 left-0">
+                {displayText}
+              </p>
+            </div>
+            <div className="flex justify-end items-center gap-2">
+              {isStreaming ? (
+                <span className="text-xs text-blue-400">Transcribing...</span>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <span className="text-xs h-min text-gray-400">
+                      {transcript.audio_start_time !== undefined
+                        ? formatRecordingTime(transcript.audio_start_time)
+                        : transcript.timestamp}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {transcript.duration !== undefined && (
+                      <span className="text-xs text-gray-400">
+                        {transcript.duration.toFixed(1)}s
+                        {transcript.confidence !== undefined && (
+                          <ConfidenceIndicator
+                            confidence={transcript.confidence}
+                            showIndicator={showConfidence}
+                          />
+                        )}
+                      </span>
                     )}
-                  </span>
-                )}
-              </TooltipContent>
-            </Tooltip>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
-
-      {/* Streaming transcript - rendered separately with animation */}
-      {streamingTranscript && (
-        <div
-          key={`streaming-${streamingTranscript.id}`}
-          className="mb-3 p-3 rounded-lg transition-colors duration-200 bg-blue-50 border-l-4 border-blue-400"
-        >
-          <p className="text-md text-gray-800">
-            {streamingTranscript.visibleText}
-          </p>
-          <div className="flex justify-end items-center gap-2">
-            <span className="text-xs text-blue-400">Transcribing...</span>
-          </div>
-        </div>
-      )}
+        );
+      })}
 
       {/* Typing indicator - shows when actively recording (not paused, not processing, not stopping) and transcripts exist */}
       {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && (

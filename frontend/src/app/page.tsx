@@ -116,8 +116,6 @@ export default function Home() {
   // Ref to avoid stale closure issues with transcripts
   const transcriptsRef = useRef<Transcript[]>(transcripts);
 
-  // Ref for the transcript scroll container
-  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const isUserAtBottomRef = useRef<boolean>(true);
 
   // Keep ref updated with current transcripts
@@ -127,32 +125,25 @@ export default function Home() {
 
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
-    const container = transcriptScrollRef.current;
-    if (!container) return;
-
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
+      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
       const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
       isUserAtBottomRef.current = isAtBottom;
     };
 
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   // Auto-scroll when transcripts change (only if user is at bottom)
   useEffect(() => {
-    const container = transcriptScrollRef.current;
-    if (!container) return;
-
     // Only auto-scroll if user was at the bottom before new content
     if (isUserAtBottomRef.current) {
-      // Use double requestAnimationFrame to ensure DOM is fully updated and painted
+      // Use requestAnimationFrame to ensure DOM is updated before scrolling
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (container) {
-            container.scrollTop = container.scrollHeight;
-          }
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior: 'smooth'
         });
       });
     }
@@ -1460,7 +1451,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 transition-all duration-1000 scroll-smooth">
+    <div className="flex flex-col min-h-screen bg-gray-50 transition-all duration-1000 scroll-smooth">
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
@@ -1493,9 +1484,9 @@ export default function Home() {
           </Alert>
         </div>
       )}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1">
         {/* Left side - Transcript */}
-        <div className="w-full border-r border-gray-200 bg-white flex flex-col relative">
+        <div className="w-full border-r border-gray-200 bg-white flex flex-col">
           {/* Title area */}
           <div className="p-4  border-b border-gray-200">
             <div className="flex flex-col space-y-3">
@@ -1665,7 +1656,7 @@ export default function Home() {
           )}
 
           {/* Transcript content */}
-          <div ref={transcriptScrollRef} className="overflow-y-auto pb-32">
+          <div className="pb-40">
             <div className="flex justify-center">
               <div className="w-2/3 max-w-[750px]">
                 <TranscriptView
@@ -1695,7 +1686,7 @@ export default function Home() {
 
           {/* Recording controls - only show when permissions are granted or already recording */}
           {(hasMicrophone || isRecording) && (
-            <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
+            <div className="fixed bottom-16 left-1/2 transform -translate-x-1/2 z-10">
               <div className="bg-white rounded-full shadow-lg flex items-center">
                 <RecordingControls
                   isRecording={recordingState.isRecording}
@@ -1719,13 +1710,13 @@ export default function Home() {
 
           {/* Processing status overlay */}
           {summaryStatus === 'processing' && !isRecording && (
-            <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+            <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
               <span className="text-sm text-gray-700">Finalizing transcription...</span>
             </div>
           )}
           {isSavingTranscript && (
-            <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+            <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
               <span className="text-sm text-gray-700">Saving transcript...</span>
             </div>
