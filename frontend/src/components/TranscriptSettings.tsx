@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
@@ -19,16 +18,15 @@ export interface TranscriptModelProps {
 export interface TranscriptSettingsProps {
     transcriptModelConfig: TranscriptModelProps;
     setTranscriptModelConfig: (config: TranscriptModelProps) => void;
-    onSave: (config: TranscriptModelProps) => void;
 }
 
-export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onSave }: TranscriptSettingsProps) {
+export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig }: TranscriptSettingsProps) {
     const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
-    const [selectedWhisperModel, setSelectedWhisperModel] = useState<string>(transcriptModelConfig.model || 'large-v3');
-    const [selectedParakeetModel, setSelectedParakeetModel] = useState<string>(transcriptModelConfig.model || 'parakeet-tdt-0.6b-v3-int8');
+    const [selectedWhisperModel, setSelectedWhisperModel] = useState<string>(transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : 'small');
+    const [selectedParakeetModel, setSelectedParakeetModel] = useState<string>(transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : 'parakeet-tdt-0.6b-v3-int8');
     const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('showConfidenceIndicator');
@@ -36,7 +34,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
         return true;
     });
-    const { serverAddress } = useSidebar();
 
     useEffect(() => {
         if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
@@ -64,24 +61,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         openai: ['gpt-4o'],
     };
     const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
-    const isDoneDisabled = requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))
-
-    const handleSave = async () => {
-        let modelToUse = transcriptModelConfig.model;
-        if (transcriptModelConfig.provider === 'localWhisper') {
-            modelToUse = selectedWhisperModel;
-        } else if (transcriptModelConfig.provider === 'parakeet') {
-            modelToUse = selectedParakeetModel;
-        }
-
-        const updatedConfig = {
-            ...transcriptModelConfig,
-            model: modelToUse,
-            apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null
-        };
-        setTranscriptModelConfig(updatedConfig);
-        onSave(updatedConfig);
-    };
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -121,9 +100,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     return (
         <div className='max-h-[calc(100vh-200px)]'>
             <div>
-                <div className="flex justify-between items-center mb-4">
+                {/* <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-semibold text-gray-900">Transcript Settings</h3>
-                </div>
+                </div> */}
                 <div className="space-y-4 pb-6">
                     <div>
                         <Label className="block text-sm font-medium text-gray-700 mb-1">
@@ -145,12 +124,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     <SelectValue placeholder="Select provider" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="parakeet">⚡ Parakeet (Fastest - 30x Real-time)</SelectItem>
+                                    <SelectItem value="parakeet">⚡ Parakeet (Recommended - 30x Real-time)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
+                                    {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
-                                    <SelectItem value="openai">☁️ OpenAI</SelectItem>
+                                    <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
                                 </SelectContent>
                             </Select>
 
@@ -266,18 +245,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <div className='flex justify-end'>
-                <Button
-                    onClick={handleSave}
-                    disabled={isDoneDisabled}
-                    className={`px-4 py-2 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${isDoneDisabled
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700'
-                        }`}
-                >
-                    Save</Button>
             </div>
         </div>
     )

@@ -697,7 +697,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-4">
+      {/* <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <span className="text-2xl">✨</span>
           <h2 className="text-2xl font-semibold bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent">
@@ -788,7 +788,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             <span className="ml-1">Regenerate</span>
           </button>
         </div>
-      </div>
+      </div> */}
 
       {Object.keys(currentSummary)
         .filter(key => currentSummary[key]?.blocks?.length > 0)

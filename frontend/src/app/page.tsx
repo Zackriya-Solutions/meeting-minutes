@@ -70,8 +70,8 @@ export default function Home() {
     whisperModel: 'large-v3'
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'localWhisper',
-    model: 'large-v3',
+    provider: 'parakeet',
+    model: 'parakeet-tdt-0.6b-v3-int8',
     apiKey: null
   });
   const [originalTranscript, setOriginalTranscript] = useState<string>('');
@@ -106,7 +106,7 @@ export default function Home() {
   // This ensures immediate UI feedback when stop is pressed, while preserving backend-synced state for reload functionality
   const effectiveIsRecording = isProcessingTranscript ? false : recordingState.isRecording;
 
-  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress } = useSidebar();
+  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
   const router = useRouter();
 
@@ -211,8 +211,8 @@ export default function Home() {
         if (config) {
           console.log('Loaded saved transcript config:', config);
           setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
-            model: config.model || 'large-v3',
+            provider: config.provider || 'parakeet',
+            model: config.model || 'parakeet-tdt-0.6b-v3-int8',
             apiKey: config.apiKey || null
           });
         }
@@ -1487,8 +1487,8 @@ export default function Home() {
       <div className="flex flex-1">
         {/* Left side - Transcript */}
         <div className="w-full border-r border-gray-200 bg-white flex flex-col">
-          {/* Title area */}
-          <div className="p-4  border-b border-gray-200">
+          {/* Title area - Sticky header */}
+          <div className="sticky top-0 z-10 bg-white p-4 border-b border-gray-200">
             <div className="flex flex-col space-y-3">
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
@@ -1665,7 +1665,7 @@ export default function Home() {
                   isPaused={recordingState.isPaused}
                   isProcessing={isProcessingStop}
                   isStopping={isStopping}
-                  enableStreaming={recordingState.isRecording}
+                  enableStreaming={recordingState.isRecording && transcriptModelConfig.provider !== 'parakeet'}
                 />
               </div>
             </div>
@@ -1684,11 +1684,13 @@ export default function Home() {
             </div>
           )} */}
 
-          {/* Recording controls - only show when permissions are granted or already recording */}
-          {(hasMicrophone || isRecording) && (
-            <div className="fixed bottom-16 left-1/2 transform -translate-x-1/2 z-10">
-              <div className="bg-white rounded-full shadow-lg flex items-center">
-                <RecordingControls
+          {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
+          {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
+            <div className="fixed bottom-16 left-0 right-0 z-10">
+              <div className="flex justify-center pl-8" style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}>
+                <div className="w-2/3 max-w-[750px] flex justify-center">
+                  <div className="bg-white rounded-full shadow-lg flex items-center">
+                    <RecordingControls
                   isRecording={recordingState.isRecording}
                   onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
                   onRecordingStart={handleRecordingStart}
@@ -1704,21 +1706,35 @@ export default function Home() {
                   selectedDevices={selectedDevices}
                   meetingName={meetingTitle}
                 />
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {/* Processing status overlay */}
           {summaryStatus === 'processing' && !isRecording && (
-            <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-              <span className="text-sm text-gray-700">Finalizing transcription...</span>
+            <div className="fixed bottom-16 left-0 right-0 z-10">
+              <div className="flex justify-center pl-8" style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}>
+                <div className="w-2/3 max-w-[750px] flex justify-center">
+                  <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                    <span className="text-sm text-gray-700">Finalizing transcription...</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           {isSavingTranscript && (
-            <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-              <span className="text-sm text-gray-700">Saving transcript...</span>
+            <div className="fixed bottom-16 left-0 right-0 z-10">
+              <div className="flex justify-center pl-8" style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}>
+                <div className="w-2/3 max-w-[750px] flex justify-center">
+                  <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                    <span className="text-sm text-gray-700">Saving transcript...</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1896,11 +1912,17 @@ export default function Home() {
           {/* Model Selection Modal - shown when model loading fails */}
           {showModelSelector && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Speech Recognition Setup Required</h3>
+              <div className="bg-white rounded-lg max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] flex flex-col">
+                {/* Fixed Header */}
+                <div className="flex justify-between items-center p-6 pb-4 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {modelSelectorMessage ? 'Speech Recognition Setup Required' : 'Transcription Model Settings'}
+                  </h3>
                   <button
-                    onClick={() => setShowModelSelector(false)}
+                    onClick={() => {
+                      setShowModelSelector(false);
+                      setModelSelectorMessage(''); // Clear the message when closing
+                    }}
                     className="text-gray-500 hover:text-gray-700"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1909,30 +1931,40 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <span className="text-yellow-600 text-xl">⚠️</span>
-                    <div>
-                      <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
-                      <p className="text-sm text-yellow-700">
-                        {modelSelectorMessage || 'Please download a transcription model (Whisper or Parakeet) to enable speech recognition and start transcription.'}
-                      </p>
+                {/* Scrollable Content */}
+                <div className="flex-1 overflow-y-auto p-6 pt-4">
+                  {/* Only show warning if there's an error message (triggered by transcription error) */}
+                  {modelSelectorMessage && (
+                    <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-start space-x-3">
+                        <span className="text-yellow-600 text-xl">⚠️</span>
+                        <div>
+                          <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
+                          <p className="text-sm text-yellow-700">
+                            {modelSelectorMessage}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  <TranscriptSettings
+                    transcriptModelConfig={transcriptModelConfig}
+                    setTranscriptModelConfig={setTranscriptModelConfig}
+                    onSave={handleSaveTranscriptConfig}
+                  />
                 </div>
 
-                <TranscriptSettings
-                  transcriptModelConfig={transcriptModelConfig}
-                  setTranscriptModelConfig={setTranscriptModelConfig}
-                  onSave={handleSaveTranscriptConfig}
-                />
-
-                <div className="mt-6 flex justify-end space-x-3">
+                {/* Fixed Footer */}
+                <div className="p-6 pt-4 border-t border-gray-200 flex justify-end">
                   <button
-                    onClick={() => setShowModelSelector(false)}
+                    onClick={() => {
+                      setShowModelSelector(false);
+                      setModelSelectorMessage(''); // Clear the message when closing
+                    }}
                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
                   >
-                    Cancel
+                    {modelSelectorMessage ? 'Cancel' : 'Done'}
                   </button>
                 </div>
               </div>
