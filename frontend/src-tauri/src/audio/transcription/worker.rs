@@ -38,6 +38,9 @@ pub struct TranscriptUpdate {
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
 }
 
+// NOTE: get_transcript_history and get_recording_meeting_name functions
+// have been moved to recording_commands.rs where they have access to RECORDING_MANAGER
+
 /// Optimized parallel transcription task ensuring ZERO chunk loss
 pub fn start_transcription_task<R: Runtime>(
     app: AppHandle<R>,

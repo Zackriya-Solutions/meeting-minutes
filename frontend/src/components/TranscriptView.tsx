@@ -8,6 +8,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 interface TranscriptViewProps {
   transcripts: Transcript[];
   isRecording?: boolean;
+  isPaused?: boolean; // Is recording paused (affects UI indicators)
+  isProcessing?: boolean; // Is processing/finalizing transcription (hides "Listening..." indicator)
+  isStopping?: boolean; // Is recording being stopped (provides immediate UI feedback)
   enableStreaming?: boolean; // Enable streaming effect for live transcription UX
 }
 
@@ -26,11 +29,21 @@ function formatRecordingTime(seconds: number | undefined): string {
   return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
-export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, enableStreaming = false }) => {
+export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>();
   const isUserAtBottomRef = useRef<boolean>(true);
   const [speechDetected, setSpeechDetected] = useState(false);
+
+  // Debug: Log the props to understand what's happening
+  console.log('TranscriptView render:', {
+    isRecording,
+    isPaused,
+    isProcessing,
+    isStopping,
+    transcriptCount: transcripts.length,
+    shouldShowListening: !isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0
+  });
 
   // Streaming effect state
   const [streamingTranscript, setStreamingTranscript] = useState<{
@@ -196,26 +209,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       {transcripts?.filter(t => t.id !== streamingTranscript?.id).map((transcript, index) => (
         <div
           key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
-          className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${transcript.is_partial
+          className={`mb-3 p-2 rounded-lg transition-colors duration-200 ${transcript.is_partial
             ? 'bg-gray-50 border-l-4 border-gray-200'
             : 'bg-gray-50 border-l-4 border-gray-200'
             }`}
         >
-          <div className="flex justify-end items-center mb-1">
-            <div className="items-center space-x-2">
-              {transcript.is_partial && (
-                // <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <div className="w-2 h-2 justify-end bg-blue-500 rounded-full animate-pulse"></div>
-                // </span>
-              )}
-              {transcript.confidence !== undefined && !transcript.is_partial && (
-                <ConfidenceIndicator
-                  confidence={transcript.confidence}
-                  showIndicator={showConfidence}
-                />
-              )}
-            </div>
-          </div>
           <p className={`text-md text-gray-800`}>
             {(() => {
               // Streaming transcript is filtered out and rendered separately, so this is always full text
@@ -227,7 +225,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           <div className="flex  justify-end items-center gap-2">
             <Tooltip>
               <TooltipTrigger>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs h-min text-gray-400">
                   {transcript.audio_start_time !== undefined
                     ? formatRecordingTime(transcript.audio_start_time)
                     : transcript.timestamp
@@ -238,6 +236,12 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                 {transcript.duration !== undefined && (
                   <span className="text-xs text-gray-400">
                     {transcript.duration.toFixed(1)}s
+                    {transcript.confidence !== undefined && (
+                      <ConfidenceIndicator
+                        confidence={transcript.confidence}
+                        showIndicator={showConfidence}
+                      />
+                    )}
                   </span>
                 )}
               </TooltipContent>
@@ -252,11 +256,6 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           key={`streaming-${streamingTranscript.id}`}
           className="mb-3 p-3 rounded-lg transition-colors duration-200 bg-blue-50 border-l-4 border-blue-400"
         >
-          <div className="flex justify-end items-center mb-1">
-            <div className="items-center space-x-2">
-              <div className="w-2 h-2 justify-end bg-blue-500 rounded-full animate-pulse"></div>
-            </div>
-          </div>
           <p className="text-md text-gray-800">
             {streamingTranscript.visibleText}
           </p>
@@ -266,8 +265,8 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         </div>
       )}
 
-      {/* Typing indicator - shows when recording and transcripts exist (always shows after first transcript) */}
-      {isRecording && transcripts.length > 0 && !streamingTranscript && (
+      {/* Typing indicator - shows when actively recording (not paused, not processing, not stopping) and transcripts exist */}
+      {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && !streamingTranscript && (
         <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-blue-50/30 border-l-4 border-blue-400 animate-fade-in">
           <div className="flex items-center space-x-2">
             <div className="flex space-x-1">
@@ -279,17 +278,31 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           </div>
         </div>
       )}
+
+      {/* Pause indicator - shows when recording is paused and transcripts exist */}
+      {isRecording && isPaused && transcripts.length > 0 && (
+        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-orange-50/30 border-l-4 border-orange-400 animate-fade-in">
+          <div className="flex items-center space-x-2">
+            <div className="flex space-x-1">
+              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+            </div>
+            <span className="text-md text-orange-600 font-medium">Recording paused</span>
+          </div>
+        </div>
+      )}
       {transcripts.length === 0 && (
         <div className="text-center text-gray-500 mt-8">
           {isRecording ? (
             <>
               <div className="flex items-center justify-center space-x-2 mb-3">
                 <div className="relative flex items-center justify-center">
-                  {/* Outer pulse ring - changes color when speech detected */}
-                  <div className={`absolute w-12 h-12 rounded-full animate-ping opacity-75 ${speechDetected ? 'bg-green-400' : 'bg-blue-400'
+                  {/* Outer pulse ring - changes color based on state: orange when paused, green when speech detected, blue otherwise */}
+                  <div className={`absolute w-12 h-12 rounded-full ${isPaused ? '' : 'animate-ping'} opacity-75 ${isPaused ? 'bg-orange-400' : speechDetected ? 'bg-green-400' : 'bg-blue-400'
                     }`}></div>
                   {/* Inner solid circle with mic icon */}
-                  <div className={`relative w-10 h-10 rounded-full flex items-center justify-center ${speechDetected ? 'bg-green-500' : 'bg-blue-500'
+                  <div className={`relative w-10 h-10 rounded-full flex items-center justify-center ${isPaused ? 'bg-orange-500' : speechDetected ? 'bg-green-500' : 'bg-blue-500'
                     }`}>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -300,13 +313,16 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                   </div>
                 </div>
               </div>
-              <p className={`text-sm font-medium ${speechDetected ? 'text-green-600' : 'text-blue-600'}`}>
-                {speechDetected ? 'Processing speech...' : 'Listening for speech...'}
+              <p className={`text-sm font-medium ${isPaused ? 'text-orange-600' : speechDetected ? 'text-green-600' : 'text-blue-600'
+                }`}>
+                {isPaused ? 'Recording paused' : speechDetected ? 'Processing speech...' : 'Listening for speech...'}
               </p>
               <p className="text-xs mt-1 text-gray-400">
-                {speechDetected
-                  ? 'Your speech is being transcribed'
-                  : 'Listening to your microphone and system audio'
+                {isPaused
+                  ? 'Click resume to continue recording'
+                  : speechDetected
+                    ? 'Your speech is being transcribed'
+                    : 'Listening to your microphone and system audio'
                 }
               </p>
             </>

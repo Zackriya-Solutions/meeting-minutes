@@ -13,6 +13,7 @@ import { LanguageSelection } from '@/components/LanguageSelection';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -92,9 +93,18 @@ export default function Home() {
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
+  const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
 
   // Permission check hook
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
+
+  // Recording state context - provides backend-synced state
+  const recordingState = useRecordingState();
+
+  // Compute effective recording state for UI: override with local state during stop transition
+  // This ensures immediate UI feedback when stop is pressed, while preserving backend-synced state for reload functionality
+  const effectiveIsRecording = isProcessingTranscript ? false : recordingState.isRecording;
 
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
@@ -235,7 +245,7 @@ export default function Home() {
 
 
   useEffect(() => {
-    if (isRecording) {
+    if (recordingState.isRecording) {
       const interval = setInterval(() => {
         setBarHeights(prev => {
           const newHeights = [...prev];
@@ -248,7 +258,7 @@ export default function Home() {
 
       return () => clearInterval(interval);
     }
-  }, [isRecording]);
+  }, [recordingState.isRecording]);
 
   // Update sidebar recording state when local recording state changes
   useEffect(() => {
@@ -428,6 +438,52 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Sync transcript history and meeting name from backend on reload
+  // This fixes the issue where reloading during active recording causes state desync
+  useEffect(() => {
+    const syncFromBackend = async () => {
+      // Only sync if recording is active but we have no local transcripts
+      if (recordingState.isRecording && transcripts.length === 0) {
+        try {
+          console.log('[Reload Sync] Recording active after reload, syncing transcript history...');
+
+          // Fetch transcript history from backend
+          const history = await invoke<any[]>('get_transcript_history');
+          console.log(`[Reload Sync] Retrieved ${history.length} transcript segments from backend`);
+
+          // Convert backend format to frontend Transcript format
+          const formattedTranscripts: Transcript[] = history.map((segment: any) => ({
+            id: segment.id,
+            text: segment.text,
+            timestamp: segment.display_time, // Use display_time for UI
+            sequence_id: segment.sequence_id,
+            chunk_start_time: segment.audio_start_time,
+            is_partial: false, // History segments are always final
+            confidence: segment.confidence,
+            audio_start_time: segment.audio_start_time,
+            audio_end_time: segment.audio_end_time,
+            duration: segment.duration,
+          }));
+
+          setTranscripts(formattedTranscripts);
+          console.log('[Reload Sync] ✅ Transcript history synced successfully');
+
+          // Fetch meeting name from backend
+          const meetingName = await invoke<string | null>('get_recording_meeting_name');
+          if (meetingName) {
+            console.log('[Reload Sync] Retrieved meeting name:', meetingName);
+            setMeetingTitle(meetingName);
+            console.log('[Reload Sync] ✅ Meeting title synced successfully');
+          }
+        } catch (error) {
+          console.error('[Reload Sync] Failed to sync from backend:', error);
+        }
+      }
+    };
+
+    syncFromBackend();
+  }, [recordingState.isRecording]); // Run when recording state changes
 
   // Set up chunk drop warning listener
   useEffect(() => {
@@ -677,8 +733,10 @@ export default function Home() {
 
   const handleRecordingStop2 = async (isCallApi: boolean) => {
     // Immediately update UI state to reflect that recording has stopped
+    // Note: setIsStopping(true) is now called via onStopInitiated callback before this function
     setIsRecordingState(false);
     setIsRecordingDisabled(true);
+    setIsProcessingTranscript(true); // Immediately set processing flag for UX
     const stopStartTime = Date.now();
     try {
       console.log('Post-stop processing (new implementation)...', {
@@ -780,6 +838,8 @@ export default function Home() {
       }
 
       setSummaryStatus('idle');
+      setIsProcessingTranscript(false); // Reset processing flag
+      setIsStopping(false); // Reset stopping flag
 
       // Wait a bit more to ensure all transcript state updates have been processed
       console.log('Waiting for transcript state updates to complete...');
@@ -902,6 +962,8 @@ export default function Home() {
       console.error('Error in handleRecordingStop2:', error);
       // isRecordingState already set to false at function start
       setSummaryStatus('idle');
+      setIsProcessingTranscript(false); // Reset on error
+      setIsStopping(false); // Reset stopping flag on error
       setIsSavingTranscript(false);
       setIsRecordingDisabled(false);
     }
@@ -1283,7 +1345,7 @@ export default function Home() {
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
-  const isProcessingStop = summaryStatus === 'processing'
+  const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript
   const handleRecordingStop2Ref = useRef(handleRecordingStop2);
   const handleRecordingStartRef = useRef(handleRecordingStart);
   useEffect(() => {
@@ -1420,7 +1482,6 @@ export default function Home() {
                   {!isRecording && transcripts?.length === 0 && (
                     <Button
                       variant="outline"
-                      size="sm"
                       onClick={() => setShowModelSelector(true)}
                       title="Transcription Model Settings"
                     >
@@ -1432,7 +1493,6 @@ export default function Home() {
                   )}
                   <Button
                     variant="outline"
-                    size="sm"
                     onClick={() => setShowDeviceSettings(true)}
                     title="Input/Output devices selection"
                   >
@@ -1443,7 +1503,6 @@ export default function Home() {
                   </Button>
                   <Button
                     variant="outline"
-                    size="sm"
                     onClick={() => setShowLanguageSettings(true)}
                     title="Language"
                   >
@@ -1572,7 +1631,14 @@ export default function Home() {
           <div className="overflow-y-auto pb-32">
             <div className="flex justify-center">
               <div className="w-2/3 max-w-[750px]">
-                <TranscriptView transcripts={transcripts} isRecording={isRecording} enableStreaming={isRecording} />
+                <TranscriptView
+                  transcripts={transcripts}
+                  isRecording={recordingState.isRecording}
+                  isPaused={recordingState.isPaused}
+                  isProcessing={isProcessingStop}
+                  isStopping={isStopping}
+                  enableStreaming={recordingState.isRecording}
+                />
               </div>
             </div>
           </div>
@@ -1595,10 +1661,11 @@ export default function Home() {
             <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
               <div className="bg-white rounded-full shadow-lg flex items-center">
                 <RecordingControls
-                  isRecording={isRecording}
+                  isRecording={recordingState.isRecording}
                   onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
                   onRecordingStart={handleRecordingStart}
                   onTranscriptReceived={handleTranscriptUpdate}
+                  onStopInitiated={() => setIsStopping(true)}
                   barHeights={barHeights}
                   onTranscriptionError={(message) => {
                     setErrorMessage(message);

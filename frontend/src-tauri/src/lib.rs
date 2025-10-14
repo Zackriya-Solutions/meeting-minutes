@@ -556,6 +556,9 @@ pub fn run() {
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
+            // Reload sync commands (retrieve transcript history and meeting name)
+            audio::recording_commands::get_transcript_history,
+            audio::recording_commands::get_recording_meeting_name,
             // Device monitoring commands (AirPods/Bluetooth disconnect/reconnect)
             audio::recording_commands::poll_audio_device_events,
             audio::recording_commands::get_reconnection_status,
