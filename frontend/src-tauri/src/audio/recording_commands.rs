@@ -72,21 +72,21 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
-    // Validate that Whisper models are available before starting recording
-    info!("🔍 Validating Whisper model availability before starting recording...");
-    if let Err(validation_error) = validate_whisper_model_ready(&app).await {
+    // Validate that transcription models are available before starting recording
+    info!("🔍 Validating transcription model availability before starting recording...");
+    if let Err(validation_error) = validate_transcription_model_ready(&app).await {
         error!("Model validation failed: {}", validation_error);
 
         // Emit actionable error event for frontend to show model selector
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: No Whisper models are available. Please download a model to enable transcription.",
+            "userMessage": "Recording cannot start: No transcription models are available. Please download a model to enable transcription.",
             "actionable": true
         }));
 
         return Err(validation_error);
     }
-    info!("✅ Whisper model validation passed");
+    info!("✅ Transcription model validation passed");
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
@@ -179,21 +179,21 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
-    // Validate that Whisper models are available before starting recording
-    info!("🔍 Validating Whisper model availability before starting recording...");
-    if let Err(validation_error) = validate_whisper_model_ready(&app).await {
+    // Validate that transcription models are available before starting recording
+    info!("🔍 Validating transcription model availability before starting recording...");
+    if let Err(validation_error) = validate_transcription_model_ready(&app).await {
         error!("Model validation failed: {}", validation_error);
 
         // Emit actionable error event for frontend to show model selector
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: No Whisper models are available. Please download a model to enable transcription.",
+            "userMessage": "Recording cannot start: No transcription models are available. Please download a model to enable transcription.",
             "actionable": true
         }));
 
         return Err(validation_error);
     }
-    info!("✅ Whisper model validation passed");
+    info!("✅ Transcription model validation passed");
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -1023,26 +1023,97 @@ async fn transcribe_chunk_with_streaming<R: Runtime>(
     }
 }
 
-/// Validate that Whisper models are ready before starting recording
-async fn validate_whisper_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    // Ensure whisper engine is initialized first
-    if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
-        warn!("❌ Failed to initialize Whisper engine: {}", init_error);
-        return Err(format!(
-            "Failed to initialize speech recognition: {}",
-            init_error
-        ));
-    }
-
-    // Call the whisper validation command with config support
-    match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
-        Ok(model_name) => {
-            info!("✅ Model validation successful: {} is ready", model_name);
-            Ok(())
+/// Validate that transcription models (Whisper or Parakeet) are ready before starting recording
+async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    // Check transcript configuration to determine which engine to validate
+    let config = match crate::api::api::api_get_transcript_config(
+        app.clone(),
+        app.clone().state(),
+        None,
+    )
+    .await
+    {
+        Ok(Some(config)) => {
+            info!(
+                "📝 Found transcript config - provider: {}, model: {}",
+                config.provider, config.model
+            );
+            config
+        }
+        Ok(None) => {
+            info!("📝 No transcript config found, defaulting to localWhisper");
+            crate::api::api::TranscriptConfig {
+                provider: "localWhisper".to_string(),
+                model: "large-v3".to_string(),
+                api_key: None,
+            }
         }
         Err(e) => {
-            warn!("❌ Model validation failed: {}", e);
-            Err(e)
+            warn!("⚠️ Failed to get transcript config: {}, defaulting to localWhisper", e);
+            crate::api::api::TranscriptConfig {
+                provider: "localWhisper".to_string(),
+                model: "large-v3".to_string(),
+                api_key: None,
+            }
+        }
+    };
+
+    // Validate based on provider
+    match config.provider.as_str() {
+        "localWhisper" => {
+            info!("🔍 Validating Whisper model...");
+            // Ensure whisper engine is initialized first
+            if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
+                warn!("❌ Failed to initialize Whisper engine: {}", init_error);
+                return Err(format!(
+                    "Failed to initialize speech recognition: {}",
+                    init_error
+                ));
+            }
+
+            // Call the whisper validation command with config support
+            match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
+                Ok(model_name) => {
+                    info!("✅ Whisper model validation successful: {} is ready", model_name);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Whisper model validation failed: {}", e);
+                    Err(e)
+                }
+            }
+        }
+        "parakeet" => {
+            info!("🔍 Validating Parakeet model...");
+            // Ensure parakeet engine is initialized first
+            if let Err(init_error) = crate::parakeet_engine::commands::parakeet_init().await {
+                warn!("❌ Failed to initialize Parakeet engine: {}", init_error);
+                return Err(format!(
+                    "Failed to initialize Parakeet speech recognition: {}",
+                    init_error
+                ));
+            }
+
+            // Check if the configured model is loaded
+            let loaded = crate::parakeet_engine::commands::parakeet_is_model_loaded().await
+                .map_err(|e| format!("Failed to check Parakeet model status: {}", e))?;
+
+            if !loaded {
+                // Try to load the configured model
+                info!("Loading Parakeet model: {}", config.model);
+                crate::parakeet_engine::commands::parakeet_load_model(app.clone(), config.model.clone()).await
+                    .map_err(|e| format!("Failed to load Parakeet model '{}': {}", config.model, e))?;
+            }
+
+            info!("✅ Parakeet model validation successful");
+            Ok(())
+        }
+        other => {
+            warn!("❌ Unsupported transcription provider for local recording: {}", other);
+            Err(format!(
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                other
+            ))
         }
     }
 }

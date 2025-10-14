@@ -7,10 +7,11 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
+import { ParakeetModelManager } from './ParakeetModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
@@ -27,6 +28,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [selectedWhisperModel, setSelectedWhisperModel] = useState<string>(transcriptModelConfig.model || 'large-v3');
+    const [selectedParakeetModel, setSelectedParakeetModel] = useState<string>(transcriptModelConfig.model || 'parakeet-tdt-0.6b-v3-int8');
     const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('showConfidenceIndicator');
@@ -37,7 +39,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const { serverAddress } = useSidebar();
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper') {
+        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -55,6 +57,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     };
     const modelOptions = {
         localWhisper: [selectedWhisperModel],
+        parakeet: [selectedParakeetModel],
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -64,9 +67,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const isDoneDisabled = requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))
 
     const handleSave = async () => {
+        let modelToUse = transcriptModelConfig.model;
+        if (transcriptModelConfig.provider === 'localWhisper') {
+            modelToUse = selectedWhisperModel;
+        } else if (transcriptModelConfig.provider === 'parakeet') {
+            modelToUse = selectedParakeetModel;
+        }
+
         const updatedConfig = {
             ...transcriptModelConfig,
-            model: transcriptModelConfig.provider === 'localWhisper' ? selectedWhisperModel : transcriptModelConfig.model,
+            model: modelToUse,
             apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null
         };
         setTranscriptModelConfig(updatedConfig);
@@ -83,6 +93,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const handleWhisperModelSelect = (modelName: string) => {
         setSelectedWhisperModel(modelName);
         if (transcriptModelConfig.provider === 'localWhisper') {
+            setTranscriptModelConfig({
+                ...transcriptModelConfig,
+                model: modelName
+            });
+        }
+    };
+
+    const handleParakeetModelSelect = (modelName: string) => {
+        setSelectedParakeetModel(modelName);
+        if (transcriptModelConfig.provider === 'parakeet') {
             setTranscriptModelConfig({
                 ...transcriptModelConfig,
                 model: modelName
@@ -125,7 +145,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     <SelectValue placeholder="Select provider" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="localWhisper">🏠 Local Whisper (Recommended)</SelectItem>
+                                    <SelectItem value="parakeet">⚡ Parakeet (Fastest - 30x Real-time)</SelectItem>
+                                    <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
                                     <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -133,7 +154,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {transcriptModelConfig.provider !== 'localWhisper' && (
+                            {transcriptModelConfig.provider !== 'localWhisper' && transcriptModelConfig.provider !== 'parakeet' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -160,6 +181,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             <ModelManager
                                 selectedModel={selectedWhisperModel}
                                 onModelSelect={handleWhisperModelSelect}
+                                autoSave={true}
+                            />
+                        </div>
+                    )}
+
+                    {transcriptModelConfig.provider === 'parakeet' && (
+                        <div className="mt-6">
+                            <ParakeetModelManager
+                                selectedModel={selectedParakeetModel}
+                                onModelSelect={handleParakeetModelSelect}
                                 autoSave={true}
                             />
                         </div>

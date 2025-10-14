@@ -94,6 +94,10 @@ whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-util = "0.3"
 silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", package = "silero" }
 
+# Parakeet (ONNX-based fast transcription) dependencies
+ort = { version = "2.0.0-rc.10" }  # ONNX Runtime for Parakeet models
+thiserror = "2.0.16"                # Error handling for Parakeet
+
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
 

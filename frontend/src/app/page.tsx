@@ -8,7 +8,7 @@ import { RecordingControls } from '@/components/RecordingControls';
 import { AISummary } from '@/components/AISummary';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { ModelManager } from '@/components/WhisperModelManager';
+import { TranscriptSettings, TranscriptModelProps } from '@/components/TranscriptSettings';
 import { LanguageSelection } from '@/components/LanguageSelection';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
@@ -67,6 +67,11 @@ export default function Home() {
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3'
+  });
+  const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
+    provider: 'localWhisper',
+    model: 'large-v3',
+    apiKey: null
   });
   const [originalTranscript, setOriginalTranscript] = useState<string>('');
   const [models, setModels] = useState<OllamaModel[]>([]);
@@ -158,6 +163,26 @@ export default function Home() {
   useEffect(() => {
     // Track page view
     Analytics.trackPageView('home');
+  }, []);
+
+  // Load saved transcript configuration on mount
+  useEffect(() => {
+    const loadTranscriptConfig = async () => {
+      try {
+        const config = await invoke('api_get_transcript_config') as any;
+        if (config) {
+          console.log('Loaded saved transcript config:', config);
+          setTranscriptModelConfig({
+            provider: config.provider || 'localWhisper',
+            model: config.model || 'large-v3',
+            apiKey: config.apiKey || null
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load transcript config:', error);
+      }
+    };
+    loadTranscriptConfig();
   }, []);
 
   useEffect(() => {
@@ -1241,6 +1266,21 @@ export default function Home() {
     }
   }, [transcripts, generateAISummary]);
 
+  // Handle transcript configuration save
+  const handleSaveTranscriptConfig = async (config: TranscriptModelProps) => {
+    try {
+      console.log('[HomePage] Saving transcript config:', config);
+      await invoke('api_save_transcript_config', {
+        provider: config.provider,
+        model: config.model,
+        apiKey: config.apiKey
+      });
+      console.log('[HomePage] ✅ Successfully saved transcript config');
+    } catch (error) {
+      console.error('[HomePage] ❌ Failed to save transcript config:', error);
+    }
+  };
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   const isProcessingStop = summaryStatus === 'processing'
@@ -1776,24 +1816,16 @@ export default function Home() {
                     <div>
                       <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
                       <p className="text-sm text-yellow-700">
-                        {modelSelectorMessage || 'Please download a Whisper model to enable speech recognition and start transcription.'}
+                        {modelSelectorMessage || 'Please download a transcription model (Whisper or Parakeet) to enable speech recognition and start transcription.'}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <ModelManager
-                  selectedModel={modelConfig.whisperModel}
-                  onModelSelect={(modelName) => {
-                    console.log('[HomePage] Model selected:', modelName);
-                    setModelConfig(prev => ({ ...prev, whisperModel: modelName }));
-                    // Close the modal once a model is selected
-                    if (modelName) {
-                      console.log('[HomePage] Closing modal after model selection');
-                      setShowModelSelector(false);
-                    }
-                  }}
-                  autoSave={true}
+                <TranscriptSettings
+                  transcriptModelConfig={transcriptModelConfig}
+                  setTranscriptModelConfig={setTranscriptModelConfig}
+                  onSave={handleSaveTranscriptConfig}
                 />
 
                 <div className="mt-6 flex justify-end space-x-3">

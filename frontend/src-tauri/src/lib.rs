@@ -43,6 +43,7 @@ pub mod database;
 pub mod notifications;
 pub mod ollama;
 pub mod openrouter;
+pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -448,6 +449,16 @@ pub fn run() {
                 }
             });
 
+            // Set Parakeet models directory
+            parakeet_engine::commands::set_models_directory(&_app.handle());
+
+            // Initialize Parakeet engine on startup
+            tauri::async_runtime::spawn(async {
+                if let Err(e) = parakeet_engine::commands::parakeet_init().await {
+                    log::error!("Failed to initialize Parakeet engine on startup: {}", e);
+                }
+            });
+
             // Trigger system audio permission request on startup (similar to microphone permission)
             // #[cfg(target_os = "macos")]
             // {
@@ -507,6 +518,20 @@ pub fn run() {
             whisper_engine::commands::whisper_download_model,
             whisper_engine::commands::whisper_cancel_download,
             whisper_engine::commands::whisper_delete_corrupted_model,
+            // Parakeet engine commands
+            parakeet_engine::commands::parakeet_init,
+            parakeet_engine::commands::parakeet_get_available_models,
+            parakeet_engine::commands::parakeet_load_model,
+            parakeet_engine::commands::parakeet_get_current_model,
+            parakeet_engine::commands::parakeet_is_model_loaded,
+            parakeet_engine::commands::parakeet_has_available_models,
+            parakeet_engine::commands::parakeet_validate_model_ready,
+            parakeet_engine::commands::parakeet_transcribe_audio,
+            parakeet_engine::commands::parakeet_get_models_directory,
+            parakeet_engine::commands::parakeet_download_model,
+            parakeet_engine::commands::parakeet_cancel_download,
+            parakeet_engine::commands::parakeet_delete_corrupted_model,
+            parakeet_engine::commands::open_parakeet_models_folder,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,
