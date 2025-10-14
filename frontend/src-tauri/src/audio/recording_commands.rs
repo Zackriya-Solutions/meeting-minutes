@@ -140,6 +140,39 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         *global_task = Some(task_handle);
     }
 
+    // CRITICAL: Listen for transcript-update events and save to recording manager
+    // This enables transcript history persistence for page reload sync
+    let app_for_listener = app.clone();
+    tokio::spawn(async move {
+        use tauri::Listener;
+
+        app_for_listener.listen("transcript-update", move |event: tauri::Event| {
+            // Parse the transcript update from the event payload
+            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+                // Create structured transcript segment
+                let segment = crate::audio::recording_saver::TranscriptSegment {
+                    id: format!("seg_{}", update.sequence_id),
+                    text: update.text.clone(),
+                    audio_start_time: update.audio_start_time,
+                    audio_end_time: update.audio_end_time,
+                    duration: update.duration,
+                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
+                    confidence: update.confidence,
+                    sequence_id: update.sequence_id,
+                };
+
+                // Save to recording manager
+                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
+                    if let Some(manager) = manager_guard.as_ref() {
+                        manager.add_transcript_segment(segment);
+                    }
+                }
+            }
+        });
+
+        info!("✅ Transcript-update event listener registered for history persistence");
+    });
+
     // Emit success event
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started successfully with parallel processing",
@@ -261,6 +294,39 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
     }
+
+    // CRITICAL: Listen for transcript-update events and save to recording manager
+    // This enables transcript history persistence for page reload sync
+    let app_for_listener = app.clone();
+    tokio::spawn(async move {
+        use tauri::Listener;
+
+        app_for_listener.listen("transcript-update", move |event: tauri::Event| {
+            // Parse the transcript update from the event payload
+            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+                // Create structured transcript segment
+                let segment = crate::audio::recording_saver::TranscriptSegment {
+                    id: format!("seg_{}", update.sequence_id),
+                    text: update.text.clone(),
+                    audio_start_time: update.audio_start_time,
+                    audio_end_time: update.audio_end_time,
+                    duration: update.duration,
+                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
+                    confidence: update.confidence,
+                    sequence_id: update.sequence_id,
+                };
+
+                // Save to recording manager
+                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
+                    if let Some(manager) = manager_guard.as_ref() {
+                        manager.add_transcript_segment(segment);
+                    }
+                }
+            }
+        });
+
+        info!("✅ Transcript-update event listener registered for history persistence");
+    });
 
     // Emit success event
     app.emit("recording-started", serde_json::json!({
