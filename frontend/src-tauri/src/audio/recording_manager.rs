@@ -335,6 +335,18 @@ impl RecordingManager {
         self.recording_saver.add_transcript_chunk(text);
     }
 
+    /// Get accumulated transcript segments from current recording session
+    /// Used for syncing frontend state after page reload during active recording
+    pub fn get_transcript_segments(&self) -> Vec<super::recording_saver::TranscriptSegment> {
+        self.recording_saver.get_transcript_segments()
+    }
+
+    /// Get meeting name from current recording session
+    /// Used for syncing frontend state after page reload during active recording
+    pub fn get_meeting_name(&self) -> Option<String> {
+        self.recording_saver.get_meeting_name()
+    }
+
     /// Cleanup all resources without saving
     pub async fn cleanup_without_save(&mut self) {
         if self.is_recording() {

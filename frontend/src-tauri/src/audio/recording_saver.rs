@@ -365,6 +365,20 @@ impl RecordingSaver {
     pub fn get_meeting_folder(&self) -> Option<&PathBuf> {
         self.meeting_folder.as_ref()
     }
+
+    /// Get accumulated transcript segments (for reload sync)
+    pub fn get_transcript_segments(&self) -> Vec<TranscriptSegment> {
+        if let Ok(segments) = self.transcript_segments.lock() {
+            segments.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get meeting name (for reload sync)
+    pub fn get_meeting_name(&self) -> Option<String> {
+        self.meeting_name.clone()
+    }
 }
 
 impl Default for RecordingSaver {

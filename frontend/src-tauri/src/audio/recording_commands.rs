@@ -606,6 +606,32 @@ pub async fn get_recording_state() -> serde_json::Value {
     }
 }
 
+/// Get accumulated transcript segments from current recording session
+/// Used for syncing frontend state after page reload during active recording
+#[tauri::command]
+pub async fn get_transcript_history() -> Result<Vec<super::recording_saver::TranscriptSegment>, String> {
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+
+    if let Some(manager) = manager_guard.as_ref() {
+        Ok(manager.get_transcript_segments())
+    } else {
+        Ok(Vec::new()) // No recording active, return empty
+    }
+}
+
+/// Get meeting name from current recording session
+/// Used for syncing frontend state after page reload during active recording
+#[tauri::command]
+pub async fn get_recording_meeting_name() -> Result<Option<String>, String> {
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+
+    if let Some(manager) = manager_guard.as_ref() {
+        Ok(manager.get_meeting_name())
+    } else {
+        Ok(None)
+    }
+}
+
 /// Optimized parallel transcription task ensuring ZERO chunk loss
 fn start_transcription_task<R: Runtime>(
     app: AppHandle<R>,
