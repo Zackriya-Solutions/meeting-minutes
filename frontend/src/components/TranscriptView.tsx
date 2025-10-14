@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 interface TranscriptViewProps {
   transcripts: Transcript[];
   isRecording?: boolean;
+  enableStreaming?: boolean; // Enable streaming effect for live transcription UX
 }
 
 interface SpeechDetectedEvent {
@@ -25,11 +26,20 @@ function formatRecordingTime(seconds: number | undefined): string {
   return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
-export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false }) => {
+export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, enableStreaming = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>();
   const isUserAtBottomRef = useRef<boolean>(true);
   const [speechDetected, setSpeechDetected] = useState(false);
+
+  // Streaming effect state
+  const [streamingTranscript, setStreamingTranscript] = useState<{
+    id: string;
+    visibleText: string;
+    fullText: string;
+  } | null>(null);
+  const streamingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastStreamedIdRef = useRef<string | null>(null); // Track which transcript we've streamed
 
   // Load preference for showing confidence indicator
   const [showConfidence, setShowConfidence] = useState<boolean>(() => {
@@ -103,9 +113,87 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
     prevScrollHeightRef.current = container.scrollHeight;
   }, [transcripts]);
 
+  // Streaming effect: animate new transcripts character-by-character
+  useEffect(() => {
+    if (!enableStreaming || !isRecording) {
+      // Clean up if streaming is disabled
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+      setStreamingTranscript(null);
+      lastStreamedIdRef.current = null;
+      return;
+    }
+
+    // Find the latest non-partial transcript
+    const latestTranscript = transcripts
+      .slice(-1)[0];
+
+    if (!latestTranscript) return;
+
+    // Check if this is a new transcript we haven't streamed yet (using ref to avoid dependency issues)
+    if (lastStreamedIdRef.current !== latestTranscript.id) {
+      // Clear any existing streaming interval
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+
+      // Mark this transcript as being streamed
+      lastStreamedIdRef.current = latestTranscript.id;
+
+      const fullText = latestTranscript.text;
+
+      // Calculate speed to complete in exactly 3 seconds
+      const TOTAL_DURATION_MS = 3000; // 3 seconds total
+      const INTERVAL_MS = 30; // Update every 30ms for smooth animation
+      const totalTicks = TOTAL_DURATION_MS / INTERVAL_MS; // 100 ticks
+      const charsPerTick = Math.max(1, Math.ceil(fullText.length / totalTicks)); // Calculate chars per tick
+      const INITIAL_CHARS = Math.min(3, fullText.length); // Start with first 3 chars visible
+      let charIndex = INITIAL_CHARS;
+
+      setStreamingTranscript({
+        id: latestTranscript.id,
+        visibleText: fullText.substring(0, INITIAL_CHARS),
+        fullText: fullText
+      });
+
+      streamingIntervalRef.current = setInterval(() => {
+        charIndex += charsPerTick;
+
+        if (charIndex >= fullText.length) {
+          // Streaming complete
+          clearInterval(streamingIntervalRef.current!);
+          streamingIntervalRef.current = null;
+          setStreamingTranscript(null);
+        } else {
+          setStreamingTranscript(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              visibleText: fullText.substring(0, charIndex)
+            };
+          });
+        }
+      }, INTERVAL_MS);
+    }
+  }, [transcripts, enableStreaming, isRecording]);
+
+  // Cleanup streaming interval on unmount
+  useEffect(() => {
+    return () => {
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+      lastStreamedIdRef.current = null;
+    };
+  }, []);
+
   return (
     <div ref={containerRef} className="h-full overflow-y-auto px-4 py-2">
-      {transcripts?.map((transcript, index) => (
+      {transcripts?.filter(t => t.id !== streamingTranscript?.id).map((transcript, index) => (
         <div
           key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
           className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${transcript.is_partial
@@ -130,6 +218,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           </div>
           <p className={`text-md text-gray-800`}>
             {(() => {
+              // Streaming transcript is filtered out and rendered separately, so this is always full text
               const filteredText = transcript.text.replace(/^Thank you\.?\s*$/gi, '').trim();
               return filteredText === '' ? '[Silence]' : filteredText;
             })()}
@@ -157,8 +246,28 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         </div>
       ))}
 
+      {/* Streaming transcript - rendered separately with animation */}
+      {streamingTranscript && (
+        <div
+          key={`streaming-${streamingTranscript.id}`}
+          className="mb-3 p-3 rounded-lg transition-colors duration-200 bg-blue-50 border-l-4 border-blue-400"
+        >
+          <div className="flex justify-end items-center mb-1">
+            <div className="items-center space-x-2">
+              <div className="w-2 h-2 justify-end bg-blue-500 rounded-full animate-pulse"></div>
+            </div>
+          </div>
+          <p className="text-md text-gray-800">
+            {streamingTranscript.visibleText}
+          </p>
+          <div className="flex justify-end items-center gap-2">
+            <span className="text-xs text-blue-400">Transcribing...</span>
+          </div>
+        </div>
+      )}
+
       {/* Typing indicator - shows when recording and transcripts exist (always shows after first transcript) */}
-      {isRecording && transcripts.length > 0 && (
+      {isRecording && transcripts.length > 0 && !streamingTranscript && (
         <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-blue-50/30 border-l-4 border-blue-400 animate-fade-in">
           <div className="flex items-center space-x-2">
             <div className="flex space-x-1">

@@ -1572,7 +1572,7 @@ export default function Home() {
           <div className="overflow-y-auto pb-32">
             <div className="flex justify-center">
               <div className="w-2/3 max-w-[750px]">
-                <TranscriptView transcripts={transcripts} isRecording={isRecording} />
+                <TranscriptView transcripts={transcripts} isRecording={isRecording} enableStreaming={isRecording} />
               </div>
             </div>
           </div>
