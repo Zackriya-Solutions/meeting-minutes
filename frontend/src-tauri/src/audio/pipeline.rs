@@ -412,10 +412,9 @@ impl AudioPipeline {
     ) -> Self {
         // Create VAD processor with balanced redemption time for speech accumulation
         // The VAD processor now handles 48kHz->16kHz resampling internally
-        // Redemption time: 500ms bridges natural pauses while maintaining responsiveness
-        // Too long (2000ms): Delays transcription after speech ends
-        // Too short (200ms): Fragments continuous speech into tiny segments
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 700) {
+        // Redemption time: 400ms matches Hyprnote's successful configuration
+        // This bridges natural pauses without excessive fragmentation
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, 900) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor
@@ -521,7 +520,7 @@ impl AudioPipeline {
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
-                                        if segment.samples.len() >= 1600 {  // Minimum 100ms at 16kHz
+                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
                                             info!("📤 Sending VAD segment: {:.1}ms, {} samples",
                                                   duration_ms, segment.samples.len());
 
@@ -538,6 +537,9 @@ impl AudioPipeline {
                                             } else {
                                                 self.chunk_id_counter += 1;
                                             }
+                                        } else {
+                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
+                                                   duration_ms, segment.samples.len());
                                         }
                                     }
                                 }
@@ -587,8 +589,8 @@ impl AudioPipeline {
                 for segment in final_segments {
                     let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
-                    // Send segments >= 100ms (1600 samples at 16kHz)
-                    if segment.samples.len() >= 1600 {
+                    // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
+                    if segment.samples.len() >= 800 {
                         info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
                               duration_ms, segment.samples.len());
 
@@ -606,7 +608,7 @@ impl AudioPipeline {
                             self.chunk_id_counter += 1;
                         }
                     } else {
-                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 1600)",
+                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
                               duration_ms, segment.samples.len());
                     }
                 }

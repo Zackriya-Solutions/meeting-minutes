@@ -403,6 +403,14 @@ impl ParakeetModel {
             }
         }
 
+        // NEW: Log if no tokens were decoded (helps debugging empty transcriptions)
+        if tokens.is_empty() {
+            log::debug!(
+                "Parakeet decoded zero tokens (all blank) for audio with {} encoding timesteps - audio may be too short or low energy",
+                encodings_len
+            );
+        }
+
         Ok((tokens, timestamps))
     }
 
