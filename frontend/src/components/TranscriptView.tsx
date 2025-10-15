@@ -31,17 +31,65 @@ function formatRecordingTime(seconds: number | undefined): string {
   return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
+// Helper function to remove consecutive word repetitions (especially short words ≤2 letters)
+function cleanRepetitions(text: string): string {
+  if (!text || text.trim().length === 0) return text;
+
+  const words = text.split(/\s+/);
+  const cleanedWords: string[] = [];
+
+  let i = 0;
+  while (i < words.length) {
+    const currentWord = words[i];
+    const currentWordLower = currentWord.toLowerCase();
+
+    // Count consecutive repetitions of the same word
+    let repeatCount = 1;
+    while (
+      i + repeatCount < words.length &&
+      words[i + repeatCount].toLowerCase() === currentWordLower
+    ) {
+      repeatCount++;
+    }
+
+    // For short words (≤2 letters), be aggressive: if repeated 2+ times, keep only 1
+    // For longer words, keep 1 if repeated 3+ times (less aggressive)
+    if (currentWord.length <= 2) {
+      // Short words: "I I I I" → "I", "Tu Tu Tu" → "Tu"
+      if (repeatCount >= 2) {
+        cleanedWords.push(currentWord);
+        i += repeatCount;
+      } else {
+        cleanedWords.push(currentWord);
+        i += 1;
+      }
+    } else {
+      // Longer words: keep original unless heavily repeated
+      if (repeatCount >= 3) {
+        cleanedWords.push(currentWord);
+        i += repeatCount;
+      } else {
+        cleanedWords.push(currentWord);
+        i += 1;
+      }
+    }
+  }
+
+  return cleanedWords.join(' ');
+}
+
 // Helper function to remove filler words and stop words from transcripts
 function cleanStopWords(text: string): string {
-  // List of common filler words and stop words to remove
+  // FIRST: Clean repetitions (especially short words)
+  let cleanedText = cleanRepetitions(text);
+
+  // THEN: Remove filler words
   const stopWords = [
     'uh', 'um', 'er', 'ah', 'hmm', 'hm', 'eh', 'oh',
     // 'like', 'you know', 'i mean', 'sort of', 'kind of',
     // 'basically', 'actually', 'literally', 'right',
     // 'thank you', 'thanks'
   ];
-
-  let cleanedText = text;
 
   // Remove each stop word (case-insensitive, with word boundaries)
   stopWords.forEach(word => {
@@ -215,13 +263,15 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       {transcripts?.map((transcript, index) => {
         const isStreaming = streamingTranscript?.id === transcript.id;
         const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
-        // Clean up text for display - remove filler words and stop words
+        // Clean up text for display - remove repetitions and filler words
         const filteredText = cleanStopWords(textToShow);
-        // Show [Silence] only for non-streaming, empty transcripts
-        const displayText = filteredText === '' && !isStreaming ? '[Silence]' : filteredText;
+        // Show [Silence] ONLY if the ORIGINAL transcript was empty (not just after filtering)
+        const originalWasEmpty = transcript.text.trim() === '';
+        const displayText = originalWasEmpty && !isStreaming ? '[Silence]' : filteredText;
 
+        // Sizer text: use cleaned version for proper sizing, fallback to [Silence] only if original was empty
         const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
-          || (isStreaming ? '' : '[Silence]');
+          || (originalWasEmpty && !isStreaming ? '[Silence]' : '');
 
         return (
           <motion.div
