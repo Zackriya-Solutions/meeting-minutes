@@ -174,7 +174,7 @@ export function PreferenceSettings() {
 
         <div className="space-y-4">
           {/* Database Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
+          {/* <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Database</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
@@ -186,10 +186,10 @@ export function PreferenceSettings() {
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
-          </div>
+          </div> */}
 
           {/* Models Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
+          {/* <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Whisper Models</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
@@ -201,7 +201,7 @@ export function PreferenceSettings() {
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
-          </div>
+          </div> */}
 
           {/* Recordings Location */}
           <div className="p-4 border rounded-lg bg-gray-50">

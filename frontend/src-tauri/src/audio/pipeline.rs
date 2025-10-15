@@ -9,7 +9,7 @@ use super::batch_processor::AudioMetricsBatcher;
 
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
-use super::audio_processing::{audio_to_mono, LoudnessNormalizer};
+use super::audio_processing::audio_to_mono;
 use super::vad::{ContinuousVadProcessor};
 
 /// Ring buffer for synchronized audio mixing
@@ -143,8 +143,6 @@ pub struct AudioCapture {
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     needs_resampling: bool,  // NEW: Flag if resampling is required
-    // EBU R128 normalizer for microphone audio (per-device, stateful)
-    normalizer: Arc<std::sync::Mutex<Option<LoudnessNormalizer>>>,
     // Note: Using global recording timestamp for synchronization
 }
 
@@ -181,26 +179,6 @@ impl AudioCapture {
             );
         }
 
-        // Initialize EBU R128 normalizer for MICROPHONE ONLY
-        // System audio doesn't need normalization (already at good levels)
-        let normalizer = if matches!(device_type, DeviceType::Microphone) {
-            // Use TARGET_SAMPLE_RATE for normalizer since we resample before normalization
-            match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
-                Ok(norm) => {
-                    info!("✅ EBU R128 normalizer initialized for microphone '{}' (target: -23 LUFS)", device.name);
-                    Some(norm)
-                }
-                Err(e) => {
-                    warn!("⚠️ Failed to create normalizer for microphone: {}, normalization disabled", e);
-                    None
-                }
-            }
-        } else {
-            // System audio: no normalization
-            info!("ℹ️ System audio '{}' will not be normalized (raw capture)", device.name);
-            None
-        };
-
         Self {
             device,
             state,
@@ -210,7 +188,6 @@ impl AudioCapture {
             device_type,
             recording_sender,
             needs_resampling,
-            normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
             // Using global recording time for sync
         }
     }
@@ -252,26 +229,6 @@ impl AudioCapture {
                     data.len() / self.channels as usize,
                     mono_data.len()
                 );
-            }
-        }
-
-        // This ensures normalized audio flows through all paths:
-        // - Recording gets normalized mic + raw system (proper balance)
-        // - Transcription gets normalized mic + raw system (proper balance)
-        // - No complex dual-path logic needed
-        if matches!(self.device_type, DeviceType::Microphone) {
-            if let Ok(mut normalizer_lock) = self.normalizer.lock() {
-                if let Some(ref mut normalizer) = *normalizer_lock {
-                    mono_data = normalizer.normalize_loudness(&mono_data);
-
-                    // Log normalization occasionally for debugging
-                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
-                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-                        let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-                        debug!("🎤 Normalized mic chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
-                    }
-                }
             }
         }
 
