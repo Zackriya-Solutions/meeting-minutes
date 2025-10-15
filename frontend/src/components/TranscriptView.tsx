@@ -29,6 +29,31 @@ function formatRecordingTime(seconds: number | undefined): string {
   return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
+// Helper function to remove filler words and stop words from transcripts
+function cleanStopWords(text: string): string {
+  // List of common filler words and stop words to remove
+  const stopWords = [
+    'uh', 'um', 'er', 'ah', 'hmm', 'hm', 'eh', 'oh',
+    // 'like', 'you know', 'i mean', 'sort of', 'kind of',
+    // 'basically', 'actually', 'literally', 'right',
+    // 'thank you', 'thanks'
+  ];
+
+  let cleanedText = text;
+
+  // Remove each stop word (case-insensitive, with word boundaries)
+  stopWords.forEach(word => {
+    // Match the stop word at word boundaries, with optional punctuation
+    const pattern = new RegExp(`\\b${word}\\b[,\\s]*`, 'gi');
+    cleanedText = cleanedText.replace(pattern, ' ');
+  });
+
+  // Clean up extra whitespace and trim
+  cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
+
+  return cleanedText;
+}
+
 export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
   const [speechDetected, setSpeechDetected] = useState(false);
 
@@ -179,13 +204,13 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       {transcripts?.map((transcript, index) => {
         const isStreaming = streamingTranscript?.id === transcript.id;
         const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
-        // Clean up text for display
-        const filteredText = textToShow.replace(/^Thank you\.?\s*$/gi, '').trim();
+        // Clean up text for display - remove filler words and stop words
+        const filteredText = cleanStopWords(textToShow);
         // Show [Silence] only for non-streaming, empty transcripts
         const displayText = filteredText === '' && !isStreaming ? '[Silence]' : filteredText;
 
-        const sizerText = (isStreaming ? streamingTranscript.fullText : transcript.text)
-          .replace(/^Thank you\.?\s*$/gi, '').trim() || (isStreaming ? '' : '[Silence]');
+        const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
+          || (isStreaming ? '' : '[Silence]');
 
         return (
           <div
