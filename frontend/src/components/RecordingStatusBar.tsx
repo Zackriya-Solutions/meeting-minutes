@@ -10,18 +10,18 @@ interface RecordingStatusBarProps {
 
 export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused = false }) => {
   // Get recording duration from backend-synced context (in seconds)
-  const { recordingDuration } = useRecordingState();
+  const { activeDuration } = useRecordingState();
 
   // Local state for live timer display
   const [displaySeconds, setDisplaySeconds] = useState(0);
 
   // Sync with backend duration when it changes (handles refresh/navigation)
   useEffect(() => {
-    if (recordingDuration !== null) {
+    if (activeDuration !== null) {
       // Round to nearest second to avoid decimal issues
-      setDisplaySeconds(Math.floor(recordingDuration));
+      setDisplaySeconds(Math.floor(activeDuration));
     }
-  }, [recordingDuration]);
+  }, [activeDuration]);
 
   // Live timer that increments every second when not paused
   useEffect(() => {
