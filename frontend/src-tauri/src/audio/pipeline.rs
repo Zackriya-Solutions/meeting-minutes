@@ -255,7 +255,6 @@ impl AudioCapture {
             }
         }
 
-        // HYPRNOTE-STYLE NORMALIZATION: Apply EBU R128 normalization at capture level (MICROPHONE ONLY)
         // This ensures normalized audio flows through all paths:
         // - Recording gets normalized mic + raw system (proper balance)
         // - Transcription gets normalized mic + raw system (proper balance)

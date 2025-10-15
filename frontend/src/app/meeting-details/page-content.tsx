@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Transcript, Summary, SummaryResponse } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
@@ -20,6 +21,7 @@ import {
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { MessageToast } from '@/components/MessageToast';
 import { BluetoothPlaybackWarning } from '@/components/BluetoothPlaybackWarning';
+import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
@@ -938,7 +940,12 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex flex-col h-screen bg-gray-50"
+    >
       <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
         <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-white flex flex-col relative">
@@ -1122,6 +1129,12 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                 <p className="text-gray-600">Generating AI Summary...</p>
               </div>
             </div>
+          ) : !aiSummary ? (
+            <EmptyStateSummary
+              onGenerate={() => handleGenerateSummary(customPrompt)}
+              hasModel={modelConfig.provider !== null && modelConfig.model !== null}
+              isGenerating={isSummaryLoading}
+            />
           ) : transcripts?.length > 0 && (
             <div className="max-w-4xl mx-auto p-6">
               {summaryResponse && (
@@ -1202,7 +1215,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
         </div>
 
       </div>
-    </div>
+    </motion.div>
   );
 }
 

@@ -87,7 +87,6 @@ pub fn normalize_v2(audio: &[f32]) -> Vec<f32> {
 }
 
 /// True peak limiter with lookahead buffer (prevents clipping)
-/// Based on Hyprnote's implementation for broadcast-quality audio
 struct TruePeakLimiter {
     lookahead_samples: usize,
     buffer: Vec<f32>,
@@ -135,7 +134,6 @@ impl TruePeakLimiter {
 /// - Used by: Netflix, YouTube, Spotify, all professional broadcast
 /// - Perceptually accurate (not just simple RMS)
 ///
-/// Based on Hyprnote's proven implementation with TruePeakLimiter
 pub struct LoudnessNormalizer {
     ebur128: ebur128::EbuR128,
     limiter: TruePeakLimiter,
@@ -151,7 +149,6 @@ impl LoudnessNormalizer {
     /// * `channels` - Number of audio channels (1 for mono, 2 for stereo)
     /// * `sample_rate` - Sample rate in Hz (e.g., 48000)
     pub fn new(channels: u32, sample_rate: u32) -> Result<Self> {
-        const TARGET_LUFS: f64 = -23.0;
         const TRUE_PEAK_LIMIT: f64 = -1.0;
         const ANALYZE_CHUNK_SIZE: usize = 512;
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useContext, useCallback, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Transcript, TranscriptUpdate, Summary, SummaryResponse } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
@@ -1451,7 +1452,12 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 transition-all duration-1000 scroll-smooth">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex flex-col min-h-screen bg-gray-50 transition-all duration-1000 scroll-smooth"
+    >
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
@@ -1665,7 +1671,7 @@ export default function Home() {
                   isPaused={recordingState.isPaused}
                   isProcessing={isProcessingStop}
                   isStopping={isStopping}
-                  enableStreaming={recordingState.isRecording && transcriptModelConfig.provider !== 'parakeet'}
+                  enableStreaming={recordingState.isRecording }
                 />
               </div>
             </div>
@@ -2060,6 +2066,6 @@ export default function Home() {
         {/*     </div> */}
         {/*   )} */}        {/* </div> */}
       </div>
-    </div >
+    </motion.div>
   );
 }

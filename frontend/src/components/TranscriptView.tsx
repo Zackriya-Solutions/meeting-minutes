@@ -3,7 +3,9 @@
 import { Transcript } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { RecordingStatusBar } from './RecordingStatusBar';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -153,12 +155,12 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
 
       const fullText = latestTranscript.text;
 
-      // Calculate speed to complete in exactly 3 seconds
-      const TOTAL_DURATION_MS = 3000; // 3 seconds total
-      const INTERVAL_MS = 30; // Update every 30ms for smooth animation
-      const totalTicks = TOTAL_DURATION_MS / INTERVAL_MS; // 100 ticks
-      const charsPerTick = Math.max(1, Math.ceil(fullText.length / totalTicks)); // Calculate chars per tick
-      const INITIAL_CHARS = Math.min(3, fullText.length); // Start with first 3 chars visible
+      // Fast typewriter effect - complete in 0.8 seconds for snappy feel
+      const TOTAL_DURATION_MS = 800; // 0.8 seconds total - fast and snappy!
+      const INTERVAL_MS = 15; // Update every 15ms for smooth animation
+      const totalTicks = TOTAL_DURATION_MS / INTERVAL_MS; // ~53 ticks
+      const charsPerTick = Math.max(2, Math.ceil(fullText.length / totalTicks)); // At least 2 chars per tick for speed
+      const INITIAL_CHARS = Math.min(5, fullText.length); // Start with first 5 chars visible
       let charIndex = INITIAL_CHARS;
 
       setStreamingTranscript({
@@ -201,6 +203,15 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
 
   return (
     <div className="px-4 py-2">
+      {/* Recording Status Bar - Sticky at top, always visible when recording */}
+      <AnimatePresence>
+        {isRecording && (
+          <div className="sticky top-0 z-10 bg-white pb-2">
+            <RecordingStatusBar isPaused={isPaused} />
+          </div>
+        )}
+      </AnimatePresence>
+
       {transcripts?.map((transcript, index) => {
         const isStreaming = streamingTranscript?.id === transcript.id;
         const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
@@ -213,113 +224,98 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           || (isStreaming ? '' : '[Silence]');
 
         return (
-          <div
+          <motion.div
             key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
-            className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${
-              isStreaming
-                ? 'bg-blue-50 border-l-4 border-blue-400' // Style for streaming transcript
-                : 'bg-gray-50 border-l-4 border-gray-200' // Default style
-            }`}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mb-3"
           >
-            <div className="relative">
-              <p className="text-md text-gray-800" style={{ visibility: 'hidden' }}>
-                {sizerText}
-              </p>
-              <p className="text-md text-gray-800 absolute top-0 left-0">
-                {displayText}
-              </p>
-            </div>
-            <div className="flex justify-end items-center gap-2">
-              {isStreaming ? (
-                <span className="text-xs text-blue-400">Transcribing...</span>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger>
-                    <span className="text-xs h-min text-gray-400">
-                      {transcript.audio_start_time !== undefined
-                        ? formatRecordingTime(transcript.audio_start_time)
-                        : transcript.timestamp}
+            <div className="flex items-start gap-2">
+              <Tooltip>
+                <TooltipTrigger>
+                  <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                    {transcript.audio_start_time !== undefined
+                      ? formatRecordingTime(transcript.audio_start_time)
+                      : transcript.timestamp}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {transcript.duration !== undefined && (
+                    <span className="text-xs text-gray-400">
+                      {transcript.duration.toFixed(1)}s
+                      {transcript.confidence !== undefined && (
+                        <ConfidenceIndicator
+                          confidence={transcript.confidence}
+                          showIndicator={showConfidence}
+                        />
+                      )}
                     </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {transcript.duration !== undefined && (
-                      <span className="text-xs text-gray-400">
-                        {transcript.duration.toFixed(1)}s
-                        {transcript.confidence !== undefined && (
-                          <ConfidenceIndicator
-                            confidence={transcript.confidence}
-                            showIndicator={showConfidence}
-                          />
-                        )}
-                      </span>
-                    )}
-                  </TooltipContent>
-                </Tooltip>
-              )}
+                  )}
+                </TooltipContent>
+              </Tooltip>
+              <div className="flex-1">
+                {isStreaming ? (
+                  // Streaming transcript - show in bubble (full width)
+                  <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="relative">
+                      <p className="text-base text-gray-800 leading-relaxed" style={{ visibility: 'hidden' }}>
+                        {sizerText}
+                      </p>
+                      <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                        {displayText}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  // Regular transcript - simple text
+                  <div className="relative">
+                    <p className="text-base text-gray-800 leading-relaxed" style={{ visibility: 'hidden' }}>
+                      {sizerText}
+                    </p>
+                    <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                      {displayText}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </motion.div>
         );
       })}
 
-      {/* Typing indicator - shows when actively recording (not paused, not processing, not stopping) and transcripts exist */}
+      {/* Show listening indicator when recording and has transcripts */}
       {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && (
-        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-blue-50/30 border-l-4 border-blue-400 animate-fade-in">
-          <div className="flex items-center space-x-2">
-            <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-            </div>
-            <span className="text-md text-blue-600 font-medium">Listening...</span>
-          </div>
-        </div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="flex items-center gap-2 mt-4 text-gray-500"
+        >
+          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+          <span className="text-sm">Listening...</span>
+        </motion.div>
       )}
 
-      {/* Pause indicator - shows when recording is paused and transcripts exist */}
-      {isRecording && isPaused && transcripts.length > 0 && (
-        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-orange-50/30 border-l-4 border-orange-400 animate-fade-in">
-          <div className="flex items-center space-x-2">
-            <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-            </div>
-            <span className="text-md text-orange-600 font-medium">Recording paused</span>
-          </div>
-        </div>
-      )}
+      {/* Empty state when no transcripts */}
       {transcripts.length === 0 && (
-        <div className="text-center text-gray-500 mt-8">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center text-gray-500 mt-8"
+        >
           {isRecording ? (
             <>
-              <div className="flex items-center justify-center space-x-2 mb-3">
-                <div className="relative flex items-center justify-center">
-                  {/* Outer pulse ring - changes color based on state: orange when paused, green when speech detected, blue otherwise */}
-                  <div className={`absolute w-12 h-12 rounded-full ${isPaused ? '' : 'animate-ping'} opacity-75 ${isPaused ? 'bg-orange-400' : speechDetected ? 'bg-green-400' : 'bg-blue-400'
-                    }`}></div>
-                  {/* Inner solid circle with mic icon */}
-                  <div className={`relative w-10 h-10 rounded-full flex items-center justify-center ${isPaused ? 'bg-orange-500' : speechDetected ? 'bg-green-500' : 'bg-blue-500'
-                    }`}>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" y1="19" x2="12" y2="23" />
-                      <line x1="8" y1="23" x2="16" y2="23" />
-                    </svg>
-                  </div>
-                </div>
+              <div className="flex items-center justify-center mb-3">
+                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
               </div>
-              <p className={`text-sm font-medium ${isPaused ? 'text-orange-600' : speechDetected ? 'text-green-600' : 'text-blue-600'
-                }`}>
-                {isPaused ? 'Recording paused' : speechDetected ? 'Processing speech...' : 'Listening for speech...'}
+              <p className="text-sm text-gray-600">
+                {isPaused ? 'Recording paused' : 'Listening for speech...'}
               </p>
               <p className="text-xs mt-1 text-gray-400">
                 {isPaused
                   ? 'Click resume to continue recording'
-                  : speechDetected
-                    ? 'Your speech is being transcribed'
-                    : 'Listening to your microphone and system audio'
-                }
+                  : 'Speak to see live transcription'}
               </p>
             </>
           ) : (
@@ -328,7 +324,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
               <p className="text-xs mt-1">Start recording to see live transcription</p>
             </>
           )}
-        </div>
+        </motion.div>
       )}
     </div>
   );
