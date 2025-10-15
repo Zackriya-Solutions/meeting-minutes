@@ -1,6 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useEffect, useState } from 'react';
 
 interface RecordingStatusBarProps {
@@ -8,22 +9,30 @@ interface RecordingStatusBarProps {
 }
 
 export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused = false }) => {
-  const [duration, setDuration] = useState(0);
+  // Get recording duration from backend-synced context (in seconds)
+  const { recordingDuration } = useRecordingState();
 
+  // Local state for live timer display
+  const [displaySeconds, setDisplaySeconds] = useState(0);
+
+  // Sync with backend duration when it changes (handles refresh/navigation)
+  useEffect(() => {
+    if (recordingDuration !== null) {
+      // Round to nearest second to avoid decimal issues
+      setDisplaySeconds(Math.floor(recordingDuration));
+    }
+  }, [recordingDuration]);
+
+  // Live timer that increments every second when not paused
   useEffect(() => {
     if (isPaused) return;
 
     const interval = setInterval(() => {
-      setDuration(prev => prev + 1);
+      setDisplaySeconds(prev => prev + 1);
     }, 1000);
 
     return () => clearInterval(interval);
   }, [isPaused]);
-
-  // Reset duration when component unmounts or recording restarts
-  useEffect(() => {
-    return () => setDuration(0);
-  }, []);
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -41,7 +50,7 @@ export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused
     >
       <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-red-500 animate-pulse'}`} />
       <span className={`text-sm ${isPaused ? 'text-orange-700' : 'text-gray-700'}`}>
-        {isPaused ? 'Paused' : 'Recording'} • {formatDuration(duration)}
+        {isPaused ? 'Paused' : 'Recording'} • {formatDuration(displaySeconds)}
       </span>
     </motion.div>
   );
