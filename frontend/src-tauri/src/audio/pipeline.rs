@@ -9,7 +9,7 @@ use super::batch_processor::AudioMetricsBatcher;
 
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
-use super::audio_processing::audio_to_mono;
+use super::audio_processing::{audio_to_mono, LoudnessNormalizer};
 use super::vad::{ContinuousVadProcessor};
 
 /// Ring buffer for synchronized audio mixing
@@ -143,6 +143,8 @@ pub struct AudioCapture {
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     needs_resampling: bool,  // NEW: Flag if resampling is required
+    // EBU R128 normalizer for microphone audio (per-device, stateful)
+    normalizer: Arc<std::sync::Mutex<Option<LoudnessNormalizer>>>,
     // Note: Using global recording timestamp for synchronization
 }
 
@@ -179,6 +181,26 @@ impl AudioCapture {
             );
         }
 
+        // Initialize EBU R128 normalizer for MICROPHONE ONLY
+        // System audio doesn't need normalization (already at good levels)
+        let normalizer = if matches!(device_type, DeviceType::Microphone) {
+            // Use TARGET_SAMPLE_RATE for normalizer since we resample before normalization
+            match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
+                Ok(norm) => {
+                    info!("✅ EBU R128 normalizer initialized for microphone '{}' (target: -23 LUFS)", device.name);
+                    Some(norm)
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to create normalizer for microphone: {}, normalization disabled", e);
+                    None
+                }
+            }
+        } else {
+            // System audio: no normalization
+            info!("ℹ️ System audio '{}' will not be normalized (raw capture)", device.name);
+            None
+        };
+
         Self {
             device,
             state,
@@ -188,6 +210,7 @@ impl AudioCapture {
             device_type,
             recording_sender,
             needs_resampling,
+            normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
             // Using global recording time for sync
         }
     }
@@ -229,6 +252,27 @@ impl AudioCapture {
                     data.len() / self.channels as usize,
                     mono_data.len()
                 );
+            }
+        }
+
+        // HYPRNOTE-STYLE NORMALIZATION: Apply EBU R128 normalization at capture level (MICROPHONE ONLY)
+        // This ensures normalized audio flows through all paths:
+        // - Recording gets normalized mic + raw system (proper balance)
+        // - Transcription gets normalized mic + raw system (proper balance)
+        // - No complex dual-path logic needed
+        if matches!(self.device_type, DeviceType::Microphone) {
+            if let Ok(mut normalizer_lock) = self.normalizer.lock() {
+                if let Some(ref mut normalizer) = *normalizer_lock {
+                    mono_data = normalizer.normalize_loudness(&mono_data);
+
+                    // Log normalization occasionally for debugging
+                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
+                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+                        let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+                        debug!("🎤 Normalized mic chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
+                    }
+                }
             }
         }
 
@@ -456,13 +500,15 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
-                    // PROFESSIONAL MIXING: Add to ring buffer (no immediate mixing)
+                    // STEP 1: Add raw audio to ring buffer for mixing
+                    // Microphone audio is already normalized at capture level (AudioCapture)
+                    // System audio remains raw
                     self.ring_buffer.add_samples(chunk.device_type.clone(), chunk.data);
 
-                    // Mix in fixed windows only when both streams have sufficient data
+                    // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // UNIFIED MIXING: Same algorithm for recording AND transcription
+                            // Professional mixing with RMS-based ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
                             // Apply post-gain (reduced from 5x to 2x to prevent distortion)
@@ -470,51 +516,47 @@ impl AudioPipeline {
                                 .map(|&s| (s * 2.0).clamp(-1.0, 1.0))
                                 .collect();
 
-                            // Send to recording (WITH post-gain for consistency)
+                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
+                            match self.vad_processor.process_audio(&mixed_with_gain) {
+                                Ok(speech_segments) => {
+                                    for segment in speech_segments {
+                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+
+                                        if segment.samples.len() >= 1600 {  // Minimum 100ms at 16kHz
+                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
+                                                  duration_ms, segment.samples.len());
+
+                                            let transcription_chunk = AudioChunk {
+                                                data: segment.samples,
+                                                sample_rate: 16000,
+                                                timestamp: segment.start_timestamp_ms / 1000.0,
+                                                chunk_id: self.chunk_id_counter,
+                                                device_type: DeviceType::Microphone,  // Mixed audio
+                                            };
+
+                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                                                warn!("Failed to send VAD segment: {}", e);
+                                            } else {
+                                                self.chunk_id_counter += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ VAD error: {}", e);
+                                }
+                            }
+
+                            // STEP 4: Send mixed audio for recording (WAV file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
                                 let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),  // Same gain as transcription
+                                    data: mixed_with_gain.clone(),
                                     sample_rate: self.sample_rate,
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone,  // Mixed audio
                                 };
                                 let _ = sender.send(recording_chunk);
-                            }
-
-                            // Process for transcription - USE VAD segments directly
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
-                                Ok(speech_segments) => {
-                                    for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                                        // VAD outputs 16kHz audio, ensure minimum 100ms (1600 samples)
-                                        if segment.samples.len() >= 1600 {
-                                            info!("📤 Sending VAD segment to Whisper: {:.1}ms duration, {} samples",
-                                                  duration_ms, segment.samples.len());
-
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000, // VAD outputs 16kHz
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,
-                                            };
-
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                                warn!("Failed to send VAD segment to transcription: {}", e);
-                                            } else {
-                                                self.chunk_id_counter += 1;
-                                            }
-                                        } else {
-                                            info!("⏭️ Skipping short VAD segment: {:.1}ms ({} samples < 1600)",
-                                                  duration_ms, segment.samples.len());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("⚠️ VAD error on mixed audio: {}", e);
-                                }
                             }
                         }
                     }

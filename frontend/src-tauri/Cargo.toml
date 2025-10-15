@@ -87,6 +87,8 @@ which = "6.0.1"
 # Bytes
 bytemuck = "1.16.1"
 
+# EBU R128 loudness normalization (professional broadcast standard)
+ebur128 = "0.1"
 
 # Whisper-rs for speech recognition - BASE dependency (no GPU features)
 # Platform-specific GPU features are added via target-specific dependencies below
