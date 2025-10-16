@@ -6,6 +6,8 @@
     <string>This application needs access to your microphone to record meeting audio.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>This application needs screen recording permission to capture system audio during meetings.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>This application needs permission to capture system audio output for meeting transcription and recording.</string>
     <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>

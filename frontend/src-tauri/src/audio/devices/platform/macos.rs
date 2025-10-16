@@ -21,16 +21,8 @@ pub fn configure_macos_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         !name.to_lowercase().contains("speakers")
     }
 
-    if let Ok(host) = cpal::host_from_id(cpal::HostId::ScreenCaptureKit) {
-        for device in host.input_devices()? {
-            if let Ok(name) = device.name() {
-                if should_include_output_device(&name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
-                }
-            }
-        }
-    }
-
+    // Use default host for all macOS output devices
+    // Core Audio backend uses direct cidre API for system capture, not cpal
     for device in host.output_devices()? {
         if let Ok(name) = device.name() {
             if should_include_output_device(&name) {

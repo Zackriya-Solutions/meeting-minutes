@@ -9,7 +9,7 @@ use super::batch_processor::AudioMetricsBatcher;
 
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
-use super::audio_processing::audio_to_mono;
+use super::audio_processing::{audio_to_mono, LoudnessNormalizer};
 use super::vad::{ContinuousVadProcessor};
 
 /// Ring buffer for synchronized audio mixing
@@ -54,7 +54,7 @@ impl AudioMixerRingBuffer {
     }
 
     fn can_mix(&self) -> bool {
-        self.mic_buffer.len() >= self.window_size_samples &&
+        self.mic_buffer.len() >= self.window_size_samples ||
         self.system_buffer.len() >= self.window_size_samples
     }
 
@@ -63,72 +63,69 @@ impl AudioMixerRingBuffer {
             return None;
         }
 
-        let mic: Vec<f32> = self.mic_buffer.drain(0..self.window_size_samples).collect();
-        let sys: Vec<f32> = self.system_buffer.drain(0..self.window_size_samples).collect();
+        // Extract mic window (or pad with zeros if insufficient data)
+        let mic_window = if self.mic_buffer.len() >= self.window_size_samples {
+            // Enough mic data - drain window
+            self.mic_buffer.drain(0..self.window_size_samples).collect()
+        } else if !self.mic_buffer.is_empty() {
+            // Some mic data but not enough - consume all + pad
+            let available: Vec<f32> = self.mic_buffer.drain(..).collect();
+            let mut padded = vec![0.0; self.window_size_samples];
+            padded[..available.len()].copy_from_slice(&available);
+            padded
+        } else {
+            // No mic data - return silence
+            vec![0.0; self.window_size_samples]
+        };
 
-        Some((mic, sys))
+        // Extract system window (or pad with zeros if insufficient data)
+        let sys_window = if self.system_buffer.len() >= self.window_size_samples {
+            // Enough system data - drain window
+            self.system_buffer.drain(0..self.window_size_samples).collect()
+        } else if !self.system_buffer.is_empty() {
+            // Some system data but not enough - consume all + pad
+            let available: Vec<f32> = self.system_buffer.drain(..).collect();
+            let mut padded = vec![0.0; self.window_size_samples];
+            padded[..available.len()].copy_from_slice(&available);
+            padded
+        } else {
+            // No system data - return silence
+            vec![0.0; self.window_size_samples]
+        };
+
+        Some((mic_window, sys_window))
     }
 
 }
 
-/// Professional audio mixer with RMS-based ducking
-/// Uses industry-standard techniques to prevent clipping and artifacts
-struct ProfessionalAudioMixer {
-    system_rms: f32,  // Running RMS estimate for smooth ducking
-    rms_smoothing: f32,  // Smoothing factor (0.95 = very smooth)
-}
+/// Simple audio mixer without aggressive ducking
+/// Combines mic + system audio with basic clipping prevention
+struct ProfessionalAudioMixer;
 
 impl ProfessionalAudioMixer {
     fn new(_sample_rate: u32) -> Self {
-        Self {
-            system_rms: 0.0,
-            rms_smoothing: 0.95,
-        }
+        Self
     }
 
     fn mix_window(&mut self, mic_window: &[f32], sys_window: &[f32]) -> Vec<f32> {
-        // Handle different lengths (pad shorter with zeros)
+        // Handle different lengths (already padded by extract_window, but defensive)
         let max_len = mic_window.len().max(sys_window.len());
         let mut mixed = Vec::with_capacity(max_len);
 
-        // Calculate system RMS for ducking decision
-        let sys_rms = Self::calculate_rms(sys_window);
-        self.system_rms = self.rms_smoothing * self.system_rms +
-                          (1.0 - self.rms_smoothing) * sys_rms;
-
-        // Calculate ducking amount based on system RMS (not per-sample)
-        // Smooth curve: 0.0 → 0.4 as RMS increases from 0.01 → 0.1
-        let duck_amount = if self.system_rms > 0.01 {
-            ((self.system_rms - 0.01) / 0.09).min(1.0) * 0.4
-        } else {
-            0.0
-        };
-
-        // Mix sample-by-sample with professional formula
+        // Simple mixing: sum samples and clamp to prevent clipping
         for i in 0..max_len {
             let mic = mic_window.get(i).copied().unwrap_or(0.0);
             let sys = sys_window.get(i).copied().unwrap_or(0.0);
 
-            // Apply ducking to mic (1.0 → 0.6 based on system RMS)
-            let mic_ducked = mic * (1.0 - duck_amount);
+            // Sum without ducking - mic stays at full volume
+            let sum = mic + sys;
 
-            // Sum with automatic gain compensation to prevent clipping
-            // This is the key: scale down if sum would exceed ±1.0
-            let sum_abs = mic_ducked.abs() + sys.abs();
-            let scale = if sum_abs > 1.0 { 1.0 / sum_abs } else { 1.0 };
-
-            let mixed_sample = (mic_ducked + sys) * scale;
-            mixed.push(mixed_sample.clamp(-1.0, 1.0));
+            // Clamp to valid audio range
+            let mixed_sample = sum.clamp(-1.0, 1.0);
+            mixed.push(mixed_sample);
         }
 
         mixed
-    }
-
-    fn calculate_rms(samples: &[f32]) -> f32 {
-        if samples.is_empty() {
-            return 0.0;
-        }
-        (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
     }
 }
 
@@ -143,6 +140,8 @@ pub struct AudioCapture {
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     needs_resampling: bool,  // NEW: Flag if resampling is required
+    // EBU R128 normalizer for microphone audio (per-device, stateful)
+    normalizer: Arc<std::sync::Mutex<Option<LoudnessNormalizer>>>,
     // Note: Using global recording timestamp for synchronization
 }
 
@@ -179,6 +178,26 @@ impl AudioCapture {
             );
         }
 
+        // Initialize EBU R128 normalizer for MICROPHONE ONLY
+        // System audio doesn't need normalization (already at good levels)
+        let normalizer = if matches!(device_type, DeviceType::Microphone) {
+            // Use TARGET_SAMPLE_RATE for normalizer since we resample before normalization
+            match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
+                Ok(norm) => {
+                    info!("✅ EBU R128 normalizer initialized for microphone '{}' (target: -23 LUFS)", device.name);
+                    Some(norm)
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to create normalizer for microphone: {}, normalization disabled", e);
+                    None
+                }
+            }
+        } else {
+            // System audio: no normalization
+            info!("ℹ️ System audio '{}' will not be normalized (raw capture)", device.name);
+            None
+        };
+
         Self {
             device,
             state,
@@ -188,6 +207,7 @@ impl AudioCapture {
             device_type,
             recording_sender,
             needs_resampling,
+            normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
             // Using global recording time for sync
         }
     }
@@ -229,6 +249,27 @@ impl AudioCapture {
                     data.len() / self.channels as usize,
                     mono_data.len()
                 );
+            }
+        }
+
+        // Apply EBU R128 normalization for microphone audio only
+        // This ensures normalized audio flows through all paths:
+        // - Recording gets normalized mic + raw system (proper balance)
+        // - Transcription gets normalized mic + raw system (proper balance)
+        // - No complex dual-path logic needed
+        if matches!(self.device_type, DeviceType::Microphone) {
+            if let Ok(mut normalizer_lock) = self.normalizer.lock() {
+                if let Some(ref mut normalizer) = *normalizer_lock {
+                    mono_data = normalizer.normalize_loudness(&mono_data);
+
+                    // Log normalization occasionally for debugging
+                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
+                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+                        let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+                        debug!("🎤 Normalized mic chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
+                    }
+                }
             }
         }
 
@@ -463,10 +504,11 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // Professional mixing with RMS-based ducking
+                            // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
-                            // Apply post-gain (reduced from 5x to 2x to prevent distortion)
+                            // Apply modest post-gain (2x for better audibility without clipping)
+                            // Microphone already normalized by EBU R128, system audio at natural levels
                             let mixed_with_gain: Vec<f32> = mixed_clean.iter()
                                 .map(|&s| (s * 2.0).clamp(-1.0, 1.0))
                                 .collect();

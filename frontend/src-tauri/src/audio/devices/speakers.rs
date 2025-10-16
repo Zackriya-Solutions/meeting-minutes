@@ -7,14 +7,8 @@ use super::configuration::{AudioDevice, DeviceType};
 pub fn default_output_device() -> Result<AudioDevice> {
     #[cfg(target_os = "macos")]
     {
-        // ! see https://github.com/RustAudio/cpal/pull/894
-        if let Ok(host) = cpal::host_from_id(cpal::HostId::ScreenCaptureKit) {
-            if let Some(device) = host.default_input_device() {
-                if let Ok(name) = device.name() {
-                    return Ok(AudioDevice::new(name, DeviceType::Output));
-                }
-            }
-        }
+        // Use default host for all macOS devices
+        // Core Audio backend uses direct cidre API for system capture, not cpal
         let host = cpal::default_host();
         let device = host
             .default_output_device()

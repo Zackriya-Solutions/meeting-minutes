@@ -67,7 +67,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 posthog-rs = "0.3.7"
 
 # Cross-platform audio capture
-cpal = { git = "https://github.com/Kree0/cpal.git", branch = "master" }
+cpal = "0.15.3"
 
 # Wav encoding - now using manual WAV creation instead of hound
 # hound = "3.5"
@@ -130,7 +130,7 @@ esaxx-rs = "0.1.10"
 symphonia = { version = "0.5.4", features = ["aac", "isomp4", "opt-simd"] }
 rand = "0.8.5"
 rubato = "0.15.0"
-ringbuf = "0.3"
+ringbuf = "0.4.8"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
@@ -191,3 +191,7 @@ memory-stats = "1.0"
 strsim = "0.10.0"
 futures = "0.3.31"
 tracing-subscriber = "0.3.16"
+
+[patch.crates-io]
+cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }
+esaxx-rs = { git = "https://github.com/thewh1teagle/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }

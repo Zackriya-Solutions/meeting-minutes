@@ -138,15 +138,15 @@ pub async fn get_device_and_config(
             DeviceType::Output => {
                 #[cfg(target_os = "macos")]
                 {
-                    if let Ok(host) = cpal::host_from_id(cpal::HostId::ScreenCaptureKit) {
-                        for device in host.input_devices()? {
-                            if let Ok(name) = device.name() {
-                                if name == audio_device.name {
-                                    let default_config = device
-                                        .default_input_config()
-                                        .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
-                                    return Ok((device, default_config));
-                                }
+                    // Use default host for all macOS output devices
+                    // Core Audio backend uses direct cidre API for system capture, not cpal
+                    for device in host.output_devices()? {
+                        if let Ok(name) = device.name() {
+                            if name == audio_device.name {
+                                let default_config = device
+                                    .default_output_config()
+                                    .map_err(|e| anyhow!("Failed to get output config: {}", e))?;
+                                return Ok((device, default_config));
                             }
                         }
                     }
