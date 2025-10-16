@@ -1,13 +1,14 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use futures_util::{Stream, StreamExt};
-use futures_channel::mpsc;
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
-use log::info;
+
 
 #[cfg(target_os = "macos")]
+use futures_channel::mpsc;
 use super::core_audio::CoreAudioCapture;
+use log::info;
 
 /// System audio capture using Core Audio tap (macOS) or CPAL (other platforms)
 pub struct SystemAudioCapture {
