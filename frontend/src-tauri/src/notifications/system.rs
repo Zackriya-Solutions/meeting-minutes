@@ -1,31 +1,19 @@
 use crate::notifications::types::{Notification, NotificationPriority, NotificationTimeout};
 use anyhow::{Result, anyhow};
-use log::{info as log_info, error as log_error, warn as log_warn};
+use log::{info as log_info, error as log_error};
 use tauri::{AppHandle, Runtime};
 use std::time::Duration;
-
-
-#[cfg(target_os = "macos")]
-use std::process::Command;
-
-#[cfg(target_os = "windows")]
-use std::process::Command;
-
-#[cfg(target_os = "linux")]
-use std::process::Command;
 
 /// Cross-platform system notification handler
 pub struct SystemNotificationHandler<R: Runtime> {
     #[allow(dead_code)] // Used for non-macOS fallback notifications
     app_handle: AppHandle<R>,
-    dnd_cache: std::sync::Arc<std::sync::Mutex<Option<(bool, std::time::Instant)>>>,
 }
 
 impl<R: Runtime> SystemNotificationHandler<R> {
     pub fn new(app_handle: AppHandle<R>) -> Self {
         Self {
             app_handle,
-            dnd_cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -109,36 +97,20 @@ impl<R: Runtime> SystemNotificationHandler<R> {
         }
     }
 
-    /// Check if Do Not Disturb is currently active on the system
+    /// Check if Do Not Disturb is currently active
+    /// Note: DND is managed through app settings, not system-level checks
     pub async fn is_dnd_active(&self) -> bool {
-        // Use cached value if it's fresh (less than 30 seconds old)
-        if let Ok(cache) = self.dnd_cache.lock() {
-            if let Some((cached_value, timestamp)) = *cache {
-                if timestamp.elapsed() < Duration::from_secs(30) {
-                    return cached_value;
-                }
-            }
-        }
-
-        let dnd_status = self.get_system_dnd_status().await;
-
-        // Update cache
-        if let Ok(mut cache) = self.dnd_cache.lock() {
-            *cache = Some((dnd_status, std::time::Instant::now()));
-        }
-
-        dnd_status
+        // App manages DND through its own notification settings
+        // No need to check system-level DND status
+        false
     }
 
-    /// Get the actual system DND status (platform-specific)
+    /// Get the actual system DND status
+    /// Note: DND is managed through app settings, not system-level checks
     pub async fn get_system_dnd_status(&self) -> bool {
-        match self.check_platform_dnd().await {
-            Ok(status) => status,
-            Err(e) => {
-                log_warn!("Failed to check DND status: {}, assuming false", e);
-                false
-            }
-        }
+        // App manages DND through its own notification settings
+        // No need to check system-level DND status
+        false
     }
 
     /// Request notification permission from the system
@@ -156,124 +128,6 @@ impl<R: Runtime> SystemNotificationHandler<R> {
     async fn show_test_notification(&self) -> Result<()> {
         let test_notification = Notification::test_notification();
         self.show_notification(test_notification).await
-    }
-
-    /// Platform-specific DND status checking
-    async fn check_platform_dnd(&self) -> Result<bool> {
-        #[cfg(target_os = "macos")]
-        {
-            self.check_macos_dnd().await
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            self.check_windows_dnd().await
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            self.check_linux_dnd().await
-        }
-
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-        {
-            log_warn!("DND checking not implemented for this platform");
-            Ok(false)
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn check_macos_dnd(&self) -> Result<bool> {
-        tokio::task::spawn_blocking(|| {
-            let output = Command::new("defaults")
-                .arg("read")
-                .arg("com.apple.controlcenter")
-                .arg("NSStatusItem Visible DoNotDisturb")
-                .output();
-
-            match output {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let is_dnd = stdout.trim() == "1";
-                    log_info!("macOS DND status: {}", is_dnd);
-                    Ok(is_dnd)
-                }
-                Err(e) => {
-                    log_warn!("Failed to check macOS DND status: {}", e);
-                    Ok(false)
-                }
-            }
-        }).await.unwrap_or(Ok(false))
-    }
-
-    #[cfg(target_os = "windows")]
-    async fn check_windows_dnd(&self) -> Result<bool> {
-        tokio::task::spawn_blocking(|| {
-            // Check Windows Focus Assist status
-            let output = Command::new("powershell")
-                .arg("-Command")
-                .arg("Get-WinUserLanguageList | Select-Object -First 1 | Select-Object -ExpandProperty InputMethodTips")
-                .output();
-
-            match output {
-                Ok(_) => {
-                    // Windows DND detection is complex, for now return false
-                    // This can be enhanced with Windows Registry checks
-                    log_info!("Windows DND status check not fully implemented, assuming false");
-                    Ok(false)
-                }
-                Err(e) => {
-                    log_warn!("Failed to check Windows DND status: {}", e);
-                    Ok(false)
-                }
-            }
-        }).await.unwrap_or(Ok(false))
-    }
-
-    #[cfg(target_os = "linux")]
-    async fn check_linux_dnd(&self) -> Result<bool> {
-        tokio::task::spawn_blocking(|| {
-            // Check GNOME DND status via gsettings
-            let output = Command::new("gsettings")
-                .arg("get")
-                .arg("org.gnome.desktop.notifications")
-                .arg("show-banners")
-                .output();
-
-            match output {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let show_banners = stdout.trim() == "true";
-                    let is_dnd = !show_banners;
-                    log_info!("Linux DND status: {}", is_dnd);
-                    Ok(is_dnd)
-                }
-                Err(_) => {
-                    // Try alternative method for KDE
-                    let kde_output = Command::new("kreadconfig5")
-                        .arg("--file")
-                        .arg("plasmanotifyrc")
-                        .arg("--group")
-                        .arg("DoNotDisturb")
-                        .arg("--key")
-                        .arg("Enabled")
-                        .output();
-
-                    match kde_output {
-                        Ok(output) => {
-                            let stdout = String::from_utf8_lossy(&output.stdout);
-                            let is_dnd = stdout.trim() == "true";
-                            log_info!("KDE DND status: {}", is_dnd);
-                            Ok(is_dnd)
-                        }
-                        Err(e) => {
-                            log_warn!("Failed to check Linux DND status: {}", e);
-                            Ok(false)
-                        }
-                    }
-                }
-            }
-        }).await.unwrap_or(Ok(false))
     }
 
     /// Determine if we should respect DND for this notification
