@@ -7,7 +7,9 @@ use cpal::traits::{DeviceTrait, HostTrait};
 
 #[cfg(target_os = "macos")]
 use futures_channel::mpsc;
+#[cfg(target_os = "macos")]
 use super::core_audio::CoreAudioCapture;
+#[cfg(target_os = "macos")]
 use log::info;
 
 /// System audio capture using Core Audio tap (macOS) or CPAL (other platforms)
