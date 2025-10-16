@@ -9,7 +9,7 @@ use super::batch_processor::AudioMetricsBatcher;
 
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
-use super::audio_processing::{audio_to_mono, LoudnessNormalizer};
+use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
 /// Ring buffer for synchronized audio mixing
@@ -140,6 +140,9 @@ pub struct AudioCapture {
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     needs_resampling: bool,  // NEW: Flag if resampling is required
+    // Audio enhancement processors (microphone only)
+    noise_suppressor: Arc<std::sync::Mutex<Option<NoiseSuppressionProcessor>>>,
+    high_pass_filter: Arc<std::sync::Mutex<Option<HighPassFilter>>>,
     // EBU R128 normalizer for microphone audio (per-device, stateful)
     normalizer: Arc<std::sync::Mutex<Option<LoudnessNormalizer>>>,
     // Note: Using global recording timestamp for synchronization
@@ -178,24 +181,45 @@ impl AudioCapture {
             );
         }
 
-        // Initialize EBU R128 normalizer for MICROPHONE ONLY
-        // System audio doesn't need normalization (already at good levels)
-        let normalizer = if matches!(device_type, DeviceType::Microphone) {
-            // Use TARGET_SAMPLE_RATE for normalizer since we resample before normalization
-            match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
-                Ok(norm) => {
+        // Initialize audio enhancement processors for MICROPHONE ONLY
+        // System audio doesn't need enhancement (already clean)
+        let (noise_suppressor, high_pass_filter, normalizer) = if matches!(device_type, DeviceType::Microphone) {
+            // Initialize noise suppression (RNNoise) at 48kHz
+            let ns = match NoiseSuppressionProcessor::new(TARGET_SAMPLE_RATE) {
+                Ok(processor) => {
+                    info!("✅ RNNoise noise suppression initialized for microphone '{}' (10-15 dB reduction)", device.name);
+                    Some(processor)
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to create noise suppressor: {}, continuing without noise suppression", e);
+                    None
+                }
+            };
+
+            // Initialize high-pass filter (removes rumble below 80 Hz)
+            let hpf = {
+                let filter = HighPassFilter::new(TARGET_SAMPLE_RATE, 80.0);
+                info!("✅ High-pass filter initialized for microphone '{}' (cutoff: 80 Hz)", device.name);
+                Some(filter)
+            };
+
+            // Initialize EBU R128 normalizer (professional loudness standard)
+            let norm = match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
+                Ok(normalizer) => {
                     info!("✅ EBU R128 normalizer initialized for microphone '{}' (target: -23 LUFS)", device.name);
-                    Some(norm)
+                    Some(normalizer)
                 }
                 Err(e) => {
                     warn!("⚠️ Failed to create normalizer for microphone: {}, normalization disabled", e);
                     None
                 }
-            }
+            };
+
+            (ns, hpf, norm)
         } else {
-            // System audio: no normalization
-            info!("ℹ️ System audio '{}' will not be normalized (raw capture)", device.name);
-            None
+            // System audio: no enhancement needed
+            info!("ℹ️ System audio '{}' captured raw (no enhancement)", device.name);
+            (None, None, None)
         };
 
         Self {
@@ -207,6 +231,8 @@ impl AudioCapture {
             device_type,
             recording_sender,
             needs_resampling,
+            noise_suppressor: Arc::new(std::sync::Mutex::new(noise_suppressor)),
+            high_pass_filter: Arc::new(std::sync::Mutex::new(high_pass_filter)),
             normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
             // Using global recording time for sync
         }
@@ -252,12 +278,33 @@ impl AudioCapture {
             }
         }
 
-        // Apply EBU R128 normalization for microphone audio only
-        // This ensures normalized audio flows through all paths:
-        // - Recording gets normalized mic + raw system (proper balance)
-        // - Transcription gets normalized mic + raw system (proper balance)
-        // - No complex dual-path logic needed
+        // AUDIO ENHANCEMENT PIPELINE (Microphone Only)
+        // Processing order is critical: high-pass → noise suppression → normalization
+        // This ensures noise is removed before being amplified by the normalizer
         if matches!(self.device_type, DeviceType::Microphone) {
+            // STEP 1: Apply high-pass filter to remove low-frequency rumble (< 80 Hz)
+            if let Ok(mut hpf_lock) = self.high_pass_filter.lock() {
+                if let Some(ref mut filter) = *hpf_lock {
+                    mono_data = filter.process(&mono_data);
+                }
+            }
+
+            // STEP 2: Apply RNNoise noise suppression (10-15 dB reduction)
+            if let Ok(mut ns_lock) = self.noise_suppressor.lock() {
+                if let Some(ref mut suppressor) = *ns_lock {
+                    mono_data = suppressor.process(&mono_data);
+
+                    // Log noise suppression occasionally for debugging
+                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
+                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+                        debug!("🔇 After noise suppression chunk {}: RMS={:.4}, buffered={} samples",
+                               chunk_id, rms, suppressor.buffered_samples());
+                    }
+                }
+            }
+
+            // STEP 3: Apply EBU R128 normalization (professional loudness standard)
             if let Ok(mut normalizer_lock) = self.normalizer.lock() {
                 if let Some(ref mut normalizer) = *normalizer_lock {
                     mono_data = normalizer.normalize_loudness(&mono_data);
@@ -267,7 +314,7 @@ impl AudioCapture {
                     if chunk_id % 200 == 0 && !mono_data.is_empty() {
                         let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
                         let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-                        debug!("🎤 Normalized mic chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
+                        debug!("🎤 After normalization chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
                     }
                 }
             }

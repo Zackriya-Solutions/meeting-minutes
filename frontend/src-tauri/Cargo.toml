@@ -90,6 +90,9 @@ bytemuck = "1.16.1"
 # EBU R128 loudness normalization (professional broadcast standard)
 ebur128 = "0.1"
 
+# Noise suppression - RNNoise-based neural network noise reduction
+nnnoiseless = "0.5"
+
 # Whisper-rs for speech recognition - BASE dependency (no GPU features)
 # Platform-specific GPU features are added via target-specific dependencies below
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }

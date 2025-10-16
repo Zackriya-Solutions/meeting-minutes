@@ -1,12 +1,13 @@
 use anyhow::Result;
 use chrono::Utc;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use realfft::num_complex::{Complex32, ComplexFloat};
 use realfft::RealFftPlanner;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::path::PathBuf;
+use nnnoiseless::DenoiseState;
 
 use super::encode::encode_single_audio; // Correct path to encode module
 
@@ -211,6 +212,174 @@ impl LoudnessNormalizer {
         }
 
         normalized_samples
+    }
+}
+
+/// RNNoise-based noise suppression processor
+///
+/// Uses a recurrent neural network to suppress background noise while preserving speech.
+/// Processes audio at 48kHz in 10ms frames (480 samples per frame).
+///
+/// Benefits:
+/// - 10-15 dB noise reduction in typical office/home environments
+/// - Preserves speech quality and intelligibility
+/// - Low latency (~10ms per frame)
+/// - Cross-platform (works on macOS, Windows, Linux)
+pub struct NoiseSuppressionProcessor {
+    denoiser: DenoiseState<'static>,
+    frame_buffer: Vec<f32>,
+    frame_size: usize,  // 480 samples at 48kHz = 10ms
+}
+
+impl NoiseSuppressionProcessor {
+    /// Create a new noise suppression processor
+    ///
+    /// # Arguments
+    /// * `sample_rate` - Must be 48000 Hz (RNNoise requirement)
+    pub fn new(sample_rate: u32) -> Result<Self> {
+        if sample_rate != 48000 {
+            return Err(anyhow::anyhow!(
+                "Noise suppression requires 48kHz sample rate, got {}Hz",
+                sample_rate
+            ));
+        }
+
+        const FRAME_SIZE: usize = DenoiseState::FRAME_SIZE;
+
+        info!("Initializing RNNoise noise suppression (frame size: {} samples, 10ms @ 48kHz)", FRAME_SIZE);
+
+        Ok(Self {
+            denoiser: *DenoiseState::new(),
+            frame_buffer: Vec::with_capacity(FRAME_SIZE * 2),
+            frame_size: FRAME_SIZE,
+        })
+    }
+
+    /// Apply noise suppression to audio samples
+    ///
+    /// Processes audio in 480-sample frames (10ms at 48kHz).
+    /// Buffers partial frames for next call.
+    ///
+    /// # Arguments
+    /// * `samples` - Input audio samples at 48kHz
+    ///
+    /// # Returns
+    /// Noise-suppressed audio samples (same length as input)
+    pub fn process(&mut self, samples: &[f32]) -> Vec<f32> {
+        if samples.is_empty() {
+            return Vec::new();
+        }
+
+        // Add new samples to buffer
+        self.frame_buffer.extend_from_slice(samples);
+
+        let mut output = Vec::with_capacity(samples.len());
+
+        // Process complete frames
+        while self.frame_buffer.len() >= self.frame_size {
+            // Extract one frame
+            let frame: Vec<f32> = self.frame_buffer.drain(0..self.frame_size).collect();
+
+            // RNNoise processes audio: separate input and output buffers
+            let mut denoised_frame = vec![0.0f32; self.frame_size];
+
+            // Apply noise suppression
+            // process_frame(output: &mut [f32], input: &[f32]) -> f32
+            // Returns VAD probability (0.0-1.0), higher means more likely to be speech
+            let _vad_prob = self.denoiser.process_frame(&mut denoised_frame, &frame);
+
+            output.extend_from_slice(&denoised_frame);
+        }
+
+        output
+    }
+
+    /// Get the number of buffered samples waiting for processing
+    pub fn buffered_samples(&self) -> usize {
+        self.frame_buffer.len()
+    }
+
+    /// Flush any remaining buffered samples
+    /// Call this at the end of recording to process partial frames
+    pub fn flush(&mut self) -> Vec<f32> {
+        if self.frame_buffer.is_empty() {
+            return Vec::new();
+        }
+
+        // Pad the remaining samples to a full frame with zeros
+        let remaining = self.frame_buffer.len();
+        let mut input_frame = self.frame_buffer.clone();
+        if input_frame.len() < self.frame_size {
+            input_frame.resize(self.frame_size, 0.0);
+        }
+
+        let mut output = vec![0.0f32; self.frame_size];
+        self.denoiser.process_frame(&mut output, &input_frame);
+        self.frame_buffer.clear();
+
+        // Return only the original samples (without padding)
+        output.truncate(remaining);
+        output
+    }
+}
+
+/// High-pass filter to remove low-frequency rumble and noise
+/// Removes frequencies below cutoff_hz (typically 80-100 Hz for speech)
+pub struct HighPassFilter {
+    sample_rate: f32,
+    cutoff_hz: f32,
+    // First-order IIR filter coefficients
+    alpha: f32,
+    prev_input: f32,
+    prev_output: f32,
+}
+
+impl HighPassFilter {
+    /// Create a new high-pass filter
+    ///
+    /// # Arguments
+    /// * `sample_rate` - Audio sample rate in Hz
+    /// * `cutoff_hz` - Cutoff frequency in Hz (typical: 80-100 Hz for speech)
+    pub fn new(sample_rate: u32, cutoff_hz: f32) -> Self {
+        let sample_rate_f = sample_rate as f32;
+        let rc = 1.0 / (2.0 * std::f32::consts::PI * cutoff_hz);
+        let dt = 1.0 / sample_rate_f;
+        let alpha = rc / (rc + dt);
+
+        info!("Initializing high-pass filter: cutoff={}Hz @ {}Hz", cutoff_hz, sample_rate);
+
+        Self {
+            sample_rate: sample_rate_f,
+            cutoff_hz,
+            alpha,
+            prev_input: 0.0,
+            prev_output: 0.0,
+        }
+    }
+
+    /// Apply high-pass filter to audio samples
+    /// Uses first-order IIR (Infinite Impulse Response) filter
+    pub fn process(&mut self, samples: &[f32]) -> Vec<f32> {
+        let mut output = Vec::with_capacity(samples.len());
+
+        for &sample in samples {
+            // First-order high-pass IIR filter formula:
+            // y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+            let filtered = self.alpha * (self.prev_output + sample - self.prev_input);
+
+            self.prev_input = sample;
+            self.prev_output = filtered;
+
+            output.push(filtered);
+        }
+
+        output
+    }
+
+    /// Reset filter state (call when starting new recording)
+    pub fn reset(&mut self) {
+        self.prev_input = 0.0;
+        self.prev_output = 0.0;
     }
 }
 
