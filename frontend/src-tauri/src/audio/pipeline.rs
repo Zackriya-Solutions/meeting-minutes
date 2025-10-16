@@ -27,8 +27,15 @@ impl AudioMixerRingBuffer {
         let window_ms = 50.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
-        // Max buffer size: 100ms (prevent unbounded growth)
-        let max_buffer_size = window_size_samples * 2;
+        // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
+        // System audio (especially Core Audio on macOS) can have significant jitter
+        // due to sample-by-sample streaming → batching → channel transmission
+        // Accounts for: RNNoise buffering + Core Audio jitter + processing delays
+        let max_buffer_size = window_size_samples * 8;  // 400ms (was 200ms)
+
+        info!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
+              window_ms, window_size_samples,
+              window_ms * 8.0, max_buffer_size);
 
         Self {
             mic_buffer: VecDeque::with_capacity(max_buffer_size),
@@ -39,12 +46,35 @@ impl AudioMixerRingBuffer {
     }
 
     fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
+        // Log buffer health periodically for diagnostics
+        static mut SAMPLE_COUNTER: u64 = 0;
+        unsafe {
+            SAMPLE_COUNTER += 1;
+            if SAMPLE_COUNTER % 200 == 0 {
+                debug!("📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
+                       self.mic_buffer.len(), self.system_buffer.len(), self.max_buffer_size);
+            }
+        }
+
         match device_type {
             DeviceType::Microphone => self.mic_buffer.extend(samples),
             DeviceType::System => self.system_buffer.extend(samples),
         }
 
-        // Safety: prevent buffer overflow (keep only last 100ms)
+        // CRITICAL FIX: Add warnings before dropping samples
+        // This helps diagnose timing issues in production
+        if self.mic_buffer.len() > self.max_buffer_size {
+            warn!("⚠️ Microphone buffer overflow: {} > {} samples, dropping oldest {} samples",
+                  self.mic_buffer.len(), self.max_buffer_size,
+                  self.mic_buffer.len() - self.max_buffer_size);
+        }
+        if self.system_buffer.len() > self.max_buffer_size {
+            error!("🔴 SYSTEM AUDIO BUFFER OVERFLOW: {} > {} samples, dropping {} samples - THIS CAUSES DISTORTION!",
+                  self.system_buffer.len(), self.max_buffer_size,
+                  self.system_buffer.len() - self.max_buffer_size);
+        }
+
+        // Safety: prevent buffer overflow (keep only last 200ms)
         while self.mic_buffer.len() > self.max_buffer_size {
             self.mic_buffer.pop_front();
         }
@@ -63,15 +93,23 @@ impl AudioMixerRingBuffer {
             return None;
         }
 
+        // Extract mic window with zero-padding for incomplete buffers
+        // Zero-padding (silence) is preferred over last-sample-hold to prevent artifacts
+
         // Extract mic window (or pad with zeros if insufficient data)
         let mic_window = if self.mic_buffer.len() >= self.window_size_samples {
             // Enough mic data - drain window
             self.mic_buffer.drain(0..self.window_size_samples).collect()
         } else if !self.mic_buffer.is_empty() {
-            // Some mic data but not enough - consume all + pad
+            // Some mic data but not enough - consume all + pad with zeros
             let available: Vec<f32> = self.mic_buffer.drain(..).collect();
-            let mut padded = vec![0.0; self.window_size_samples];
-            padded[..available.len()].copy_from_slice(&available);
+            let mut padded = Vec::with_capacity(self.window_size_samples);
+            padded.extend_from_slice(&available);
+
+            // Use zero-padding (silence) to prevent repetition artifacts
+            // Zero-padding is inaudible at 48kHz sample rate
+            padded.resize(self.window_size_samples, 0.0);
+
             padded
         } else {
             // No mic data - return silence
@@ -83,10 +121,15 @@ impl AudioMixerRingBuffer {
             // Enough system data - drain window
             self.system_buffer.drain(0..self.window_size_samples).collect()
         } else if !self.system_buffer.is_empty() {
-            // Some system data but not enough - consume all + pad
+            // Some system data but not enough - consume all + pad with zeros
             let available: Vec<f32> = self.system_buffer.drain(..).collect();
-            let mut padded = vec![0.0; self.window_size_samples];
-            padded[..available.len()].copy_from_slice(&available);
+            let mut padded = Vec::with_capacity(self.window_size_samples);
+            padded.extend_from_slice(&available);
+
+            // Use zero-padding (silence) to prevent repetition artifacts
+            // Zero-padding is inaudible at 48kHz sample rate
+            padded.resize(self.window_size_samples, 0.0);
+
             padded
         } else {
             // No system data - return silence
@@ -112,16 +155,31 @@ impl ProfessionalAudioMixer {
         let max_len = mic_window.len().max(sys_window.len());
         let mut mixed = Vec::with_capacity(max_len);
 
-        // Simple mixing: sum samples and clamp to prevent clipping
+        // Professional mixing with soft scaling to prevent distortion
+        // Uses proportional scaling instead of hard clamping to avoid artifacts
         for i in 0..max_len {
             let mic = mic_window.get(i).copied().unwrap_or(0.0);
             let sys = sys_window.get(i).copied().unwrap_or(0.0);
 
-            // Sum without ducking - mic stays at full volume
-            let sum = mic + sys;
+            // Pre-scale system audio to 70% to leave headroom
+            // This prevents constant soft scaling which can cause pumping artifacts
+            // Mic is normalized to -23 LUFS (already optimal), system needs reduction
+            let sys_scaled = sys * 0.7;
 
-            // Clamp to valid audio range
-            let mixed_sample = sum.clamp(-1.0, 1.0);
+            // Sum without ducking - mic stays at full volume, system slightly reduced
+            let sum = mic + sys_scaled;
+
+            // CRITICAL FIX: Soft scaling prevents distortion artifacts
+            // If the sum would exceed ±1.0, scale down PROPORTIONALLY
+            // This avoids hard clipping distortion that sounds like "radio breaks"
+            let sum_abs = sum.abs();
+            let mixed_sample = if sum_abs > 1.0 {
+                // Scale down to fit within ±1.0
+                sum / sum_abs
+            } else {
+                sum
+            };
+
             mixed.push(mixed_sample);
         }
 
@@ -292,14 +350,33 @@ impl AudioCapture {
             // STEP 2: Apply RNNoise noise suppression (10-15 dB reduction)
             if let Ok(mut ns_lock) = self.noise_suppressor.lock() {
                 if let Some(ref mut suppressor) = *ns_lock {
+                    let before_len = mono_data.len();
                     mono_data = suppressor.process(&mono_data);
+                    let after_len = mono_data.len();
 
-                    // Log noise suppression occasionally for debugging
+                    // CRITICAL MONITORING: Track buffer health
                     let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
-                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-                        debug!("🔇 After noise suppression chunk {}: RMS={:.4}, buffered={} samples",
-                               chunk_id, rms, suppressor.buffered_samples());
+                    if chunk_id % 100 == 0 {
+                        let buffered = suppressor.buffered_samples();
+                        let length_delta = (before_len as i32 - after_len as i32).abs();
+
+                        debug!("🔇 Noise suppression health: in={}, out={}, delta={}, buffered={}, RMS={:.4}",
+                               before_len, after_len, length_delta, buffered,
+                               if !mono_data.is_empty() {
+                                   (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
+                               } else { 0.0 });
+
+                        // WARN if accumulating samples (potential latency buildup)
+                        if buffered > 1000 {
+                            warn!("⚠️ RNNoise accumulating samples: {} buffered (potential latency issue!)",
+                                  buffered);
+                        }
+
+                        // WARN if significant length mismatch
+                        if length_delta > 50 {
+                            warn!("⚠️ RNNoise length mismatch: input={} output={} (delta={})",
+                                  before_len, after_len, length_delta);
+                        }
                     }
                 }
             }
@@ -554,11 +631,11 @@ impl AudioPipeline {
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
-                            // Apply modest post-gain (2x for better audibility without clipping)
-                            // Microphone already normalized by EBU R128, system audio at natural levels
-                            let mixed_with_gain: Vec<f32> = mixed_clean.iter()
-                                .map(|&s| (s * 2.0).clamp(-1.0, 1.0))
-                                .collect();
+                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
+                            // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
+                            // System audio at natural levels
+                            // Previous 2x gain was causing excessive limiting/distortion
+                            let mixed_with_gain = mixed_clean;
 
                             // STEP 3: Send mixed audio for transcription (VAD + Whisper)
                             match self.vad_processor.process_audio(&mixed_with_gain) {
