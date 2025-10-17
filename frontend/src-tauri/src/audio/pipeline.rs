@@ -33,7 +33,7 @@ impl AudioMixerRingBuffer {
         // Accounts for: RNNoise buffering + Core Audio jitter + processing delays
         let max_buffer_size = window_size_samples * 8;  // 400ms (was 200ms)
 
-        debug!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
+        info!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
               window_ms, window_size_samples,
               window_ms * 8.0, max_buffer_size);
 
@@ -51,7 +51,7 @@ impl AudioMixerRingBuffer {
         unsafe {
             SAMPLE_COUNTER += 1;
             if SAMPLE_COUNTER % 200 == 0 {
-                info!("📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
+                debug!("📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
                        self.mic_buffer.len(), self.system_buffer.len(), self.max_buffer_size);
             }
         }
@@ -156,18 +156,15 @@ impl ProfessionalAudioMixer {
         let mut mixed = Vec::with_capacity(max_len);
 
         // Professional mixing with soft scaling to prevent distortion
+        // Both mic and system audio are normalized to -23 LUFS (broadcast standard)
         // Uses proportional scaling instead of hard clamping to avoid artifacts
         for i in 0..max_len {
             let mic = mic_window.get(i).copied().unwrap_or(0.0);
             let sys = sys_window.get(i).copied().unwrap_or(0.0);
 
-            // Pre-scale system audio to 70% to leave headroom
-            // This prevents constant soft scaling which can cause pumping artifacts
-            // Mic is normalized to -23 LUFS (already optimal), system needs reduction
-            let sys_scaled = sys * 0.7;
-
-            // Sum without ducking - mic stays at full volume, system slightly reduced
-            let sum = mic + sys_scaled;
+            // CRITICAL FIX: No pre-scaling needed - both sources normalized to -23 LUFS
+            // Direct sum of normalized audio sources for balanced mixing
+            let sum = mic + sys;
 
             // CRITICAL FIX: Soft scaling prevents distortion artifacts
             // If the sum would exceed ±1.0, scale down PROPORTIONALLY
@@ -239,8 +236,9 @@ impl AudioCapture {
             );
         }
 
-        // Initialize audio enhancement processors for MICROPHONE ONLY
-        // System audio doesn't need enhancement (already clean)
+        // Initialize audio enhancement processors
+        // Microphone: noise suppression + high-pass filter + normalizer
+        // System audio: normalizer only (no noise suppression/filtering needed)
         let (noise_suppressor, high_pass_filter, normalizer) = if matches!(device_type, DeviceType::Microphone) {
             // Initialize noise suppression (RNNoise) at 48kHz
             let ns = match NoiseSuppressionProcessor::new(TARGET_SAMPLE_RATE) {
@@ -275,9 +273,20 @@ impl AudioCapture {
 
             (ns, hpf, norm)
         } else {
-            // System audio: no enhancement needed
-            info!("ℹ️ System audio '{}' captured raw (no enhancement)", device.name);
-            (None, None, None)
+            // System audio: normalization only (no noise suppression/high-pass needed)
+            // CRITICAL FIX: Apply same EBU R128 normalization to system audio for balanced mixing
+            let norm = match LoudnessNormalizer::new(1, TARGET_SAMPLE_RATE) {
+                Ok(normalizer) => {
+                    info!("✅ EBU R128 normalizer initialized for system audio '{}' (target: -23 LUFS)", device.name);
+                    Some(normalizer)
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to create normalizer for system audio: {}, normalization disabled", e);
+                    None
+                }
+            };
+
+            (None, None, norm)
         };
 
         Self {
@@ -336,9 +345,12 @@ impl AudioCapture {
             }
         }
 
-        // AUDIO ENHANCEMENT PIPELINE (Microphone Only)
-        // Processing order is critical: high-pass → noise suppression → normalization
-        // This ensures noise is removed before being amplified by the normalizer
+        // AUDIO ENHANCEMENT PIPELINE
+        // Microphone: high-pass → noise suppression → normalization
+        // System: normalization only
+        // Processing order is critical: noise removal before amplification
+
+        // STEP 1 & 2: Apply high-pass filter and noise suppression (MICROPHONE ONLY)
         if matches!(self.device_type, DeviceType::Microphone) {
             // STEP 1: Apply high-pass filter to remove low-frequency rumble (< 80 Hz)
             if let Ok(mut hpf_lock) = self.high_pass_filter.lock() {
@@ -380,19 +392,22 @@ impl AudioCapture {
                     }
                 }
             }
+        }
 
-            // STEP 3: Apply EBU R128 normalization (professional loudness standard)
-            if let Ok(mut normalizer_lock) = self.normalizer.lock() {
-                if let Some(ref mut normalizer) = *normalizer_lock {
-                    mono_data = normalizer.normalize_loudness(&mono_data);
+        // STEP 3: Apply EBU R128 normalization (BOTH MICROPHONE AND SYSTEM)
+        // CRITICAL FIX: Normalize both audio sources to -23 LUFS for balanced mixing
+        if let Ok(mut normalizer_lock) = self.normalizer.lock() {
+            if let Some(ref mut normalizer) = *normalizer_lock {
+                mono_data = normalizer.normalize_loudness(&mono_data);
 
-                    // Log normalization occasionally for debugging
-                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
-                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-                        let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-                        debug!("🎤 After normalization chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
-                    }
+                // Log normalization occasionally for debugging
+                let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                if chunk_id % 200 == 0 && !mono_data.is_empty() {
+                    let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+                    let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+                    debug!("{} After normalization chunk {}: RMS={:.4}, Peak={:.4}",
+                           if matches!(self.device_type, DeviceType::Microphone) { "🎤" } else { "🔊" },
+                           chunk_id, rms, peak);
                 }
             }
         }
@@ -537,7 +552,7 @@ impl AudioPipeline {
         // This bridges natural pauses without excessive fragmentation
         // For mac os core audio, 900ms, for windows 400ms seems good
 
-        let redemption_time = if cfg!(target_os = "macos") { 900 } else { 400 };
+        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
 
         let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
             Ok(processor) => {
