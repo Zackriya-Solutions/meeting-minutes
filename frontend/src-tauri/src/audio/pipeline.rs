@@ -24,7 +24,7 @@ struct AudioMixerRingBuffer {
 impl AudioMixerRingBuffer {
     fn new(sample_rate: u32) -> Self {
         // Use 50ms windows for mixing
-        let window_ms = 50.0;
+        let window_ms = 600.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
         // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
@@ -51,7 +51,7 @@ impl AudioMixerRingBuffer {
         unsafe {
             SAMPLE_COUNTER += 1;
             if SAMPLE_COUNTER % 200 == 0 {
-                debug!("📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
+                info!("📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
                        self.mic_buffer.len(), self.system_buffer.len(), self.max_buffer_size);
             }
         }
