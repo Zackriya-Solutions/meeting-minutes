@@ -33,7 +33,7 @@ impl AudioMixerRingBuffer {
         // Accounts for: RNNoise buffering + Core Audio jitter + processing delays
         let max_buffer_size = window_size_samples * 8;  // 400ms (was 200ms)
 
-        info!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
+        debug!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
               window_ms, window_size_samples,
               window_ms * 8.0, max_buffer_size);
 
