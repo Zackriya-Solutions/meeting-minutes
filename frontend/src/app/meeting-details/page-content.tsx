@@ -1074,7 +1074,7 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                   onChange={handleTitleChange}
                 />
               </div>
-              <BluetoothPlaybackWarning enabled={true} checkInterval={5000} />
+              {/* <BluetoothPlaybackWarning enabled={true} checkInterval={5000} /> */}
               <div className="flex items-center justify-center border-t w-full pt-4 gap-2 ">
                 <Button
                   variant="outline"
