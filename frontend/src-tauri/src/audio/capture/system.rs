@@ -125,7 +125,7 @@ impl SystemAudioCapture {
 
             // Create channel for audio samples
             let (tx, rx) = mpsc::unbounded::<Vec<f32>>();
-            let (drop_tx, drop_rx) = std::sync::mpsc::channel::<()>();
+            let (drop_tx, _drop_rx) = std::sync::mpsc::channel::<()>();
 
             // Build input stream in loopback mode (WASAPI captures output as input)
             let stream = match config.sample_format() {
@@ -215,24 +215,17 @@ impl SystemAudioCapture {
             stream.play()
                 .map_err(|e| anyhow::anyhow!("Failed to start WASAPI loopback stream: {}", e))?;
 
-            // Spawn blocking task to manage stream lifecycle (Stream is !Send, requires spawn_blocking)
-            tokio::task::spawn_blocking(move || {
-                // Keep stream alive until drop signal
-                let _stream = stream;
-                if drop_rx.recv().is_ok() {
-                    info!("WASAPI loopback stream stopped");
-                }
-                // Stream drops here when task exits
-            });
-
             let receiver = rx.map(futures_util::stream::iter).flatten();
 
             info!("WASAPI loopback system capture started successfully");
 
+            // Store the stream in the struct to keep it alive
+            // When SystemAudioStream is dropped, the stream will be dropped automatically
             Ok(SystemAudioStream {
                 drop_tx,
                 sample_rate,
                 receiver: Box::pin(receiver),
+                _stream: Some(stream),
             })
         }
 
@@ -256,6 +249,8 @@ pub struct SystemAudioStream {
     drop_tx: std::sync::mpsc::Sender<()>,
     sample_rate: u32,
     receiver: Pin<Box<dyn Stream<Item = f32> + Send + Sync>>,
+    #[cfg(target_os = "windows")]
+    _stream: Option<cpal::Stream>, // Keep stream alive on Windows
 }
 
 impl Drop for SystemAudioStream {
