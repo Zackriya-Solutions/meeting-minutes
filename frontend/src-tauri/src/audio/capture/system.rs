@@ -10,7 +10,7 @@ use log::info;
 use cpal::traits::StreamTrait;
 
 #[cfg(target_os = "windows")]
-use log::{warn, error};
+use log::error;
 
 #[cfg(target_os = "macos")]
 use super::core_audio::CoreAudioCapture;
@@ -215,13 +215,14 @@ impl SystemAudioCapture {
             stream.play()
                 .map_err(|e| anyhow::anyhow!("Failed to start WASAPI loopback stream: {}", e))?;
 
-            // Spawn task to manage stream lifecycle
-            tokio::spawn(async move {
+            // Spawn blocking thread to manage stream lifecycle (Stream is not Send, can't use tokio::spawn)
+            std::thread::spawn(move || {
                 // Keep stream alive until drop signal
                 let _stream = stream;
                 if drop_rx.recv().is_ok() {
                     info!("WASAPI loopback stream stopped");
                 }
+                // Stream drops here when thread exits
             });
 
             let receiver = rx.map(futures_util::stream::iter).flatten();

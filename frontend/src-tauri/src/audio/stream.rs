@@ -77,7 +77,7 @@ impl AudioStream {
             && backend_type == AudioCaptureBackend::CoreAudio;
 
         #[cfg(not(target_os = "macos"))]
-        let use_core_audio = false;
+        let _use_core_audio = false;
 
         // Windows: Use WASAPI loopback for system audio (more reliable than CPAL)
         #[cfg(target_os = "windows")]
