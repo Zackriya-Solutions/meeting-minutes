@@ -13,6 +13,9 @@ use super::capture::{AudioCaptureBackend, get_current_backend};
 #[cfg(target_os = "macos")]
 use super::capture::CoreAudioCapture;
 
+#[cfg(target_os = "windows")]
+use super::capture::system::start_system_audio_capture;
+
 /// Stream backend implementation
 pub enum StreamBackend {
     /// CPAL-based stream (ScreenCaptureKit or default)
@@ -21,6 +24,12 @@ pub enum StreamBackend {
     #[cfg(target_os = "macos")]
     CoreAudio {
         task: Option<tokio::task::JoinHandle<()>>,
+    },
+    /// WASAPI loopback implementation (Windows only)
+    #[cfg(target_os = "windows")]
+    WasapiLoopback {
+        task: Option<tokio::task::JoinHandle<()>>,
+        drop_tx: std::sync::mpsc::Sender<()>,
     },
 }
 
@@ -61,7 +70,7 @@ impl AudioStream {
         info!("🎵 Stream: Creating audio stream for device: {} with backend: {:?}, device_type: {:?}",
               device.name, backend_type, device_type);
 
-        // For system audio devices, use the selected backend
+        // For system audio devices, use platform-specific backends
         // For microphone devices, always use CPAL
         #[cfg(target_os = "macos")]
         let use_core_audio = device_type == DeviceType::System
@@ -70,13 +79,25 @@ impl AudioStream {
         #[cfg(not(target_os = "macos"))]
         let use_core_audio = false;
 
+        // Windows: Use WASAPI loopback for system audio (more reliable than CPAL)
+        #[cfg(target_os = "windows")]
+        let use_wasapi_loopback = device_type == DeviceType::System;
+
+        #[cfg(not(target_os = "windows"))]
+        let _use_wasapi_loopback = false;
+
         #[cfg(target_os = "macos")]
         info!("🎵 Stream: use_core_audio = {}, device_type == System: {}, backend == CoreAudio: {}",
               use_core_audio,
               device_type == DeviceType::System,
               backend_type == AudioCaptureBackend::CoreAudio);
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        info!("🎵 Stream: use_wasapi_loopback = {}, device_type == System: {}",
+              use_wasapi_loopback,
+              device_type == DeviceType::System);
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         info!("🎵 Stream: use_core_audio = {}, device_type == System: {}",
               use_core_audio,
               device_type == DeviceType::System);
@@ -85,6 +106,12 @@ impl AudioStream {
         if use_core_audio {
             info!("🎵 Stream: Using Core Audio backend (cidre) for system audio");
             return Self::create_core_audio_stream(device, state, device_type, recording_sender).await;
+        }
+
+        #[cfg(target_os = "windows")]
+        if use_wasapi_loopback {
+            info!("🎵 Stream: Using WASAPI loopback for system audio");
+            return Self::create_wasapi_loopback_stream(device, state, device_type, recording_sender).await;
         }
 
         // Default path: use CPAL
@@ -137,6 +164,89 @@ impl AudioStream {
         Ok(Self {
             device,
             backend: StreamBackend::Cpal(stream),
+        })
+    }
+
+    /// Create a WASAPI loopback stream (Windows only)
+    #[cfg(target_os = "windows")]
+    async fn create_wasapi_loopback_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        info!("🔊 Stream: Creating WASAPI loopback stream for device: {}", device.name);
+
+        // Call the WASAPI loopback implementation from capture/system.rs
+        info!("🔊 Stream: Calling start_system_audio_capture()...");
+        let mut wasapi_stream = start_system_audio_capture().await
+            .map_err(|e| {
+                error!("❌ Stream: start_system_audio_capture() failed: {}", e);
+                anyhow::anyhow!("Failed to create WASAPI loopback stream: {}", e)
+            })?;
+
+        let sample_rate = wasapi_stream.sample_rate();
+        info!("✅ Stream: WASAPI loopback stream created with sample rate: {} Hz", sample_rate);
+
+        // Create audio capture processor for pipeline integration
+        let capture = AudioCapture::new(
+            device.clone(),
+            state.clone(),
+            sample_rate,
+            2, // WASAPI loopback typically uses stereo
+            device_type,
+            recording_sender,
+        );
+
+        // Spawn task to process WASAPI loopback stream samples
+        let device_name = device.name.clone();
+        info!("🔊 Stream: Spawning tokio task to poll WASAPI loopback stream...");
+        let task = tokio::spawn({
+            let capture = capture.clone();
+
+            async move {
+                use futures_util::StreamExt;
+
+                let mut buffer = Vec::new();
+                let mut frame_count = 0;
+                let frames_per_chunk = 1024; // Process in chunks of 1024 samples
+
+                info!("✅ Stream: WASAPI loopback processing task started for {}", device_name);
+
+                while let Some(sample) = wasapi_stream.next().await {
+                    buffer.push(sample);
+                    frame_count += 1;
+
+                    // Process when we have enough samples
+                    if frame_count >= frames_per_chunk {
+                        capture.process_audio_data(&buffer);
+                        buffer.clear();
+                        frame_count = 0;
+                    }
+                }
+
+                // Process any remaining samples
+                if !buffer.is_empty() {
+                    capture.process_audio_data(&buffer);
+                }
+
+                info!("⚠️ Stream: WASAPI loopback processing task ended for {}", device_name);
+            }
+        });
+
+        // Get the drop_tx from the stream (we need to move this before the stream is moved)
+        // Actually, we can't easily extract drop_tx without modifying SystemAudioStream
+        // For now, we'll manage the stream lifecycle through the task
+        let (drop_tx, _drop_rx) = std::sync::mpsc::channel::<()>();
+
+        info!("✅ Stream: WASAPI loopback stream fully initialized for device: {}", device.name);
+
+        Ok(Self {
+            device: device.clone(),
+            backend: StreamBackend::WasapiLoopback {
+                task: Some(task),
+                drop_tx,
+            },
         })
     }
 
@@ -327,6 +437,14 @@ impl AudioStream {
             #[cfg(target_os = "macos")]
             StreamBackend::CoreAudio { task } => {
                 // Abort the processing task (which will drop the stream)
+                if let Some(task_handle) = task {
+                    task_handle.abort();
+                }
+            }
+            #[cfg(target_os = "windows")]
+            StreamBackend::WasapiLoopback { task, drop_tx } => {
+                // Send drop signal and abort the processing task
+                let _ = drop_tx.send(());
                 if let Some(task_handle) = task {
                     task_handle.abort();
                 }
