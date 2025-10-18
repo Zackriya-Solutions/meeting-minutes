@@ -381,28 +381,20 @@ impl AudioCapture {
             }
 
             // STEP 3: Apply EBU R128 normalization (professional loudness standard)
-            // CRITICAL: Skip normalization for resampled audio to prevent double-amplification
-            // The resampler already preserves RMS energy, so normalizing after resampling
-            // would cause 173.5% RMS amplification (as seen in logs)
-            if !self.needs_resampling {
-                if let Ok(mut normalizer_lock) = self.normalizer.lock() {
-                    if let Some(ref mut normalizer) = *normalizer_lock {
-                        mono_data = normalizer.normalize_loudness(&mono_data);
+            // Restored unconditional normalization to match good processing (6ff333e)
+            // Normalizes microphone audio to -23 LUFS (broadcast standard)
+            // This prevents mic from being too loud relative to system audio
+            if let Ok(mut normalizer_lock) = self.normalizer.lock() {
+                if let Some(ref mut normalizer) = *normalizer_lock {
+                    mono_data = normalizer.normalize_loudness(&mono_data);
 
-                        // Log normalization occasionally for debugging
-                        let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                        if chunk_id % 200 == 0 && !mono_data.is_empty() {
-                            let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-                            let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-                            debug!("🎤 After normalization chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
-                        }
+                    // Log normalization occasionally for debugging
+                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
+                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+                        let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+                        debug!("🎤 After normalization chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
                     }
-                }
-            } else {
-                // Skip normalization for resampled audio (prevents double-amplification)
-                let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                if chunk_id == 0 {
-                    info!("ℹ️ EBU R128 normalization SKIPPED for resampled microphone (resampler preserves RMS energy)");
                 }
             }
         }

@@ -17,7 +17,7 @@ use log::{debug, warn, info};
 use super::device_detection::InputDeviceKind;
 
 /// Configuration flags for audio processing features
-pub const RNNOISE_APPLY_ENABLED: bool = false;  // Default: disabled (Whisper handles noise well)
+pub const RNNOISE_APPLY_ENABLED: bool = true;  // Enabled for clean microphone audio (removes background noise)
 
 /// Timestamp for audio samples (reserved for future use)
 #[allow(dead_code)]
@@ -268,7 +268,7 @@ impl AudioMixer {
     fn new(adaptive_ducking: bool) -> Self {
         Self {
             mic_ducking: 1.0,      // Full volume by default
-            system_ducking: 0.4,   // System audio at 40% when mic is active
+            system_ducking: 0.75,  // System audio at 75% when mic is active (better balance)
             adaptive_ducking,
         }
     }
@@ -289,7 +289,8 @@ impl AudioMixer {
             let mic_rms = calculate_rms(mic);
 
             // Speech detection threshold (calibrated for meetings)
-            const SPEECH_THRESHOLD: f32 = 0.01;
+            // Raised from 0.01 to reduce false triggers from background noise
+            const SPEECH_THRESHOLD: f32 = 0.03;
 
             let is_speech = mic_rms > SPEECH_THRESHOLD;
 
