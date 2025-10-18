@@ -165,7 +165,7 @@ impl ProfessionalAudioMixer {
             // This prevents constant soft scaling which can cause pumping artifacts
             // Mic is normalized to -23 LUFS (already optimal), system needs reduction
             let sys_scaled = sys * 1.0;
-            let mic_scaled = mic * 0.8;
+            let _mic_scaled = mic * 0.8;  // Reserved for future mic scaling
 
             // Sum without ducking - mic stays at full volume, system slightly reduced
             let sum = mic + sys_scaled;

@@ -334,7 +334,9 @@ impl NoiseSuppressionProcessor {
 /// High-pass filter to remove low-frequency rumble and noise
 /// Removes frequencies below cutoff_hz (typically 80-100 Hz for speech)
 pub struct HighPassFilter {
+    #[allow(dead_code)]
     sample_rate: f32,
+    #[allow(dead_code)]
     cutoff_hz: f32,
     // First-order IIR filter coefficients
     alpha: f32,
