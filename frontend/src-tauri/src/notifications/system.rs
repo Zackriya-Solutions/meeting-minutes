@@ -2,11 +2,11 @@ use crate::notifications::types::{Notification, NotificationPriority, Notificati
 use anyhow::{Result, anyhow};
 use log::{info as log_info, error as log_error};
 use tauri::{AppHandle, Runtime};
+use tauri_plugin_notification::NotificationExt;
 use std::time::Duration;
 
 /// Cross-platform system notification handler
 pub struct SystemNotificationHandler<R: Runtime> {
-    #[allow(dead_code)] // Used for non-macOS fallback notifications
     app_handle: AppHandle<R>,
 }
 
@@ -17,7 +17,7 @@ impl<R: Runtime> SystemNotificationHandler<R> {
         }
     }
 
-    /// Show a notification using the system's notification center
+    /// Show a notification using Tauri's notification plugin
     pub async fn show_notification(&self, notification: Notification) -> Result<()> {
         log_info!("Attempting to show notification: {}", notification.title);
 
@@ -27,58 +27,7 @@ impl<R: Runtime> SystemNotificationHandler<R> {
             return Ok(());
         }
 
-        // Platform-specific notification implementation
-        #[cfg(target_os = "macos")]
-        {
-            self.show_macos_notification(&notification).await
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            self.show_tauri_notification(&notification).await
-        }
-    }
-
-    /// Show native macOS notification (like "mic activity detected")
-    #[cfg(target_os = "macos")]
-    async fn show_macos_notification(&self, notification: &Notification) -> Result<()> {
-        log_info!("Showing native macOS notification: {}", notification.title);
-
-        let result = tokio::task::spawn_blocking({
-            let title = notification.title.clone();
-            let body = notification.body.clone();
-            move || {
-                // Send native macOS notification
-                mac_notification_sys::send_notification(
-                    &title,
-                    None, // No subtitle
-                    &body,
-                    Some(mac_notification_sys::Notification::new().sound("default"))
-                )
-            }
-        }).await;
-
-        match result {
-            Ok(Ok(_)) => {
-                log_info!("Successfully showed native macOS notification: {}", notification.title);
-                Ok(())
-            }
-            Ok(Err(e)) => {
-                log_error!("Failed to show native macOS notification: {:?}", e);
-                Err(anyhow!("Failed to show native macOS notification: {:?}", e))
-            }
-            Err(e) => {
-                log_error!("Task join error for macOS notification: {}", e);
-                Err(anyhow!("Task join error: {}", e))
-            }
-        }
-    }
-
-    /// Fallback to Tauri notification for non-macOS platforms
-    #[cfg(not(target_os = "macos"))]
-    async fn show_tauri_notification(&self, notification: &Notification) -> Result<()> {
-        use tauri_plugin_notification::NotificationExt;
-
+        // Use Tauri notification for all platforms
         log_info!("Showing Tauri notification: {}", notification.title);
 
         let builder = self.app_handle.notification().builder()

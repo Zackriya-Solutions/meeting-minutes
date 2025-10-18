@@ -105,18 +105,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       setIsStarting(true);
       setIsValidatingModel(false);
 
-      // Show enhanced recording confirmation on macOS
-      try {
-        console.log('Attempting to show enhanced recording confirmation notification...');
-        await invoke('show_enhanced_recording_confirmation', {
-          meetingName: meetingName || generatedMeetingTitle,
-          actionUrl: 'meetily://confirm-recording'
-        });
-        console.log('Enhanced recording confirmation notification shown');
-      } catch (enhancedError) {
-        console.log('Enhanced notification not available (non-macOS or error):', enhancedError);
-      }
-
       // Use the correct command with device parameters
       if (selectedDevices || meetingName || generatedMeetingTitle) {
         console.log('Using start_recording_with_devices_and_meeting with:', {
@@ -364,20 +352,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setIsPaused(false);
         });
 
-        // Enhanced notification confirmed listener
-        const enhancedConfirmedUnsubscribe = await listen('enhanced-notification-confirmed', (event) => {
-          console.log('enhanced-notification-confirmed event received:', event);
-          // The recording has already started, the notification just confirmed it
-          // This can be used to show additional UI feedback if needed
-        });
-
-        // Enhanced notification dismissed listener
-        const enhancedDismissedUnsubscribe = await listen('enhanced-notification-dismissed', (event) => {
-          console.log('enhanced-notification-dismissed event received:', event);
-          // The user dismissed the notification, recording may have already started
-          // This is just for informational purposes
-        });
-
         // Speech detected listener - for UX feedback when VAD detects speech
         const speechDetectedUnsubscribe = await listen('speech-detected', (event) => {
           console.log('speech-detected event received:', event);
@@ -389,8 +363,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           transcriptionErrorUnsubscribe,
           pausedUnsubscribe,
           resumedUnsubscribe,
-          enhancedConfirmedUnsubscribe,
-          enhancedDismissedUnsubscribe,
           speechDetectedUnsubscribe
         ];
         console.log('Recording event listeners set up successfully');

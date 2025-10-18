@@ -156,7 +156,6 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
 core-graphics = "0.23"
-mac-notification-sys = "0.6.1"
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
