@@ -125,7 +125,7 @@ impl SystemAudioCapture {
 
             // Create channel for audio samples
             let (tx, rx) = mpsc::unbounded::<Vec<f32>>();
-            let (drop_tx, _drop_rx) = std::sync::mpsc::channel::<()>();
+            let (drop_tx, drop_rx) = std::sync::mpsc::channel::<()>();
 
             // Build input stream in loopback mode (WASAPI captures output as input)
             let stream = match config.sample_format() {
@@ -215,17 +215,37 @@ impl SystemAudioCapture {
             stream.play()
                 .map_err(|e| anyhow::anyhow!("Failed to start WASAPI loopback stream: {}", e))?;
 
+            // SAFETY: We wrap the stream in a Send-safe wrapper to manage its lifecycle.
+            // This is safe because:
+            // 1. The WASAPI callbacks run in their own OS-managed thread
+            // 2. We only drop the stream from a single dedicated thread
+            // 3. The stream is never accessed from multiple threads simultaneously
+            #[allow(dead_code)]
+            struct SendableStream(cpal::Stream);
+            unsafe impl Send for SendableStream {}
+
+            let sendable_stream = SendableStream(stream);
+
+            // Spawn a task to keep the stream alive
+            // The stream must stay alive for the callbacks to continue firing
+            std::thread::spawn(move || {
+                let _stream = sendable_stream;
+
+                // Wait for drop signal
+                let _ = drop_rx.recv();
+
+                info!("WASAPI loopback stream task shutting down");
+                // Stream will be dropped here, stopping the callbacks
+            });
+
             let receiver = rx.map(futures_util::stream::iter).flatten();
 
             info!("WASAPI loopback system capture started successfully");
 
-            // Store the stream in the struct to keep it alive
-            // When SystemAudioStream is dropped, the stream will be dropped automatically
             Ok(SystemAudioStream {
                 drop_tx,
                 sample_rate,
                 receiver: Box::pin(receiver),
-                _stream: Some(stream),
             })
         }
 
@@ -249,8 +269,6 @@ pub struct SystemAudioStream {
     drop_tx: std::sync::mpsc::Sender<()>,
     sample_rate: u32,
     receiver: Pin<Box<dyn Stream<Item = f32> + Send + Sync>>,
-    #[cfg(target_os = "windows")]
-    _stream: Option<cpal::Stream>, // Keep stream alive on Windows
 }
 
 impl Drop for SystemAudioStream {
