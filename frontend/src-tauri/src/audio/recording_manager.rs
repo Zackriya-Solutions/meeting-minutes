@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 
-use super::devices::{AudioDevice, default_input_device, default_output_device, list_audio_devices};
+use super::devices::{AudioDevice, list_audio_devices, get_safe_recording_devices};
 use super::recording_state::{RecordingState, AudioChunk, DeviceType as RecordingDeviceType};
 use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
@@ -125,38 +125,40 @@ impl RecordingManager {
         Ok(transcription_receiver)
     }
 
-    /// Start recording with default devices
+    /// Start recording with default devices (with automatic Bluetooth fallback)
+    ///
+    /// This method uses smart device selection that automatically overrides
+    /// Bluetooth devices (AirPods, headsets) to built-in wired devices for
+    /// stable, low-latency recording.
+    ///
+    /// # Bluetooth Override Strategy
+    ///
+    /// - If system default is Bluetooth → Use built-in MacBook mic/speaker
+    /// - If system default is wired → Use it directly
+    ///
+    /// Rationale: Bluetooth has variable latency (50-120ms ± 50ms jitter) which
+    /// causes sync issues and buffer overflows. Built-in devices are wired and
+    /// provide stable 5-10ms latency for optimal FFmpeg mixer performance.
+    ///
+    /// User still hears audio via Bluetooth (playback), but recording captures
+    /// via stable wired path for best quality.
     pub async fn start_recording_with_defaults(&mut self) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
-        info!("Starting recording with default devices");
+        info!("🎙️ Starting recording with smart device selection (Bluetooth override enabled)");
 
-        // Get default devices
-        let microphone_device = match default_input_device() {
-            Ok(device) => {
-                info!("Using default microphone: {}", device.name);
-                Some(Arc::new(device))
-            }
-            Err(e) => {
-                warn!("No default microphone available: {}", e);
-                None
-            }
-        };
+        // Get safe recording devices with automatic Bluetooth fallback
+        // This function handles all the detection and override logic
+        let (microphone_device, system_device) = get_safe_recording_devices()?;
 
-        let system_device = match default_output_device() {
-            Ok(device) => {
-                info!("Using default system audio: {}", device.name);
-                Some(Arc::new(device))
-            }
-            Err(e) => {
-                warn!("No default system audio available: {}", e);
-                None
-            }
-        };
+        // Wrap in Arc for sharing across threads
+        let microphone_device = microphone_device.map(Arc::new);
+        let system_device = system_device.map(Arc::new);
 
         // Ensure at least microphone is available
         if microphone_device.is_none() {
-            return Err(anyhow::anyhow!("No microphone device available"));
+            return Err(anyhow::anyhow!("❌ No microphone device available for recording"));
         }
 
+        // Start recording with selected devices
         self.start_recording(microphone_device, system_device).await
     }
 
