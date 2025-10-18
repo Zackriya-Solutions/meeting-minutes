@@ -1,6 +1,6 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily-frontend",
+    "productName": "meetily",
     "version": "0.1.1",
     "identifier": "com.meetily.ai",
     "build": {
