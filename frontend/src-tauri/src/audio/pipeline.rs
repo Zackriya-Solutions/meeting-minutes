@@ -490,12 +490,10 @@ impl AudioCapture {
             device_type: self.device_type.clone(),
         };
 
-        // Send to recording saver
-        if let Some(recording_sender) = &self.recording_sender {
-            if let Err(e) = recording_sender.send(audio_chunk.clone()) {
-                warn!("Failed to send chunk to recording saver: {}", e);
-            }
-        }
+        // NOTE: Raw audio is NOT sent to recording saver to prevent echo
+        // Only the mixed audio (from AudioPipeline) is saved to file (see pipeline.rs:726-736)
+        // This ensures we only record once: mic + system properly mixed
+        // Individual raw streams go only to the transcription pipeline below
 
         // Send to processing pipeline for transcription
         if let Err(e) = self.state.send_audio_chunk(audio_chunk) {

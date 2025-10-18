@@ -87,10 +87,18 @@ impl CoreAudioCapture {
             &[output_uid.as_type_ref()],
         );
 
-        // Create process tap with mono global tap, excluding no processes
-        // Note: Mono tap is more reliable for system audio capture on macOS
-        info!("🎙️ CoreAudio: Creating process tap (global mono tap)...");
-        let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&cidre::ns::Array::new());
+        // Create process tap with mono global tap, EXCLUDING CURRENT PROCESS to prevent feedback loop
+        // CRITICAL: If we don't exclude our own process, the system audio tap will capture
+        // the microphone audio being played/monitored by this app, creating echo!
+        info!("🎙️ CoreAudio: Creating process tap (global mono tap, excluding current process)...");
+
+        // Get current process ID and exclude it from the tap
+        let current_pid = std::process::id();
+        let pid_number = cidre::ns::Number::with_i32(current_pid as i32);
+        let excluded_processes = cidre::ns::Array::from_slice(&[pid_number.as_ref()]);
+
+        info!("✅ CoreAudio: Excluding current process (PID: {}) from system audio capture", current_pid);
+        let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&excluded_processes);
         let tap = tap_desc.create_process_tap()
             .map_err(|e| {
                 error!("❌ CoreAudio: Failed to create process tap: {:?}", e);
