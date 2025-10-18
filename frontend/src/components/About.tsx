@@ -27,7 +27,7 @@ export function About() {
                     />
                 </div>
                 {/* <h1 className="text-xl font-bold text-gray-900">Meetily</h1> */}
-                <span className="text-sm text-gray-500"> v0.0.6 - Pre Release</span>
+                <span className="text-sm text-gray-500"> v0.1.1 - Pre Release</span>
                 <p className="text-medium text-gray-600 mt-1">
                     Real-time notes and summaries that never leave your machine.
                 </p>

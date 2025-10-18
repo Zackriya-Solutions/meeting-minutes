@@ -1456,7 +1456,7 @@ export default function Home() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col min-h-screen bg-gray-50 transition-all duration-1000 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      className="flex flex-col min-h-screen bg-gray-50 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
     >
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1662,7 +1662,7 @@ export default function Home() {
           )}
 
           {/* Transcript content */}
-          <div className="pb-40">
+          <div className="pb-20">
             <div className="flex justify-center">
               <div className="w-2/3 max-w-[750px]">
                 <TranscriptView
@@ -1692,8 +1692,13 @@ export default function Home() {
 
           {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
           {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
-            <div className="fixed bottom-16 left-0 right-0 z-10">
-              <div className="flex justify-center pl-8" style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}>
+            <div className="fixed bottom-12 left-0 right-0 z-10">
+              <div
+                className="flex justify-center pl-8 transition-[margin] duration-300"
+                style={{
+                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+                }}
+              >
                 <div className="w-2/3 max-w-[750px] flex justify-center">
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
@@ -1720,8 +1725,13 @@ export default function Home() {
 
           {/* Processing status overlay */}
           {summaryStatus === 'processing' && !isRecording && (
-            <div className="fixed bottom-16 left-0 right-0 z-10">
-              <div className="flex justify-center pl-8" style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}>
+            <div className="fixed bottom-4 left-0 right-0 z-10">
+              <div
+                className="flex justify-center pl-8 transition-[margin] duration-300"
+                style={{
+                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+                }}
+              >
                 <div className="w-2/3 max-w-[750px] flex justify-center">
                   <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
@@ -1732,8 +1742,13 @@ export default function Home() {
             </div>
           )}
           {isSavingTranscript && (
-            <div className="fixed bottom-16 left-0 right-0 z-10">
-              <div className="flex justify-center pl-8" style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}>
+            <div className="fixed bottom-4 left-0 right-0 z-10">
+              <div
+                className="flex justify-center pl-8 transition-[margin] duration-300"
+                style={{
+                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+                }}
+              >
                 <div className="w-2/3 max-w-[750px] flex justify-center">
                   <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>

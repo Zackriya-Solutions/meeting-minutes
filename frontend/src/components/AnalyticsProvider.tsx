@@ -81,7 +81,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
 
         // Identify user with enhanced properties immediately after init
         await Analytics.identify(userId, {
-          app_version: '0.0.6',
+          app_version: '0.1.1',
           platform: deviceInfo.platform,
           os_version: deviceInfo.os_version,
           architecture: deviceInfo.architecture,

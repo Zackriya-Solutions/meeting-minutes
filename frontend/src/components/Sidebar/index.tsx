@@ -576,7 +576,7 @@ const Sidebar: React.FC = () => {
         }`}
       >
         {/* Header with traffic light spacing */}
-        <div className="flex-shrink-0 h-22 flex items-center border-b">
+        <div className="flex-shrink-0 h-22 flex items-center">
         
           {/* Title container */}
           
@@ -711,7 +711,7 @@ const Sidebar: React.FC = () => {
               </button>
               <Info isCollapsed={isCollapsed} />
               <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
-              v0.0.6 - Pre Release
+              v0.1.1 - Pre Release
             </div>
           </div>
         )}
