@@ -590,17 +590,17 @@ pub fn resample_audio(input: &[f32], from_sample_rate: u32, to_sample_rate: u32)
     }
 }
 
-pub fn write_audio_to_file(
+pub async fn write_audio_to_file(
     audio: &[f32],
     sample_rate: u32,
     output_path: &PathBuf,
     device: &str,
     skip_encoding: bool,
 ) -> Result<String> {
-    write_audio_to_file_with_meeting_name(audio, sample_rate, output_path, device, skip_encoding, None)
+    write_audio_to_file_with_meeting_name(audio, sample_rate, output_path, device, skip_encoding, None).await
 }
 
-pub fn write_audio_to_file_with_meeting_name(
+pub async fn write_audio_to_file_with_meeting_name(
     audio: &[f32],
     sample_rate: u32,
     output_path: &PathBuf,
@@ -639,7 +639,7 @@ pub fn write_audio_to_file_with_meeting_name(
             sample_rate,
             1,
             &file_path.into(),
-        )?;
+        ).await?;
     }
     Ok(file_path_clone)
 }

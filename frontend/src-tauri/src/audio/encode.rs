@@ -1,4 +1,4 @@
-use super::ffmpeg::find_ffmpeg_path; // Correct path to encode module
+use super::ffmpeg::get_ffmpeg_path; // Async FFmpeg path getter
 use super::AudioDevice;
 use std::io::Write;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub struct AudioInput {
     pub device: Arc<AudioDevice>,
 }
 
-pub fn encode_single_audio(
+pub async fn encode_single_audio(
     data: &[u8],
     sample_rate: u32,
     channels: u16,
@@ -27,8 +27,8 @@ pub fn encode_single_audio(
         return Err(anyhow::anyhow!("No audio data provided for encoding"));
     }
 
-    let ffmpeg_path = find_ffmpeg_path().ok_or_else(|| {
-        anyhow::anyhow!("FFmpeg not found. Please install FFmpeg to save recordings.")
+    let ffmpeg_path = get_ffmpeg_path().await.ok_or_else(|| {
+        anyhow::anyhow!("FFmpeg not available. Audio encoding system is still initializing. Please wait a moment and try again.")
     })?;
 
     debug!("Using FFmpeg at: {:?}", ffmpeg_path);

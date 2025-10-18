@@ -77,6 +77,22 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
+    // Check if FFmpeg is ready for audio encoding
+    info!("🔍 Checking FFmpeg availability for audio encoding...");
+    if !super::ffmpeg::is_ffmpeg_ready() {
+        error!("FFmpeg not ready - audio encoding system still initializing");
+
+        // Emit error event to frontend
+        let _ = app.emit("ffmpeg-not-ready", serde_json::json!({
+            "error": "FFmpeg not ready",
+            "userMessage": "Audio encoding is still initializing. Please wait a moment and try again.",
+            "actionable": false
+        }));
+
+        return Err("Audio encoding system is still initializing. Please wait a moment and try again.".to_string());
+    }
+    info!("✅ FFmpeg is ready for audio encoding");
+
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
@@ -215,6 +231,22 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
+
+    // Check if FFmpeg is ready for audio encoding
+    info!("🔍 Checking FFmpeg availability for audio encoding...");
+    if !super::ffmpeg::is_ffmpeg_ready() {
+        error!("FFmpeg not ready - audio encoding system still initializing");
+
+        // Emit error event to frontend
+        let _ = app.emit("ffmpeg-not-ready", serde_json::json!({
+            "error": "FFmpeg not ready",
+            "userMessage": "Audio encoding is still initializing. Please wait a moment and try again.",
+            "actionable": false
+        }));
+
+        return Err("Audio encoding system is still initializing. Please wait a moment and try again.".to_string());
+    }
+    info!("✅ FFmpeg is ready for audio encoding");
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
