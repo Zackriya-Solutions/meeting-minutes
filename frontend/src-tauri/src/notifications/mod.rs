@@ -5,10 +5,6 @@ pub mod settings;
 pub mod commands;
 pub mod manager;
 
-// Enhanced macOS notifications
-#[cfg(target_os = "macos")]
-pub mod enhanced_macos;
-
 // Re-export main types for easy access
 pub use types::{
     Notification, NotificationType, NotificationPriority, NotificationTimeout

@@ -8,7 +8,6 @@ use anyhow::Result;
 use log::{info as log_info, error as log_error};
 use tauri::{State, AppHandle, Runtime, Wry};
 
-use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
