@@ -401,144 +401,74 @@ pub async fn stop_recording<R: Runtime>(
         }
     }
 
-    // Step 2: Signal transcription workers to finish processing ALL queued chunks
+    // Step 2: Continue transcription in BACKGROUND (no blocking!)
+    // Transcripts are already being saved incrementally, so no data loss
     let _ = app.emit(
         "recording-shutdown-progress",
         serde_json::json!({
-            "stage": "processing_transcripts",
-            "message": "Processing remaining transcript chunks...",
+            "stage": "background_processing",
+            "message": "Audio stopped. Processing transcriptions in background...",
             "progress": 40
         }),
     );
 
-    // Wait for transcription task with enhanced progress monitoring (NO TIMEOUT - we must process all chunks)
+    // Take transcription task and move to background processing
     let transcription_task = {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         global_task.take()
     };
 
+    // CRITICAL CHANGE: Spawn background task instead of blocking await
     if let Some(task_handle) = transcription_task {
-        info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
+        info!("🚀 Moving transcription processing to background (non-blocking)");
 
-        // Enhanced progress monitoring during shutdown
-        let progress_app = app.clone();
-        let progress_task = tokio::spawn(async move {
-            let last_update = std::time::Instant::now();
+        let app_for_background = app.clone();
+        tokio::spawn(async move {
+            info!("⏳ Background: Processing remaining transcription chunks...");
 
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Wait for transcription completion in background
+            match task_handle.await {
+                Ok(()) => {
+                    info!("✅ Background: ALL transcription chunks processed successfully");
 
-                // Emit periodic progress updates during shutdown
-                let elapsed = last_update.elapsed().as_secs();
-                let _ = progress_app.emit(
-                    "recording-shutdown-progress",
-                    serde_json::json!({
-                        "stage": "processing_transcripts",
-                        "message": format!("Processing transcripts... ({}s elapsed)", elapsed),
-                        "progress": 40,
-                        "detailed": true,
-                        "elapsed_seconds": elapsed
-                    }),
-                );
+                    // Emit completion event
+                    let _ = app_for_background.emit(
+                        "transcription-background-complete",
+                        serde_json::json!({
+                            "message": "All transcriptions processed successfully",
+                            "status": "success"
+                        }),
+                    );
+
+                    // Now safely unload model after transcription complete
+                    info!("🧠 Background: Unloading transcription model after processing...");
+                    unload_transcription_model_safely(&app_for_background).await;
+                }
+                Err(e) => {
+                    warn!("⚠️ Background: Transcription task error: {:?}", e);
+
+                    // Emit error event
+                    let _ = app_for_background.emit(
+                        "transcription-background-complete",
+                        serde_json::json!({
+                            "message": "Transcription completed with warnings",
+                            "status": "warning",
+                            "error": format!("{:?}", e)
+                        }),
+                    );
+
+                    // Still unload model
+                    unload_transcription_model_safely(&app_for_background).await;
+                }
             }
         });
 
-        // Wait indefinitely for transcription completion - no 30 second timeout!
-        match task_handle.await {
-            Ok(()) => {
-                info!("✅ ALL transcription chunks processed successfully - no data lost");
-            }
-            Err(e) => {
-                warn!("⚠️ Transcription task completed with error: {:?}", e);
-                // Continue anyway - the worker may have processed most chunks
-            }
-        }
-
-        // Stop progress monitoring
-        progress_task.abort();
+        info!("✅ Transcription moved to background - user can continue immediately");
     } else {
-        info!("ℹ️ No transcription task found to wait for");
+        info!("ℹ️ No transcription task found");
     }
 
-    // Step 3: Now safely unload Whisper model after ALL chunks are processed
-    let _ = app.emit(
-        "recording-shutdown-progress",
-        serde_json::json!({
-            "stage": "unloading_model",
-            "message": "Unloading speech recognition model...",
-            "progress": 70
-        }),
-    );
-
-    info!("🧠 All transcript chunks processed. Now safely unloading transcription model...");
-
-    // Determine which provider was used and unload the appropriate model
-    let config = match crate::api::api::api_get_transcript_config(
-        app.clone(),
-        app.clone().state(),
-        None,
-    )
-    .await
-    {
-        Ok(Some(config)) => Some(config.provider),
-        _ => None,
-    };
-
-    match config.as_deref() {
-        Some("parakeet") => {
-            info!("🦜 Unloading Parakeet model...");
-            let engine_clone = {
-                let engine_guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Parakeet model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!("✅ Parakeet model '{}' unloaded successfully", current_model);
-                } else {
-                    warn!("⚠️ Failed to unload Parakeet model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Parakeet engine found to unload model");
-            }
-        }
-        _ => {
-            // Default to Whisper
-            info!("🎤 Unloading Whisper model...");
-            let engine_clone = {
-                let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Whisper model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!("✅ Whisper model '{}' unloaded successfully", current_model);
-                } else {
-                    warn!("⚠️ Failed to unload Whisper model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Whisper engine found to unload model");
-            }
-        }
-    }
-
-    // Step 4: Finalize recording state and cleanup resources safely
+    // Step 3: Finalize recording state and cleanup resources (model unload happens in background)
     let _ = app.emit(
         "recording-shutdown-progress",
         serde_json::json!({
@@ -754,6 +684,81 @@ pub async fn get_recording_meeting_name() -> Result<Option<String>, String> {
         Ok(manager.get_meeting_name())
     } else {
         Ok(None)
+    }
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/// Safely unload transcription model after background processing completes
+async fn unload_transcription_model_safely<R: Runtime>(app: &AppHandle<R>) {
+    info!("🧠 Safely unloading transcription model after processing...");
+
+    // Determine which provider was used and unload the appropriate model
+    let config = match crate::api::api::api_get_transcript_config(
+        app.clone(),
+        app.clone().state(),
+        None,
+    )
+    .await
+    {
+        Ok(Some(config)) => Some(config.provider),
+        _ => None,
+    };
+
+    match config.as_deref() {
+        Some("parakeet") => {
+            info!("🦜 Unloading Parakeet model...");
+            let engine_clone = {
+                let engine_guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
+                    .lock()
+                    .unwrap();
+                engine_guard.as_ref().cloned()
+            };
+
+            if let Some(engine) = engine_clone {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                info!("Current Parakeet model before unload: '{}'", current_model);
+
+                if engine.unload_model().await {
+                    info!("✅ Parakeet model '{}' unloaded successfully", current_model);
+                } else {
+                    warn!("⚠️ Failed to unload Parakeet model '{}'", current_model);
+                }
+            } else {
+                warn!("⚠️ No Parakeet engine found to unload model");
+            }
+        }
+        _ => {
+            // Default to Whisper
+            info!("🎤 Unloading Whisper model...");
+            let engine_clone = {
+                let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
+                    .lock()
+                    .unwrap();
+                engine_guard.as_ref().cloned()
+            };
+
+            if let Some(engine) = engine_clone {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                info!("Current Whisper model before unload: '{}'", current_model);
+
+                if engine.unload_model().await {
+                    info!("✅ Whisper model '{}' unloaded successfully", current_model);
+                } else {
+                    warn!("⚠️ Failed to unload Whisper model '{}'", current_model);
+                }
+            } else {
+                warn!("⚠️ No Whisper engine found to unload model");
+            }
+        }
     }
 }
 

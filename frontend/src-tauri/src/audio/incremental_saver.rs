@@ -158,12 +158,13 @@ impl IncrementalAudioSaver {
     /// Merge all checkpoint files into final audio.mp4 using FFmpeg concat
     /// Uses concat demuxer for fast merging without re-encoding
     async fn merge_checkpoints(&self, output: &PathBuf) -> Result<()> {
-        info!("Merging {} checkpoints into final audio file...", self.checkpoint_count);
+        info!("📦 Merging {} checkpoints into final audio file (this may take 10-30 seconds)...", self.checkpoint_count);
 
         // Create concat list file for FFmpeg
         let list_file = self.checkpoints_dir.join("concat_list.txt");
         let mut list_content = String::new();
 
+        info!("📝 Validating {} checkpoint files...", self.checkpoint_count);
         for i in 0..self.checkpoint_count {
             let checkpoint_path = self.checkpoints_dir
                 .join(format!("audio_chunk_{:03}.mp4", i));
@@ -179,20 +180,21 @@ impl IncrementalAudioSaver {
         }
 
         std::fs::write(&list_file, list_content)?;
+        info!("✅ All {} checkpoints validated successfully", self.checkpoint_count);
 
         #[cfg(target_os = "macos")]
         let ffmpeg_path = find_ffmpeg_path()
             .ok_or_else(|| anyhow!("FFmpeg not found. Please install FFmpeg to finalize recordings."))?;
-        
+
         #[cfg(not(target_os = "macos"))]
         let ffmpeg_path = "ffmpeg";  // Assume ffmpeg is in PATH on Windows/Linux
         info!("Using FFmpeg at: {:?}", ffmpeg_path);
 
         // Run FFmpeg concat command
         // Using concat demuxer with copy codec for fast merging (no re-encoding)
-        
+
         let mut command = std::process::Command::new(ffmpeg_path);
-        
+
         command.args(&[
             "-f", "concat",          // Use concat demuxer
             "-safe", "0",            // Allow absolute paths
@@ -210,11 +212,17 @@ impl IncrementalAudioSaver {
             command.creation_flags(CREATE_NO_WINDOW);
         }
 
+        info!("⚙️ Executing FFmpeg merge (copy mode - no re-encoding)...");
+        let start_time = std::time::Instant::now();
+
         let ffmpeg_output = command.output()?;
+
+        let elapsed = start_time.elapsed();
+        info!("⏱️ FFmpeg merge completed in {:.2}s", elapsed.as_secs_f64());
 
         if !ffmpeg_output.status.success() {
             let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
-            error!("FFmpeg merge failed: {}", stderr);
+            error!("❌ FFmpeg merge failed: {}", stderr);
             return Err(anyhow!("FFmpeg concat failed: {}", stderr));
         }
 
@@ -223,8 +231,15 @@ impl IncrementalAudioSaver {
             return Err(anyhow!("Merged audio file was not created: {}", output.display()));
         }
 
-        info!("✅ Successfully merged {} checkpoints → {}",
-              self.checkpoint_count, output.display());
+        // Log file size for verification
+        if let Ok(metadata) = std::fs::metadata(output) {
+            let size_mb = metadata.len() as f64 / 1_048_576.0;
+            info!("✅ Successfully merged {} checkpoints → {} ({:.2} MB, took {:.2}s)",
+                  self.checkpoint_count, output.display(), size_mb, elapsed.as_secs_f64());
+        } else {
+            info!("✅ Successfully merged {} checkpoints → {}",
+                  self.checkpoint_count, output.display());
+        }
 
         Ok(())
     }

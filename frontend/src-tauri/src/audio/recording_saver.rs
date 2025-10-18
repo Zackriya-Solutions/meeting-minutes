@@ -287,9 +287,10 @@ impl RecordingSaver {
         }
     }
 
-    /// Stop and save using incremental saving approach
+    /// Stop and save using incremental saving approach with BACKGROUND merging
+    /// Returns immediately - actual merging happens in background
     pub async fn stop_and_save<R: Runtime>(&mut self, app: &AppHandle<R>) -> Result<Option<String>, String> {
-        info!("Stopping recording saver - using incremental saving approach");
+        info!("🚀 Stopping recording saver - using BACKGROUND merging (non-blocking)");
 
         // Stop accumulation
         if let Ok(mut is_saving) = self.is_saving.lock() {
@@ -313,68 +314,110 @@ impl RecordingSaver {
             return Ok(None);
         }
 
-        // Finalize incremental saver (merge checkpoints into final audio.mp4)
-        let final_audio_path = if let Some(saver_arc) = &self.incremental_saver {
-            let mut saver = saver_arc.lock().await;
-            match saver.finalize().await {
-                Ok(path) => {
-                    info!("✅ Successfully finalized audio: {}", path.display());
-                    path
-                }
-                Err(e) => {
-                    error!("❌ Failed to finalize incremental saver: {}", e);
-                    return Err(format!("Failed to finalize audio: {}", e));
-                }
-            }
-        } else {
-            error!("No incremental saver initialized - cannot save recording");
-            return Err("No incremental saver initialized".to_string());
-        };
-
-        // Save final transcripts.json
+        // Save final transcripts.json NOW (don't wait for audio merge)
         if let Some(folder) = &self.meeting_folder {
             if let Err(e) = self.write_transcripts_json(folder) {
                 warn!("Failed to write final transcripts: {}", e);
             }
         }
 
-        // Update metadata to completed status
-        if let (Some(folder), Some(mut metadata)) = (&self.meeting_folder, self.metadata.clone()) {
-            metadata.status = "completed".to_string();
-            metadata.completed_at = Some(chrono::Utc::now().to_rfc3339());
+        // CRITICAL CHANGE: Move finalization to BACKGROUND task
+        if let Some(saver_arc) = self.incremental_saver.clone() {
+            let app_clone = app.clone();
+            let meeting_folder_clone = self.meeting_folder.clone();
+            let meeting_name_clone = self.meeting_name.clone();
+            let metadata_clone = self.metadata.clone();
+            let transcript_segments_clone = self.transcript_segments.clone();
 
-            // Calculate duration from transcript segments
-            if let Ok(segments) = self.transcript_segments.lock() {
-                if let Some(last_segment) = segments.last() {
-                    metadata.duration_seconds = Some(last_segment.audio_end_time);
+            // Spawn background task for audio merging (non-blocking!)
+            tokio::spawn(async move {
+                info!("⏳ Background: Starting audio checkpoint merge...");
+
+                // Emit start event
+                let _ = app_clone.emit(
+                    "audio-merge-progress",
+                    serde_json::json!({
+                        "stage": "merging",
+                        "message": "Merging audio checkpoints...",
+                        "progress": 0
+                    }),
+                );
+
+                // Finalize incremental saver (merge checkpoints)
+                let mut saver = saver_arc.lock().await;
+                let merge_result = saver.finalize().await;
+                drop(saver); // Release lock
+
+                match merge_result {
+                    Ok(final_audio_path) => {
+                        info!("✅ Background: Audio merge completed successfully: {}", final_audio_path.display());
+
+                        // Update metadata to completed status
+                        if let (Some(folder), Some(mut metadata)) = (meeting_folder_clone, metadata_clone) {
+                            metadata.status = "completed".to_string();
+                            metadata.completed_at = Some(chrono::Utc::now().to_rfc3339());
+
+                            // Calculate duration from transcript segments
+                            if let Ok(segments) = transcript_segments_clone.lock() {
+                                if let Some(last_segment) = segments.last() {
+                                    metadata.duration_seconds = Some(last_segment.audio_end_time);
+                                }
+                            }
+
+                            if let Err(e) = Self::write_metadata_static(&folder, &metadata) {
+                                warn!("Background: Failed to update metadata: {}", e);
+                            }
+                        }
+
+                        // Emit completion event with final paths
+                        let _ = app_clone.emit(
+                            "audio-merge-complete",
+                            serde_json::json!({
+                                "status": "success",
+                                "message": "Audio file ready",
+                                "audio_file": final_audio_path.to_string_lossy(),
+                                "meeting_name": meeting_name_clone,
+                                "progress": 100
+                            }),
+                        );
+                    }
+                    Err(e) => {
+                        error!("❌ Background: Audio merge failed: {}", e);
+
+                        // Emit error event - but checkpoints are still safe on disk!
+                        let _ = app_clone.emit(
+                            "audio-merge-complete",
+                            serde_json::json!({
+                                "status": "error",
+                                "message": format!("Audio merge failed: {}. Checkpoint files preserved.", e),
+                                "error": e.to_string(),
+                                "checkpoints_preserved": true
+                            }),
+                        );
+                    }
                 }
-            }
+            });
 
-            if let Err(e) = self.write_metadata(folder, &metadata) {
-                warn!("Failed to update metadata to completed: {}", e);
-            }
+            info!("✅ Audio merge moved to background - user can continue immediately");
+
+            // Return immediately with checkpoint info (don't wait for merge)
+            Ok(Some(format!("Checkpoints saved, merging in background...")))
+        } else {
+            error!("No incremental saver initialized - cannot save recording");
+            return Err("No incremental saver initialized".to_string());
         }
+    }
 
-        // Emit save event with audio and transcript paths
-        let save_event = serde_json::json!({
-            "audio_file": final_audio_path.to_string_lossy(),
-            "transcript_file": self.meeting_folder.as_ref()
-                .map(|f| f.join("transcripts.json").to_string_lossy().to_string()),
-            "meeting_name": self.meeting_name,
-            "meeting_folder": self.meeting_folder.as_ref()
-                .map(|f| f.to_string_lossy().to_string())
-        });
+    /// Static helper to write metadata without self reference
+    fn write_metadata_static(folder: &PathBuf, metadata: &MeetingMetadata) -> Result<()> {
+        let metadata_path = folder.join("metadata.json");
+        let temp_path = folder.join(".metadata.json.tmp");
 
-        if let Err(e) = app.emit("recording-saved", &save_event) {
-            warn!("Failed to emit recording-saved event: {}", e);
-        }
+        let json_string = serde_json::to_string_pretty(metadata)?;
+        std::fs::write(&temp_path, json_string)?;
+        std::fs::rename(&temp_path, &metadata_path)?;  // Atomic
 
-        // Clean up transcript segments
-        if let Ok(mut segments) = self.transcript_segments.lock() {
-            segments.clear();
-        }
-
-        Ok(Some(final_audio_path.to_string_lossy().to_string()))
+        Ok(())
     }
 
     /// Get the meeting folder path (for passing to backend)
