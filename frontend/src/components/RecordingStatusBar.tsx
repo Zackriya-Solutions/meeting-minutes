@@ -16,12 +16,24 @@ export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused
   const [displaySeconds, setDisplaySeconds] = useState(0);
 
   // Sync with backend duration when it changes (handles refresh/navigation)
+  // Only reset local timer if:
+  // 1. Recording stopped (activeDuration is null)
+  // 2. Initial sync (displaySeconds is 0)
+  // 3. Significant drift (>2 seconds difference)
   useEffect(() => {
-    if (activeDuration !== null) {
-      // Round to nearest second to avoid decimal issues
-      setDisplaySeconds(Math.floor(activeDuration));
+    if (activeDuration === null) {
+      // Recording stopped, reset display
+      setDisplaySeconds(0);
+    } else {
+      const backendSeconds = Math.floor(activeDuration);
+      const drift = Math.abs(backendSeconds - displaySeconds);
+
+      // Only sync if this is initial load or there's significant drift
+      if (displaySeconds === 0 || drift > 2) {
+        setDisplaySeconds(backendSeconds);
+      }
     }
-  }, [activeDuration]);
+  }, [activeDuration, displaySeconds]);
 
   // Live timer that increments every second when recording and not paused
   useEffect(() => {
