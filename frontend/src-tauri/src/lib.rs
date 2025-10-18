@@ -54,7 +54,7 @@ use audio::{list_audio_devices, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
@@ -386,36 +386,6 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
-// FFmpeg status and management commands
-#[tauri::command]
-fn is_ffmpeg_ready() -> bool {
-    audio::ffmpeg::is_ffmpeg_ready()
-}
-
-#[tauri::command]
-async fn retry_ffmpeg_initialization<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
-    log_info!("Retrying FFmpeg initialization");
-
-    match audio::ffmpeg::initialize_ffmpeg().await {
-        Ok(path) => {
-            log_info!("✅ FFmpeg initialized successfully at: {:?}", path);
-            // Emit success event
-            if let Err(e) = app.emit("ffmpeg-ready", true) {
-                log_error!("Failed to emit ffmpeg-ready event: {}", e);
-            }
-            Ok(true)
-        }
-        Err(e) => {
-            log_error!("❌ FFmpeg initialization retry failed: {}", e);
-            // Emit error event
-            if let Err(emit_err) = app.emit("ffmpeg-error", e.to_string()) {
-                log_error!("Failed to emit ffmpeg-error event: {}", emit_err);
-            }
-            Err(format!("FFmpeg initialization failed: {}", e))
-        }
-    }
-}
-
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -486,28 +456,6 @@ pub fn run() {
             tauri::async_runtime::spawn(async {
                 if let Err(e) = parakeet_engine::commands::parakeet_init().await {
                     log::error!("Failed to initialize Parakeet engine on startup: {}", e);
-                }
-            });
-
-            // Initialize FFmpeg in background (for audio encoding)
-            log::info!("Starting FFmpeg initialization...");
-            let app_for_ffmpeg = _app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match audio::ffmpeg::initialize_ffmpeg().await {
-                    Ok(path) => {
-                        log::info!("✅ FFmpeg ready at: {:?}", path);
-                        // Emit success event to frontend
-                        if let Err(e) = app_for_ffmpeg.emit("ffmpeg-ready", true) {
-                            log::error!("Failed to emit ffmpeg-ready event: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("❌ FFmpeg initialization failed: {}", e);
-                        // Emit error event to frontend
-                        if let Err(emit_err) = app_for_ffmpeg.emit("ffmpeg-error", e.to_string()) {
-                            log::error!("Failed to emit ffmpeg-error event: {}", emit_err);
-                        }
-                    }
                 }
             });
 
@@ -656,9 +604,6 @@ pub fn run() {
             // Language preference commands
             get_language_preference,
             set_language_preference,
-            // FFmpeg commands
-            is_ffmpeg_ready,
-            retry_ffmpeg_initialization,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,

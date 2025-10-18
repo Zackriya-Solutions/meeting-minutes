@@ -57,9 +57,9 @@ pub fn show_recording_confirmation(notification: &EnhancedNotification) -> Resul
     // Use the enhanced notification with subtitle and action information
     let body = format!("{}\n\nTap this notification to bring app to front", notification.message);
 
-    let mut binding = Notification::new();
-    let notif = binding
-        .sound("Glass"); // Use a distinctive sound
+    // Create notification without sound to avoid macOS "use_default" dialog issue
+    let binding = Notification::new();
+    let notif = &binding;
 
     // Try to set subtitle if available
     let result = send_notification(

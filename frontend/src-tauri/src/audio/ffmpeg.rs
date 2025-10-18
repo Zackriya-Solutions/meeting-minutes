@@ -4,10 +4,9 @@ use ffmpeg_sidecar::{
     paths::sidecar_dir,
     version::ffmpeg_version,
 };
-use log::{debug, error, info};
+use log::{debug, error};
+use once_cell::sync::Lazy;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use which::which;
 
 #[cfg(not(windows))]
@@ -16,55 +15,19 @@ const EXECUTABLE_NAME: &str = "ffmpeg";
 #[cfg(windows)]
 const EXECUTABLE_NAME: &str = "ffmpeg.exe";
 
-// Async-safe FFmpeg path storage
-static FFMPEG_STATE: once_cell::sync::Lazy<Arc<RwLock<Option<PathBuf>>>> =
-    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(None)));
+static FFMPEG_PATH: Lazy<Option<PathBuf>> = Lazy::new(find_ffmpeg_path_internal);
 
-/// Check if FFmpeg is ready (non-blocking)
-pub fn is_ffmpeg_ready() -> bool {
-    // Try to read without blocking
-    FFMPEG_STATE.try_read().map(|state| state.is_some()).unwrap_or(false)
+pub fn find_ffmpeg_path() -> Option<PathBuf> {
+    FFMPEG_PATH.as_ref().map(|p| p.clone())
 }
 
-/// Get FFmpeg path (async, waits for initialization if needed)
-pub async fn get_ffmpeg_path() -> Option<PathBuf> {
-    let state = FFMPEG_STATE.read().await;
-    state.clone()
-}
-
-/// Initialize FFmpeg asynchronously (safe to call multiple times)
-pub async fn initialize_ffmpeg() -> Result<PathBuf, anyhow::Error> {
-    info!("Starting FFmpeg initialization...");
-
-    // Check if already initialized
-    {
-        let state = FFMPEG_STATE.read().await;
-        if let Some(path) = state.as_ref() {
-            info!("FFmpeg already initialized at: {:?}", path);
-            return Ok(path.clone());
-        }
-    }
-
-    // Search and initialize in background task
-    let path = tokio::task::spawn_blocking(|| find_ffmpeg_path_internal()).await??;
-
-    // Store the result
-    {
-        let mut state = FFMPEG_STATE.write().await;
-        *state = Some(path.clone());
-    }
-
-    info!("FFmpeg initialized successfully at: {:?}", path);
-    Ok(path)
-}
-
-fn find_ffmpeg_path_internal() -> Result<PathBuf, anyhow::Error> {
+fn find_ffmpeg_path_internal() -> Option<PathBuf> {
     debug!("Starting search for ffmpeg executable");
 
     // Check if `ffmpeg` is in the PATH environment variable
     if let Ok(path) = which(EXECUTABLE_NAME) {
         debug!("Found ffmpeg in PATH: {:?}", path);
-        return Ok(path);
+        return Some(path);
     }
     debug!("ffmpeg not found in PATH");
 
@@ -77,7 +40,7 @@ fn find_ffmpeg_path_internal() -> Result<PathBuf, anyhow::Error> {
             let ffmpeg_in_local_bin = local_bin.join(EXECUTABLE_NAME);
             if ffmpeg_in_local_bin.exists() {
                 debug!("Found ffmpeg in $HOME/.local/bin: {:?}", ffmpeg_in_local_bin);
-                return Ok(ffmpeg_in_local_bin);
+                return Some(ffmpeg_in_local_bin);
             }
             debug!("ffmpeg not found in $HOME/.local/bin");
         }
@@ -92,7 +55,7 @@ fn find_ffmpeg_path_internal() -> Result<PathBuf, anyhow::Error> {
                 "Found ffmpeg in current working directory: {:?}",
                 ffmpeg_in_cwd
             );
-            return Ok(ffmpeg_in_cwd);
+            return Some(ffmpeg_in_cwd);
         }
         debug!("ffmpeg not found in current working directory");
     }
@@ -107,7 +70,7 @@ fn find_ffmpeg_path_internal() -> Result<PathBuf, anyhow::Error> {
                     "Found ffmpeg in executable folder: {:?}",
                     ffmpeg_in_exe_folder
                 );
-                return Ok(ffmpeg_in_exe_folder);
+                return Some(ffmpeg_in_exe_folder);
             }
             debug!("ffmpeg not found in executable folder");
 
@@ -122,7 +85,7 @@ fn find_ffmpeg_path_internal() -> Result<PathBuf, anyhow::Error> {
                         "Found ffmpeg in Resources folder: {:?}",
                         ffmpeg_in_resources
                     );
-                    return Ok(ffmpeg_in_resources);
+                    return Some(ffmpeg_in_resources);
                 }
                 debug!("ffmpeg not found in Resources folder");
             }
@@ -134,33 +97,34 @@ fn find_ffmpeg_path_internal() -> Result<PathBuf, anyhow::Error> {
                 let ffmpeg_in_lib = lib_folder.join(EXECUTABLE_NAME);
                 if ffmpeg_in_lib.exists() {
                     debug!("Found ffmpeg in lib folder: {:?}", ffmpeg_in_lib);
-                    return Ok(ffmpeg_in_lib);
+                    return Some(ffmpeg_in_lib);
                 }
                 debug!("ffmpeg not found in lib folder");
             }
         }
     }
 
-    info!("FFmpeg not found locally. Downloading...");
+    debug!("ffmpeg not found. installing...");
 
-    // Download and install FFmpeg
-    handle_ffmpeg_installation()?;
-
-    // Try to find it again after installation
-    if let Ok(path) = which(EXECUTABLE_NAME) {
-        debug!("Found ffmpeg after installation: {:?}", path);
-        return Ok(path);
+    if let Err(error) = handle_ffmpeg_installation() {
+        error!("failed to install ffmpeg: {}", error);
+        return None;
     }
 
-    let installation_dir = sidecar_dir()?;
+    if let Ok(path) = which(EXECUTABLE_NAME) {
+        debug!("found ffmpeg after installation: {:?}", path);
+        return Some(path);
+    }
+
+    let installation_dir = sidecar_dir().map_err(|e| e.to_string()).unwrap();
     let ffmpeg_in_installation = installation_dir.join(EXECUTABLE_NAME);
     if ffmpeg_in_installation.is_file() {
-        debug!("Found ffmpeg in installation directory: {:?}", ffmpeg_in_installation);
-        return Ok(ffmpeg_in_installation);
+        debug!("found ffmpeg in directory: {:?}", ffmpeg_in_installation);
+        return Some(ffmpeg_in_installation);
     }
 
-    error!("FFmpeg not found even after installation attempt");
-    Err(anyhow::anyhow!("FFmpeg could not be found or installed. Please install FFmpeg manually."))
+    error!("ffmpeg not found even after installation");
+    None // Return None if ffmpeg is not found
 }
 
 fn handle_ffmpeg_installation() -> Result<(), anyhow::Error> {

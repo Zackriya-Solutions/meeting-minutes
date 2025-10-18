@@ -4,8 +4,8 @@ use log::{info, warn, error};
 use super::encode::encode_single_audio;
 use super::recording_state::AudioChunk;
 
-#[cfg(target_os = "macos")]
-use super::ffmpeg::get_ffmpeg_path;
+#[cfg (target_os = "macos")]
+use super::ffmpeg::find_ffmpeg_path;
 
 /// Audio data without device type (we only store mixed audio)
 #[derive(Clone)]
@@ -51,7 +51,7 @@ impl IncrementalAudioSaver {
 
     /// Add an audio chunk to the buffer
     /// Automatically saves a checkpoint when buffer reaches 30 seconds
-    pub async fn add_chunk(&mut self, chunk: AudioChunk) -> Result<()> {
+    pub fn add_chunk(&mut self, chunk: AudioChunk) -> Result<()> {
         let audio_data = AudioData {
             data: chunk.data,
             // sample_rate: chunk.sample_rate,
@@ -67,7 +67,7 @@ impl IncrementalAudioSaver {
 
         // Save checkpoint when buffer reaches threshold (30 seconds)
         if total_samples >= self.checkpoint_interval_samples {
-            self.save_checkpoint().await?;
+            self.save_checkpoint()?;
             self.checkpoint_buffer.clear();
         }
 
@@ -75,7 +75,7 @@ impl IncrementalAudioSaver {
     }
 
     /// Save current buffer as a checkpoint file
-    async fn save_checkpoint(&mut self) -> Result<()> {
+    fn save_checkpoint(&mut self) -> Result<()> {
         // Concatenate all chunks in buffer
         let audio_data: Vec<f32> = self.checkpoint_buffer
             .iter()
@@ -92,13 +92,13 @@ impl IncrementalAudioSaver {
         let checkpoint_path = self.checkpoints_dir
             .join(format!("audio_chunk_{:03}.mp4", self.checkpoint_count));
 
-        // Encode and save checkpoint (now async)
+        // Encode and save checkpoint
         encode_single_audio(
             bytemuck::cast_slice(&audio_data),
             self.sample_rate,
             1,  // mono
             &checkpoint_path
-        ).await?;
+        )?;
 
         let duration_seconds = audio_data.len() as f32 / self.sample_rate as f32;
         self.checkpoint_count += 1;
@@ -128,7 +128,7 @@ impl IncrementalAudioSaver {
 
             info!("Saving final checkpoint with remaining {} chunks ({:.1}s of audio)",
                   self.checkpoint_buffer.len(), duration_seconds);
-            self.save_checkpoint().await?;
+            self.save_checkpoint()?;
             self.checkpoint_buffer.clear();
         }
 
@@ -181,9 +181,9 @@ impl IncrementalAudioSaver {
         std::fs::write(&list_file, list_content)?;
 
         #[cfg(target_os = "macos")]
-        let ffmpeg_path = get_ffmpeg_path().await
-            .ok_or_else(|| anyhow!("FFmpeg not available. Please ensure FFmpeg is initialized before finalizing recordings."))?;
-
+        let ffmpeg_path = find_ffmpeg_path()
+            .ok_or_else(|| anyhow!("FFmpeg not found. Please install FFmpeg to finalize recordings."))?;
+        
         #[cfg(not(target_os = "macos"))]
         let ffmpeg_path = "ffmpeg";  // Assume ffmpeg is in PATH on Windows/Linux
         info!("Using FFmpeg at: {:?}", ffmpeg_path);
@@ -266,7 +266,7 @@ mod tests {
                 sample_rate: 48000,
                 device_type: DeviceType::Microphone,
             };
-            saver.add_chunk(chunk).await.unwrap();
+            saver.add_chunk(chunk).unwrap();
         }
 
         // Verify 2 checkpoints created
