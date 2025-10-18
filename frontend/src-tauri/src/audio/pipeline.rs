@@ -221,38 +221,63 @@ impl AudioCapture {
         const TARGET_SAMPLE_RATE: u32 = 48000;
         let needs_resampling = sample_rate != TARGET_SAMPLE_RATE;
 
+        // Detect device kind (Bluetooth vs Wired) for adaptive processing
+        // Use reasonable defaults for buffer size (512 samples is typical)
+        let device_kind = super::device_detection::InputDeviceKind::detect(&device.name, 512, sample_rate);
+
         if needs_resampling {
             warn!(
                 "⚠️ SAMPLE RATE MISMATCH DETECTED ⚠️"
             );
             warn!(
-                "🔄 [{:?}] Audio device '{}' reports {} Hz (pipeline expects {} Hz)",
-                device_type, device.name, sample_rate, TARGET_SAMPLE_RATE
+                "🔄 [{:?}] Audio device '{}' ({:?}) reports {} Hz (pipeline expects {} Hz)",
+                device_type, device.name, device_kind, sample_rate, TARGET_SAMPLE_RATE
             );
             warn!(
                 "🔄 Automatic resampling will be applied: {} Hz → {} Hz",
                 sample_rate, TARGET_SAMPLE_RATE
             );
+
+            // Log which resampling strategy will be used
+            let ratio = TARGET_SAMPLE_RATE as f64 / sample_rate as f64;
+            let strategy = if ratio >= 2.0 {
+                "High-quality upsampling (sinc_len=512, Cubic interpolation)"
+            } else if ratio >= 1.5 {
+                "Moderate upsampling (sinc_len=384, Cubic)"
+            } else if ratio > 1.0 {
+                "Small upsampling (sinc_len=256, Linear)"
+            } else if ratio <= 0.5 {
+                "Anti-aliased downsampling (sinc_len=512, Cubic)"
+            } else {
+                "Moderate downsampling (sinc_len=384, Linear)"
+            };
+            info!("   Resampling strategy: {}", strategy);
         } else {
             info!(
-                "✅ [{:?}] Audio device '{}' uses {} Hz (matches pipeline)",
-                device_type, device.name, sample_rate
+                "✅ [{:?}] Audio device '{}' ({:?}) uses {} Hz (matches pipeline)",
+                device_type, device.name, device_kind, sample_rate
             );
         }
 
         // Initialize audio enhancement processors for MICROPHONE ONLY
         // System audio doesn't need enhancement (already clean)
         let (noise_suppressor, high_pass_filter, normalizer) = if matches!(device_type, DeviceType::Microphone) {
-            // Initialize noise suppression (RNNoise) at 48kHz
-            let ns = match NoiseSuppressionProcessor::new(TARGET_SAMPLE_RATE) {
-                Ok(processor) => {
-                    info!("✅ RNNoise noise suppression initialized for microphone '{}' (10-15 dB reduction)", device.name);
-                    Some(processor)
+            // Initialize noise suppression (RNNoise) at 48kHz - CONDITIONAL based on flag
+            let ns = if super::ffmpeg_mixer::RNNOISE_APPLY_ENABLED {
+                match NoiseSuppressionProcessor::new(TARGET_SAMPLE_RATE) {
+                    Ok(processor) => {
+                        info!("✅ RNNoise noise suppression ENABLED for microphone '{}' (10-15 dB reduction)", device.name);
+                        Some(processor)
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Failed to create noise suppressor: {}, continuing without noise suppression", e);
+                        None
+                    }
                 }
-                Err(e) => {
-                    warn!("⚠️ Failed to create noise suppressor: {}, continuing without noise suppression", e);
-                    None
-                }
+            } else {
+                info!("ℹ️ RNNoise noise suppression DISABLED for microphone '{}' (flag: RNNOISE_APPLY_ENABLED=false)", device.name);
+                info!("   Whisper handles noise well internally - RNNoise is optional");
+                None
             };
 
             // Initialize high-pass filter (removes rumble below 80 Hz)
@@ -316,6 +341,13 @@ impl AudioCapture {
         // Without this, audio is sped up 3x and VAD fails
         const TARGET_SAMPLE_RATE: u32 = 48000;
         if self.needs_resampling {
+            let before_len = mono_data.len();
+            let before_rms = if !mono_data.is_empty() {
+                (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
+            } else {
+                0.0
+            };
+
             mono_data = super::audio_processing::resample_audio(
                 &mono_data,
                 self.sample_rate,
@@ -325,14 +357,28 @@ impl AudioCapture {
             // Log resampling only occasionally to avoid spam
             let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
             if chunk_id % 100 == 0 {
-                debug!(
-                    "🔄 [{:?}] Resampled chunk {}: {} → {} Hz ({} → {} samples)",
+                let after_len = mono_data.len();
+                let after_rms = if !mono_data.is_empty() {
+                    (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
+                } else {
+                    0.0
+                };
+                let ratio = TARGET_SAMPLE_RATE as f64 / self.sample_rate as f64;
+                let rms_preservation = if before_rms > 0.0 { (after_rms / before_rms) * 100.0 } else { 100.0 };
+
+                info!(
+                    "🔄 [{:?}] Universal resampler: {}Hz → {}Hz (ratio: {:.2}x)",
                     self.device_type,
-                    chunk_id,
                     self.sample_rate,
                     TARGET_SAMPLE_RATE,
-                    data.len() / self.channels as usize,
-                    mono_data.len()
+                    ratio
+                );
+                info!(
+                    "   Chunk {}: {} → {} samples, RMS preservation: {:.1}%",
+                    chunk_id,
+                    before_len,
+                    after_len,
+                    rms_preservation
                 );
             }
         }
@@ -348,35 +394,37 @@ impl AudioCapture {
                 }
             }
 
-            // STEP 2: Apply RNNoise noise suppression (10-15 dB reduction)
-            if let Ok(mut ns_lock) = self.noise_suppressor.lock() {
-                if let Some(ref mut suppressor) = *ns_lock {
-                    let before_len = mono_data.len();
-                    mono_data = suppressor.process(&mono_data);
-                    let after_len = mono_data.len();
+            // STEP 2: Apply RNNoise noise suppression (10-15 dB reduction) - CONDITIONAL
+            if super::ffmpeg_mixer::RNNOISE_APPLY_ENABLED {
+                if let Ok(mut ns_lock) = self.noise_suppressor.lock() {
+                    if let Some(ref mut suppressor) = *ns_lock {
+                        let before_len = mono_data.len();
+                        mono_data = suppressor.process(&mono_data);
+                        let after_len = mono_data.len();
 
-                    // CRITICAL MONITORING: Track buffer health
-                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                    if chunk_id % 100 == 0 {
-                        let buffered = suppressor.buffered_samples();
-                        let length_delta = (before_len as i32 - after_len as i32).abs();
+                        // CRITICAL MONITORING: Track buffer health
+                        let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                        if chunk_id % 100 == 0 {
+                            let buffered = suppressor.buffered_samples();
+                            let length_delta = (before_len as i32 - after_len as i32).abs();
 
-                        debug!("🔇 Noise suppression health: in={}, out={}, delta={}, buffered={}, RMS={:.4}",
-                               before_len, after_len, length_delta, buffered,
-                               if !mono_data.is_empty() {
-                                   (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
-                               } else { 0.0 });
+                            debug!("🔇 Noise suppression health: in={}, out={}, delta={}, buffered={}, RMS={:.4}",
+                                   before_len, after_len, length_delta, buffered,
+                                   if !mono_data.is_empty() {
+                                       (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
+                                   } else { 0.0 });
 
-                        // WARN if accumulating samples (potential latency buildup)
-                        if buffered > 1000 {
-                            warn!("⚠️ RNNoise accumulating samples: {} buffered (potential latency issue!)",
-                                  buffered);
-                        }
+                            // WARN if accumulating samples (potential latency buildup)
+                            if buffered > 1000 {
+                                warn!("⚠️ RNNoise accumulating samples: {} buffered (potential latency issue!)",
+                                      buffered);
+                            }
 
-                        // WARN if significant length mismatch
-                        if length_delta > 50 {
-                            warn!("⚠️ RNNoise length mismatch: input={} output={} (delta={})",
-                                  before_len, after_len, length_delta);
+                            // WARN if significant length mismatch
+                            if length_delta > 50 {
+                                warn!("⚠️ RNNoise length mismatch: input={} output={} (delta={})",
+                                      before_len, after_len, length_delta);
+                            }
                         }
                     }
                 }
