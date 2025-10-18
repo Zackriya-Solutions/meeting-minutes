@@ -432,13 +432,6 @@ pub fn run() {
                 }
             });
 
-            // Setup enhanced notification handlers (macOS only)
-            #[cfg(target_os = "macos")]
-            {
-                notifications::setup_enhanced_notification_handlers(_app.handle().clone());
-                log::info!("Enhanced notification handlers set up for macOS");
-            }
-
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
 
@@ -619,9 +612,6 @@ pub fn run() {
             notifications::commands::initialize_notification_manager_manual,
             notifications::commands::test_notification_with_auto_consent,
             notifications::commands::get_notification_stats,
-            // Enhanced notification commands
-            notifications::commands::show_enhanced_recording_confirmation,
-            notifications::commands::dismiss_all_enhanced_notifications,
             // System audio capture commands
             audio::system_audio_commands::start_system_audio_capture_command,
             audio::system_audio_commands::list_system_audio_devices_command,

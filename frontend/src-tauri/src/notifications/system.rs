@@ -48,12 +48,12 @@ impl<R: Runtime> SystemNotificationHandler<R> {
             let title = notification.title.clone();
             let body = notification.body.clone();
             move || {
-                // Send native macOS notification
+                // Send native macOS notification without sound to avoid "use_default" dialog
                 mac_notification_sys::send_notification(
                     &title,
                     None, // No subtitle
                     &body,
-                    Some(mac_notification_sys::Notification::new().sound("default"))
+                    None  // No sound configuration - avoids macOS "use_default" application picker
                 )
             }
         }).await;
