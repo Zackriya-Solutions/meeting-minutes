@@ -76,6 +76,22 @@ impl RecordingSaver {
         self.meeting_name = name;
     }
 
+    /// Set device information in metadata
+    pub fn set_device_info(&mut self, mic_name: Option<String>, sys_name: Option<String>) {
+        if let Some(ref mut metadata) = self.metadata {
+            metadata.devices.microphone = mic_name;
+            metadata.devices.system_audio = sys_name;
+
+            // Write updated metadata to disk if folder exists
+            if let Some(folder) = &self.meeting_folder {
+                let metadata_clone = metadata.clone();
+                if let Err(e) = self.write_metadata(folder, &metadata_clone) {
+                    warn!("Failed to update metadata with device info: {}", e);
+                }
+            }
+        }
+    }
+
     /// Add or update a structured transcript segment (upserts based on sequence_id)
     /// Also saves incrementally to disk
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {

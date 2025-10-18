@@ -117,16 +117,27 @@ impl IncrementalAudioSaver {
     pub async fn finalize(&mut self) -> Result<PathBuf> {
         info!("Finalizing incremental recording...");
 
-        // Save final buffer if not empty
+        // CRITICAL FIX: Always save final buffer, even if < 30 seconds
+        // This ensures short recordings (< 30s) are saved successfully
         if !self.checkpoint_buffer.is_empty() {
-            info!("Saving final checkpoint with remaining {} chunks", self.checkpoint_buffer.len());
+            let total_samples: usize = self.checkpoint_buffer
+                .iter()
+                .map(|c| c.data.len())
+                .sum();
+            let duration_seconds = total_samples as f32 / self.sample_rate as f32;
+
+            info!("Saving final checkpoint with remaining {} chunks ({:.1}s of audio)",
+                  self.checkpoint_buffer.len(), duration_seconds);
             self.save_checkpoint()?;
             self.checkpoint_buffer.clear();
         }
 
+        // Check if we have ANY audio data (even from short recordings)
         if self.checkpoint_count == 0 {
-            return Err(anyhow!("No audio checkpoints to merge - recording may have failed"));
+            return Err(anyhow!("No audio data recorded - recording may have failed completely"));
         }
+
+        info!("📦 Total checkpoints saved: {}", self.checkpoint_count);
 
         // Merge all checkpoints using FFmpeg concat
         let final_audio_path = self.meeting_folder.join("audio.mp4");

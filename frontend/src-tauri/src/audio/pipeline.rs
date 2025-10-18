@@ -6,11 +6,14 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use crate::{perf_debug, batch_audio_metric};
 use super::batch_processor::AudioMetricsBatcher;
+use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
+use super::ffmpeg_mixer::FFmpegAudioMixer;
+use super::device_detection::InputDeviceKind;
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -198,7 +201,12 @@ pub struct AudioCapture {
     chunk_counter: Arc<std::sync::atomic::AtomicU64>,
     device_type: DeviceType,
     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
-    needs_resampling: bool,  // NEW: Flag if resampling is required
+    needs_resampling: bool,  // Flag if resampling is required
+    // CRITICAL FIX: Persistent resampler to preserve energy across chunks
+    resampler: Arc<std::sync::Mutex<Option<SincFixedIn<f32>>>>,
+    // Buffering for variable-size chunks → fixed-size resampler input
+    resampler_input_buffer: Arc<std::sync::Mutex<Vec<f32>>>,
+    resampler_chunk_size: usize,  // Fixed chunk size for resampler (512 samples)
     // Audio enhancement processors (microphone only)
     noise_suppressor: Arc<std::sync::Mutex<Option<NoiseSuppressionProcessor>>>,
     high_pass_filter: Arc<std::sync::Mutex<Option<HighPassFilter>>>,
@@ -306,6 +314,57 @@ impl AudioCapture {
             (None, None, None)
         };
 
+        // CRITICAL FIX: Initialize persistent resampler to preserve energy across chunks
+        // Creating a new resampler per chunk causes energy amplification and incorrect output sizes
+        // Use fixed chunk size of 512 samples with buffering for variable-size input
+        const RESAMPLER_CHUNK_SIZE: usize = 512;
+
+        let resampler = if needs_resampling {
+            let ratio = TARGET_SAMPLE_RATE as f64 / sample_rate as f64;
+
+            // Adaptive parameters based on sample rate ratio (same logic as resample_audio)
+            let (sinc_len, interpolation_type, oversampling) = if ratio >= 2.0 {
+                (512, SincInterpolationType::Cubic, 512)
+            } else if ratio >= 1.5 {
+                (384, SincInterpolationType::Cubic, 384)
+            } else if ratio > 1.0 {
+                (256, SincInterpolationType::Linear, 256)
+            } else if ratio <= 0.5 {
+                (512, SincInterpolationType::Cubic, 512)
+            } else {
+                (384, SincInterpolationType::Linear, 384)
+            };
+
+            let params = SincInterpolationParameters {
+                sinc_len,
+                f_cutoff: 0.95,
+                interpolation: interpolation_type,
+                oversampling_factor: oversampling,
+                window: WindowFunction::BlackmanHarris2,
+            };
+
+            match SincFixedIn::<f32>::new(
+                ratio,
+                2.0,  // Maximum relative deviation
+                params,
+                RESAMPLER_CHUNK_SIZE,
+                1,    // Mono
+            ) {
+                Ok(resampler) => {
+                    info!("✅ Persistent resampler initialized for '{}' ({}Hz → {}Hz, chunk_size={})",
+                          device.name, sample_rate, TARGET_SAMPLE_RATE, RESAMPLER_CHUNK_SIZE);
+                    info!("   Buffering enabled for variable-size chunks (e.g., 320, 512, etc.)");
+                    Some(resampler)
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to create persistent resampler: {}, will use fallback", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             device,
             state,
@@ -315,6 +374,9 @@ impl AudioCapture {
             device_type,
             recording_sender,
             needs_resampling,
+            resampler: Arc::new(std::sync::Mutex::new(resampler)),
+            resampler_input_buffer: Arc::new(std::sync::Mutex::new(Vec::with_capacity(RESAMPLER_CHUNK_SIZE * 2))),
+            resampler_chunk_size: RESAMPLER_CHUNK_SIZE,
             noise_suppressor: Arc::new(std::sync::Mutex::new(noise_suppressor)),
             high_pass_filter: Arc::new(std::sync::Mutex::new(high_pass_filter)),
             normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
@@ -339,6 +401,10 @@ impl AudioCapture {
         // CRITICAL FIX: Resample to 48kHz if device uses different sample rate
         // This fixes Bluetooth devices (like Sony WH-1000XM4) that report 16kHz
         // Without this, audio is sped up 3x and VAD fails
+        //
+        // IMPORTANT: Uses PERSISTENT resampler with BUFFERING to preserve energy across chunks
+        // Creating a new resampler per chunk causes energy amplification (173.5% RMS)
+        // Buffering handles variable chunk sizes (320, 512, etc.) by accumulating to fixed 512-sample chunks
         const TARGET_SAMPLE_RATE: u32 = 48000;
         if self.needs_resampling {
             let before_len = mono_data.len();
@@ -348,15 +414,69 @@ impl AudioCapture {
                 0.0
             };
 
-            mono_data = super::audio_processing::resample_audio(
-                &mono_data,
-                self.sample_rate,
-                TARGET_SAMPLE_RATE,
-            );
+            // Use persistent resampler with buffering to handle variable chunk sizes
+            let mut resampled_output = Vec::new();
+            let mut used_persistent_resampler = false;
+
+            if let Ok(mut buffer_lock) = self.resampler_input_buffer.lock() {
+                // Add new samples to buffer
+                buffer_lock.extend_from_slice(&mono_data);
+
+                // Process complete chunks through the resampler
+                if let Ok(mut resampler_lock) = self.resampler.lock() {
+                    if let Some(ref mut resampler) = *resampler_lock {
+                        used_persistent_resampler = true;
+
+                        // Process as many complete chunks as we have
+                        while buffer_lock.len() >= self.resampler_chunk_size {
+                            // Extract exactly chunk_size samples
+                            let chunk: Vec<f32> = buffer_lock.drain(0..self.resampler_chunk_size).collect();
+
+                            // Rubato expects input as Vec<Vec<f32>> (one Vec per channel)
+                            let waves_in = vec![chunk];
+
+                            match resampler.process(&waves_in, None) {
+                                Ok(mut waves_out) => {
+                                    if let Some(output) = waves_out.pop() {
+                                        resampled_output.extend_from_slice(&output);
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ Persistent resampler processing failed: {}", e);
+                                    used_persistent_resampler = false;
+                                    break;
+                                }
+                            }
+                        }
+                        // Remaining samples in buffer will be processed in next iteration
+                    }
+                }
+            }
+
+            // CRITICAL: Only update mono_data if we got output from persistent resampler
+            // If buffer is accumulating (< 512 samples), skip this chunk - data is safely buffered
+            // and will be processed in next iteration with proper resampling
+            let has_resampled_output = !resampled_output.is_empty();
+
+            if has_resampled_output {
+                mono_data = resampled_output;
+            } else if !used_persistent_resampler {
+                // Only fallback if persistent resampler is not available at all
+                mono_data = super::audio_processing::resample_audio(
+                    &mono_data,
+                    self.sample_rate,
+                    TARGET_SAMPLE_RATE,
+                );
+            } else {
+                // Buffering: samples are accumulating in buffer, waiting for 512-sample chunk
+                // Don't send partial/unprocessed data - return early
+                // Audio is NOT lost - it's in the buffer and will be processed next iteration
+                return;
+            }
 
             // Log resampling only occasionally to avoid spam
             let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-            if chunk_id % 100 == 0 {
+            if chunk_id % 100 == 0 && has_resampled_output {
                 let after_len = mono_data.len();
                 let after_rms = if !mono_data.is_empty() {
                     (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
@@ -366,19 +486,26 @@ impl AudioCapture {
                 let ratio = TARGET_SAMPLE_RATE as f64 / self.sample_rate as f64;
                 let rms_preservation = if before_rms > 0.0 { (after_rms / before_rms) * 100.0 } else { 100.0 };
 
+                let buffer_size = if let Ok(buf) = self.resampler_input_buffer.lock() {
+                    buf.len()
+                } else {
+                    0
+                };
+
                 info!(
-                    "🔄 [{:?}] Universal resampler: {}Hz → {}Hz (ratio: {:.2}x)",
+                    "🔄 [{:?}] Persistent buffered resampler: {}Hz → {}Hz (ratio: {:.2}x)",
                     self.device_type,
                     self.sample_rate,
                     TARGET_SAMPLE_RATE,
                     ratio
                 );
                 info!(
-                    "   Chunk {}: {} → {} samples, RMS preservation: {:.1}%",
+                    "   Chunk {}: {} input samples → {} output samples, RMS preservation: {:.1}%, buffer: {} samples",
                     chunk_id,
                     before_len,
                     after_len,
-                    rms_preservation
+                    rms_preservation,
+                    buffer_size
                 );
             }
         }
@@ -431,17 +558,28 @@ impl AudioCapture {
             }
 
             // STEP 3: Apply EBU R128 normalization (professional loudness standard)
-            if let Ok(mut normalizer_lock) = self.normalizer.lock() {
-                if let Some(ref mut normalizer) = *normalizer_lock {
-                    mono_data = normalizer.normalize_loudness(&mono_data);
+            // CRITICAL: Skip normalization for resampled audio to prevent double-amplification
+            // The resampler already preserves RMS energy, so normalizing after resampling
+            // would cause 173.5% RMS amplification (as seen in logs)
+            if !self.needs_resampling {
+                if let Ok(mut normalizer_lock) = self.normalizer.lock() {
+                    if let Some(ref mut normalizer) = *normalizer_lock {
+                        mono_data = normalizer.normalize_loudness(&mono_data);
 
-                    // Log normalization occasionally for debugging
-                    let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
-                    if chunk_id % 200 == 0 && !mono_data.is_empty() {
-                        let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-                        let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-                        debug!("🎤 After normalization chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
+                        // Log normalization occasionally for debugging
+                        let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                        if chunk_id % 200 == 0 && !mono_data.is_empty() {
+                            let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+                            let peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+                            debug!("🎤 After normalization chunk {}: RMS={:.4}, Peak={:.4}", chunk_id, rms, peak);
+                        }
                     }
+                }
+            } else {
+                // Skip normalization for resampled audio (prevents double-amplification)
+                let chunk_id = self.chunk_counter.load(std::sync::atomic::Ordering::SeqCst);
+                if chunk_id == 0 {
+                    info!("ℹ️ EBU R128 normalization SKIPPED for resampled microphone (resampler preserves RMS energy)");
                 }
             }
         }
@@ -566,9 +704,8 @@ pub struct AudioPipeline {
     processed_chunks: u64,
     // Smart batching for audio metrics
     metrics_batcher: Option<AudioMetricsBatcher>,
-    // PROFESSIONAL AUDIO MIXING: Ring buffer + RMS-based mixer
-    ring_buffer: AudioMixerRingBuffer,
-    mixer: ProfessionalAudioMixer,
+    // FFmpeg-style adaptive audio mixing (50ms windows, per-source buffering)
+    ffmpeg_mixer: FFmpegAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
@@ -580,6 +717,10 @@ impl AudioPipeline {
         state: Arc<RecordingState>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
+        mic_device_name: String,
+        mic_device_kind: InputDeviceKind,
+        system_device_name: String,
+        system_device_kind: InputDeviceKind,
     ) -> Self {
         // Create VAD processor with balanced redemption time for speech accumulation
         // The VAD processor now handles 48kHz->16kHz resampling internally
@@ -599,9 +740,15 @@ impl AudioPipeline {
             }
         };
 
-        // Initialize professional audio mixing components
-        let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
-        let mixer = ProfessionalAudioMixer::new(sample_rate);
+        // Initialize FFmpeg-style adaptive audio mixer
+        // Uses 50ms windows instead of 600ms, with per-source adaptive buffering
+        let ffmpeg_mixer = FFmpegAudioMixer::new(
+            mic_device_name,
+            mic_device_kind,
+            system_device_name,
+            system_device_kind,
+            sample_rate,
+        );
 
         // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
         let _ = target_chunk_duration_ms;
@@ -618,9 +765,8 @@ impl AudioPipeline {
             processed_chunks: 0,
             // Initialize metrics batcher for smart batching
             metrics_batcher: Some(AudioMetricsBatcher::new()),
-            // Initialize professional audio mixing
-            ring_buffer,
-            mixer,
+            // Initialize FFmpeg-style adaptive audio mixing
+            ffmpeg_mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
         }
     }
@@ -672,25 +818,28 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
-                    // STEP 1: Add raw audio to ring buffer for mixing
+                    // STEP 1: Push raw audio to FFmpeg mixer (per-source buffering)
                     // Microphone audio is already normalized at capture level (AudioCapture)
                     // System audio remains raw
-                    self.ring_buffer.add_samples(chunk.device_type.clone(), chunk.data);
+                    match chunk.device_type {
+                        DeviceType::Microphone => {
+                            self.ffmpeg_mixer.push_mic(chunk.data);
+                        }
+                        DeviceType::System => {
+                            self.ffmpeg_mixer.push_system(chunk.data);
+                        }
+                    }
 
-                    // STEP 2: Mix audio in fixed windows when both streams have sufficient data
-                    while self.ring_buffer.can_mix() {
-                        if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // Simple mixing without aggressive ducking
-                            let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
-
-                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
-                            // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
-                            // System audio at natural levels
-                            // Previous 2x gain was causing excessive limiting/distortion
-                            let mixed_with_gain = mixed_clean;
+                    // STEP 2: Pop mixed audio from FFmpeg mixer when both sources are ready
+                    // FFmpeg mixer uses adaptive timeouts (50ms windows, timeout-aware buffering)
+                    while self.ffmpeg_mixer.has_data_ready() {
+                        if let Some(mixed_audio) = self.ffmpeg_mixer.pop_mixed() {
+                            // Mixed audio is ready (50ms window)
+                            // Microphone already normalized by EBU R128 to -23 LUFS
+                            // System audio at natural levels, with adaptive ducking applied by mixer
 
                             // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
+                            match self.vad_processor.process_audio(&mixed_audio) {
                                 Ok(speech_segments) => {
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
@@ -723,10 +872,10 @@ impl AudioPipeline {
                                 }
                             }
 
-                            // STEP 4: Send mixed audio for recording (WAV file)
+                            // STEP 4: Send mixed audio for recording (MP4 file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
                                 let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
+                                    data: mixed_audio.clone(),
                                     sample_rate: self.sample_rate,
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
@@ -734,6 +883,9 @@ impl AudioPipeline {
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
+                        } else {
+                            // No mixed audio ready yet (waiting for more data)
+                            break;
                         }
                     }
                 }
@@ -812,7 +964,7 @@ impl AudioPipelineManager {
         }
     }
 
-    /// Start the audio pipeline
+    /// Start the audio pipeline with device information for adaptive mixing
     pub fn start(
         &mut self,
         state: Arc<RecordingState>,
@@ -820,6 +972,10 @@ impl AudioPipelineManager {
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+        mic_device_name: String,
+        mic_device_kind: InputDeviceKind,
+        system_device_name: String,
+        system_device_kind: InputDeviceKind,
     ) -> Result<()> {
         // Create audio processing channel
         let (audio_sender, audio_receiver) = mpsc::unbounded_channel::<AudioChunk>();
@@ -827,13 +983,17 @@ impl AudioPipelineManager {
         // Set sender in state for audio captures to use
         state.set_audio_sender(audio_sender.clone());
 
-        // Create and start pipeline
+        // Create and start pipeline with device information for adaptive mixing
         let mut pipeline = AudioPipeline::new(
             audio_receiver,
             transcription_sender,
             state.clone(),
             target_chunk_duration_ms,
             sample_rate,
+            mic_device_name,
+            mic_device_kind,
+            system_device_name,
+            system_device_kind,
         );
 
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
@@ -847,7 +1007,7 @@ impl AudioPipelineManager {
         self.pipeline_handle = Some(handle);
         self.audio_sender = Some(audio_sender);
 
-        info!("Audio pipeline manager started with mixed audio recording");
+        info!("Audio pipeline manager started with FFmpeg adaptive mixer (50ms windows)");
         Ok(())
     }
 

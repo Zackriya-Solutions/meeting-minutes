@@ -66,8 +66,29 @@ impl RecordingManager {
         // Start recording state first
         self.state.start_recording()?;
 
-        // Start the audio processing pipeline
-        // Pipeline will: 1) Mix mic+system audio professionally, 2) Send mixed to recording_sender,
+        // Get device information for adaptive mixing
+        let (mic_name, mic_kind) = if let Some(ref mic) = microphone_device {
+            let device_kind = super::device_detection::InputDeviceKind::detect(&mic.name, 512, 48000);
+            (mic.name.clone(), device_kind)
+        } else {
+            ("No Microphone".to_string(), super::device_detection::InputDeviceKind::Unknown)
+        };
+
+        let (sys_name, sys_kind) = if let Some(ref sys) = system_device {
+            let device_kind = super::device_detection::InputDeviceKind::detect(&sys.name, 512, 48000);
+            (sys.name.clone(), device_kind)
+        } else {
+            ("No System Audio".to_string(), super::device_detection::InputDeviceKind::Unknown)
+        };
+
+        // Update recording metadata with device information
+        self.recording_saver.set_device_info(
+            microphone_device.as_ref().map(|d| d.name.clone()),
+            system_device.as_ref().map(|d| d.name.clone())
+        );
+
+        // Start the audio processing pipeline with FFmpeg adaptive mixer
+        // Pipeline will: 1) Mix mic+system audio with adaptive buffering, 2) Send mixed to recording_sender,
         // 3) Apply VAD and send speech segments to transcription
         self.pipeline_manager.start(
             self.state.clone(),
@@ -75,6 +96,10 @@ impl RecordingManager {
             0, // Ignored - using dynamic sizing internally
             48000, // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
+            mic_name,
+            mic_kind,
+            sys_name,
+            sys_kind,
         )?;
 
         // Give the pipeline a moment to fully initialize before starting streams
