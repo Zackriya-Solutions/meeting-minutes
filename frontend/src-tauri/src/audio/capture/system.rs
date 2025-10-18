@@ -215,14 +215,14 @@ impl SystemAudioCapture {
             stream.play()
                 .map_err(|e| anyhow::anyhow!("Failed to start WASAPI loopback stream: {}", e))?;
 
-            // Spawn blocking thread to manage stream lifecycle (Stream is not Send, can't use tokio::spawn)
-            std::thread::spawn(move || {
+            // Spawn blocking task to manage stream lifecycle (Stream is !Send, requires spawn_blocking)
+            tokio::task::spawn_blocking(move || {
                 // Keep stream alive until drop signal
                 let _stream = stream;
                 if drop_rx.recv().is_ok() {
                     info!("WASAPI loopback stream stopped");
                 }
-                // Stream drops here when thread exits
+                // Stream drops here when task exits
             });
 
             let receiver = rx.map(futures_util::stream::iter).flatten();
