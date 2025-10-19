@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Info, Loader2 } from 'lucide-react';
 import { AnalyticsContext } from './AnalyticsProvider';
@@ -10,26 +10,8 @@ import { Analytics } from '@/lib/analytics';
 export default function AnalyticsConsentSwitch() {
   const { setIsAnalyticsOptedIn, isAnalyticsOptedIn } = useContext(AnalyticsContext);
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // Load saved preference on component mount
-  useEffect(() => {
-    const loadPreference = async () => {
-      try {
-        const store = await load('analytics.json', {
-          autoSave: false,
-          defaults: {
-            analyticsOptedIn: true
-          }
-        });
-        const saved = await store.get<boolean>('analyticsOptedIn');
-        setIsAnalyticsOptedIn(saved ?? true);
-      } catch (error) {
-        console.log('No saved analytics preference found, using default');
-        setIsAnalyticsOptedIn(true);
-      }
-    };
-    loadPreference();
-  }, [setIsAnalyticsOptedIn]);
+
+  // Note: Store loading is handled by AnalyticsProvider to avoid race conditions
 
   const handleToggle = async (enabled: boolean) => {
     // Optimistic update - immediately update UI state
