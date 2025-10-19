@@ -172,9 +172,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
       const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
       setSearchResults(results);
-
-      // Track search performed
-      Analytics.trackSearchPerformed(query, results.length);
     } catch (error) {
       console.error('Error searching transcripts:', error);
       setSearchResults([]);

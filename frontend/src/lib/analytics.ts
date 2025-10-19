@@ -571,16 +571,6 @@ export class Analytics {
     }
   }
 
-  static async trackSearchPerformed(query: string, resultsCount: number): Promise<void> {
-    if (!this.initialized) return;
-
-    try {
-      await invoke('track_search_performed', { query, resultsCount });
-    } catch (error) {
-      console.error('Failed to track search performed:', error);
-    }
-  }
-
   static async trackSettingsChanged(settingType: string, newValue: string): Promise<void> {
     if (!this.initialized) return;
 
