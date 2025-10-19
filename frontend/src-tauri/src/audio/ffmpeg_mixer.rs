@@ -268,7 +268,7 @@ impl AudioMixer {
     fn new(adaptive_ducking: bool) -> Self {
         Self {
             mic_ducking: 1.0,      // Full volume by default
-            system_ducking: 0.4,   // System audio at 40% when mic is active
+            system_ducking: 0.60,   // System audio at 40% when mic is active
             adaptive_ducking,
         }
     }

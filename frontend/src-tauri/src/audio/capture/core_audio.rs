@@ -81,11 +81,9 @@ impl CoreAudioCapture {
         let device_name = output_device.name().unwrap_or_else(|_| cf::String::from_str("Unknown"));
         info!("✅ CoreAudio: Default output device: '{}' (UID: {:?})", device_name, output_uid);
 
-        // Create sub-device dictionary for the output device
-        let sub_device = cf::DictionaryOf::with_keys_values(
-            &[ca::sub_device_keys::uid()],
-            &[output_uid.as_type_ref()],
-        );
+        // IMPORTANT: We do NOT create a sub_device dictionary here
+        // When using a tap, the tap provides all the audio we need
+        // Including both the tap AND the device creates duplicate audio (echo issue)
 
         // Create process tap with mono global tap, excluding no processes
         // Note: Mono tap is more reliable for system audio capture on macOS
@@ -119,6 +117,10 @@ impl CoreAudioCapture {
         );
 
         // Create aggregate device descriptor
+        // CRITICAL FIX: Use ONLY the tap, NOT the output device + tap
+        // Previous configuration included both sub_device_list (output device) and tap_list (tap of same device)
+        // This caused duplicate audio capture, resulting in echo (YouTube audio appeared twice)
+        // The tap alone provides all the system audio we need
         let agg_desc = cf::DictionaryOf::with_keys_values(
             &[
                 ca::aggregate_device_keys::is_private(),
@@ -127,7 +129,7 @@ impl CoreAudioCapture {
                 ca::aggregate_device_keys::name(),
                 ca::aggregate_device_keys::main_sub_device(),
                 ca::aggregate_device_keys::uid(),
-                ca::aggregate_device_keys::sub_device_list(),
+                // REMOVED: sub_device_list (was causing duplicate audio)
                 ca::aggregate_device_keys::tap_list(),
             ],
             &[
@@ -137,7 +139,7 @@ impl CoreAudioCapture {
                 cf::str!(c"meetily-audio-tap").as_type_ref(),
                 &output_uid,
                 &cf::Uuid::new().to_cf_string(),
-                &cf::ArrayOf::from_slice(&[sub_device.as_ref()]),
+                // REMOVED: sub_device array (was causing echo)
                 &cf::ArrayOf::from_slice(&[sub_tap.as_ref()]),
             ],
         );
