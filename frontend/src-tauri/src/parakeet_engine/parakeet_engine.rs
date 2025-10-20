@@ -79,6 +79,7 @@ pub struct ParakeetEngine {
     current_model: Arc<RwLock<Option<ParakeetModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
+    cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
 }
 
 impl ParakeetEngine {
@@ -117,6 +118,7 @@ impl ParakeetEngine {
             current_model: Arc::new(RwLock::new(None)),
             current_model_name: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
+            cancel_download_flag: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -127,9 +129,10 @@ impl ParakeetEngine {
 
         // Parakeet model configurations
         // Model name format: parakeet-tdt-0.6b-v{version}-{quantization}
+        // Sizes match actual download sizes (encoder + decoder + preprocessor + vocab)
         let model_configs = [
-            ("parakeet-tdt-0.6b-v3-int8", 200, QuantizationType::Int8, "Ultra Fast (v3)", "30x real-time on M4 Max, latest version with int8 quantization"),
-            ("parakeet-tdt-0.6b-v2-int8", 180, QuantizationType::Int8, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
+            ("parakeet-tdt-0.6b-v3-int8", 670, QuantizationType::Int8, "Ultra Fast (v3)", "30x real-time on M4 Max, latest version with int8 quantization"),
+            ("parakeet-tdt-0.6b-v2-int8", 661, QuantizationType::Int8, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
         ];
 
         for (name, size_mb, quantization, speed, description) in model_configs {
@@ -393,6 +396,12 @@ impl ParakeetEngine {
     ) -> Result<()> {
         log::info!("Starting download for Parakeet model: {}", model_name);
 
+        // Clear any previous cancellation flag for this model
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            *cancel_flag = None;
+        }
+
         // Get model info
         let model_info = {
             let models = self.available_models.read().await;
@@ -513,8 +522,18 @@ impl ParakeetEngine {
             let mut stream = response.bytes_stream();
             let mut downloaded = 0u64;
             let mut last_reported_mb = 0u64;
+            let mut last_reported_progress = 0u8;
 
             while let Some(chunk_result) = stream.next().await {
+                // Check for cancellation before processing chunk
+                {
+                    let cancel_flag = self.cancel_download_flag.read().await;
+                    if cancel_flag.as_ref() == Some(&model_name.to_string()) {
+                        log::info!("Download cancelled for {}", model_name);
+                        return Err(anyhow!("Download cancelled by user"));
+                    }
+                }
+
                 let chunk = chunk_result
                     .map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
 
@@ -532,14 +551,18 @@ impl ParakeetEngine {
                     ((index as f64 + (downloaded as f64 / total_size.max(1) as f64)) / total_files as f64 * 100.0) as u8
                 };
 
-                // Report progress every 1MB to reduce event spam (or on first/last chunk)
+                // Improved throttling: Report every 5MB OR every 5% progress change OR on completion
+                // This significantly reduces event spam while keeping progress smooth
                 let current_mb = total_downloaded / 1_048_576;
-                let should_report = current_mb > last_reported_mb ||
-                                    downloaded == total_size ||
-                                    downloaded < 65536; // Always report first 64KB
+                let mb_threshold_crossed = current_mb / 5 > last_reported_mb / 5; // Every 5MB
+                let progress_threshold_crossed = overall_progress >= last_reported_progress + 5; // Every 5%
+                let is_complete = downloaded == total_size;
+
+                let should_report = mb_threshold_crossed || progress_threshold_crossed || is_complete;
 
                 if should_report {
                     last_reported_mb = current_mb;
+                    last_reported_progress = overall_progress;
 
                     // Report progress
                     if let Some(ref callback) = progress_callback {
@@ -581,16 +604,48 @@ impl ParakeetEngine {
             }
         }
 
+        // Clear cancellation flag on successful completion
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            if cancel_flag.as_ref() == Some(&model_name.to_string()) {
+                *cancel_flag = None;
+            }
+        }
+
         log::info!("Download completed for Parakeet model: {}", model_name);
         Ok(())
     }
 
-    /// Cancel a model download (not fully implemented, just updates status)
+    /// Cancel an ongoing model download
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
-        let mut models = self.available_models.write().await;
-        if let Some(model) = models.get_mut(model_name) {
-            model.status = ModelStatus::Error("Download cancelled".to_string());
+        log::info!("Cancelling download for Parakeet model: {}", model_name);
+
+        // Set cancellation flag to interrupt the download loop
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            *cancel_flag = Some(model_name.to_string());
         }
+
+        // Update model status to Missing (so it can be retried)
+        {
+            let mut models = self.available_models.write().await;
+            if let Some(model) = models.get_mut(model_name) {
+                model.status = ModelStatus::Missing;
+            }
+        }
+
+        // Clean up partially downloaded files
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Brief delay to let download loop exit
+
+        let model_path = self.models_dir.join(model_name);
+        if model_path.exists() {
+            if let Err(e) = fs::remove_dir_all(&model_path).await {
+                log::warn!("Failed to clean up cancelled download directory: {}", e);
+            } else {
+                log::info!("Cleaned up cancelled download directory: {}", model_path.display());
+            }
+        }
+
         Ok(())
     }
 }

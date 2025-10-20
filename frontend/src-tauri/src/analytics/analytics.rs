@@ -114,7 +114,10 @@ impl AnalyticsClient {
 
         let event_name = event_name.to_string();
         let mut properties = properties.unwrap_or_default();
-        
+
+        // Add app version to all events
+        properties.insert("app_version".to_string(), env!("CARGO_PKG_VERSION").to_string());
+
         // Add session information to all events
         if let Some(session) = self.current_session.lock().await.as_ref() {
             properties.insert("session_id".to_string(), session.session_id.clone());
@@ -237,17 +240,8 @@ impl AnalyticsClient {
         let mut properties = HashMap::new();
         properties.insert("meeting_id".to_string(), meeting_id.to_string());
         properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
-        
-        self.track_event("meeting_deleted", Some(properties)).await
-    }
 
-    pub async fn track_search_performed(&self, query: &str, results_count: usize) -> Result<(), String> {
-        let mut properties = HashMap::new();
-        properties.insert("query".to_string(), query.to_string());
-        properties.insert("results_count".to_string(), results_count.to_string());
-        properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
-        
-        self.track_event("search_performed", Some(properties)).await
+        self.track_event("meeting_deleted", Some(properties)).await
     }
 
     pub async fn track_settings_changed(&self, setting_type: &str, new_value: &str) -> Result<(), String> {
@@ -328,8 +322,75 @@ impl AnalyticsClient {
         let mut properties = HashMap::new();
         properties.insert("prompt_length".to_string(), prompt_length.to_string());
         properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
-        
+
         self.track_event("custom_prompt_used", Some(properties)).await
+    }
+
+    pub async fn track_meeting_ended(
+        &self,
+        transcription_provider: &str,
+        transcription_model: &str,
+        summary_provider: &str,
+        summary_model: &str,
+        total_duration_seconds: Option<f64>,
+        active_duration_seconds: f64,
+        pause_duration_seconds: f64,
+        microphone_device_type: &str,
+        system_audio_device_type: &str,
+        chunks_processed: u64,
+        transcript_segments_count: u64,
+        had_fatal_error: bool,
+    ) -> Result<(), String> {
+        let mut properties = HashMap::new();
+
+        // Model information
+        properties.insert("transcription_provider".to_string(), transcription_provider.to_string());
+        properties.insert("transcription_model".to_string(), transcription_model.to_string());
+        properties.insert("summary_provider".to_string(), summary_provider.to_string());
+        properties.insert("summary_model".to_string(), summary_model.to_string());
+
+        // Duration metrics
+        if let Some(duration) = total_duration_seconds {
+            properties.insert("total_duration_seconds".to_string(), duration.to_string());
+        }
+        properties.insert("active_duration_seconds".to_string(), active_duration_seconds.to_string());
+        properties.insert("pause_duration_seconds".to_string(), pause_duration_seconds.to_string());
+
+        // Privacy-safe device types
+        properties.insert("microphone_device_type".to_string(), microphone_device_type.to_string());
+        properties.insert("system_audio_device_type".to_string(), system_audio_device_type.to_string());
+
+        // Processing stats
+        properties.insert("chunks_processed".to_string(), chunks_processed.to_string());
+        properties.insert("transcript_segments_count".to_string(), transcript_segments_count.to_string());
+        properties.insert("had_fatal_error".to_string(), had_fatal_error.to_string());
+
+        // Timestamp
+        properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
+
+        self.track_event("meeting_ended", Some(properties)).await
+    }
+
+    // Analytics consent tracking
+    pub async fn track_analytics_enabled(&self) -> Result<(), String> {
+        let mut properties = HashMap::new();
+        properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
+
+        self.track_event("analytics_enabled", Some(properties)).await
+    }
+
+    pub async fn track_analytics_disabled(&self) -> Result<(), String> {
+        let mut properties = HashMap::new();
+        properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
+
+        self.track_event("analytics_disabled", Some(properties)).await
+    }
+
+    pub async fn track_analytics_transparency_viewed(&self) -> Result<(), String> {
+        let mut properties = HashMap::new();
+        properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
+
+        self.track_event("analytics_transparency_viewed", Some(properties)).await
     }
 
     pub fn is_enabled(&self) -> bool {
