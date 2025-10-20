@@ -1,0 +1,39 @@
+{
+  "name": "Daily Standup",
+  "description": "Time-boxed daily updates for engineering/product teams.",
+  "sections": [
+    {
+      "title": "Date",
+      "instruction": "YYYY-MM-DD",
+      "format": "string"
+    },
+    {
+      "title": "Attendees",
+      "instruction": "List of participants present",
+      "format": "list"
+    },
+    {
+      "title": "Yesterday",
+      "instruction": "What I completed yesterday (short bullets)",
+      "format": "list",
+      "example_item_format": "| **Owner** | **Completed Work** |\n| --- | --- |"
+    },
+    {
+      "title": "Today",
+      "instruction": "Planned work for today (short bullets)",
+      "format": "list",
+      "example_item_format": "| **Owner** | **Planned Work** |\n| --- | --- |"
+    },
+    {
+      "title": "Blockers",
+      "instruction": "Any impediments and owner if known",
+      "format": "list",
+      "item_format": "| **Owner** | **Blocker** | Impact |\n| --- | --- | --- |"
+    },
+    {
+      "title": "Notes",
+      "instruction": "Optional quick notes or announcements",
+      "format": "paragraph"
+    }
+  ]
+}
