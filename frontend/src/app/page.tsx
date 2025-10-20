@@ -290,10 +290,10 @@ export default function Home() {
     }
   }, [recordingState.isRecording]);
 
-  // Update sidebar recording state when local recording state changes
+  // Update sidebar recording state when backend-synced recording state changes
   useEffect(() => {
-    setSidebarIsRecording(isRecording);
-  }, [isRecording, setSidebarIsRecording]);
+    setSidebarIsRecording(recordingState.isRecording);
+  }, [recordingState.isRecording, setSidebarIsRecording]);
 
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
