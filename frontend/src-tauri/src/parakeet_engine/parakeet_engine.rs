@@ -1,7 +1,7 @@
 use crate::parakeet_engine::model::ParakeetModel;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
@@ -80,6 +80,8 @@ pub struct ParakeetEngine {
     current_model_name: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
+    // Active downloads tracking to prevent concurrent downloads
+    active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
 }
 
 impl ParakeetEngine {
@@ -119,6 +121,8 @@ impl ParakeetEngine {
             current_model_name: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             cancel_download_flag: Arc::new(RwLock::new(None)),
+            // Initialize active downloads tracking
+            active_downloads: Arc::new(RwLock::new(HashSet::new())),
         })
     }
 
@@ -396,6 +400,21 @@ impl ParakeetEngine {
     ) -> Result<()> {
         log::info!("Starting download for Parakeet model: {}", model_name);
 
+        // Check if download is already in progress for this model
+        {
+            let active = self.active_downloads.read().await;
+            if active.contains(model_name) {
+                log::warn!("Download already in progress for Parakeet model: {}", model_name);
+                return Err(anyhow!("Download already in progress for model: {}", model_name));
+            }
+        }
+
+        // Add to active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.insert(model_name.to_string());
+        }
+
         // Clear any previous cancellation flag for this model
         {
             let mut cancel_flag = self.cancel_download_flag.write().await;
@@ -405,7 +424,15 @@ impl ParakeetEngine {
         // Get model info
         let model_info = {
             let models = self.available_models.read().await;
-            models.get(model_name).cloned().ok_or_else(|| anyhow!("Model {} not found", model_name))?
+            match models.get(model_name).cloned() {
+                Some(info) => info,
+                None => {
+                    // Remove from active downloads on error
+                    let mut active = self.active_downloads.write().await;
+                    active.remove(model_name);
+                    return Err(anyhow!("Model {} not found", model_name));
+                }
+            }
         };
 
         // Update model status to downloading
@@ -443,8 +470,12 @@ impl ParakeetEngine {
         // Create model directory
         let model_dir = &model_info.path;
         if !model_dir.exists() {
-            fs::create_dir_all(model_dir).await
-                .map_err(|e| anyhow!("Failed to create model directory: {}", e))?;
+            if let Err(e) = fs::create_dir_all(model_dir).await {
+                // Remove from active downloads on error
+                let mut active = self.active_downloads.write().await;
+                active.remove(model_name);
+                return Err(anyhow!("Failed to create model directory: {}", e));
+            }
         }
 
         // Download each file
@@ -507,15 +538,28 @@ impl ParakeetEngine {
 
             // Download file
             let response = client.get(&file_url).send().await
-                .map_err(|e| anyhow!("Failed to start download for {}: {}", filename, e))?;
+                .map_err(|e| {
+                    // Note: cleanup will happen at function end via drop or explicit cleanup
+                    anyhow!("Failed to start download for {}: {}", filename, e)
+                })?;
 
             if !response.status().is_success() {
+                // Remove from active downloads on error
+                let mut active = self.active_downloads.write().await;
+                active.remove(model_name);
                 return Err(anyhow!("Download failed for {} with status: {}", filename, response.status()));
             }
 
             let total_size = response.content_length().unwrap_or(0);
-            let mut file = fs::File::create(&file_path).await
-                .map_err(|e| anyhow!("Failed to create file {}: {}", filename, e))?;
+            let mut file = match fs::File::create(&file_path).await {
+                Ok(f) => f,
+                Err(e) => {
+                    // Remove from active downloads on error
+                    let mut active = self.active_downloads.write().await;
+                    active.remove(model_name);
+                    return Err(anyhow!("Failed to create file {}: {}", filename, e));
+                }
+            };
 
             // Stream download
             use futures_util::StreamExt;
@@ -530,15 +574,29 @@ impl ParakeetEngine {
                     let cancel_flag = self.cancel_download_flag.read().await;
                     if cancel_flag.as_ref() == Some(&model_name.to_string()) {
                         log::info!("Download cancelled for {}", model_name);
+                        // Remove from active downloads on cancellation
+                        let mut active = self.active_downloads.write().await;
+                        active.remove(model_name);
                         return Err(anyhow!("Download cancelled by user"));
                     }
                 }
 
-                let chunk = chunk_result
-                    .map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
+                let chunk = match chunk_result {
+                    Ok(c) => c,
+                    Err(e) => {
+                        // Remove from active downloads on error
+                        let mut active = self.active_downloads.write().await;
+                        active.remove(model_name);
+                        return Err(anyhow!("Failed to read chunk: {}", e));
+                    }
+                };
 
-                file.write_all(&chunk).await
-                    .map_err(|e| anyhow!("Failed to write chunk to file: {}", e))?;
+                if let Err(e) = file.write_all(&chunk).await {
+                    // Remove from active downloads on error
+                    let mut active = self.active_downloads.write().await;
+                    active.remove(model_name);
+                    return Err(anyhow!("Failed to write chunk to file: {}", e));
+                }
 
                 downloaded += chunk.len() as u64;
                 total_downloaded += chunk.len() as u64;
@@ -579,8 +637,12 @@ impl ParakeetEngine {
                 }
             }
 
-            file.flush().await
-                .map_err(|e| anyhow!("Failed to flush file {}: {}", filename, e))?;
+            if let Err(e) = file.flush().await {
+                // Remove from active downloads on error
+                let mut active = self.active_downloads.write().await;
+                active.remove(model_name);
+                return Err(anyhow!("Failed to flush file {}: {}", filename, e));
+            }
 
             log::info!(
                 "Completed download: {} ({:.2} MB, overall progress: {:.1}%)",
@@ -604,6 +666,12 @@ impl ParakeetEngine {
             }
         }
 
+        // Remove from active downloads on completion
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+        }
+
         // Clear cancellation flag on successful completion
         {
             let mut cancel_flag = self.cancel_download_flag.write().await;
@@ -624,6 +692,12 @@ impl ParakeetEngine {
         {
             let mut cancel_flag = self.cancel_download_flag.write().await;
             *cancel_flag = Some(model_name.to_string());
+        }
+
+        // Remove from active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
         }
 
         // Update model status to Missing (so it can be retried)

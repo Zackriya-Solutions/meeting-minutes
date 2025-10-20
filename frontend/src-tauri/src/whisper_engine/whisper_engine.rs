@@ -44,6 +44,8 @@ pub struct WhisperEngine {
     transcription_count: Arc<RwLock<u64>>,
     // Download cancellation tracking
     cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
+    // Active downloads tracking to prevent concurrent downloads
+    active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
 }
 
 impl WhisperEngine {
@@ -157,6 +159,8 @@ impl WhisperEngine {
             transcription_count: Arc::new(RwLock::new(0)),
             // Initialize cancellation tracking
             cancel_download_flag: Arc::new(RwLock::new(None)),
+            // Initialize active downloads tracking
+            active_downloads: Arc::new(RwLock::new(HashSet::new())),
         };
         
         Ok(engine)
@@ -910,6 +914,21 @@ impl WhisperEngine {
     pub async fn download_model(&self, model_name: &str, progress_callback: Option<Box<dyn Fn(u8) + Send>>) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
 
+        // Check if download is already in progress for this model
+        {
+            let active = self.active_downloads.read().await;
+            if active.contains(model_name) {
+                log::warn!("Download already in progress for model: {}", model_name);
+                return Err(anyhow!("Download already in progress for model: {}", model_name));
+            }
+        }
+
+        // Add to active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.insert(model_name.to_string());
+        }
+
         // Clear any previous cancellation flag for this model
         {
             let mut cancel_flag = self.cancel_download_flag.write().await;
@@ -966,6 +985,9 @@ impl WhisperEngine {
         
         log::info!("Received response with status: {}", response.status());
         if !response.status().is_success() {
+            // Remove from active downloads on error
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
             return Err(anyhow!("Download failed with status: {}", response.status()));
         }
         
@@ -1002,6 +1024,9 @@ impl WhisperEngine {
                 let cancel_flag = self.cancel_download_flag.read().await;
                 if cancel_flag.as_ref() == Some(&model_name.to_string()) {
                     log::info!("Download cancelled for {}", model_name);
+                    // Remove from active downloads on cancellation
+                    let mut active = self.active_downloads.write().await;
+                    active.remove(model_name);
                     return Err(anyhow!("Download cancelled by user"));
                 }
             }
@@ -1074,7 +1099,13 @@ impl WhisperEngine {
                 model_info.path = file_path.clone();
             }
         }
-        
+
+        // Remove from active downloads on completion
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+        }
+
         Ok(())
     }
     
@@ -1085,6 +1116,12 @@ impl WhisperEngine {
         {
             let mut cancel_flag = self.cancel_download_flag.write().await;
             *cancel_flag = Some(model_name.to_string());
+        }
+
+        // Remove from active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
         }
 
         // Update model status to Missing (so it can be retried)
