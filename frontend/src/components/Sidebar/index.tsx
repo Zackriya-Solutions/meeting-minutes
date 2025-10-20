@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
@@ -37,13 +37,13 @@ interface SidebarItem {
 
 const Sidebar: React.FC = () => {
   const router = useRouter();
-  const { 
-    currentMeeting, 
-    setCurrentMeeting, 
-    sidebarItems, 
-    isCollapsed, 
-    toggleCollapse, 
-    isMeetingActive,
+  const pathname = usePathname();
+  const {
+    currentMeeting,
+    setCurrentMeeting,
+    sidebarItems,
+    isCollapsed,
+    toggleCollapse,
     isRecording,
     handleRecordingToggle,
     searchTranscripts,
@@ -68,7 +68,6 @@ const Sidebar: React.FC = () => {
     model: 'large-v3',
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
-  const [showRecordingBlockToast, setShowRecordingBlockToast] = useState(false);
 
   // Ensure 'meetings' folder is always expanded
   useEffect(() => {
@@ -379,10 +378,30 @@ const Sidebar: React.FC = () => {
   const renderCollapsedIcons = () => {
     if (!isCollapsed) return null;
 
+    const isHomePage = pathname === '/';
+    const isMeetingPage = pathname?.includes('/meeting-details');
+    const isSettingsPage = pathname === '/settings';
+
     return (
       <TooltipProvider>
         <div className="flex flex-col items-center space-y-4 mt-4">
           <Logo isCollapsed={isCollapsed} />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${
+                  isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                }`}
+              >
+                <Home className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Home</p>
+            </TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -410,7 +429,9 @@ const Sidebar: React.FC = () => {
                   if (isCollapsed) toggleCollapse();
                   toggleFolder('meetings');
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-150"
+                className={`p-2 rounded-lg transition-colors duration-150 ${
+                  isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                }`}
               >
                 <Calendar className="w-5 h-5 text-gray-600" />
               </button>
@@ -423,24 +444,16 @@ const Sidebar: React.FC = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => {
-                  if (isRecording) {
-                    setShowRecordingBlockToast(true);
-                    setTimeout(() => setShowRecordingBlockToast(false), 3000);
-                    return;
-                  }
-                  router.push('/settings');
-                }}
-                disabled={isRecording}
+                onClick={() => router.push('/settings')}
                 className={`p-2 rounded-lg transition-colors duration-150 ${
-                  isRecording ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
+                  isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                 }`}
               >
                 <Settings className="w-5 h-5 text-gray-600" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>{isRecording ? "Settings unavailable during recording" : "Settings"}</p>
+              <p>Settings</p>
             </TooltipContent>
           </Tooltip>
 
@@ -461,8 +474,7 @@ const Sidebar: React.FC = () => {
     const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
-    const isDisabled = isMeetingActive && isMeetingItem;
-    
+
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
@@ -478,19 +490,13 @@ const Sidebar: React.FC = () => {
               : `px-3 py-2 my-0.5 rounded-md text-sm ${
                   isActive ? 'bg-blue-100 text-blue-700 font-medium' :
                   hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
-                } ${
-                  isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                }`
+                } cursor-pointer`
           }`}
           style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
           onClick={() => {
             if (item.type === 'folder') {
               toggleFolder(item.id);
             } else {
-              if (isDisabled) {
-                return;
-              }
-
               setCurrentMeeting({ id: item.id, title: item.title });
               const basePath = item.id.startsWith('intro-call') ? '/' :
                 item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
@@ -521,18 +527,16 @@ const Sidebar: React.FC = () => {
             <div className="flex flex-col w-full">
               <div className="flex items-center w-full">
                 {isMeetingItem ? (
-                  <div className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 ${
-                    isDisabled ? 'bg-gray-100' : 'bg-gray-100'}`}>
-                    <File className={`w-3.5 h-3.5 ${
-                      isDisabled ? 'text-gray-400' : 'text-gray-600'}`} />
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
+                    <File className="w-3.5 h-3.5 text-gray-600" />
                   </div>
                 ) : (
                   <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
                     <Plus className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                 )}
-                <span className={`flex-1 break-words ${isDisabled ? 'text-gray-400' : ''}`}>{item.title}</span>
-                {isMeetingItem && !isDisabled && (
+                <span className="flex-1 break-words">{item.title}</span>
+                {isMeetingItem && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -700,20 +704,8 @@ const Sidebar: React.FC = () => {
               </button>
         
               <button
-                onClick={() => {
-                  if (isRecording) {
-                    setShowRecordingBlockToast(true);
-                    setTimeout(() => setShowRecordingBlockToast(false), 3000);
-                    return;
-                  }
-                  router.push('/settings');
-                }}
-                disabled={isRecording}
-                className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium ${
-                  isRecording
-                    ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
-                    : 'text-gray-700 bg-gray-200 hover:bg-gray-300'
-                } rounded-lg transition-colors shadow-sm`}
+                onClick={() => router.push('/settings')}
+                className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
               >
                 <Settings className="w-4 h-4 mr-2" />
                 <span>Settings</span>
@@ -733,14 +725,6 @@ const Sidebar: React.FC = () => {
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
-
-      {/* Toast notification for recording block */}
-      {showRecordingBlockToast && (
-        <div className="fixed bottom-4 right-4 z-50 bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
-          <span className="text-sm font-medium">Can't access other pages while recording is going on</span>
-        </div>
-      )}
-
     </div>
   );
 };

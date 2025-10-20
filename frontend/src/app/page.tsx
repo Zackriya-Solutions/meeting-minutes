@@ -25,6 +25,7 @@ import { useRouter } from 'next/navigation';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
+import { showRecordingNotification } from '@/lib/recordingNotification';
 import { Button } from '@/components/ui/button';
 import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
@@ -647,6 +648,9 @@ export default function Home() {
       setTranscripts([]); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
       Analytics.trackButtonClick('start_recording', 'home_page');
+
+      // Show recording notification if enabled
+      await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert('Failed to start recording. Check console for details.');
@@ -692,6 +696,9 @@ export default function Home() {
             setTranscripts([]);
             setIsMeetingActive(true);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
+
+            // Show recording notification if enabled
+            await showRecordingNotification();
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
             alert('Failed to start recording. Check console for details.');
@@ -1513,7 +1520,7 @@ export default function Home() {
                       </span>
                     </Button>
                   )}
-                  {!isRecording && transcripts?.length === 0 && (
+                  {/* {!isRecording && transcripts?.length === 0 && ( */}
                     <Button
                       variant="outline"
                       onClick={() => setShowModelSelector(true)}
@@ -1524,7 +1531,7 @@ export default function Home() {
                         Model
                       </span>
                     </Button>
-                  )}
+                  
                   <Button
                     variant="outline"
                     onClick={() => setShowDeviceSettings(true)}
