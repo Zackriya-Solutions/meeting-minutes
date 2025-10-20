@@ -3,10 +3,17 @@
 import { Transcript } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { RecordingStatusBar } from './RecordingStatusBar';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
   isRecording?: boolean;
+  isPaused?: boolean; // Is recording paused (affects UI indicators)
+  isProcessing?: boolean; // Is processing/finalizing transcription (hides "Listening..." indicator)
+  isStopping?: boolean; // Is recording being stopped (provides immediate UI feedback)
+  enableStreaming?: boolean; // Enable streaming effect for live transcription UX
 }
 
 interface SpeechDetectedEvent {
@@ -24,11 +31,100 @@ function formatRecordingTime(seconds: number | undefined): string {
   return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
-export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const prevScrollHeightRef = useRef<number>();
-  const isUserAtBottomRef = useRef<boolean>(true);
+// Helper function to remove consecutive word repetitions (especially short words ≤2 letters)
+function cleanRepetitions(text: string): string {
+  if (!text || text.trim().length === 0) return text;
+
+  const words = text.split(/\s+/);
+  const cleanedWords: string[] = [];
+
+  let i = 0;
+  while (i < words.length) {
+    const currentWord = words[i];
+    const currentWordLower = currentWord.toLowerCase();
+
+    // Count consecutive repetitions of the same word
+    let repeatCount = 1;
+    while (
+      i + repeatCount < words.length &&
+      words[i + repeatCount].toLowerCase() === currentWordLower
+    ) {
+      repeatCount++;
+    }
+
+    // For short words (≤2 letters), be aggressive: if repeated 2+ times, keep only 1
+    // For longer words, keep 1 if repeated 3+ times (less aggressive)
+    if (currentWord.length <= 2) {
+      // Short words: "I I I I" → "I", "Tu Tu Tu" → "Tu"
+      if (repeatCount >= 2) {
+        cleanedWords.push(currentWord);
+        i += repeatCount;
+      } else {
+        cleanedWords.push(currentWord);
+        i += 1;
+      }
+    } else {
+      // Longer words: keep original unless heavily repeated
+      if (repeatCount >= 3) {
+        cleanedWords.push(currentWord);
+        i += repeatCount;
+      } else {
+        cleanedWords.push(currentWord);
+        i += 1;
+      }
+    }
+  }
+
+  return cleanedWords.join(' ');
+}
+
+// Helper function to remove filler words and stop words from transcripts
+function cleanStopWords(text: string): string {
+  // FIRST: Clean repetitions (especially short words)
+  let cleanedText = cleanRepetitions(text);
+
+  // THEN: Remove filler words
+  const stopWords = [
+    'uh', 'um', 'er', 'ah', 'hmm', 'hm', 'eh', 'oh',
+    // 'like', 'you know', 'i mean', 'sort of', 'kind of',
+    // 'basically', 'actually', 'literally', 'right',
+    // 'thank you', 'thanks'
+  ];
+
+  // Remove each stop word (case-insensitive, with word boundaries)
+  stopWords.forEach(word => {
+    // Match the stop word at word boundaries, with optional punctuation
+    const pattern = new RegExp(`\\b${word}\\b[,\\s]*`, 'gi');
+    cleanedText = cleanedText.replace(pattern, ' ');
+  });
+
+  // Clean up extra whitespace and trim
+  cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
+
+  return cleanedText;
+}
+
+export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
   const [speechDetected, setSpeechDetected] = useState(false);
+
+  // Debug: Log the props to understand what's happening
+  console.log('TranscriptView render:', {
+    isRecording,
+    isPaused,
+    isProcessing,
+    isStopping,
+    transcriptCount: transcripts.length,
+    shouldShowListening: !isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0
+  });
+
+  // Streaming effect state
+  const [streamingTranscript, setStreamingTranscript] = useState<{
+    id: string;
+    visibleText: string;
+    fullText: string;
+  } | null>(null);
+  const streamingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastStreamedIdRef = useRef<string | null>(null); // Track which transcript we've streamed
 
   // Load preference for showing confidence indicator
   const [showConfidence, setShowConfidence] = useState<boolean>(() => {
@@ -75,126 +171,201 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
     };
   }, [isRecording]);
 
-  // Smart scrolling - only auto-scroll if user is at bottom
+  // Streaming effect: animate new transcripts character-by-character
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    if (!enableStreaming || !isRecording) {
+      // Clean up if streaming is disabled
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+      setStreamingTranscript(null);
+      lastStreamedIdRef.current = null;
+      return;
+    }
 
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
-      isUserAtBottomRef.current = isAtBottom;
+    // Find the latest non-partial transcript
+    const latestTranscript = transcripts
+      .slice(-1)[0];
+
+    if (!latestTranscript) return;
+
+    // Check if this is a new transcript we haven't streamed yet (using ref to avoid dependency issues)
+    if (lastStreamedIdRef.current !== latestTranscript.id) {
+      // Clear any existing streaming interval
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+
+      // Mark this transcript as being streamed
+      lastStreamedIdRef.current = latestTranscript.id;
+
+      const fullText = latestTranscript.text;
+
+      // Fast typewriter effect - complete in 0.8 seconds for snappy feel
+      const TOTAL_DURATION_MS = 800; // 0.8 seconds total - fast and snappy!
+      const INTERVAL_MS = 15; // Update every 15ms for smooth animation
+      const totalTicks = TOTAL_DURATION_MS / INTERVAL_MS; // ~53 ticks
+      const charsPerTick = Math.max(2, Math.ceil(fullText.length / totalTicks)); // At least 2 chars per tick for speed
+      const INITIAL_CHARS = Math.min(5, fullText.length); // Start with first 5 chars visible
+      let charIndex = INITIAL_CHARS;
+
+      setStreamingTranscript({
+        id: latestTranscript.id,
+        visibleText: fullText.substring(0, INITIAL_CHARS),
+        fullText: fullText
+      });
+
+      streamingIntervalRef.current = setInterval(() => {
+        charIndex += charsPerTick;
+
+        if (charIndex >= fullText.length) {
+          // Streaming complete
+          clearInterval(streamingIntervalRef.current!);
+          streamingIntervalRef.current = null;
+          setStreamingTranscript(null);
+        } else {
+          setStreamingTranscript(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              visibleText: fullText.substring(0, charIndex)
+            };
+          });
+        }
+      }, INTERVAL_MS);
+    }
+  }, [transcripts, enableStreaming, isRecording]);
+
+  // Cleanup streaming interval on unmount
+  useEffect(() => {
+    return () => {
+      if (streamingIntervalRef.current) {
+        clearInterval(streamingIntervalRef.current);
+        streamingIntervalRef.current = null;
+      }
+      lastStreamedIdRef.current = null;
     };
-
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
   }, []);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current) {
-      container.scrollTop = container.scrollHeight;
-    }
-    
-    prevScrollHeightRef.current = container.scrollHeight;
-  }, [transcripts]);
-
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto px-4 py-2">
-      {transcripts?.map((transcript, index) => (
-        <div
-          key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
-          className={`mb-3 p-3 rounded-lg transition-colors duration-200 ${
-            transcript.is_partial
-              ? 'bg-gray-50 border-l-4 border-gray-200'
-              : 'bg-gray-50 border-l-4 border-gray-200'
-          }`}
+    <div className="px-4 py-2">
+      {/* Recording Status Bar - Sticky at top, always visible when recording */}
+      <AnimatePresence>
+        {isRecording && (
+          <div className="sticky top-4 z-10 bg-white pb-2">
+            <RecordingStatusBar isPaused={isPaused} />
+          </div>
+        )}
+      </AnimatePresence>
+
+      {transcripts?.map((transcript, index) => {
+        const isStreaming = streamingTranscript?.id === transcript.id;
+        const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
+        // Clean up text for display - remove repetitions and filler words
+        const filteredText = cleanStopWords(textToShow);
+        // Show [Silence] ONLY if the ORIGINAL transcript was empty (not just after filtering)
+        const originalWasEmpty = transcript.text.trim() === '';
+        const displayText = originalWasEmpty && !isStreaming ? '[Silence]' : filteredText;
+
+        // Sizer text: use cleaned version for proper sizing, fallback to [Silence] only if original was empty
+        const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
+          || (originalWasEmpty && !isStreaming ? '[Silence]' : '');
+
+        return (
+          <motion.div
+            key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mb-3"
+          >
+            <div className="flex items-start gap-2">
+              <Tooltip>
+                <TooltipTrigger>
+                  <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                    {transcript.audio_start_time !== undefined
+                      ? formatRecordingTime(transcript.audio_start_time)
+                      : transcript.timestamp}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {transcript.duration !== undefined && (
+                    <span className="text-xs text-gray-400">
+                      {transcript.duration.toFixed(1)}s
+                      {transcript.confidence !== undefined && (
+                        <ConfidenceIndicator
+                          confidence={transcript.confidence}
+                          showIndicator={showConfidence}
+                        />
+                      )}
+                    </span>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+              <div className="flex-1">
+                {isStreaming ? (
+                  // Streaming transcript - show in bubble (full width)
+                  <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="relative">
+                      <p className="text-base text-gray-800 leading-relaxed" style={{ visibility: 'hidden' }}>
+                        {sizerText}
+                      </p>
+                      <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                        {displayText}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  // Regular transcript - simple text
+                  <div className="relative">
+                    <p className="text-base text-gray-800 leading-relaxed" style={{ visibility: 'hidden' }}>
+                      {sizerText}
+                    </p>
+                    <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                      {displayText}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        );
+      })}
+
+      {/* Show listening indicator when recording and has transcripts */}
+      {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="flex items-center gap-2 mt-4 text-gray-500"
         >
-          <div className="flex justify-between items-center mb-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                {transcript.audio_start_time !== undefined
-                  ? formatRecordingTime(transcript.audio_start_time)
-                  : transcript.timestamp
-                }
-              </span>
-              {transcript.duration !== undefined && (
-                <span className="text-xs text-gray-400">
-                  {transcript.duration.toFixed(1)}s
-                </span>
-              )}
-            </div>
-            <div className="flex items-center space-x-2">
-              {transcript.is_partial && (
-                // <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-
-                // </span>
-              )}
-              {transcript.confidence !== undefined && !transcript.is_partial && (
-                <ConfidenceIndicator
-                  confidence={transcript.confidence}
-                  showIndicator={showConfidence}
-                />
-              )}
-            </div>
-          </div>
-          <p className={`text-sm text-gray-800`}>
-            {(() => {
-              const filteredText = transcript.text.replace(/^Thank you\.?\s*$/gi, '').trim();
-              return filteredText === '' ? '[Silence]' : filteredText;
-            })()}
-          </p>
-        </div>
-      ))}
-
-      {/* Typing indicator - shows when recording and transcripts exist (always shows after first transcript) */}
-      {isRecording && transcripts.length > 0 && (
-        <div className="mb-3 p-3 rounded-lg bg-gradient-to-r from-gray-50 to-blue-50/30 border-l-4 border-blue-400 animate-fade-in">
-          <div className="flex items-center space-x-2">
-            <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-            </div>
-            <span className="text-xs text-blue-600 font-medium">Listening...</span>
-          </div>
-        </div>
+          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+          <span className="text-sm">Listening...</span>
+        </motion.div>
       )}
+
+      {/* Empty state when no transcripts */}
       {transcripts.length === 0 && (
-        <div className="text-center text-gray-500 mt-8">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center text-gray-500 mt-8"
+        >
           {isRecording ? (
             <>
-              <div className="flex items-center justify-center space-x-2 mb-3">
-                <div className="relative flex items-center justify-center">
-                  {/* Outer pulse ring - changes color when speech detected */}
-                  <div className={`absolute w-12 h-12 rounded-full animate-ping opacity-75 ${
-                    speechDetected ? 'bg-green-400' : 'bg-blue-400'
-                  }`}></div>
-                  {/* Inner solid circle with mic icon */}
-                  <div className={`relative w-10 h-10 rounded-full flex items-center justify-center ${
-                    speechDetected ? 'bg-green-500' : 'bg-blue-500'
-                  }`}>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                      <line x1="12" y1="19" x2="12" y2="23"/>
-                      <line x1="8" y1="23" x2="16" y2="23"/>
-                    </svg>
-                  </div>
-                </div>
+              <div className="flex items-center justify-center mb-3">
+                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
               </div>
-              <p className={`text-sm font-medium ${speechDetected ? 'text-green-600' : 'text-blue-600'}`}>
-                {speechDetected ? 'Processing speech...' : 'Listening for speech...'}
+              <p className="text-sm text-gray-600">
+                {isPaused ? 'Recording paused' : 'Listening for speech...'}
               </p>
               <p className="text-xs mt-1 text-gray-400">
-                {speechDetected
-                  ? 'Your speech is being transcribed'
-                  : 'Listening to your microphone and system audio'
-                }
+                {isPaused
+                  ? 'Click resume to continue recording'
+                  : 'Speak to see live transcription'}
               </p>
             </>
           ) : (
@@ -203,7 +374,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
               <p className="text-xs mt-1">Start recording to see live transcription</p>
             </>
           )}
-        </div>
+        </motion.div>
       )}
     </div>
   );

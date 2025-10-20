@@ -133,7 +133,7 @@ impl SettingsRepository {
         Ok(setting)
 
         // TODO: In higher layer if provider is not found(not returned anything from  here),
-        // return default values localWhisper and large-v3
+        // return default values parakeet and parakeet-tdt-0.6b-v3-int8
     }
 
     pub async fn save_transcript_config(
@@ -165,6 +165,7 @@ impl SettingsRepository {
     ) -> std::result::Result<(), sqlx::Error> {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
+            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -196,6 +197,7 @@ impl SettingsRepository {
     ) -> std::result::Result<Option<String>, sqlx::Error> {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
+            "parakeet" => return Ok(None), // Parakeet doesn't need an API key
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",

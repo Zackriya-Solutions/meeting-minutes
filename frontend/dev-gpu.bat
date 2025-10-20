@@ -119,9 +119,9 @@ echo    Starting complete Tauri application with automatic GPU detection...
 echo.
 
 if %USE_PNPM% equ 1 (
-    pnpm run tauri:dev
+    pnpm run tauri:dev:vulkan
 ) else (
-    npm run tauri:dev
+    npm run tauri:dev:vulkan
 )
 
 if errorlevel 1 (

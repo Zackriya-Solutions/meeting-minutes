@@ -27,7 +27,7 @@ impl Default for RecordingPreferences {
             auto_save: true,
             file_format: "mp4".to_string(),
             #[cfg(target_os = "macos")]
-            system_audio_backend: Some("screencapturekit".to_string()),
+            system_audio_backend: Some("coreaudio".to_string()),
         }
     }
 }
@@ -255,26 +255,29 @@ pub async fn set_audio_backend(backend: String) -> Result<(), String> {
         let backend_enum = AudioCaptureBackend::from_string(&backend)
             .ok_or_else(|| format!("Invalid backend: {}", backend))?;
 
-        // If switching to Core Audio, check Screen Recording permission
+        // If switching to Core Audio, log information about Audio Capture permission
         if backend_enum == AudioCaptureBackend::CoreAudio {
-            info!("🔐 Checking Screen Recording permission for Core Audio backend...");
+            info!("🔐 Core Audio backend requires Audio Capture permission (macOS 14.4+)");
+            info!("📍 Permission dialog will appear automatically when recording starts");
 
+            // Check if permission is already granted (this is informational only)
             if !check_screen_recording_permission() {
-                warn!("⚠️  Screen Recording permission not granted for Core Audio");
+                warn!("⚠️  Audio Capture permission may not be granted");
 
-                // Attempt to request permission (opens System Settings)
+                // Attempt to open System Settings (opens System Settings)
                 if let Err(e) = request_screen_recording_permission() {
-                    error!("Failed to request permission: {}", e);
+                    error!("Failed to open System Settings: {}", e);
                 }
 
                 return Err(
-                    "Core Audio requires Screen Recording permission. \
-                    Please enable it in System Settings → Privacy & Security → Screen Recording, \
+                    "Core Audio requires Audio Capture permission. \
+                    The permission dialog will appear when you start recording. \
+                    If already denied, enable it in System Settings → Privacy & Security → Audio Capture, \
                     then restart the app.".to_string()
                 );
             }
 
-            info!("✅ Screen Recording permission verified for Core Audio");
+            info!("✅ Core Audio backend selected - permission check will occur at recording start");
         }
 
         info!("Setting audio backend to: {:?}", backend_enum);

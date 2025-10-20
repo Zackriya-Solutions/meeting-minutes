@@ -7,7 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use anyhow::Result;
 use futures_util::Stream;
-use ringbuf::HeapRb;
+use ringbuf::{
+    traits::{Consumer, Producer, Split},
+    HeapCons, HeapProd, HeapRb,
+};
 use log::{error, info, warn};
 
 #[cfg(target_os = "macos")]
@@ -29,7 +32,7 @@ pub struct CoreAudioCapture {
 /// Core Audio stream that produces audio samples
 #[cfg(target_os = "macos")]
 pub struct CoreAudioStream {
-    consumer: ringbuf::Consumer<f32, Arc<ringbuf::SharedRb<f32, Vec<std::mem::MaybeUninit<f32>>>>>,
+    consumer: HeapCons<f32>,
     _device: ca::hardware::StartedDevice<ca::AggregateDevice>,
     _ctx: Box<AudioContext>,
     _tap: ca::TapGuard,
@@ -41,7 +44,7 @@ pub struct CoreAudioStream {
 #[cfg(target_os = "macos")]
 struct AudioContext {
     format: arc::R<av::AudioFormat>,
-    producer: ringbuf::Producer<f32, Arc<ringbuf::SharedRb<f32, Vec<std::mem::MaybeUninit<f32>>>>>,
+    producer: HeapProd<f32>,
     waker_state: Arc<Mutex<WakerState>>,
     current_sample_rate: Arc<AtomicU32>,
     consecutive_drops: Arc<AtomicU32>,
@@ -54,23 +57,9 @@ impl CoreAudioCapture {
     pub fn new() -> Result<Self> {
         info!("🎙️ CoreAudio: Starting Core Audio capture initialization...");
 
-        // Check Screen Recording permission first
-        #[cfg(target_os = "macos")]
-        {
-            use crate::audio::permissions::check_screen_recording_permission;
-
-            if !check_screen_recording_permission() {
-                error!("❌ CoreAudio: Screen Recording permission not granted!");
-                error!("Core Audio tap requires Screen Recording permission to capture system audio.");
-                error!("Please enable Screen Recording permission in System Settings:");
-                error!("  System Settings → Privacy & Security → Screen Recording");
-                error!("Then restart the application.");
-                return Err(anyhow::anyhow!(
-                    "Screen Recording permission not granted. Please enable in System Settings and restart the app."
-                ));
-            }
-            info!("✅ CoreAudio: Screen Recording permission verified");
-        }
+        // Note: Audio Capture permission (NSAudioCaptureUsageDescription) is required for macOS 14.4+
+        // The permission dialog is automatically triggered when creating the Core Audio tap.
+        // If permission is denied, the tap will return silence (all zeros).
 
         // Get default output device
         info!("🎙️ CoreAudio: Getting default output device...");
@@ -92,16 +81,14 @@ impl CoreAudioCapture {
         let device_name = output_device.name().unwrap_or_else(|_| cf::String::from_str("Unknown"));
         info!("✅ CoreAudio: Default output device: '{}' (UID: {:?})", device_name, output_uid);
 
-        // Create sub-device dictionary for the output device
-        let sub_device = cf::DictionaryOf::with_keys_values(
-            &[ca::sub_device_keys::uid()],
-            &[output_uid.as_type_ref()],
-        );
+        // IMPORTANT: We do NOT create a sub_device dictionary here
+        // When using a tap, the tap provides all the audio we need
+        // Including both the tap AND the device creates duplicate audio (echo issue)
 
-        // Create process tap with stereo global tap, excluding no processes
-        // Note: Using stereo instead of mono may help capture actual system audio
-        info!("🎙️ CoreAudio: Creating process tap (global stereo tap)...");
-        let tap_desc = ca::TapDesc::with_stereo_global_tap_excluding_processes(&cidre::ns::Array::new());
+        // Create process tap with mono global tap, excluding no processes
+        // Note: Mono tap is more reliable for system audio capture on macOS
+        info!("🎙️ CoreAudio: Creating process tap (global mono tap)...");
+        let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&cidre::ns::Array::new());
         let tap = tap_desc.create_process_tap()
             .map_err(|e| {
                 error!("❌ CoreAudio: Failed to create process tap: {:?}", e);
@@ -130,6 +117,10 @@ impl CoreAudioCapture {
         );
 
         // Create aggregate device descriptor
+        // CRITICAL FIX: Use ONLY the tap, NOT the output device + tap
+        // Previous configuration included both sub_device_list (output device) and tap_list (tap of same device)
+        // This caused duplicate audio capture, resulting in echo (YouTube audio appeared twice)
+        // The tap alone provides all the system audio we need
         let agg_desc = cf::DictionaryOf::with_keys_values(
             &[
                 ca::aggregate_device_keys::is_private(),
@@ -138,7 +129,7 @@ impl CoreAudioCapture {
                 ca::aggregate_device_keys::name(),
                 ca::aggregate_device_keys::main_sub_device(),
                 ca::aggregate_device_keys::uid(),
-                ca::aggregate_device_keys::sub_device_list(),
+                // REMOVED: sub_device_list (was causing duplicate audio)
                 ca::aggregate_device_keys::tap_list(),
             ],
             &[
@@ -148,7 +139,7 @@ impl CoreAudioCapture {
                 cf::str!(c"meetily-audio-tap").as_type_ref(),
                 &output_uid,
                 &cf::Uuid::new().to_cf_string(),
-                &cf::ArrayOf::from_slice(&[sub_device.as_ref()]),
+                // REMOVED: sub_device array (was causing echo)
                 &cf::ArrayOf::from_slice(&[sub_tap.as_ref()]),
             ],
         );
@@ -175,13 +166,6 @@ impl CoreAudioCapture {
         ) -> os::Status {
             let ctx = ctx.unwrap();
 
-            // Log callback invocation periodically
-            static CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
-            let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
-            if count % 100 == 0 {
-                info!("🔊 CoreAudio: audio_proc callback called {} times", count);
-            }
-
             // Check for sample rate changes
             let after = device
                 .nominal_sample_rate()
@@ -190,7 +174,6 @@ impl CoreAudioCapture {
 
             if before != after {
                 ctx.current_sample_rate.store(after, Ordering::Release);
-                info!("Sample rate changed: {} Hz -> {} Hz", before, after);
             }
 
             // Try to get audio data from the buffer list
@@ -198,9 +181,6 @@ impl CoreAudioCapture {
                 av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None)
             {
                 if let Some(data) = view.data_f32_at(0) {
-                    if count % 100 == 0 {
-                        info!("🎵 CoreAudio: Received {} samples via AudioPcmBuf", data.len());
-                    }
                     process_audio_data(ctx, data);
                 }
             } else if ctx.format.common_format() == av::audio::CommonFormat::PcmF32 {
@@ -213,9 +193,6 @@ impl CoreAudioCapture {
                     let data = unsafe {
                         std::slice::from_raw_parts(first_buffer.data as *const f32, float_count)
                     };
-                    if count % 100 == 0 {
-                        info!("🎵 CoreAudio: Received {} samples via fallback", float_count);
-                    }
                     process_audio_data(ctx, data);
                 }
             }
@@ -321,59 +298,8 @@ impl CoreAudioCapture {
 /// Process audio data from the IO proc callback
 #[cfg(target_os = "macos")]
 fn process_audio_data(ctx: &mut AudioContext, data: &[f32]) {
-    static PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
-    static SILENT_COUNT: AtomicU32 = AtomicU32::new(0);
-    static PERMISSION_WARNING_SHOWN: AtomicBool = AtomicBool::new(false);
-
-    let process_count = PROCESS_COUNT.fetch_add(1, Ordering::Relaxed);
-
-    // Calculate audio statistics every 100 buffers
-    if process_count % 100 == 0 {
-        // Calculate RMS and peak
-        let mut sum_squares = 0.0f32;
-        let mut peak = 0.0f32;
-        let mut all_zeros = true;
-
-        for &sample in data.iter().take(512.min(data.len())) {
-            sum_squares += sample * sample;
-            peak = peak.max(sample.abs());
-            if sample.abs() > 0.00001 {
-                all_zeros = false;
-            }
-        }
-
-        let rms = (sum_squares / data.len() as f32).sqrt();
-
-        // Track consecutive silent buffers
-        if all_zeros {
-            let silent = SILENT_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-
-            // After 5 seconds of silence (500 buffers at ~10ms each), warn about permissions
-            if silent >= 500 && !PERMISSION_WARNING_SHOWN.swap(true, Ordering::Relaxed) {
-                error!("⚠️ CORE AUDIO PERMISSION ISSUE DETECTED ⚠️");
-                error!("Core Audio tap is capturing only silence after {} callbacks.", silent);
-                error!("This typically means macOS Screen Recording permission is not granted.");
-                error!("SOLUTION:");
-                error!("  1. Open System Settings → Privacy & Security → Screen Recording");
-                error!("  2. Enable permission for this application");
-                error!("  3. Restart the application");
-                error!("  4. OR: Switch to ScreenCaptureKit backend in device settings");
-                warn!("Continuing with silent capture - please grant Screen Recording permission");
-            }
-        } else {
-            SILENT_COUNT.store(0, Ordering::Relaxed);
-        }
-
-        // Log first 10 samples for inspection (only every 100 buffers to reduce noise)
-        let sample_preview: Vec<String> = data.iter()
-            .take(10)
-            .map(|s| format!("{:.6}", s))
-            .collect();
-
-        info!("🔊 AUDIO DATA #{}: len={}, RMS={:.6}, peak={:.6}, all_zeros={}, samples=[{}]",
-              process_count, data.len(), rms, peak, all_zeros, sample_preview.join(", "));
-    }
-
+    // Push raw samples directly to ring buffer
+    // Let the pipeline handle all gain adjustments (post-mix 3x gain + mic normalization)
     let buffer_size = data.len();
     let pushed = ctx.producer.push_slice(data);
 
@@ -381,19 +307,14 @@ fn process_audio_data(ctx: &mut AudioContext, data: &[f32]) {
         let consecutive = ctx.consecutive_drops.fetch_add(1, Ordering::AcqRel) + 1;
 
         if consecutive > 10 {
-            error!("Too many consecutive buffer drops ({}), terminating stream", consecutive);
             ctx.should_terminate.store(true, Ordering::Release);
             return;
-        } else if consecutive % 5 == 0 {
-            warn!("Buffer pressure: dropped {} consecutive times", consecutive);
         }
     } else {
-        // Reset consecutive drops counter on successful push
         ctx.consecutive_drops.store(0, Ordering::Release);
     }
 
     if pushed > 0 {
-        // Wake up the async task if it's waiting
         let should_wake = {
             let mut waker_state = ctx.waker_state.lock().unwrap();
             if !waker_state.has_data {
@@ -427,14 +348,14 @@ impl Stream for CoreAudioStream {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         // Try to pop a sample from the ring buffer
-        if let Some(sample) = self.consumer.pop() {
+        if let Some(sample) = self.consumer.try_pop() {
             return Poll::Ready(Some(sample));
         }
 
         // Check if we should terminate
         if self._ctx.should_terminate.load(Ordering::Acquire) {
             warn!("Stream terminating due to buffer pressure");
-            return match self.consumer.pop() {
+            return match self.consumer.try_pop() {
                 Some(sample) => Poll::Ready(Some(sample)),
                 None => Poll::Ready(None),
             };

@@ -9,6 +9,11 @@ pub mod devices;
 pub mod capture;
 pub mod permissions;
 
+// NEW: Device detection and diagnostics for adaptive buffering
+pub mod device_detection;
+pub mod diagnostics;
+pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
+
 // New simplified audio system
 pub mod recording_state;
 pub mod pipeline;
@@ -29,6 +34,9 @@ pub mod system_detector;
 pub mod system_audio_commands;
 pub mod device_monitor;  // NEW: Device disconnect/reconnect monitoring
 pub mod playback_monitor; // NEW: Playback device detection for BT warnings
+
+// Transcription module (provider abstraction, engine management, worker pool)
+pub mod transcription;
 
 pub use devices::{
     default_input_device, default_output_device, get_device_and_config, list_audio_devices,
@@ -79,6 +87,16 @@ pub use encode::{
     encode_single_audio, AudioInput
 };
 pub use device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
+
+// Export device detection and diagnostics
+pub use device_detection::{InputDeviceKind, calculate_buffer_timeout};
+pub use diagnostics::{
+    log_device_capabilities, log_detection_summary, log_buffer_health,
+    log_mixer_status, log_performance_summary
+};
+
+// Export FFmpeg mixer
+pub use ffmpeg_mixer::{FFmpegAudioMixer, BufferStats, RNNOISE_APPLY_ENABLED};
 
 pub use vad::{extract_speech_16k};
 

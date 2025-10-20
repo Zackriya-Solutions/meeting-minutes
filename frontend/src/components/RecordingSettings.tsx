@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
+import { toast } from 'sonner';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -27,6 +28,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showRecordingNotification, setShowRecordingNotification] = useState(true);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -49,6 +51,21 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     };
 
     loadPreferences();
+  }, []);
+
+  // Load recording notification preference
+  useEffect(() => {
+    const loadNotificationPref = async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const show = await store.get<boolean>('show_recording_notification') ?? true;
+        setShowRecordingNotification(show);
+      } catch (error) {
+        console.error('Failed to load notification preference:', error);
+      }
+    };
+    loadNotificationPref();
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
@@ -87,13 +104,40 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     }
   };
 
+  const handleNotificationToggle = async (enabled: boolean) => {
+    try {
+      setShowRecordingNotification(enabled);
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set('show_recording_notification', enabled);
+      await store.save();
+      toast.success('Preference saved');
+      await Analytics.track('recording_notification_preference_changed', {
+        enabled: enabled.toString()
+      });
+    } catch (error) {
+      console.error('Failed to save notification preference:', error);
+      toast.error('Failed to save preference');
+    }
+  };
+
   const savePreferences = async (prefs: RecordingPreferences) => {
     setSaving(true);
     try {
       await invoke('set_recording_preferences', { preferences: prefs });
       onSave?.(prefs);
+
+      // Show success toast with device details
+      const micDevice = prefs.preferred_mic_device || 'Default';
+      const systemDevice = prefs.preferred_system_device || 'Default';
+      toast.success("Device preferences saved", {
+        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+      });
     } catch (error) {
       console.error('Failed to save recording preferences:', error);
+      toast.error("Failed to save device preferences", {
+        description: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       setSaving(false);
     }
@@ -168,6 +212,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           </div>
         </div>
       )}
+
+      {/* Recording Notification Toggle */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Recording Start Notification</div>
+          <div className="text-sm text-gray-600">
+            Show legal notice reminder to inform participants when recording starts (US law compliance)
+          </div>
+        </div>
+        <Switch
+          checked={showRecordingNotification}
+          onCheckedChange={handleNotificationToggle}
+        />
+      </div>
 
       {/* Device Preferences */}
       <div className="space-y-4">

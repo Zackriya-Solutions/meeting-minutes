@@ -1,6 +1,6 @@
 {
-    "name": "meetily-frontend",
-    "version": "0.0.6",
+    "name": "meetily",
+    "version": "0.1.1",
     "private": true,
     "main": "electron/main.js",
     "scripts": {
@@ -33,6 +33,7 @@
         "@blocknote/shadcn": "0.36.0",
         "@heroicons/react": "^2.2.0",
         "@hookform/resolvers": "^5.1.1",
+        "@radix-ui/react-accordion": "^1.2.12",
         "@radix-ui/react-dialog": "^1.1.14",
         "@radix-ui/react-label": "^2.1.7",
         "@radix-ui/react-scroll-area": "^1.2.9",
@@ -40,6 +41,7 @@
         "@radix-ui/react-slot": "^1.2.3",
         "@radix-ui/react-switch": "^1.2.5",
         "@radix-ui/react-tabs": "^1.1.12",
+        "@radix-ui/react-tooltip": "^1.2.8",
         "@remirror/core": "^3.0.1",
         "@remirror/extension-bold": "^3.0.1",
         "@remirror/extension-italic": "^3.0.1",
@@ -63,6 +65,7 @@
         "lodash": "^4.17.21",
         "lucide-react": "^0.469.0",
         "next": "^14.2.25",
+        "radix-ui": "^1.4.3",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
         "react-hook-form": "^7.59.0",

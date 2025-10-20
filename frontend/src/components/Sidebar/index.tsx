@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Delete, Mic, Square, Plus, Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search } from 'lucide-react';
+import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
@@ -11,6 +11,8 @@ import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from 'sonner';
 
 import {
   Dialog,
@@ -35,13 +37,13 @@ interface SidebarItem {
 
 const Sidebar: React.FC = () => {
   const router = useRouter();
-  const { 
-    currentMeeting, 
-    setCurrentMeeting, 
-    sidebarItems, 
-    isCollapsed, 
-    toggleCollapse, 
-    isMeetingActive,
+  const pathname = usePathname();
+  const {
+    currentMeeting,
+    setCurrentMeeting,
+    sidebarItems,
+    isCollapsed,
+    toggleCollapse,
     isRecording,
     handleRecordingToggle,
     searchTranscripts,
@@ -66,7 +68,6 @@ const Sidebar: React.FC = () => {
     model: 'large-v3',
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
-  const [showRecordingBlockToast, setShowRecordingBlockToast] = useState(false);
 
   // Ensure 'meetings' folder is always expanded
   useEffect(() => {
@@ -325,7 +326,12 @@ const Sidebar: React.FC = () => {
       
       // Track meeting deletion
       Analytics.trackMeetingDeleted(itemId);
-      
+
+      // Show success toast
+      toast.success("Meeting deleted successfully", {
+        description: "All associated data has been removed"
+      });
+
       // If deleting the active meeting, navigate to home
       if (currentMeeting?.id === itemId) {
         setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
@@ -333,6 +339,9 @@ const Sidebar: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to delete meeting:', error);
+      toast.error("Failed to delete meeting", {
+        description: error instanceof Error ? error.message : String(error)
+      });
     }
   };
   
@@ -369,75 +378,88 @@ const Sidebar: React.FC = () => {
   const renderCollapsedIcons = () => {
     if (!isCollapsed) return null;
 
-    return (
-      <div className="flex flex-col items-center space-y-4 mt-4">
-        {/* New Call button for collapsed sidebar */}
-            {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
-              <span className='m-3'>Me</span>
-            </span> */}
-            <Logo isCollapsed={isCollapsed} />
-            {/* <Logo isCollapsed={isCollapsed} /> */}
-        <button
-          onClick={handleRecordingToggle}
-          disabled={isRecording}
-          className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors shadow-sm`}
-          title={isRecording ? "Recording in progress..." : "Start New Call"}
-        >
-          {isRecording ? (
-            <Square className="w-5 h-5 text-white" />
-          ) : (
-            <Mic className="w-5 h-5 text-white" />
-          )}
-        </button>
-        
-        <button
-          onClick={() => router.push('/')}
-          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          title="Home"
-        >
-          <Home className="w-5 h-5 text-gray-600" />
-        </button>
-        
-        <button
-          onClick={() => {
-            if (isCollapsed) toggleCollapse();
-            toggleFolder('meetings');
-          }}
-          className="p-3 hover:bg-gray-100 rounded-md transition-colors"
-          title="Meeting Notes"
-        >
-          <StickyNote className="w-5 h-5 text-gray-600" />
-        </button>
+    const isHomePage = pathname === '/';
+    const isMeetingPage = pathname?.includes('/meeting-details');
+    const isSettingsPage = pathname === '/settings';
 
-        <button
-          onClick={() => {
-            if (isRecording) {
-              setShowRecordingBlockToast(true);
-              setTimeout(() => setShowRecordingBlockToast(false), 3000);
-              return;
-            }
-            router.push('/settings');
-          }}
-          disabled={isRecording}
-          className={`p-2 rounded-lg transition-colors ${
-            isRecording ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
-          }`}
-          title={isRecording ? "Settings unavailable during recording" : "Settings"}
-        >
-          <Settings className="w-5 h-5 text-gray-600" />
-        </button>
-        {/* <button
-          onClick={() => {
-            if (isCollapsed) toggleCollapse();
-            toggleFolder('notes');
-          }}
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-          title="Notes"
-        >
-          <StickyNote className="w-5 h-5 text-gray-600" />
-        </button> */}
-        <Info isCollapsed={isCollapsed} />
-      </div>
+    return (
+      <TooltipProvider>
+        <div className="flex flex-col items-center space-y-4 mt-4">
+          <Logo isCollapsed={isCollapsed} />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${
+                  isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                }`}
+              >
+                <Home className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Home</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleRecordingToggle}
+                disabled={isRecording}
+                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
+              >
+                {isRecording ? (
+                  <Square className="w-5 h-5 text-white" />
+                ) : (
+                  <Mic className="w-5 h-5 text-white" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  if (isCollapsed) toggleCollapse();
+                  toggleFolder('meetings');
+                }}
+                className={`p-2 rounded-lg transition-colors duration-150 ${
+                  isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                }`}
+              >
+                <Calendar className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Meeting Notes</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/settings')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${
+                  isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                }`}
+              >
+                <Settings className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Settings</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Info isCollapsed={isCollapsed} />
+        </div>
+      </TooltipProvider>
     );
   };
 
@@ -452,8 +474,7 @@ const Sidebar: React.FC = () => {
     const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
-    const isDisabled = isMeetingActive && isMeetingItem;
-    
+
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
@@ -464,24 +485,18 @@ const Sidebar: React.FC = () => {
       <div key={item.id}>
         <div
           className={`flex items-center transition-all duration-150 group ${
-            item.type === 'folder' && depth === 0 
-              ? 'p-3 text-lg font-semibold hover:bg-gray-100 h-10 mx-3 mt-3 rounded-lg cursor-pointer'
+            item.type === 'folder' && depth === 0
+              ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
               : `px-3 py-2 my-0.5 rounded-md text-sm ${
-                  isActive ? 'bg-blue-50 text-blue-700 font-medium shadow-sm' : 
+                  isActive ? 'bg-blue-100 text-blue-700 font-medium' :
                   hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
-                } ${
-                  isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                }`
+                } cursor-pointer`
           }`}
           style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
           onClick={() => {
             if (item.type === 'folder') {
               toggleFolder(item.id);
             } else {
-              if (isDisabled) {
-                return;
-              }
-
               setCurrentMeeting({ id: item.id, title: item.title });
               const basePath = item.id.startsWith('intro-call') ? '/' :
                 item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
@@ -492,9 +507,9 @@ const Sidebar: React.FC = () => {
           {item.type === 'folder' ? (
             <>
               {item.id === 'meetings' ? (
-                <StickyNote className="w-4 h-4 mr-2" />
+                <Calendar className="w-4 h-4 mr-2" />
               ) : item.id === 'notes' ? (
-                <StickyNote className="w-4 h-4 mr-2" />
+                <Calendar className="w-4 h-4 mr-2" />
               ) : null}
               <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
               <div className="ml-auto">
@@ -510,33 +525,27 @@ const Sidebar: React.FC = () => {
             </>
           ) : (
             <div className="flex flex-col w-full">
-              <div className="flex items-center justify-between w-full">
-                <div className="flex items-center">
-                  {isMeetingItem ? (
-                    <div className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 ${
-                      isDisabled ? 'bg-gray-100' : 
-                      hasTranscriptMatch ? 'bg-yellow-100' : 'bg-blue-100'}`}>
-                      <File className={`w-3.5 h-3.5 ${
-                        isDisabled ? 'text-gray-400' : 
-                        hasTranscriptMatch ? 'text-yellow-600' : 'text-blue-600'}`} />
-                    </div>
-                  ) : (
-                    <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-green-100">
-                      <Plus className="w-3.5 h-3.5 text-green-600" />
-                    </div>
-                  )}
-                  <span className={`break-words pr-6 ${isDisabled ? 'text-gray-400' : ''}`}>{item.title}</span>
-                </div>
-                {isMeetingItem && !isDisabled && (
+              <div className="flex items-center w-full">
+                {isMeetingItem ? (
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
+                    <File className="w-3.5 h-3.5 text-gray-600" />
+                  </div>
+                ) : (
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
+                    <Plus className="w-3.5 h-3.5 text-blue-600" />
+                  </div>
+                )}
+                <span className="flex-1 break-words">{item.title}</span>
+                {isMeetingItem && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setDeleteModalState({ isOpen: true, itemId: item.id });
                     }}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition-opacity duration-200 flex-shrink-0 ml-1"
+                    className="opacity-0 group-hover:opacity-100 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition-opacity duration-150 flex-shrink-0 ml-auto"
                     aria-label="Delete meeting"
                   >
-                    <Delete className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )}
               </div>
@@ -580,7 +589,7 @@ const Sidebar: React.FC = () => {
         }`}
       >
         {/* Header with traffic light spacing */}
-        <div className="flex-shrink-0 h-22 flex items-center border-b">
+        <div className="flex-shrink-0 h-22 flex items-center">
         
           {/* Title container */}
           
@@ -644,18 +653,10 @@ const Sidebar: React.FC = () => {
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
                     <div
-                      className="flex items-center  transition-all duration-150 group p-3 text-lg font-semibold hover:bg-gray-100 h-10 mx-3 mt-3 rounded-lg cursor-pointer"
-                      onClick={() => toggleFolder(item.id)}
+                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
                     >
-                      <StickyNote className="w-4 h-4 mr-2" />
-                      <span>{item.title}</span>
-                      {/* <div className="ml-auto">
-                        {expandedFolders.has(item.id) ? (
-                          <ChevronDown className="w-4 h-4 text-gray-500" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-gray-500" />
-                        )}
-                      </div> */}
+                      <Calendar className="w-4 h-4 mr-2 text-gray-600" />
+                      <span className="text-gray-700">{item.title}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
                       )}
@@ -703,27 +704,15 @@ const Sidebar: React.FC = () => {
               </button>
         
               <button
-                onClick={() => {
-                  if (isRecording) {
-                    setShowRecordingBlockToast(true);
-                    setTimeout(() => setShowRecordingBlockToast(false), 3000);
-                    return;
-                  }
-                  router.push('/settings');
-                }}
-                disabled={isRecording}
-                className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium ${
-                  isRecording
-                    ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
-                    : 'text-gray-700 bg-gray-200 hover:bg-gray-300'
-                } rounded-lg transition-colors shadow-sm`}
+                onClick={() => router.push('/settings')}
+                className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
               >
                 <Settings className="w-4 h-4 mr-2" />
                 <span>Settings</span>
               </button>
               <Info isCollapsed={isCollapsed} />
               <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
-              v0.0.6 - Pre Release
+              v0.1.1 - Pre Release
             </div>
           </div>
         )}
@@ -736,14 +725,6 @@ const Sidebar: React.FC = () => {
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
-
-      {/* Toast notification for recording block */}
-      {showRecordingBlockToast && (
-        <div className="fixed bottom-4 right-4 z-50 bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
-          <span className="text-sm font-medium">Can't access other pages while recording is going on</span>
-        </div>
-      )}
-
     </div>
   );
 };

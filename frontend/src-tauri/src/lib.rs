@@ -43,6 +43,7 @@ pub mod database;
 pub mod notifications;
 pub mod ollama;
 pub mod openrouter;
+pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -431,13 +432,6 @@ pub fn run() {
                 }
             });
 
-            // Setup enhanced notification handlers (macOS only)
-            #[cfg(target_os = "macos")]
-            {
-                notifications::setup_enhanced_notification_handlers(_app.handle().clone());
-                log::info!("Enhanced notification handlers set up for macOS");
-            }
-
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
 
@@ -445,6 +439,16 @@ pub fn run() {
             tauri::async_runtime::spawn(async {
                 if let Err(e) = whisper_engine::commands::whisper_init().await {
                     log::error!("Failed to initialize Whisper engine on startup: {}", e);
+                }
+            });
+
+            // Set Parakeet models directory
+            parakeet_engine::commands::set_models_directory(&_app.handle());
+
+            // Initialize Parakeet engine on startup
+            tauri::async_runtime::spawn(async {
+                if let Err(e) = parakeet_engine::commands::parakeet_init().await {
+                    log::error!("Failed to initialize Parakeet engine on startup: {}", e);
                 }
             });
 
@@ -481,7 +485,6 @@ pub fn run() {
             analytics::commands::track_recording_started,
             analytics::commands::track_recording_stopped,
             analytics::commands::track_meeting_deleted,
-            analytics::commands::track_search_performed,
             analytics::commands::track_settings_changed,
             analytics::commands::track_feature_used,
             analytics::commands::is_analytics_enabled,
@@ -495,6 +498,10 @@ pub fn run() {
             analytics::commands::track_summary_regenerated,
             analytics::commands::track_model_changed,
             analytics::commands::track_custom_prompt_used,
+            analytics::commands::track_meeting_ended,
+            analytics::commands::track_analytics_enabled,
+            analytics::commands::track_analytics_disabled,
+            analytics::commands::track_analytics_transparency_viewed,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,
@@ -507,6 +514,20 @@ pub fn run() {
             whisper_engine::commands::whisper_download_model,
             whisper_engine::commands::whisper_cancel_download,
             whisper_engine::commands::whisper_delete_corrupted_model,
+            // Parakeet engine commands
+            parakeet_engine::commands::parakeet_init,
+            parakeet_engine::commands::parakeet_get_available_models,
+            parakeet_engine::commands::parakeet_load_model,
+            parakeet_engine::commands::parakeet_get_current_model,
+            parakeet_engine::commands::parakeet_is_model_loaded,
+            parakeet_engine::commands::parakeet_has_available_models,
+            parakeet_engine::commands::parakeet_validate_model_ready,
+            parakeet_engine::commands::parakeet_transcribe_audio,
+            parakeet_engine::commands::parakeet_get_models_directory,
+            parakeet_engine::commands::parakeet_download_model,
+            parakeet_engine::commands::parakeet_cancel_download,
+            parakeet_engine::commands::parakeet_delete_corrupted_model,
+            parakeet_engine::commands::open_parakeet_models_folder,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,
@@ -531,6 +552,9 @@ pub fn run() {
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
+            // Reload sync commands (retrieve transcript history and meeting name)
+            audio::recording_commands::get_transcript_history,
+            audio::recording_commands::get_recording_meeting_name,
             // Device monitoring commands (AirPods/Bluetooth disconnect/reconnect)
             audio::recording_commands::poll_audio_device_events,
             audio::recording_commands::get_reconnection_status,
@@ -591,9 +615,6 @@ pub fn run() {
             notifications::commands::initialize_notification_manager_manual,
             notifications::commands::test_notification_with_auto_consent,
             notifications::commands::get_notification_stats,
-            // Enhanced notification commands
-            notifications::commands::show_enhanced_recording_confirmation,
-            notifications::commands::dismiss_all_enhanced_notifications,
             // System audio capture commands
             audio::system_audio_commands::start_system_audio_capture_command,
             audio::system_audio_commands::list_system_audio_devices_command,

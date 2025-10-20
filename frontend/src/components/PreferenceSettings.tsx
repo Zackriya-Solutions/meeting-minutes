@@ -5,6 +5,7 @@ import { Switch } from "./ui/switch"
 import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
+import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 
 interface StorageLocations {
   database: string
@@ -174,7 +175,7 @@ export function PreferenceSettings() {
 
         <div className="space-y-4">
           {/* Database Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
+          {/* <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Database</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
@@ -186,10 +187,10 @@ export function PreferenceSettings() {
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
-          </div>
+          </div> */}
 
           {/* Models Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
+          {/* <div className="p-4 border rounded-lg bg-gray-50">
             <div className="font-medium mb-2">Whisper Models</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
@@ -201,7 +202,7 @@ export function PreferenceSettings() {
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
-          </div>
+          </div> */}
 
           {/* Recordings Location */}
           <div className="p-4 border rounded-lg bg-gray-50">
@@ -224,6 +225,11 @@ export function PreferenceSettings() {
             <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
           </p>
         </div>
+      </div>
+
+      {/* Analytics Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <AnalyticsConsentSwitch />
       </div>
     </div>
   )

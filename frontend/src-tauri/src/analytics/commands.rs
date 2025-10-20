@@ -114,20 +114,6 @@ pub async fn track_meeting_deleted(meeting_id: String) -> Result<(), String> {
 }
 
 #[command]
-pub async fn track_search_performed(query: String, results_count: usize) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
-    
-    if let Some(client) = client {
-        client.track_search_performed(&query, results_count).await
-    } else {
-        Err("Analytics client not initialized".to_string())
-    }
-}
-
-#[command]
 pub async fn track_settings_changed(setting_type: String, new_value: String) -> Result<(), String> {
     let client = {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
@@ -281,9 +267,92 @@ pub async fn track_custom_prompt_used(prompt_length: usize) -> Result<(), String
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
-    
+
     if let Some(client) = client {
         client.track_custom_prompt_used(prompt_length).await
+    } else {
+        Err("Analytics client not initialized".to_string())
+    }
+}
+
+#[command]
+pub async fn track_meeting_ended(
+    transcription_provider: String,
+    transcription_model: String,
+    summary_provider: String,
+    summary_model: String,
+    total_duration_seconds: Option<f64>,
+    active_duration_seconds: f64,
+    pause_duration_seconds: f64,
+    microphone_device_type: String,
+    system_audio_device_type: String,
+    chunks_processed: u64,
+    transcript_segments_count: u64,
+    had_fatal_error: bool,
+) -> Result<(), String> {
+    let client = {
+        let guard = ANALYTICS_CLIENT.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(client) = client {
+        client.track_meeting_ended(
+            &transcription_provider,
+            &transcription_model,
+            &summary_provider,
+            &summary_model,
+            total_duration_seconds,
+            active_duration_seconds,
+            pause_duration_seconds,
+            &microphone_device_type,
+            &system_audio_device_type,
+            chunks_processed,
+            transcript_segments_count,
+            had_fatal_error,
+        ).await
+    } else {
+        Err("Analytics client not initialized".to_string())
+    }
+}
+
+// Analytics consent tracking commands
+#[command]
+pub async fn track_analytics_enabled() -> Result<(), String> {
+    let client = {
+        let guard = ANALYTICS_CLIENT.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(client) = client {
+        client.track_analytics_enabled().await
+    } else {
+        Err("Analytics client not initialized".to_string())
+    }
+}
+
+#[command]
+pub async fn track_analytics_disabled() -> Result<(), String> {
+    let client = {
+        let guard = ANALYTICS_CLIENT.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(client) = client {
+        client.track_analytics_disabled().await
+    } else {
+        Err("Analytics client not initialized".to_string())
+    }
+}
+
+#[command]
+pub async fn track_analytics_transparency_viewed() -> Result<(), String> {
+    let client = {
+        let guard = ANALYTICS_CLIENT.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(client) = client {
+        client.track_analytics_transparency_viewed().await
     } else {
         Err("Analytics client not initialized".to_string())
     }

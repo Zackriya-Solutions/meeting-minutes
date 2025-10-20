@@ -7,6 +7,7 @@ import { Play, Pause, Square, Mic, AlertCircle, X } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Analytics from '@/lib/analytics';
 
 interface RecordingControlsProps {
@@ -16,6 +17,7 @@ interface RecordingControlsProps {
   onRecordingStart: () => void;
   onTranscriptReceived: (summary: SummaryResponse) => void;
   onTranscriptionError?: (message: string) => void;
+  onStopInitiated?: () => void; // Called immediately when stop button is clicked
   isRecordingDisabled: boolean;
   isParentProcessing: boolean;
   selectedDevices?: {
@@ -32,6 +34,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   onRecordingStart,
   onTranscriptReceived,
   onTranscriptionError,
+  onStopInitiated,
   isRecordingDisabled,
   isParentProcessing,
   selectedDevices,
@@ -101,18 +104,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
       setIsStarting(true);
       setIsValidatingModel(false);
-
-      // Show enhanced recording confirmation on macOS
-      try {
-        console.log('Attempting to show enhanced recording confirmation notification...');
-        await invoke('show_enhanced_recording_confirmation', {
-          meetingName: meetingName || generatedMeetingTitle,
-          actionUrl: 'meetily://confirm-recording'
-        });
-        console.log('Enhanced recording confirmation notification shown');
-      } catch (enhancedError) {
-        console.log('Enhanced notification not available (non-macOS or error):', enhancedError);
-      }
 
       // Use the correct command with device parameters
       if (selectedDevices || meetingName || generatedMeetingTitle) {
@@ -234,11 +225,15 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     }
 
     console.log('Stopping recording...');
+
+    // Notify parent immediately (for UI state updates)
+    onStopInitiated?.();
+
     setIsStopping(true);
 
     // Immediately trigger the stop action
     await stopRecordingAction();
-  }, [isRecording, isStarting, isStopping, stopRecordingAction]);
+  }, [isRecording, isStarting, isStopping, stopRecordingAction, onStopInitiated]);
 
   const handlePauseRecording = useCallback(async () => {
     if (!isRecording || isPaused || isPausing) return;
@@ -357,20 +352,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setIsPaused(false);
         });
 
-        // Enhanced notification confirmed listener
-        const enhancedConfirmedUnsubscribe = await listen('enhanced-notification-confirmed', (event) => {
-          console.log('enhanced-notification-confirmed event received:', event);
-          // The recording has already started, the notification just confirmed it
-          // This can be used to show additional UI feedback if needed
-        });
-
-        // Enhanced notification dismissed listener
-        const enhancedDismissedUnsubscribe = await listen('enhanced-notification-dismissed', (event) => {
-          console.log('enhanced-notification-dismissed event received:', event);
-          // The user dismissed the notification, recording may have already started
-          // This is just for informational purposes
-        });
-
         // Speech detected listener - for UX feedback when VAD detects speech
         const speechDetectedUnsubscribe = await listen('speech-detected', (event) => {
           console.log('speech-detected event received:', event);
@@ -382,8 +363,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           transcriptionErrorUnsubscribe,
           pausedUnsubscribe,
           resumedUnsubscribe,
-          enhancedConfirmedUnsubscribe,
-          enhancedDismissedUnsubscribe,
           speechDetectedUnsubscribe
         ];
         console.log('Recording event listeners set up successfully');
@@ -405,135 +384,159 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [onRecordingStop, onTranscriptionError]);
 
     return (
-    <div className="flex flex-col space-y-2">
-      <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
-        {isProcessing && !isParentProcessing ? (
-          <div className="flex items-center space-x-2">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900"></div>
-            <span className="text-sm text-gray-600">Processing recording...</span>
-          </div>
-        ) : (
-          <>
-            {showPlayback ? (
-              <>
-                <button
-                  onClick={handleStartRecording}
-                  className="w-10 h-10 flex items-center justify-center bg-red-500 rounded-full text-white hover:bg-red-600 transition-colors"
-                >
-                  <Mic size={16} />
-                </button>
-
-                <div className="w-px h-6 bg-gray-200 mx-1" />
-
-                <div className="flex items-center space-x-1 mx-2">
-                  <div className="text-sm text-gray-600 min-w-[40px]">
-                    {formatTime(currentTime)}
-                  </div>
-                  <div 
-                    className="relative w-24 h-1 bg-gray-200 rounded-full"
-                  >
-                    <div 
-                      className="absolute h-full bg-blue-500 rounded-full" 
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <div className="text-sm text-gray-600 min-w-[40px]">
-                    {formatTime(duration)}
-                  </div>
-                </div>
-
-                <button 
-                  className="w-10 h-10 flex items-center justify-center bg-gray-300 rounded-full text-white cursor-not-allowed"
-                  disabled
-                >
-                  <Play size={16} />
-                </button>
-              </>
-            ) : (
-              <>
-                {!isRecording ? (
-                  // Start recording button
+    <TooltipProvider>
+      <div className="flex flex-col space-y-2">
+        <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
+          {isProcessing && !isParentProcessing ? (
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900"></div>
+              <span className="text-sm text-gray-600">Processing recording...</span>
+            </div>
+          ) : (
+            <>
+              {showPlayback ? (
+                <>
                   <button
-                    onClick={() => {
-                      Analytics.trackButtonClick('start_recording', 'recording_controls');
-                      handleStartRecording();
-                    }}
-                    disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
-                    className={`w-12 h-12 flex items-center justify-center ${
-                      isStarting || isProcessing || isValidatingModel ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
-                    } rounded-full text-white transition-colors relative`}
+                    onClick={handleStartRecording}
+                    className="w-10 h-10 flex items-center justify-center bg-red-500 rounded-full text-white hover:bg-red-600 transition-colors"
                   >
-                    {isValidatingModel ? (
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    ) : (
-                      <Mic size={20} />
-                    )}
+                    <Mic size={16} />
                   </button>
-                ) : (
-                  // Recording controls (pause/resume + stop)
-                  <>
-                    <button
-                      onClick={() => {
-                        if (isPaused) {
-                          Analytics.trackButtonClick('resume_recording', 'recording_controls');
-                          handleResumeRecording();
-                        } else {
-                          Analytics.trackButtonClick('pause_recording', 'recording_controls');
-                          handlePauseRecording();
-                        }
-                      }}
-                      disabled={isPausing || isResuming || isStopping}
-                      className={`w-10 h-10 flex items-center justify-center ${
-                        isPausing || isResuming || isStopping ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
-                      } rounded-full text-white transition-colors relative`}
-                    >
-                      {isPaused ? <Play size={16} /> : <Pause size={16} />}
-                      {(isPausing || isResuming) && (
-                        <div className="absolute -top-8 text-gray-600 font-medium text-xs">
-                          {isPausing ? 'Pausing...' : 'Resuming...'}
-                        </div>
-                      )}
-                    </button>
 
-                    <button
-                      onClick={() => {
-                        Analytics.trackButtonClick('stop_recording', 'recording_controls');
-                        handleStopRecording();
-                      }}
-                      disabled={isStopping || isPausing || isResuming}
-                      className={`w-10 h-10 flex items-center justify-center ${
-                        isStopping || isPausing || isResuming ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
-                      } rounded-full text-white transition-colors relative`}
-                    >
-                      <Square size={16} />
-                      {isStopping && (
-                        <div className="absolute -top-8 text-gray-600 font-medium text-xs">
-                          Stopping...
-                        </div>
-                      )}
-                    </button>
-                  </>
-                )}
+                  <div className="w-px h-6 bg-gray-200 mx-1" />
 
-                <div className="flex items-center space-x-1 mx-4">
-                  {barHeights.map((height, index) => (
+                  <div className="flex items-center space-x-1 mx-2">
+                    <div className="text-sm text-gray-600 min-w-[40px]">
+                      {formatTime(currentTime)}
+                    </div>
                     <div
-                      key={index}
-                      className={`w-1 rounded-full transition-all duration-200 ${
-                        isPaused ? 'bg-orange-500' : 'bg-red-500'
-                      }`}
-                      style={{
-                        height: isRecording && !isPaused ? height : '4px',
-                        opacity: isPaused ? 0.6 : 1,
-                      }}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
+                      className="relative w-24 h-1 bg-gray-200 rounded-full"
+                    >
+                      <div
+                        className="absolute h-full bg-blue-500 rounded-full"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <div className="text-sm text-gray-600 min-w-[40px]">
+                      {formatTime(duration)}
+                    </div>
+                  </div>
+
+                  <button
+                    className="w-10 h-10 flex items-center justify-center bg-gray-300 rounded-full text-white cursor-not-allowed"
+                    disabled
+                  >
+                    <Play size={16} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  {!isRecording ? (
+                    // Start recording button
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => {
+                            Analytics.trackButtonClick('start_recording', 'recording_controls');
+                            handleStartRecording();
+                          }}
+                          disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
+                          className={`w-12 h-12 flex items-center justify-center ${
+                            isStarting || isProcessing || isValidatingModel ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                          } rounded-full text-white transition-colors relative`}
+                        >
+                          {isValidatingModel ? (
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                          ) : (
+                            <Mic size={20} />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Start recording</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    // Recording controls (pause/resume + stop)
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => {
+                              if (isPaused) {
+                                Analytics.trackButtonClick('resume_recording', 'recording_controls');
+                                handleResumeRecording();
+                              } else {
+                                Analytics.trackButtonClick('pause_recording', 'recording_controls');
+                                handlePauseRecording();
+                              }
+                            }}
+                            disabled={isPausing || isResuming || isStopping}
+                            className={`w-10 h-10 flex items-center justify-center ${
+                              isPausing || isResuming || isStopping
+                                ? 'bg-gray-200 border-2 border-gray-300 text-gray-400'
+                                : 'bg-white border-2 border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-50'
+                            } rounded-full transition-colors relative`}
+                          >
+                            {isPaused ? <Play size={16} /> : <Pause size={16} />}
+                            {(isPausing || isResuming) && (
+                              <div className="absolute -top-8 text-gray-600 font-medium text-xs">
+                                {isPausing ? 'Pausing...' : 'Resuming...'}
+                              </div>
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{isPaused ? 'Resume recording' : 'Pause recording'}</p>
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => {
+                              Analytics.trackButtonClick('stop_recording', 'recording_controls');
+                              handleStopRecording();
+                            }}
+                            disabled={isStopping || isPausing || isResuming}
+                            className={`w-10 h-10 flex items-center justify-center ${
+                              isStopping || isPausing || isResuming ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                            } rounded-full text-white transition-colors relative`}
+                          >
+                            <Square size={16} />
+                            {isStopping && (
+                              <div className="absolute -top-8 text-gray-600 font-medium text-xs">
+                                Stopping...
+                              </div>
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Stop recording</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </>
+                  )}
+
+                  <div className="flex items-center space-x-1 mx-4">
+                    {barHeights.map((height, index) => (
+                      <div
+                        key={index}
+                        className={`w-1 rounded-full transition-all duration-200 ${
+                          isPaused ? 'bg-orange-500' : 'bg-red-500'
+                        }`}
+                        style={{
+                          height: isRecording && !isPaused ? height : '4px',
+                          opacity: isPaused ? 0.6 : 1,
+                        }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
 
       {/* Show validation status only */}
       {isValidatingModel && (
@@ -566,11 +569,12 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         </Alert>
       )}
 
-            {/* {showPlayback && recordingPath && (
+      {/* {showPlayback && recordingPath && (
         <div className="text-sm text-gray-600 px-4">
           Recording saved to: {recordingPath}
         </div>
       )} */}
-    </div>
+      </div>
+    </TooltipProvider>
   );
 };

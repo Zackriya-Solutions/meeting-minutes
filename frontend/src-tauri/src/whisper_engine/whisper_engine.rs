@@ -42,6 +42,10 @@ pub struct WhisperEngine {
     short_audio_warning_logged: Arc<RwLock<bool>>,
     // Performance optimization: reduce logging frequency
     transcription_count: Arc<RwLock<u64>>,
+    // Download cancellation tracking
+    cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
+    // Active downloads tracking to prevent concurrent downloads
+    active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
 }
 
 impl WhisperEngine {
@@ -153,6 +157,10 @@ impl WhisperEngine {
             short_audio_warning_logged: Arc::new(RwLock::new(false)),
             // Performance optimization: reduce logging frequency
             transcription_count: Arc::new(RwLock::new(0)),
+            // Initialize cancellation tracking
+            cancel_download_flag: Arc::new(RwLock::new(None)),
+            // Initialize active downloads tracking
+            active_downloads: Arc::new(RwLock::new(HashSet::new())),
         };
         
         Ok(engine)
@@ -564,7 +572,7 @@ impl WhisperEngine {
 
         // Additional suppression to reduce C library verbosity
         params.set_suppress_blank(true);
-        params.set_suppress_nst(true);
+        params.set_suppress_non_speech_tokens(true);
         params.set_temperature(adaptive_config.temperature);
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
@@ -601,13 +609,12 @@ impl WhisperEngine {
         let mut total_confidence = 0.0;
         let mut segment_count = 0;
 
+        let num_segments = num_segments?;
         for i in 0..num_segments {
-            let segment = match state.get_segment(i) {
-                Some(seg) => seg,
-                None => continue,
+            let segment_text = match state.full_get_segment_text_lossy(i) {
+                Ok(text) => text,
+                Err(_) => continue,
             };
-
-            let segment_text = segment.to_str_lossy()?;
 
             // Calculate confidence based on segment length and duration (simplified approach)
             let segment_length = segment_text.len() as f32;
@@ -645,10 +652,14 @@ impl WhisperEngine {
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
 
-        // BALANCED parameters - reasonable speed with good accuracy
+        // Get adaptive configuration based on hardware
+        let hardware_profile = crate::audio::HardwareProfile::detect();
+        let adaptive_config = hardware_profile.get_whisper_config();
+
+        // ADAPTIVE parameters - optimized for current hardware
         let mut params = FullParams::new(SamplingStrategy::BeamSearch {
-            beam_size: 2,      // Reduced from 5 to 2 for speed while keeping quality
-            patience: 1.0      // Balance between speed and accuracy
+            beam_size: adaptive_config.beam_size as i32,
+            patience: 1.0
         });
 
         // Configure for good quality
@@ -676,7 +687,7 @@ impl WhisperEngine {
 
         // BALANCED settings - good quality with reasonable speed
         params.set_suppress_blank(true);
-        params.set_suppress_nst(true);
+        params.set_suppress_non_speech_tokens(true);
         params.set_temperature(0.3);             // Lower than 0.4 for consistency, higher than 0.0 for quality
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
@@ -746,7 +757,7 @@ impl WhisperEngine {
         state.full(params, &audio_data)?;
 
         // Extract text with improved segment handling
-        let num_segments = state.full_n_segments();
+        let num_segments = state.full_n_segments()?;
 
         // Performance optimization: reduce segment completion logging
         // Only log for significant transcriptions to avoid I/O overhead
@@ -756,14 +767,13 @@ impl WhisperEngine {
         let mut result = String::new();
 
         for i in 0..num_segments {
-            let segment = match state.get_segment(i) {
-                Some(seg) => seg,
-                None => continue,
+            let segment_text = match state.full_get_segment_text_lossy(i) {
+                Ok(text) => text,
+                Err(_) => continue,
             };
 
-            let segment_text = segment.to_str_lossy()?;
-            let _start_time = segment.start_timestamp();
-            let _end_time = segment.end_timestamp();
+            let _start_time = state.full_get_segment_t0(i).unwrap_or(0);
+            let _end_time = state.full_get_segment_t1(i).unwrap_or(0);
 
             // Performance optimization: remove per-segment debug logging
             // This was causing significant I/O overhead during transcription
@@ -903,7 +913,28 @@ impl WhisperEngine {
     
     pub async fn download_model(&self, model_name: &str, progress_callback: Option<Box<dyn Fn(u8) + Send>>) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
-        
+
+        // Check if download is already in progress for this model
+        {
+            let active = self.active_downloads.read().await;
+            if active.contains(model_name) {
+                log::warn!("Download already in progress for model: {}", model_name);
+                return Err(anyhow!("Download already in progress for model: {}", model_name));
+            }
+        }
+
+        // Add to active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.insert(model_name.to_string());
+        }
+
+        // Clear any previous cancellation flag for this model
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            *cancel_flag = None;
+        }
+
         // Official ggerganov/whisper.cpp model URLs from Hugging Face
         let model_url = match model_name {
             // Standard f16 models
@@ -954,6 +985,9 @@ impl WhisperEngine {
         
         log::info!("Received response with status: {}", response.status());
         if !response.status().is_success() {
+            // Remove from active downloads on error
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
             return Err(anyhow!("Download failed with status: {}", response.status()));
         }
         
@@ -985,6 +1019,18 @@ impl WhisperEngine {
         }
 
         while let Some(chunk_result) = stream.next().await {
+            // Check for cancellation before processing chunk
+            {
+                let cancel_flag = self.cancel_download_flag.read().await;
+                if cancel_flag.as_ref() == Some(&model_name.to_string()) {
+                    log::info!("Download cancelled for {}", model_name);
+                    // Remove from active downloads on cancellation
+                    let mut active = self.active_downloads.write().await;
+                    active.remove(model_name);
+                    return Err(anyhow!("Download cancelled by user"));
+                }
+            }
+
             let chunk = chunk_result
                 .map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
 
@@ -1053,16 +1099,52 @@ impl WhisperEngine {
                 model_info.path = file_path.clone();
             }
         }
-        
+
+        // Remove from active downloads on completion
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+        }
+
         Ok(())
     }
     
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
-        // Update the status to cancelled
-        let mut models = self.available_models.write().await;
-        if let Some(model_info) = models.get_mut(model_name) {
-            model_info.status = ModelStatus::Error("Download cancelled".to_string());
+        log::info!("Cancelling download for model: {}", model_name);
+
+        // Set cancellation flag to interrupt the download loop
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            *cancel_flag = Some(model_name.to_string());
         }
+
+        // Remove from active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+        }
+
+        // Update model status to Missing (so it can be retried)
+        {
+            let mut models = self.available_models.write().await;
+            if let Some(model_info) = models.get_mut(model_name) {
+                model_info.status = ModelStatus::Missing;
+            }
+        }
+
+        // Clean up partially downloaded files
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Brief delay to let download loop detect cancellation
+
+        let filename = format!("ggml-{}.bin", model_name);
+        let file_path = self.models_dir.join(&filename);
+        if file_path.exists() {
+            if let Err(e) = fs::remove_file(&file_path).await {
+                log::warn!("Failed to clean up cancelled download file: {}", e);
+            } else {
+                log::info!("Cleaned up cancelled download file: {}", file_path.display());
+            }
+        }
+
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useContext, useCallback, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Transcript, TranscriptUpdate, Summary, SummaryResponse } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { TranscriptView } from '@/components/TranscriptView';
@@ -8,11 +9,12 @@ import { RecordingControls } from '@/components/RecordingControls';
 import { AISummary } from '@/components/AISummary';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { ModelManager } from '@/components/WhisperModelManager';
+import { TranscriptSettings, TranscriptModelProps } from '@/components/TranscriptSettings';
 import { LanguageSelection } from '@/components/LanguageSelection';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { listen } from '@tauri-apps/api/event';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -23,6 +25,7 @@ import { useRouter } from 'next/navigation';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
+import { showRecordingNotification } from '@/lib/recordingNotification';
 import { Button } from '@/components/ui/button';
 import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
@@ -68,6 +71,11 @@ export default function Home() {
     model: 'llama3.2:latest',
     whisperModel: 'large-v3'
   });
+  const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
+    provider: 'parakeet',
+    model: 'parakeet-tdt-0.6b-v3-int8',
+    apiKey: null
+  });
   const [originalTranscript, setOriginalTranscript] = useState<string>('');
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
@@ -87,11 +95,20 @@ export default function Home() {
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
+  const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
 
   // Permission check hook
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
 
-  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress } = useSidebar();
+  // Recording state context - provides backend-synced state
+  const recordingState = useRecordingState();
+
+  // Compute effective recording state for UI: override with local state during stop transition
+  // This ensures immediate UI feedback when stop is pressed, while preserving backend-synced state for reload functionality
+  const effectiveIsRecording = isProcessingTranscript ? false : recordingState.isRecording;
+
+  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
   const router = useRouter();
 
@@ -101,9 +118,37 @@ export default function Home() {
   // Ref to avoid stale closure issues with transcripts
   const transcriptsRef = useRef<Transcript[]>(transcripts);
 
+  const isUserAtBottomRef = useRef<boolean>(true);
+
   // Keep ref updated with current transcripts
   useEffect(() => {
     transcriptsRef.current = transcripts;
+  }, [transcripts]);
+
+  // Smart auto-scroll: Track user scroll position
+  useEffect(() => {
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
+      isUserAtBottomRef.current = isAtBottom;
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll when transcripts change (only if user is at bottom)
+  useEffect(() => {
+    // Only auto-scroll if user was at the bottom before new content
+    if (isUserAtBottomRef.current) {
+      // Use requestAnimationFrame to ensure DOM is updated before scrolling
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior: 'smooth'
+        });
+      });
+    }
   }, [transcripts]);
 
   const modelOptions = {
@@ -160,6 +205,26 @@ export default function Home() {
     Analytics.trackPageView('home');
   }, []);
 
+  // Load saved transcript configuration on mount
+  useEffect(() => {
+    const loadTranscriptConfig = async () => {
+      try {
+        const config = await invoke('api_get_transcript_config') as any;
+        if (config) {
+          console.log('Loaded saved transcript config:', config);
+          setTranscriptModelConfig({
+            provider: config.provider || 'parakeet',
+            model: config.model || 'parakeet-tdt-0.6b-v3-int8',
+            apiKey: config.apiKey || null
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load transcript config:', error);
+      }
+    };
+    loadTranscriptConfig();
+  }, []);
+
   useEffect(() => {
     setCurrentMeeting({ id: 'intro-call', title: meetingTitle });
 
@@ -210,7 +275,7 @@ export default function Home() {
 
 
   useEffect(() => {
-    if (isRecording) {
+    if (recordingState.isRecording) {
       const interval = setInterval(() => {
         setBarHeights(prev => {
           const newHeights = [...prev];
@@ -223,12 +288,12 @@ export default function Home() {
 
       return () => clearInterval(interval);
     }
-  }, [isRecording]);
+  }, [recordingState.isRecording]);
 
-  // Update sidebar recording state when local recording state changes
+  // Update sidebar recording state when backend-synced recording state changes
   useEffect(() => {
-    setSidebarIsRecording(isRecording);
-  }, [isRecording, setSidebarIsRecording]);
+    setSidebarIsRecording(recordingState.isRecording);
+  }, [recordingState.isRecording, setSidebarIsRecording]);
 
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -404,6 +469,52 @@ export default function Home() {
     };
   }, []);
 
+  // Sync transcript history and meeting name from backend on reload
+  // This fixes the issue where reloading during active recording causes state desync
+  useEffect(() => {
+    const syncFromBackend = async () => {
+      // Only sync if recording is active but we have no local transcripts
+      if (recordingState.isRecording && transcripts.length === 0) {
+        try {
+          console.log('[Reload Sync] Recording active after reload, syncing transcript history...');
+
+          // Fetch transcript history from backend
+          const history = await invoke<any[]>('get_transcript_history');
+          console.log(`[Reload Sync] Retrieved ${history.length} transcript segments from backend`);
+
+          // Convert backend format to frontend Transcript format
+          const formattedTranscripts: Transcript[] = history.map((segment: any) => ({
+            id: segment.id,
+            text: segment.text,
+            timestamp: segment.display_time, // Use display_time for UI
+            sequence_id: segment.sequence_id,
+            chunk_start_time: segment.audio_start_time,
+            is_partial: false, // History segments are always final
+            confidence: segment.confidence,
+            audio_start_time: segment.audio_start_time,
+            audio_end_time: segment.audio_end_time,
+            duration: segment.duration,
+          }));
+
+          setTranscripts(formattedTranscripts);
+          console.log('[Reload Sync] ✅ Transcript history synced successfully');
+
+          // Fetch meeting name from backend
+          const meetingName = await invoke<string | null>('get_recording_meeting_name');
+          if (meetingName) {
+            console.log('[Reload Sync] Retrieved meeting name:', meetingName);
+            setMeetingTitle(meetingName);
+            console.log('[Reload Sync] ✅ Meeting title synced successfully');
+          }
+        } catch (error) {
+          console.error('[Reload Sync] Failed to sync from backend:', error);
+        }
+      }
+    };
+
+    syncFromBackend();
+  }, [recordingState.isRecording]); // Run when recording state changes
+
   // Set up chunk drop warning listener
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -436,6 +547,56 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Set up recording-stopped listener for meeting navigation
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupRecordingStoppedListener = async () => {
+      try {
+        console.log('Setting up recording-stopped listener for navigation...');
+        unlistenFn = await listen<{ message: string; meeting_id?: string }>('recording-stopped', (event) => {
+          console.log('Recording stopped event received:', event.payload);
+
+          const { meeting_id } = event.payload;
+          if (meeting_id) {
+            console.log('Meeting ID found, navigating to meeting details:', meeting_id);
+
+            // Show success toast with navigation option
+            toast.success('Recording saved successfully!', {
+              description: 'Your meeting has been saved.',
+              action: {
+                label: 'View Meeting',
+                onClick: () => {
+                  router.push(`/meeting-details?id=${meeting_id}`);
+                  Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
+                }
+              },
+              duration: 10000, // Keep toast visible for 10 seconds
+            });
+
+            // Auto-navigate after a short delay (optional - user can click toast action)
+            setTimeout(() => {
+              router.push(`/meeting-details?id=${meeting_id}`);
+              Analytics.trackPageView('meeting_details');
+            }, 2000); // 2 second delay before auto-navigation
+          }
+        });
+        console.log('Recording stopped listener setup complete');
+      } catch (error) {
+        console.error('Failed to setup recording stopped listener:', error);
+      }
+    };
+
+    setupRecordingStoppedListener();
+
+    return () => {
+      console.log('Cleaning up recording stopped listener...');
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, [router]);
 
   // Set up transcription error listener for model loading failures
   useEffect(() => {
@@ -537,6 +698,9 @@ export default function Home() {
       setTranscripts([]); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
       Analytics.trackButtonClick('start_recording', 'home_page');
+
+      // Show recording notification if enabled
+      await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert('Failed to start recording. Check console for details.');
@@ -582,6 +746,9 @@ export default function Home() {
             setTranscripts([]);
             setIsMeetingActive(true);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
+
+            // Show recording notification if enabled
+            await showRecordingNotification();
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
             alert('Failed to start recording. Check console for details.');
@@ -652,8 +819,10 @@ export default function Home() {
 
   const handleRecordingStop2 = async (isCallApi: boolean) => {
     // Immediately update UI state to reflect that recording has stopped
+    // Note: setIsStopping(true) is now called via onStopInitiated callback before this function
     setIsRecordingState(false);
     setIsRecordingDisabled(true);
+    setIsProcessingTranscript(true); // Immediately set processing flag for UX
     const stopStartTime = Date.now();
     try {
       console.log('Post-stop processing (new implementation)...', {
@@ -755,6 +924,8 @@ export default function Home() {
       }
 
       setSummaryStatus('idle');
+      setIsProcessingTranscript(false); // Reset processing flag
+      setIsStopping(false); // Reset stopping flag
 
       // Wait a bit more to ensure all transcript state updates have been processed
       console.log('Waiting for transcript state updates to complete...');
@@ -877,6 +1048,8 @@ export default function Home() {
       console.error('Error in handleRecordingStop2:', error);
       // isRecordingState already set to false at function start
       setSummaryStatus('idle');
+      setIsProcessingTranscript(false); // Reset on error
+      setIsStopping(false); // Reset stopping flag on error
       setIsSavingTranscript(false);
       setIsRecordingDisabled(false);
     }
@@ -1241,9 +1414,24 @@ export default function Home() {
     }
   }, [transcripts, generateAISummary]);
 
+  // Handle transcript configuration save
+  const handleSaveTranscriptConfig = async (config: TranscriptModelProps) => {
+    try {
+      console.log('[HomePage] Saving transcript config:', config);
+      await invoke('api_save_transcript_config', {
+        provider: config.provider,
+        model: config.model,
+        apiKey: config.apiKey
+      });
+      console.log('[HomePage] ✅ Successfully saved transcript config');
+    } catch (error) {
+      console.error('[HomePage] ❌ Failed to save transcript config:', error);
+    }
+  };
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
-  const isProcessingStop = summaryStatus === 'processing'
+  const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript
   const handleRecordingStop2Ref = useRef(handleRecordingStop2);
   const handleRecordingStartRef = useRef(handleRecordingStart);
   useEffect(() => {
@@ -1321,7 +1509,12 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex flex-col min-h-screen bg-gray-50 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+    >
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
@@ -1354,11 +1547,11 @@ export default function Home() {
           </Alert>
         </div>
       )}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1">
         {/* Left side - Transcript */}
-        <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-white flex flex-col relative">
-          {/* Title area */}
-          <div className="p-4  border-b border-gray-200">
+        <div className="w-full border-r border-gray-200 bg-white flex flex-col">
+          {/* Title area - Sticky header */}
+          <div className="sticky top-0 z-10 bg-white p-4 border-b border-gray-200">
             <div className="flex flex-col space-y-3">
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
@@ -1377,10 +1570,9 @@ export default function Home() {
                       </span>
                     </Button>
                   )}
-                  {!isRecording && transcripts?.length === 0 && (
+                  {/* {!isRecording && transcripts?.length === 0 && ( */}
                     <Button
                       variant="outline"
-                      size="sm"
                       onClick={() => setShowModelSelector(true)}
                       title="Transcription Model Settings"
                     >
@@ -1389,10 +1581,9 @@ export default function Home() {
                         Model
                       </span>
                     </Button>
-                  )}
+                  
                   <Button
                     variant="outline"
-                    size="sm"
                     onClick={() => setShowDeviceSettings(true)}
                     title="Input/Output devices selection"
                   >
@@ -1403,7 +1594,6 @@ export default function Home() {
                   </Button>
                   <Button
                     variant="outline"
-                    size="sm"
                     onClick={() => setShowLanguageSettings(true)}
                     title="Language"
                   >
@@ -1518,7 +1708,7 @@ export default function Home() {
 
           {/* Permission Warning */}
           {!isRecording && !isCheckingPermissions && (
-            <div className="px-4 pt-4">
+            <div className="flex justify-center px-4 pt-4">
               <PermissionWarning
                 hasMicrophone={hasMicrophone}
                 hasSystemAudio={hasSystemAudio}
@@ -1529,8 +1719,19 @@ export default function Home() {
           )}
 
           {/* Transcript content */}
-          <div className="flex-1 overflow-y-auto pb-32">
-            <TranscriptView transcripts={transcripts} isRecording={isRecording} />
+          <div className="pb-20">
+            <div className="flex justify-center">
+              <div className="w-2/3 max-w-[750px]">
+                <TranscriptView
+                  transcripts={transcripts}
+                  isRecording={recordingState.isRecording}
+                  isPaused={recordingState.isPaused}
+                  isProcessing={isProcessingStop}
+                  isStopping={isStopping}
+                  enableStreaming={recordingState.isRecording }
+                />
+              </div>
+            </div>
           </div>
 
           {/* Custom prompt input at bottom of transcript section */}
@@ -1546,15 +1747,23 @@ export default function Home() {
             </div>
           )} */}
 
-          {/* Recording controls - only show when permissions are granted or already recording */}
-          {(hasMicrophone || isRecording) && (
-            <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-10">
-              <div className="bg-white rounded-full shadow-lg flex items-center">
-                <RecordingControls
-                  isRecording={isRecording}
+          {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
+          {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
+            <div className="fixed bottom-12 left-0 right-0 z-10">
+              <div
+                className="flex justify-center pl-8 transition-[margin] duration-300"
+                style={{
+                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+                }}
+              >
+                <div className="w-2/3 max-w-[750px] flex justify-center">
+                  <div className="bg-white rounded-full shadow-lg flex items-center">
+                    <RecordingControls
+                  isRecording={recordingState.isRecording}
                   onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
                   onRecordingStart={handleRecordingStart}
                   onTranscriptReceived={handleTranscriptUpdate}
+                  onStopInitiated={() => setIsStopping(true)}
                   barHeights={barHeights}
                   onTranscriptionError={(message) => {
                     setErrorMessage(message);
@@ -1565,21 +1774,45 @@ export default function Home() {
                   selectedDevices={selectedDevices}
                   meetingName={meetingTitle}
                 />
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {/* Processing status overlay */}
           {summaryStatus === 'processing' && !isRecording && (
-            <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-              <span className="text-sm text-gray-700">Finalizing transcription...</span>
+            <div className="fixed bottom-4 left-0 right-0 z-10">
+              <div
+                className="flex justify-center pl-8 transition-[margin] duration-300"
+                style={{
+                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+                }}
+              >
+                <div className="w-2/3 max-w-[750px] flex justify-center">
+                  <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                    <span className="text-sm text-gray-700">Finalizing transcription...</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           {isSavingTranscript && (
-            <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-              <span className="text-sm text-gray-700">Saving transcript...</span>
+            <div className="fixed bottom-4 left-0 right-0 z-10">
+              <div
+                className="flex justify-center pl-8 transition-[margin] duration-300"
+                style={{
+                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+                }}
+              >
+                <div className="w-2/3 max-w-[750px] flex justify-center">
+                  <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                    <span className="text-sm text-gray-700">Saving transcript...</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1609,66 +1842,66 @@ export default function Home() {
                   <div className="border-t pt-8">
                     <h4 className="text-lg font-semibold text-gray-900 mb-4">AI Model Configuration</h4>
                     <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Summarization Model
-                    </label>
-                    <div className="flex space-x-2">
-                      <select
-                        className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        value={modelConfig.provider}
-                        onChange={(e) => {
-                          const provider = e.target.value as ModelConfig['provider'];
-                          setModelConfig({
-                            ...modelConfig,
-                            provider,
-                            model: modelOptions[provider][0]
-                          });
-                        }}
-                      >
-                        <option value="claude">Claude</option>
-                        <option value="groq">Groq</option>
-                        <option value="ollama">Ollama</option>
-                        <option value="openrouter">OpenRouter</option>
-                      </select>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Summarization Model
+                        </label>
+                        <div className="flex space-x-2">
+                          <select
+                            className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            value={modelConfig.provider}
+                            onChange={(e) => {
+                              const provider = e.target.value as ModelConfig['provider'];
+                              setModelConfig({
+                                ...modelConfig,
+                                provider,
+                                model: modelOptions[provider][0]
+                              });
+                            }}
+                          >
+                            <option value="claude">Claude</option>
+                            <option value="groq">Groq</option>
+                            <option value="ollama">Ollama</option>
+                            <option value="openrouter">OpenRouter</option>
+                          </select>
 
-                      <select
-                        className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        value={modelConfig.model}
-                        onChange={(e) => setModelConfig(prev => ({ ...prev, model: e.target.value }))}
-                      >
-                        {modelOptions[modelConfig.provider].map(model => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  {modelConfig.provider === 'ollama' && (
-                    <div>
-                      <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
-                      {error && (
-                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                          {error}
+                          <select
+                            className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            value={modelConfig.model}
+                            onChange={(e) => setModelConfig(prev => ({ ...prev, model: e.target.value }))}
+                          >
+                            {modelOptions[modelConfig.provider].map(model => (
+                              <option key={model} value={model}>
+                                {model}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      {modelConfig.provider === 'ollama' && (
+                        <div>
+                          <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
+                          {error && (
+                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                              {error}
+                            </div>
+                          )}
+                          <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
+                            {models.map((model) => (
+                              <div
+                                key={model.id}
+                                className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
+                                  }`}
+                                onClick={() => setModelConfig(prev => ({ ...prev, model: model.name }))}
+                              >
+                                <h3 className="font-bold">{model.name}</h3>
+                                <p className="text-gray-600">Size: {model.size}</p>
+                                <p className="text-gray-600">Modified: {model.modified}</p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
-                      <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
-                        {models.map((model) => (
-                          <div
-                            key={model.id}
-                            className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
-                              }`}
-                            onClick={() => setModelConfig(prev => ({ ...prev, model: model.name }))}
-                          >
-                            <h3 className="font-bold">{model.name}</h3>
-                            <p className="text-gray-600">Size: {model.size}</p>
-                            <p className="text-gray-600">Modified: {model.modified}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                     </div>
                   </div>
                 </div>
@@ -1710,7 +1943,14 @@ export default function Home() {
 
                 <div className="mt-6 flex justify-end">
                   <button
-                    onClick={() => setShowDeviceSettings(false)}
+                    onClick={() => {
+                      const micDevice = selectedDevices.micDevice || 'Default';
+                      const systemDevice = selectedDevices.systemDevice || 'Default';
+                      toast.success("Devices selected", {
+                        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+                      });
+                      setShowDeviceSettings(false);
+                    }}
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   >
                     Done
@@ -1740,6 +1980,7 @@ export default function Home() {
                   selectedLanguage={selectedLanguage}
                   onLanguageChange={setSelectedLanguage}
                   disabled={isRecording}
+                  provider={transcriptModelConfig.provider}
                 />
 
                 <div className="mt-6 flex justify-end">
@@ -1757,11 +1998,17 @@ export default function Home() {
           {/* Model Selection Modal - shown when model loading fails */}
           {showModelSelector && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Speech Recognition Setup Required</h3>
+              <div className="bg-white rounded-lg max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] flex flex-col">
+                {/* Fixed Header */}
+                <div className="flex justify-between items-center p-6 pb-4 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {modelSelectorMessage ? 'Speech Recognition Setup Required' : 'Transcription Model Settings'}
+                  </h3>
                   <button
-                    onClick={() => setShowModelSelector(false)}
+                    onClick={() => {
+                      setShowModelSelector(false);
+                      setModelSelectorMessage(''); // Clear the message when closing
+                    }}
                     className="text-gray-500 hover:text-gray-700"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1770,38 +2017,40 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-start space-x-3">
-                    <span className="text-yellow-600 text-xl">⚠️</span>
-                    <div>
-                      <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
-                      <p className="text-sm text-yellow-700">
-                        {modelSelectorMessage || 'Please download a Whisper model to enable speech recognition and start transcription.'}
-                      </p>
+                {/* Scrollable Content */}
+                <div className="flex-1 overflow-y-auto p-6 pt-4">
+                  {/* Only show warning if there's an error message (triggered by transcription error) */}
+                  {modelSelectorMessage && (
+                    <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <div className="flex items-start space-x-3">
+                        <span className="text-yellow-600 text-xl">⚠️</span>
+                        <div>
+                          <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
+                          <p className="text-sm text-yellow-700">
+                            {modelSelectorMessage}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  <TranscriptSettings
+                    transcriptModelConfig={transcriptModelConfig}
+                    setTranscriptModelConfig={setTranscriptModelConfig}
+                    // onSave={handleSaveTranscriptConfig}
+                  />
                 </div>
 
-                <ModelManager
-                  selectedModel={modelConfig.whisperModel}
-                  onModelSelect={(modelName) => {
-                    console.log('[HomePage] Model selected:', modelName);
-                    setModelConfig(prev => ({ ...prev, whisperModel: modelName }));
-                    // Close the modal once a model is selected
-                    if (modelName) {
-                      console.log('[HomePage] Closing modal after model selection');
-                      setShowModelSelector(false);
-                    }
-                  }}
-                  autoSave={true}
-                />
-
-                <div className="mt-6 flex justify-end space-x-3">
+                {/* Fixed Footer */}
+                <div className="p-6 pt-4 border-t border-gray-200 flex justify-end">
                   <button
-                    onClick={() => setShowModelSelector(false)}
+                    onClick={() => {
+                      setShowModelSelector(false);
+                      setModelSelectorMessage(''); // Clear the message when closing
+                    }}
                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
                   >
-                    Cancel
+                    {modelSelectorMessage ? 'Cancel' : 'Done'}
                   </button>
                 </div>
               </div>
@@ -1810,94 +2059,93 @@ export default function Home() {
         </div>
 
         {/* Right side - AI Summary */}
-        <div className="flex-1 overflow-y-auto bg-white">
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center">
-              <EditableTitle
-                title={meetingTitle}
-                isEditing={isEditingTitle}
-                onStartEditing={() => setIsEditingTitle(true)}
-                onFinishEditing={() => setIsEditingTitle(false)}
-                onChange={handleTitleChange}
-              />
-            </div>
-          </div>
-          {/* {isSummaryLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                <p className="text-gray-600">Generating AI Summary...</p>
-              </div>
-            </div>
-          ) : showSummary && (
-            <div className="max-w-4xl mx-auto p-6">
-              {summaryResponse && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
-                  <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white p-4 rounded-lg shadow-sm">
-                      <h4 className="font-medium mb-1">Key Points</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.key_points.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Action Items</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.action_items.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Decisions</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.decisions.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                      <h4 className="font-medium mb-1">Main Topics</h4>
-                      <ul className="list-disc pl-4">
-                        {summaryResponse.summary.main_topics.blocks.map((block, i) => (
-                          <li key={i} className="text-sm">{block.content}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                  {summaryResponse.raw_summary ? (
-                    <div className="mt-4">
-                      <h4 className="font-medium mb-1">Full Summary</h4>
-                      <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              <div className="flex-1 overflow-y-auto p-4">
-                <AISummary 
-                  summary={aiSummary} 
-                  status={summaryStatus} 
-                  error={summaryError}
-                  onSummaryChange={(newSummary) => setAiSummary(newSummary)}
-                  onRegenerateSummary={handleRegenerateSummary}
-                />
-              </div>
-              {summaryStatus !== 'idle' && (
-                <div className={`mt-4 p-4 rounded-lg ${
-                  summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
-                  summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
-                  'bg-blue-100 text-blue-700'
-                }`}>
-                  <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
-                </div>
-              )}
-            </div>
-          )} */}
-        </div>
+        {/* <div className="flex-1 overflow-y-auto bg-white"> */}
+        {/*   <div className="p-4 border-b border-gray-200"> */}
+        {/*     <div className="flex items-center"> */}
+        {/*       <EditableTitle */}
+        {/*         title={meetingTitle} */}
+        {/*         isEditing={isEditingTitle} */}
+        {/*         onStartEditing={() => setIsEditingTitle(true)} */}
+        {/*         onFinishEditing={() => setIsEditingTitle(false)} */}
+        {/*         onChange={handleTitleChange} */}
+        {/*       /> */}
+        {/*     </div> */}
+        {/*   </div> */}
+        {/*   {/* {isSummaryLoading ? ( */}
+        {/*     <div className="flex items-center justify-center h-full"> */}
+        {/*       <div className="text-center"> */}
+        {/*         <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div> */}
+        {/*         <p className="text-gray-600">Generating AI Summary...</p> */}
+        {/*       </div> */}
+        {/*     </div> */}
+        {/*   ) : showSummary && ( */}
+        {/*     <div className="max-w-4xl mx-auto p-6"> */}
+        {/*       {summaryResponse && ( */}
+        {/*         <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto"> */}
+        {/*           <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3> */}
+        {/*           <div className="grid grid-cols-2 gap-4"> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm"> */}
+        {/*               <h4 className="font-medium mb-1">Key Points</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.key_points.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Action Items</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.action_items.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Decisions</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.decisions.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Main Topics</h4> */}
+        {/*               <ul className="list-disc pl-4"> */}
+        {/*                 {summaryResponse.summary.main_topics.blocks.map((block, i) => ( */}
+        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
+        {/*                 ))} */}
+        {/*               </ul> */}
+        {/*             </div> */}
+        {/*           </div> */}
+        {/*           {summaryResponse.raw_summary ? ( */}
+        {/*             <div className="mt-4"> */}
+        {/*               <h4 className="font-medium mb-1">Full Summary</h4> */}
+        {/*               <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p> */}
+        {/*             </div> */}
+        {/*           ) : null} */}
+        {/*         </div> */}
+        {/*       )} */}
+        {/*       <div className="flex-1 overflow-y-auto p-4"> */}
+        {/*         <AISummary  */}
+        {/*           summary={aiSummary}  */}
+        {/*           status={summaryStatus}  */}
+        {/*           error={summaryError} */}
+        {/*           onSummaryChange={(newSummary) => setAiSummary(newSummary)} */}
+        {/*           onRegenerateSummary={handleRegenerateSummary} */}
+        {/*         /> */}
+        {/*       </div> */}
+        {/*       {summaryStatus !== 'idle' && ( */}
+        {/*         <div className={`mt-4 p-4 rounded-lg ${ */}
+        {/*           summaryStatus === 'error' ? 'bg-red-100 text-red-700' : */}
+        {/*           summaryStatus === 'completed' ? 'bg-green-100 text-green-700' : */}
+        {/*           'bg-blue-100 text-blue-700' */}
+        {/*         }`}> */}
+        {/*           <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p> */}
+        {/*         </div> */}
+        {/*       )} */}
+        {/*     </div> */}
+        {/*   )} */}        {/* </div> */}
       </div>
-    </div >
+    </motion.div>
   );
 }

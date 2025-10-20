@@ -30,7 +30,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     }
 
     const initAnalytics = async () => {
-      const store = await load('analytics.json', { 
+      const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
           analyticsOptedIn: true
@@ -40,9 +40,10 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
         await store.set('analyticsOptedIn', true);
       }
       const analyticsOptedIn = await store.get('analyticsOptedIn')
-      
+
       setIsAnalyticsOptedIn(analyticsOptedIn as boolean);
-      if (analyticsOptedIn && isAnalyticsOptedIn) {
+      // Fix: Use fresh value from store, not stale state
+      if (analyticsOptedIn) {
         initAnalytics2();
       }
     }
@@ -81,7 +82,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
 
         // Identify user with enhanced properties immediately after init
         await Analytics.identify(userId, {
-          app_version: '0.0.6',
+          app_version: '0.1.1',
           platform: deviceInfo.platform,
           os_version: deviceInfo.os_version,
           architecture: deviceInfo.architecture,
@@ -126,6 +127,14 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     };
 
     initAnalytics().catch(console.error);
+  }, []); // Run only once on mount to prevent infinite loops
+
+  // Separate effect to handle re-initialization when analytics is toggled
+  useEffect(() => {
+    // Reset initialized flag when analytics is disabled to allow re-initialization
+    if (!isAnalyticsOptedIn) {
+      initialized.current = false;
+    }
   }, [isAnalyticsOptedIn]);
 
   return <AnalyticsContext.Provider value={{ isAnalyticsOptedIn, setIsAnalyticsOptedIn }}>{children}</AnalyticsContext.Provider>;

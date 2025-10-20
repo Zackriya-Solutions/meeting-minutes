@@ -1,6 +1,6 @@
 [package]
-name = "meetily-frontend-app"
-version = "0.0.6"
+name = "meetily"
+version = "0.1.1"
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
@@ -67,7 +67,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 posthog-rs = "0.3.7"
 
 # Cross-platform audio capture
-cpal = { git = "https://github.com/Kree0/cpal.git", branch = "master" }
+cpal = "0.15.3"
 
 # Wav encoding - now using manual WAV creation instead of hound
 # hound = "3.5"
@@ -87,15 +87,25 @@ which = "6.0.1"
 # Bytes
 bytemuck = "1.16.1"
 
+# EBU R128 loudness normalization (professional broadcast standard)
+ebur128 = "0.1"
+
+# Noise suppression - RNNoise-based neural network noise reduction
+nnnoiseless = "0.5"
 
 # Whisper-rs for speech recognition - BASE dependency (no GPU features)
 # Platform-specific GPU features are added via target-specific dependencies below
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
+whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-util = "0.3"
 silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", package = "silero" }
 
+# Parakeet (ONNX-based fast transcription) dependencies
+ort = { version = "2.0.0-rc.10" }  # ONNX Runtime for Parakeet models
+thiserror = "2.0.16"                # Error handling for Parakeet
+
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
+async-trait = "0.1"  # Trait abstraction for async methods
 
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
@@ -123,7 +133,7 @@ esaxx-rs = "0.1.10"
 symphonia = { version = "0.5.4", features = ["aac", "isomp4", "opt-simd"] }
 rand = "0.8.5"
 rubato = "0.15.0"
-ringbuf = "0.3"
+ringbuf = "0.4.8"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
@@ -146,14 +156,13 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
 core-graphics = "0.23"
-mac-notification-sys = "0.6.1"
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend", "metal", "coreml"] }
+whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 
 # Windows-specific dependencies
 # Default: CPU-only build (no BLAS)
@@ -162,7 +171,7 @@ whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec"
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
+whisper-rs = { version = "0.13.2", features = ["raw-api", "vulkan"] }
 futures-channel = "0.3.31"
 
 # Linux-specific dependencies
@@ -173,7 +182,7 @@ futures-channel = "0.3.31"
 #   --features hipblas  (AMD ROCm)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
-whisper-rs = { git = "https://codeberg.org/tazz4843/whisper-rs", rev = "0c509ec", features = ["raw-api", "tracing_backend"] }
+whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
 
 [dev-dependencies]
@@ -184,3 +193,7 @@ memory-stats = "1.0"
 strsim = "0.10.0"
 futures = "0.3.31"
 tracing-subscriber = "0.3.16"
+
+[patch.crates-io]
+cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }
+esaxx-rs = { git = "https://github.com/thewh1teagle/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }

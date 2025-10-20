@@ -130,7 +130,7 @@ export function AudioBackendSelector({
       <div className="space-y-2">
         {backends.map((backend) => {
           // Disable Core Audio option
-          const isCoreAudio = backend.id === 'coreaudio';
+          const isCoreAudio = backend.id === 'screencapturekit';
           const isDisabled = disabled || isCoreAudio;
 
           return (

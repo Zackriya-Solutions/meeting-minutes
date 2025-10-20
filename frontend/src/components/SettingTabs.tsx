@@ -50,7 +50,7 @@ onSave={onSave}
     <TranscriptSettings
     transcriptModelConfig={transcriptModelConfig}
     setTranscriptModelConfig={setTranscriptModelConfig}
-    onSave={onSaveTranscript}
+    // onSave={onSaveTranscript}
   />
   </TabsContent>
   <TabsContent value="recordingSettings">
