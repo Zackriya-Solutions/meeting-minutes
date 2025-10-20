@@ -767,7 +767,11 @@ impl AudioPipeline {
     pub async fn run(mut self) -> Result<()> {
         info!("VAD-driven audio pipeline started - segments sent in real-time based on speech detection");
 
-        while self.state.is_recording() {
+        // CRITICAL FIX: Continue processing until channel is closed, not based on recording state
+        // This ensures ALL chunks are processed during shutdown, fixing premature meeting completion
+        // Previous bug: Loop checked `while self.state.is_recording()` which caused early exit when
+        // stop_recording() was called, losing flush signals and remaining chunks in the pipeline
+        loop {
             // Receive audio chunks with timeout
             match tokio::time::timeout(
                 std::time::Duration::from_millis(50), // Shorter timeout for responsiveness

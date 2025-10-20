@@ -163,6 +163,9 @@ impl RecordingState {
         self.is_paused.store(false, Ordering::SeqCst);
         // Clear pause tracking when stopping
         *self.pause_start.lock().unwrap() = None;
+        // CRITICAL: Clear audio sender to close the pipeline channel
+        // This ensures the pipeline loop exits properly after processing all chunks
+        *self.audio_sender.lock().unwrap() = None;
     }
 
     pub fn pause_recording(&self) -> Result<()> {
