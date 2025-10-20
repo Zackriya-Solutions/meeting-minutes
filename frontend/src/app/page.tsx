@@ -548,6 +548,56 @@ export default function Home() {
     };
   }, []);
 
+  // Set up recording-stopped listener for meeting navigation
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupRecordingStoppedListener = async () => {
+      try {
+        console.log('Setting up recording-stopped listener for navigation...');
+        unlistenFn = await listen<{ message: string; meeting_id?: string }>('recording-stopped', (event) => {
+          console.log('Recording stopped event received:', event.payload);
+
+          const { meeting_id } = event.payload;
+          if (meeting_id) {
+            console.log('Meeting ID found, navigating to meeting details:', meeting_id);
+
+            // Show success toast with navigation option
+            toast.success('Recording saved successfully!', {
+              description: 'Your meeting has been saved.',
+              action: {
+                label: 'View Meeting',
+                onClick: () => {
+                  router.push(`/meeting-details?id=${meeting_id}`);
+                  Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
+                }
+              },
+              duration: 10000, // Keep toast visible for 10 seconds
+            });
+
+            // Auto-navigate after a short delay (optional - user can click toast action)
+            setTimeout(() => {
+              router.push(`/meeting-details?id=${meeting_id}`);
+              Analytics.trackPageView('meeting_details');
+            }, 2000); // 2 second delay before auto-navigation
+          }
+        });
+        console.log('Recording stopped listener setup complete');
+      } catch (error) {
+        console.error('Failed to setup recording stopped listener:', error);
+      }
+    };
+
+    setupRecordingStoppedListener();
+
+    return () => {
+      console.log('Cleaning up recording stopped listener...');
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, [router]);
+
   // Set up transcription error listener for model loading failures
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;

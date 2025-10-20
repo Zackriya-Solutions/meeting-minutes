@@ -652,8 +652,13 @@ pub async fn stop_recording<R: Runtime>(
     );
 
     // Perform final cleanup with the manager if available
-    if let Some(mut manager) = manager_for_cleanup {
+    let (meeting_folder, meeting_name) = if let Some(mut manager) = manager_for_cleanup {
         info!("🧹 Performing final cleanup and saving recording data");
+
+        // Extract meeting info BEFORE async operations
+        let meeting_folder = manager.get_meeting_folder();
+        let meeting_name = manager.get_meeting_name();
+
         match manager.save_recording_only(&app).await {
             Ok(_) => {
                 info!("✅ Recording data saved successfully during cleanup");
@@ -666,13 +671,78 @@ pub async fn stop_recording<R: Runtime>(
                 // Don't fail shutdown - transcripts are already preserved
             }
         }
+
+        (meeting_folder, meeting_name)
     } else {
         info!("ℹ️ No recording manager available for cleanup");
-    }
+        (None, None)
+    };
 
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
+
+    // Step 4.5: Create backend meeting from saved recording
+    let meeting_id = if let (Some(folder_path), Some(name)) = (meeting_folder, meeting_name) {
+        info!("📤 Creating backend meeting from local recording: {}", name);
+
+        // Read transcripts.json from the meeting folder
+        let transcript_path = folder_path.join("transcripts.json");
+        if transcript_path.exists() {
+            match std::fs::read_to_string(&transcript_path) {
+                Ok(json_content) => {
+                    match serde_json::from_str::<serde_json::Value>(&json_content) {
+                        Ok(json_data) => {
+                            // Extract segments from the JSON structure
+                            if let Some(segments) = json_data.get("segments").and_then(|s| s.as_array()) {
+                                info!("📝 Found {} transcript segments to save", segments.len());
+
+                                // Call the backend API to save transcripts and create meeting
+                                match crate::api::api::api_save_transcript(
+                                    app.clone(),
+                                    app.state(),
+                                    name.clone(),
+                                    segments.clone(),
+                                    None, // auth_token
+                                ).await {
+                                    Ok(response) => {
+                                        if let Some(id) = response.get("meeting_id").and_then(|id| id.as_str()) {
+                                            info!("✅ Successfully created backend meeting with ID: {}", id);
+                                            Some(id.to_string())
+                                        } else {
+                                            warn!("⚠️ Backend API response missing meeting_id");
+                                            None
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("❌ Failed to create backend meeting: {}", e);
+                                        None
+                                    }
+                                }
+                            } else {
+                                warn!("⚠️ No segments found in transcripts.json");
+                                None
+                            }
+                        }
+                        Err(e) => {
+                            error!("❌ Failed to parse transcripts.json: {}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("❌ Failed to read transcripts.json: {}", e);
+                    None
+                }
+            }
+        } else {
+            warn!("⚠️ Transcript file not found at: {}", transcript_path.display());
+            None
+        }
+    } else {
+        info!("ℹ️ No meeting folder or name available, skipping backend meeting creation");
+        None
+    };
 
     // Step 5: Complete shutdown
     let _ = app.emit(
@@ -684,11 +754,12 @@ pub async fn stop_recording<R: Runtime>(
         }),
     );
 
-    // Emit final stop event
+    // Emit final stop event with meeting ID if available
     app.emit(
         "recording-stopped",
         serde_json::json!({
-            "message": "Recording stopped - all transcript chunks preserved"
+            "message": "Recording stopped - all transcript chunks preserved",
+            "meeting_id": meeting_id
         }),
     )
     .map_err(|e| e.to_string())?;

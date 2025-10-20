@@ -267,8 +267,12 @@ impl RecordingManager {
     pub async fn save_recording_only<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
         debug!("Saving recording with transcript chunks");
 
-        // Save the recording
-        match self.recording_saver.stop_and_save(app).await {
+        // Get actual recording duration from state
+        let recording_duration = self.state.get_active_recording_duration();
+        info!("Recording duration from state: {:?}s", recording_duration);
+
+        // Save the recording with actual duration
+        match self.recording_saver.stop_and_save(app, recording_duration).await {
             Ok(Some(file_path)) => {
                 info!("Recording saved successfully to: {}", file_path);
             }
@@ -289,6 +293,10 @@ impl RecordingManager {
     pub async fn stop_recording<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
         info!("Stopping recording manager");
 
+        // Get recording duration BEFORE stopping (important!)
+        let recording_duration = self.state.get_active_recording_duration();
+        info!("Recording duration before stop: {:?}s", recording_duration);
+
         // Stop recording state first
         self.state.stop_recording();
 
@@ -302,8 +310,8 @@ impl RecordingManager {
             error!("Error stopping audio pipeline: {}", e);
         }
 
-        // Save the recording
-        match self.recording_saver.stop_and_save(app).await {
+        // Save the recording with actual duration
+        match self.recording_saver.stop_and_save(app, recording_duration).await {
             Ok(Some(file_path)) => {
                 info!("Recording saved successfully to: {}", file_path);
             }
