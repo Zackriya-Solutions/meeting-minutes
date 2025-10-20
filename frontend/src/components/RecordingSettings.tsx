@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
+import { toast } from 'sonner';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -92,8 +93,18 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     try {
       await invoke('set_recording_preferences', { preferences: prefs });
       onSave?.(prefs);
+
+      // Show success toast with device details
+      const micDevice = prefs.preferred_mic_device || 'Default';
+      const systemDevice = prefs.preferred_system_device || 'Default';
+      toast.success("Device preferences saved", {
+        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+      });
     } catch (error) {
       console.error('Failed to save recording preferences:', error);
+      toast.error("Failed to save device preferences", {
+        description: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       setSaving(false);
     }

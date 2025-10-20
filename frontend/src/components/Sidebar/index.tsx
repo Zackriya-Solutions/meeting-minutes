@@ -12,6 +12,7 @@ import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from 'sonner';
 
 import {
   Dialog,
@@ -326,7 +327,12 @@ const Sidebar: React.FC = () => {
       
       // Track meeting deletion
       Analytics.trackMeetingDeleted(itemId);
-      
+
+      // Show success toast
+      toast.success("Meeting deleted successfully", {
+        description: "All associated data has been removed"
+      });
+
       // If deleting the active meeting, navigate to home
       if (currentMeeting?.id === itemId) {
         setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
@@ -334,6 +340,9 @@ const Sidebar: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to delete meeting:', error);
+      toast.error("Failed to delete meeting", {
+        description: error instanceof Error ? error.message : String(error)
+      });
     }
   };
   
