@@ -78,7 +78,7 @@ export default function RootLayout({
             </SidebarProvider>
           </RecordingStateProvider>
         </AnalyticsProvider>
-        <Toaster position="bottom-center" richColors />
+        <Toaster position="bottom-center" richColors closeButton />
         <LegacyDatabaseImport
           isOpen={showImportDialog}
           onComplete={() => setShowImportDialog(false)}

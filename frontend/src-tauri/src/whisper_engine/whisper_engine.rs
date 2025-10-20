@@ -42,6 +42,8 @@ pub struct WhisperEngine {
     short_audio_warning_logged: Arc<RwLock<bool>>,
     // Performance optimization: reduce logging frequency
     transcription_count: Arc<RwLock<u64>>,
+    // Download cancellation tracking
+    cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
 }
 
 impl WhisperEngine {
@@ -153,6 +155,8 @@ impl WhisperEngine {
             short_audio_warning_logged: Arc::new(RwLock::new(false)),
             // Performance optimization: reduce logging frequency
             transcription_count: Arc::new(RwLock::new(0)),
+            // Initialize cancellation tracking
+            cancel_download_flag: Arc::new(RwLock::new(None)),
         };
         
         Ok(engine)
@@ -905,7 +909,13 @@ impl WhisperEngine {
     
     pub async fn download_model(&self, model_name: &str, progress_callback: Option<Box<dyn Fn(u8) + Send>>) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
-        
+
+        // Clear any previous cancellation flag for this model
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            *cancel_flag = None;
+        }
+
         // Official ggerganov/whisper.cpp model URLs from Hugging Face
         let model_url = match model_name {
             // Standard f16 models
@@ -987,6 +997,15 @@ impl WhisperEngine {
         }
 
         while let Some(chunk_result) = stream.next().await {
+            // Check for cancellation before processing chunk
+            {
+                let cancel_flag = self.cancel_download_flag.read().await;
+                if cancel_flag.as_ref() == Some(&model_name.to_string()) {
+                    log::info!("Download cancelled for {}", model_name);
+                    return Err(anyhow!("Download cancelled by user"));
+                }
+            }
+
             let chunk = chunk_result
                 .map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
 
@@ -1060,11 +1079,35 @@ impl WhisperEngine {
     }
     
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
-        // Update the status to cancelled
-        let mut models = self.available_models.write().await;
-        if let Some(model_info) = models.get_mut(model_name) {
-            model_info.status = ModelStatus::Error("Download cancelled".to_string());
+        log::info!("Cancelling download for model: {}", model_name);
+
+        // Set cancellation flag to interrupt the download loop
+        {
+            let mut cancel_flag = self.cancel_download_flag.write().await;
+            *cancel_flag = Some(model_name.to_string());
         }
+
+        // Update model status to Missing (so it can be retried)
+        {
+            let mut models = self.available_models.write().await;
+            if let Some(model_info) = models.get_mut(model_name) {
+                model_info.status = ModelStatus::Missing;
+            }
+        }
+
+        // Clean up partially downloaded files
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Brief delay to let download loop detect cancellation
+
+        let filename = format!("ggml-{}.bin", model_name);
+        let file_path = self.models_dir.join(&filename);
+        if file_path.exists() {
+            if let Err(e) = fs::remove_file(&file_path).await {
+                log::warn!("Failed to clean up cancelled download file: {}", e);
+            } else {
+                log::info!("Cleaned up cancelled download file: {}", file_path.display());
+            }
+        }
+
         Ok(())
     }
 }

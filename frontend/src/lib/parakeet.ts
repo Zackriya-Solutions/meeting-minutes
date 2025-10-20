@@ -41,14 +41,14 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'parakeet-tdt-0.6b-v3-int8': {
     friendlyName: 'Lightning',
     icon: '⚡',
-    tagline: '30x real-time • Best for speed',
+    tagline: 'Real time • Best for speed',
     recommended: true,
     tier: 'fastest'
   },
   'parakeet-tdt-0.6b-v2-int8': {
     friendlyName: 'Compact',
     icon: '📦',
-    tagline: '25x real-time • Smaller size, great accuracy',
+    tagline: 'Real time • Smaller size, great accuracy',
     tier: 'balanced'
   },
   'parakeet-tdt-0.6b-v3-fp32': {
@@ -64,7 +64,7 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
 // Source: https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx
 export const PARAKEET_MODEL_CONFIGS: Record<string, Partial<ParakeetModelInfo>> = {
   'parakeet-tdt-0.6b-v3-int8': {
-    description: '30x real-time on M4 Max, optimized for speed',
+    description: 'Real time on M4 Max, optimized for speed',
     size_mb: 670, // Actual download: 652MB encoder + 18.2MB decoder + 0.2MB extras
     accuracy: 'High',
     speed: 'Ultra Fast',

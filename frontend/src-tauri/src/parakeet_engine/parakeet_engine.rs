@@ -131,7 +131,7 @@ impl ParakeetEngine {
         // Model name format: parakeet-tdt-0.6b-v{version}-{quantization}
         // Sizes match actual download sizes (encoder + decoder + preprocessor + vocab)
         let model_configs = [
-            ("parakeet-tdt-0.6b-v3-int8", 670, QuantizationType::Int8, "Ultra Fast (v3)", "30x real-time on M4 Max, latest version with int8 quantization"),
+            ("parakeet-tdt-0.6b-v3-int8", 670, QuantizationType::Int8, "Ultra Fast (v3)", "Real time on M4 Max, latest version with int8 quantization"),
             ("parakeet-tdt-0.6b-v2-int8", 661, QuantizationType::Int8, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
         ];
 

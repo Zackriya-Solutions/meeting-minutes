@@ -204,6 +204,57 @@ export function getModelPerformanceBadge(modelName: string): { label: string; co
   }
 }
 
+// Helper function to get concise tagline for model (similar to Parakeet style)
+export function getModelTagline(modelName: string, speed: ProcessingSpeed, accuracy: ModelAccuracy): string {
+  const isQuantized = isQuantizedModel(modelName);
+  const baseName = getModelBaseName(modelName);
+
+  // Speed prefix
+  let speedText = '';
+  switch (speed) {
+    case 'Very Fast':
+      speedText = 'Real time';
+      break;
+    case 'Fast':
+      speedText = 'Fast processing';
+      break;
+    case 'Medium':
+      speedText = 'Moderate speed';
+      break;
+    case 'Slow':
+      speedText = 'Slower processing';
+      break;
+  }
+
+  // Key feature based on model and accuracy
+  let featureText = '';
+  if (baseName === 'large-v3') {
+    featureText = 'Highest accuracy';
+  } else if (baseName === 'large-v3-turbo') {
+    featureText = 'Best accuracy with speed';
+  } else if (baseName === 'medium') {
+    featureText = accuracy === 'High' ? 'Professional quality' : 'Balanced quality';
+  } else if (baseName === 'small') {
+    featureText = 'Good accuracy';
+  } else if (baseName === 'base') {
+    featureText = 'Balanced quality';
+  } else if (baseName === 'tiny') {
+    featureText = 'Fastest option';
+  }
+
+  // Add quantization note if applicable
+  if (isQuantized) {
+    const quantType = getModelType(modelName);
+    if (quantType === 'q5_0') {
+      featureText += ', optimized';
+    } else if (quantType === 'q4_0') {
+      featureText += ', ultra fast';
+    }
+  }
+
+  return `${speedText} • ${featureText}`;
+}
+
 // Group models by their base name for better UI organization
 export function groupModelsByBase(models: ModelInfo[]): Record<string, ModelInfo[]> {
   const grouped: Record<string, ModelInfo[]> = {};
@@ -290,5 +341,9 @@ export class WhisperAPI {
 
   static async validateModelReady(): Promise<string> {
     return await invoke('whisper_validate_model_ready');
+  }
+
+  static async openModelsFolder(): Promise<void> {
+    await invoke('open_models_folder');
   }
 }

@@ -1,12 +1,12 @@
 //! Parakeet (NVIDIA NeMo) speech recognition engine module.
 //!
 //! This module provides a high-performance alternative to Whisper for speech-to-text transcription.
-//! Parakeet offers significantly faster processing (up to 30x real-time on modern hardware)
+//! Parakeet offers significantly faster processing (up to Real time on modern hardware)
 //! with comparable accuracy.
 //!
 //! # Features
 //!
-//! - **High Performance**: 30x real-time on M4 Max, 20x on Zen 3, 5x on Skylake
+//! - **High Performance**: Real time on M4 Max, 20x on Zen 3, 5x on Skylake
 //! - **Int8 Quantization**: Reduced memory footprint with minimal accuracy loss
 //! - **ONNX Runtime**: Cross-platform support via ONNX
 //! - **Unified API**: Compatible interface with Whisper engine
