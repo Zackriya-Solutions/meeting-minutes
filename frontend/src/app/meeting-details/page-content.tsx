@@ -25,7 +25,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
-import { Copy, Sparkles, Settings, Save, Loader2 } from 'lucide-react';
+import { Copy, Sparkles, Settings, Save, Loader2, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
 
@@ -671,6 +671,16 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
     });
   }, [transcripts, meeting, meetingTitle]);
 
+  const handleOpenMeetingFolder = useCallback(async () => {
+    try {
+      await invokeTauri('open_meeting_folder', { meetingId: meeting.id });
+
+    } catch (error) {
+      console.error('Failed to open meeting folder:', error);
+      toast.error(error as string || 'Failed to open recording folder');
+    }
+  }, [meeting.id]);
+
   const handleCopySummary = useCallback(async () => {
     try {
       let summaryMarkdown = '';
@@ -953,10 +963,11 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
           <div className="p-4 border-b border-gray-200">
             <div className="flex flex-col space-y-3">
 
-              <div className="flex items-center space-x-2">
+              <div className="flex justify-center items-center gap-2">
                 <Button
+                  size={"sm"}
                   variant="outline"
-                  size="sm"
+                  className="xl:px-4"
                   onClick={() => {
                     Analytics.trackButtonClick('copy_transcript', 'meeting_details');
                     handleCopyTranscript();
@@ -964,14 +975,25 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                   disabled={transcripts?.length === 0}
                   title={transcripts?.length === 0 ? 'No transcript available' : 'Copy Transcript'}
                 >
-                  <Copy />
-                  Copy
+                  <Copy className="xl:mr-2" size={18} />
+                  <span className="hidden xl:inline">Copy</span>
+                </Button>
+                <Button
+                  size={"sm"}
+                  variant="outline"
+                  className="xl:px-4"
+                  onClick={handleOpenMeetingFolder}
+                  title="Open Recording Folder"
+                >
+                  <FolderOpen className="xl:mr-2" size={18} />
+                  <span className="hidden xl:inline">Recording</span>
                 </Button>
                 {transcripts?.length > 0 && (
                   <>
                     <Button
+                      size={"sm"}
                       variant="outline"
-                      size="sm"
+                      className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
                       onClick={() => {
                         Analytics.trackButtonClick('generate_summary', 'meeting_details');
                         handleGenerateSummary(customPrompt);
@@ -985,13 +1007,13 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                     >
                       {summaryStatus === 'processing' ? (
                         <>
-                          <Loader2 className="animate-spin" />
-                          Processing...
+                          <Loader2 className="animate-spin xl:mr-2" size={18} />
+                          <span className="hidden xl:inline">Processing...</span>
                         </>
                       ) : (
                         <>
-                          <Sparkles />
-                          Generate Note
+                          <Sparkles className="xl:mr-2" size={18} />
+                          <span className="hidden xl:inline">Generate Note</span>
                         </>
                       )}
                     </Button>
@@ -1001,8 +1023,9 @@ export default function PageContent({ meeting, summaryData, onMeetingUpdated }: 
                           variant="ghost"
                           size="icon"
                           title="Summary Settings"
+                          className="hover:bg-gray-100"
                         >
-                          <Settings />
+                          <Settings size={18} />
                         </Button>
                       </DialogTrigger>
                       <DialogContent

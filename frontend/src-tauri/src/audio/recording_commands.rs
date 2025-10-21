@@ -682,67 +682,23 @@ pub async fn stop_recording<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
 
-    // Step 4.5: Create backend meeting from saved recording
-    let meeting_id = if let (Some(folder_path), Some(name)) = (meeting_folder, meeting_name) {
-        info!("📤 Creating backend meeting from local recording: {}", name);
-
-        // Read transcripts.json from the meeting folder
-        let transcript_path = folder_path.join("transcripts.json");
-        if transcript_path.exists() {
-            match std::fs::read_to_string(&transcript_path) {
-                Ok(json_content) => {
-                    match serde_json::from_str::<serde_json::Value>(&json_content) {
-                        Ok(json_data) => {
-                            // Extract segments from the JSON structure
-                            if let Some(segments) = json_data.get("segments").and_then(|s| s.as_array()) {
-                                info!("📝 Found {} transcript segments to save", segments.len());
-
-                                // Call the backend API to save transcripts and create meeting
-                                match crate::api::api::api_save_transcript(
-                                    app.clone(),
-                                    app.state(),
-                                    name.clone(),
-                                    segments.clone(),
-                                    None, // auth_token
-                                ).await {
-                                    Ok(response) => {
-                                        if let Some(id) = response.get("meeting_id").and_then(|id| id.as_str()) {
-                                            info!("✅ Successfully created backend meeting with ID: {}", id);
-                                            Some(id.to_string())
-                                        } else {
-                                            warn!("⚠️ Backend API response missing meeting_id");
-                                            None
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("❌ Failed to create backend meeting: {}", e);
-                                        None
-                                    }
-                                }
-                            } else {
-                                warn!("⚠️ No segments found in transcripts.json");
-                                None
-                            }
-                        }
-                        Err(e) => {
-                            error!("❌ Failed to parse transcripts.json: {}", e);
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("❌ Failed to read transcripts.json: {}", e);
-                    None
-                }
-            }
-        } else {
-            warn!("⚠️ Transcript file not found at: {}", transcript_path.display());
-            None
-        }
-    } else {
-        info!("ℹ️ No meeting folder or name available, skipping backend meeting creation");
-        None
+    // Step 4.5: Prepare metadata for frontend (NO database save)
+    // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.
+    // This ensures the user sees all transcripts streaming in before the database save happens.
+    let (folder_path_str, meeting_name_str) = match (&meeting_folder, &meeting_name) {
+        (Some(path), Some(name)) => (
+            Some(path.to_string_lossy().to_string()),
+            Some(name.clone()),
+        ),
+        _ => (None, None),
     };
+
+    info!("📤 Preparing recording metadata for frontend save");
+    info!("   folder_path: {:?}", folder_path_str);
+    info!("   meeting_name: {:?}", meeting_name_str);
+
+    // Database save removed - frontend will handle this after receiving all transcripts
+    info!("ℹ️ Skipping database save in Rust - frontend will save after all transcripts received");
 
     // Step 5: Complete shutdown
     let _ = app.emit(
@@ -754,12 +710,13 @@ pub async fn stop_recording<R: Runtime>(
         }),
     );
 
-    // Emit final stop event with meeting ID if available
+    // Emit final stop event with folder_path and meeting_name for frontend to save
     app.emit(
         "recording-stopped",
         serde_json::json!({
-            "message": "Recording stopped - all transcript chunks preserved",
-            "meeting_id": meeting_id
+            "message": "Recording stopped - frontend will save after all transcripts received",
+            "folder_path": folder_path_str,
+            "meeting_name": meeting_name_str
         }),
     )
     .map_err(|e| e.to_string())?;

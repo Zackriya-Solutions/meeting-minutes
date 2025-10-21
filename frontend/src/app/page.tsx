@@ -108,7 +108,7 @@ export default function Home() {
   // This ensures immediate UI feedback when stop is pressed, while preserving backend-synced state for reload functionality
   const effectiveIsRecording = isProcessingTranscript ? false : recordingState.isRecording;
 
-  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed } = useSidebar();
+  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
   const router = useRouter();
 
@@ -555,32 +555,25 @@ export default function Home() {
     const setupRecordingStoppedListener = async () => {
       try {
         console.log('Setting up recording-stopped listener for navigation...');
-        unlistenFn = await listen<{ message: string; meeting_id?: string }>('recording-stopped', (event) => {
+        unlistenFn = await listen<{
+          message: string;
+          folder_path?: string;
+          meeting_name?: string;
+        }>('recording-stopped', async (event) => {
           console.log('Recording stopped event received:', event.payload);
 
-          const { meeting_id } = event.payload;
-          if (meeting_id) {
-            console.log('Meeting ID found, navigating to meeting details:', meeting_id);
+          const { folder_path, meeting_name } = event.payload;
 
-            // Show success toast with navigation option
-            toast.success('Recording saved successfully!', {
-              description: 'Your meeting has been saved.',
-              action: {
-                label: 'View Meeting',
-                onClick: () => {
-                  router.push(`/meeting-details?id=${meeting_id}`);
-                  Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
-                }
-              },
-              duration: 10000, // Keep toast visible for 10 seconds
-            });
-
-            // Auto-navigate after a short delay (optional - user can click toast action)
-            setTimeout(() => {
-              router.push(`/meeting-details?id=${meeting_id}`);
-              Analytics.trackPageView('meeting_details');
-            }, 2000); // 2 second delay before auto-navigation
+          // Store folder_path and meeting_name for later use in handleRecordingStop2
+          if (folder_path) {
+            sessionStorage.setItem('last_recording_folder_path', folder_path);
+            console.log('✅ Stored folder_path for frontend save:', folder_path);
           }
+          if (meeting_name) {
+            sessionStorage.setItem('last_recording_meeting_name', meeting_name);
+            console.log('✅ Stored meeting_name for frontend save:', meeting_name);
+          }
+
         });
         console.log('Recording stopped listener setup complete');
       } catch (error) {
@@ -932,51 +925,89 @@ export default function Home() {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Save to SQLite
+      // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
+      // This ensures user sees all transcripts streaming in before database save
       if (isCallApi && transcriptionComplete == true) {
 
-        // await new Promise(resolve => setTimeout(resolve, 5000));
         setIsSavingTranscript(true);
 
-        // Fix stale closure issue: Use ref to get fresh transcript state
-        console.log('🔄 Solving stale closure - getting fresh transcript state at save time...');
-
-        // // Force final buffer flush to capture any remaining transcripts
-        // if (finalFlushRef.current) {
-        //   finalFlushRef.current();
-        // }
-
-        // // Wait a moment for any final state updates to propagate
-        // await new Promise(resolve => setTimeout(resolve, 300));
-
-        // Get fresh transcript state using ref (avoids stale closure)
+        // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];
 
-        console.log('💾 Saving transcript to database with fresh state...', {
-          fresh_transcript_count: freshTranscripts.length,
+        // Get folder_path and meeting_name from recording-stopped event
+        const folderPath = sessionStorage.getItem('last_recording_folder_path');
+        const savedMeetingName = sessionStorage.getItem('last_recording_meeting_name');
+
+        console.log('💾 Saving COMPLETE transcripts to database...', {
+          transcript_count: freshTranscripts.length,
+          meeting_name: meetingTitle || savedMeetingName,
+          folder_path: folderPath,
           sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
           last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none',
-          // DEBUG: Check if timestamp fields are present
-          first_has_audio_start_time: freshTranscripts.length > 0 ? freshTranscripts[0].audio_start_time : 'N/A',
-          first_audio_start_time_value: freshTranscripts.length > 0 ? freshTranscripts[0].audio_start_time : undefined,
         });
 
-        const responseData = await invoke('api_save_transcript', {
-          meetingTitle: meetingTitle,
-          transcripts: freshTranscripts, // Use fresh state, not stale closure
-        }) as any;
-
-        const meetingId = responseData.meeting_id;
-        if (!meetingId) {
-          console.error('No meeting_id in response:', responseData);
-          throw new Error('No meeting ID received from save operation');
-        }
-
-        console.log('Successfully saved transcript with meeting ID:', meetingId);
-        setMeetings([{ id: meetingId, title: meetingTitle }, ...meetings]);
-
-        // Track meeting completion analytics
         try {
-          // Calculate meeting duration from transcript timestamps
+          const responseData = await invoke('api_save_transcript', {
+            meetingTitle: meetingTitle || savedMeetingName,
+            transcripts: freshTranscripts, 
+            folderPath: folderPath, 
+          }) as any;
+
+          const meetingId = responseData.meeting_id;
+          if (!meetingId) {
+            console.error('No meeting_id in response:', responseData);
+            throw new Error('No meeting ID received from save operation');
+          }
+
+          console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
+          console.log('   Transcripts:', freshTranscripts.length);
+          console.log('   folder_path:', folderPath);
+
+          // Clean up session storage
+          sessionStorage.removeItem('last_recording_folder_path');
+          sessionStorage.removeItem('last_recording_meeting_name');
+
+          // Refetch meetings and set current meeting
+          await refetchMeetings();
+
+          try {
+            const meetingData = await invoke('api_get_meeting', { meetingId }) as any;
+            if (meetingData) {
+              setCurrentMeeting({
+                id: meetingId,
+                title: meetingData.title
+              });
+              console.log('✅ Current meeting set:', meetingData.title);
+            }
+          } catch (error) {
+            console.warn('Could not fetch meeting details, using ID only:', error);
+            setCurrentMeeting({ id: meetingId, title: meetingTitle || 'New Meeting' });
+          }
+
+          // Show success toast with navigation option
+          toast.success('Recording saved successfully!', {
+            description: `${freshTranscripts.length} transcript segments saved.`,
+            action: {
+              label: 'View Meeting',
+              onClick: () => {
+                router.push(`/meeting-details?id=${meetingId}`);
+                Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
+              }
+            },
+            duration: 10000,
+          });
+
+          // Auto-navigate after a short delay
+          setTimeout(() => {
+            router.push(`/meeting-details?id=${meetingId}`);
+            Analytics.trackPageView('meeting_details');
+          }, 2000);
+
+          setMeetings([{ id: meetingId, title: meetingTitle || savedMeetingName || 'New Meeting' }, ...meetings]);
+
+          // Track meeting completion analytics
+          try {
+            // Calculate meeting duration from transcript timestamps
           let durationSeconds = 0;
           if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
             // Use audio_end_time of last transcript if available
@@ -1025,15 +1056,15 @@ export default function Home() {
           // Don't block user flow on analytics errors
         }
 
-        // Wait a moment to ensure backend has fully processed the save
-        console.log('Waiting for backend processing to complete...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Set current meeting and navigate
-        console.log('Setting current meeting and navigating to details page');
-        setCurrentMeeting({ id: meetingId, title: meetingTitle });
-        setIsMeetingActive(false);
-        router.push(`/meeting-details?id=${meetingId}`);
+        } catch (saveError) {
+          console.error('Failed to save meeting to database:', saveError);
+          toast.error('Failed to save meeting', {
+            description: saveError instanceof Error ? saveError.message : 'Unknown error'
+          });
+          throw saveError;
+        } finally {
+          setIsSavingTranscript(false);
+        }
       }
       setIsMeetingActive(false);
       // isRecordingState already set to false at function start
