@@ -232,3 +232,49 @@ fn format_size(size: i64) -> String {
         format!("{:.1} GB", size as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DownloadProgress {
+    pub status: String,
+    pub completed: u64,
+    pub total: u64,
+}
+
+#[command]
+pub async fn pull_ollama_model(
+    model_name: String,
+    endpoint: Option<String>,
+) -> Result<(), String> {
+    let client = Client::new();
+    let base_url = endpoint.as_deref().unwrap_or("http://localhost:11434");
+    let url = format!("{}/api/pull", base_url);
+
+    let payload = serde_json::json!({
+        "name": model_name,
+        "stream": false
+    });
+
+    let response = client
+        .post(&url)
+        .json(&payload)
+        .timeout(Duration::from_secs(600)) // 10 minutes timeout for pulling
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("Download timed out. The model may be large, please try using the Ollama CLI: ollama pull {}", model_name)
+            } else if e.is_connect() {
+                format!("Cannot connect to {}. Please check if the Ollama server is running.", base_url)
+            } else {
+                format!("Failed to download model: {}", e)
+            }
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Failed to pull model (HTTP {}): {}", status, error_text));
+    }
+
+    Ok(())
+}

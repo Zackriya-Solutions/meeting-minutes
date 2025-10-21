@@ -468,6 +468,16 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Initialize bundled templates directory for dynamic template discovery
+            log::info!("Initializing bundled templates directory...");
+            if let Ok(resource_path) = _app.handle().path().resource_dir() {
+                let templates_dir = resource_path.join("templates");
+                log::info!("Setting bundled templates directory to: {:?}", templates_dir);
+                summary::templates::set_bundled_templates_dir(templates_dir);
+            } else {
+                log::warn!("Failed to resolve resource directory for templates");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -565,6 +575,7 @@ pub fn run() {
             console_utils::hide_console,
             console_utils::toggle_console,
             ollama::get_ollama_models,
+            ollama::pull_ollama_model,
             api::api_get_meetings,
             api::api_search_transcripts,
             api::api_get_profile,
@@ -573,6 +584,8 @@ pub fn run() {
             api::api_get_model_config,
             api::api_save_model_config,
             api::api_get_api_key,
+            // api::api_get_auto_generate_setting,
+            // api::api_save_auto_generate_setting,
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
@@ -587,6 +600,10 @@ pub fn run() {
             summary::api_process_transcript,
             summary::api_get_summary,
             summary::api_save_meeting_summary,
+            // Template commands
+            summary::api_list_templates,
+            summary::api_get_template_details,
+            summary::api_validate_template,
             openrouter::get_openrouter_models,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,

@@ -126,6 +126,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `api_key` - API key for the provider
 /// * `text` - Full transcript text to summarize
 /// * `custom_prompt` - Optional user-provided context
+/// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
 /// * `token_threshold` - Token limit for single-pass processing (default 4000)
 /// * `ollama_endpoint` - Optional custom Ollama endpoint
 ///
@@ -138,6 +139,7 @@ pub async fn generate_meeting_summary(
     api_key: &str,
     text: &str,
     custom_prompt: &str,
+    template_id: &str,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
 ) -> Result<(String, i64), String> {
@@ -240,11 +242,11 @@ pub async fn generate_meeting_summary(
         };
     }
 
-    info!("Generating final markdown report");
+    info!("Generating final markdown report with template: {}", template_id);
 
-    // Load the template (defaults to "daily_standup", can be made configurable later)
-    let template = templates::get_template("standard_meeting")
-        .map_err(|e| format!("Failed to load template: {}", e))?;
+    // Load the template using the provided template_id
+    let template = templates::get_template(template_id)
+        .map_err(|e| format!("Failed to load template '{}': {}", template_id, e))?;
 
     // Generate markdown structure and section instructions using template methods
     let clean_template_markdown = template.to_markdown_structure();
