@@ -1,0 +1,64 @@
+ {
+      "name": "Psychiatric Session Note (SOAP + AI Hybrid)",
+      "description": "AI-assisted psychiatric progress note template based on SOAP, with clinical metadata and AI summary.",
+      "sections": [
+        {
+          "title": "Session Metadata",
+          "instruction": "Patient initials/ID, session date, provider, session type, duration (HIPAA-sensitive)",
+          "format": "string"
+        },
+        {
+          "title": "AI Session Summary",
+          "instruction": "One-line takeaway and one-paragraph executive summary (AI-generated). Include confidence score.",
+          "format": "paragraph"
+        },
+        {
+          "title": "Subjective (S)",
+          "instruction": "Patient's self-reported mood, symptoms, sleep, appetite, stressors",
+          "format": "paragraph"
+        },
+        {
+          "title": "Objective (O)",
+          "instruction": "Observable findings: affect, speech, behavior, orientation, vitals if relevant",
+          "format": "paragraph"
+        },
+        {
+          "title": "Assessment (A)",
+          "instruction": "Diagnostic impression, risk assessment (SI/HI), progress vs treatment goals",
+          "format": "paragraph"
+        },
+        {
+          "title": "Plan (P)",
+          "instruction": "Interventions, medication changes, referrals, therapy tasks and follow-up",
+          "format": "list",
+          "item_format": "| **Intervention** | **Owner** | **Frequency** | **Follow-up Date** |\n| --- | --- | --- | --- |"
+        },
+        {
+          "title": "Medications",
+          "instruction": "Current medications, doses, changes, and rationale",
+          "format": "list",
+          "item_format": "| **Medication** | **Dose** | **Route** | **Start/Change Date** |\n| --- | --- | --- | --- |"
+        },
+        {
+          "title": "Diagnoses (DSM/ICD)",
+          "instruction": "List diagnostic codes and working diagnosis",
+          "format": "list",
+          "item_format": "| **Code** | **System** | **Diagnosis** |\n| --- | --- | --- |"
+        },
+        {
+          "title": "Safety & Risk Management",
+          "instruction": "Safety plan, emergency contacts, hospitalization considerations",
+          "format": "paragraph"
+        },
+        {
+          "title": "Next Appointment",
+          "instruction": "Date, time and modality of next session",
+          "format": "string"
+        },
+        {
+          "title": "Audit Trail",
+          "instruction": "Human review flag, reviewer name and timestamp, AI version",
+          "format": "paragraph"
+        }
+      ]
+    }

@@ -1,0 +1,45 @@
+{
+      "name": "Retrospective (Agile)",
+      "description": "Sprint retrospective template for continuous improvement.",
+      "sections": [
+        {
+          "title": "Sprint",
+          "instruction": "Sprint name/number and date range",
+          "format": "string"
+        },
+        {
+          "title": "Attendance",
+          "instruction": "List of participants",
+          "format": "list"
+        },
+        {
+          "title": "Start Doing",
+          "instruction": "Actions or experiments to start next sprint",
+          "format": "list",
+          "item_format": "| **Idea** | **Proposer** |\n| --- | --- |"
+        },
+        {
+          "title": "Stop Doing",
+          "instruction": "Practices to stop",
+          "format": "list",
+          "item_format": "| **Practice** | **Reason** |\n| --- | --- |"
+        },
+        {
+          "title": "Continue Doing",
+          "instruction": "Practices to continue",
+          "format": "list",
+          "item_format": "| **Practice** | **Notes** |\n| --- | --- |"
+        },
+        {
+          "title": "Action Items",
+          "instruction": "Concrete experiments with owners and success metrics",
+          "format": "list",
+          "item_format": "| **Owner** | **Task** | **Due Date** | **Success Metric** |\n| --- | --- | --- | --- |"
+        },
+        {
+          "title": "Notes & Votes",
+          "instruction": "Summary and top-voted items",
+          "format": "paragraph"
+        }
+      ]
+    }
