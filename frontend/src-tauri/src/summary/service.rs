@@ -3,14 +3,17 @@ use crate::database::repositories::{
 };
 use crate::summary::llm_client::LLMProvider;
 use crate::summary::processor::{extract_meeting_name_from_markdown, generate_meeting_summary};
+use crate::ollama::metadata::ModelMetadataCache;
 use sqlx::SqlitePool;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::AppHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+use once_cell::sync::Lazy;
 
-/// Token threshold for chunking strategy (Ollama-specific)
-/// TODO: This may need to change based on model capabilities
-const TOKEN_THRESHOLD: usize = 4000;
+// Global cache for model metadata (5 minute TTL)
+static METADATA_CACHE: Lazy<ModelMetadataCache> = Lazy::new(|| {
+    ModelMetadataCache::new(Duration::from_secs(300))
+});
 
 /// Summary service - handles all summary generation logic
 pub struct SummaryService;
@@ -87,6 +90,31 @@ impl SummaryService {
             None
         };
 
+        // Dynamically fetch context size for Ollama models
+        let token_threshold = if provider == LLMProvider::Ollama {
+            match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {
+                Ok(metadata) => {
+                    // Reserve 300 tokens for prompt overhead
+                    let optimal = metadata.context_size.saturating_sub(300);
+                    info!(
+                        "✓ Using dynamic context for {}: {} tokens (chunk size: {})",
+                        model_name, metadata.context_size, optimal
+                    );
+                    optimal
+                }
+                Err(e) => {
+                    warn!(
+                        "⚠️ Failed to fetch context for {}: {}. Using default 4000",
+                        model_name, e
+                    );
+                    4000  // Fallback to safe default
+                }
+            }
+        } else {
+            // Cloud providers (OpenAI, Claude, Groq) handle large contexts automatically
+            100000  // Effectively unlimited for single-pass processing
+        };
+
         // Generate summary
         let client = reqwest::Client::new();
         let result = generate_meeting_summary(
@@ -97,7 +125,7 @@ impl SummaryService {
             &text,
             &custom_prompt,
             &template_id,
-            TOKEN_THRESHOLD,
+            token_threshold,
             ollama_endpoint.as_deref(),
         )
         .await;

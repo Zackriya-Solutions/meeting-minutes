@@ -8,10 +8,16 @@ use tokio::time::{timeout, Duration, sleep};
 use tokio::sync::RwLock;
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
+use crate::ollama::metadata::ModelMetadataCache;
 
 // Global set to track models currently being downloaded
 static DOWNLOADING_MODELS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| {
     Arc::new(RwLock::new(HashSet::new()))
+});
+
+// Global cache for model metadata (5 minute TTL)
+static METADATA_CACHE: Lazy<ModelMetadataCache> = Lazy::new(|| {
+    ModelMetadataCache::new(Duration::from_secs(300))
 });
 
 // Error categorization for better error handling and user feedback
@@ -466,4 +472,43 @@ pub async fn delete_ollama_model(
     log::info!("Successfully deleted Ollama model: {}", model_name);
 
     Ok(())
+}
+
+/// Get the context size for a specific Ollama model
+///
+/// This command fetches model metadata and returns the context size.
+/// Results are cached for 5 minutes to avoid repeated API calls.
+///
+/// # Arguments
+/// * `model_name` - Name of the model (e.g., "llama3.2:1b")
+/// * `endpoint` - Optional custom Ollama endpoint
+///
+/// # Returns
+/// Context size in tokens, or error message
+#[command]
+pub async fn get_ollama_model_context(
+    model_name: String,
+    endpoint: Option<String>,
+) -> Result<usize, String> {
+    log::info!("Fetching context size for model: {}", model_name);
+
+    match METADATA_CACHE.get_or_fetch(&model_name, endpoint.as_deref()).await {
+        Ok(metadata) => {
+            log::info!(
+                "Model {} context size: {} tokens",
+                model_name,
+                metadata.context_size
+            );
+            Ok(metadata.context_size)
+        }
+        Err(e) => {
+            log::warn!(
+                "Failed to fetch context for {}: {}. Returning default 4000",
+                model_name,
+                e
+            );
+            // Return default instead of error for better UX
+            Ok(4000)
+        }
+    }
 }

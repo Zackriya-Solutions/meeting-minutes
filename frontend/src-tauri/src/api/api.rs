@@ -454,10 +454,12 @@ pub async fn api_get_model_config<R: Runtime>(
 
     match SettingsRepository::get_model_config(pool).await {
         Ok(Some(config)) => {
-            log_debug!(
-                "Found model config: provider={}, model={}",
+            log_info!(
+                "✅ Found model config in database: provider={}, model={}, whisperModel={}, ollamaEndpoint={:?}",
                 &config.provider,
-                &config.model
+                &config.model,
+                &config.whisper_model,
+                &config.ollama_endpoint
             );
             match SettingsRepository::get_api_key(pool, &config.provider).await {
                 Ok(api_key) => {
@@ -481,11 +483,11 @@ pub async fn api_get_model_config<R: Runtime>(
             }
         }
         Ok(None) => {
-            log_info!("No model config found in database.");
+            log_warn!("⚠️ No model config found in database - database may be empty or settings table not initialized");
             Ok(None)
         }
         Err(e) => {
-            log_error!("Failed to get model config: {}", e);
+            log_error!("❌ Failed to get model config from database: {}", e);
             Err(e.to_string())
         }
     }
@@ -503,8 +505,11 @@ pub async fn api_save_model_config<R: Runtime>(
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_model_config called (native) for provider '{}'",
-        &provider
+        "💾 api_save_model_config called (native): provider='{}', model='{}', whisperModel='{}', ollamaEndpoint={:?}",
+        &provider,
+        &model,
+        &whisper_model,
+        &ollama_endpoint
     );
     let pool = state.db_manager.pool();
 
@@ -517,21 +522,21 @@ pub async fn api_save_model_config<R: Runtime>(
     )
     .await
     {
-        log_error!("Failed to save model config: {}", e);
+        log_error!("❌ Failed to save model config to database: {}", e);
         return Err(e.to_string());
     }
 
     if let Some(key) = api_key {
         if !key.is_empty() {
-            log_info!("API key provided, saving...");
+            log_info!("🔑 API key provided, saving...");
             if let Err(e) = SettingsRepository::save_api_key(pool, &provider, &key).await {
-                log_error!("Failed to save API key: {}", e);
+                log_error!("❌ Failed to save API key: {}", e);
                 return Err(e.to_string());
             }
         }
     }
 
-    log_info!("Successfully saved model configuration.");
+    log_info!("✅ Successfully saved model configuration to database");
     Ok(
         serde_json::json!({ "status": "success", "message": "Model configuration saved successfully" }),
     )
