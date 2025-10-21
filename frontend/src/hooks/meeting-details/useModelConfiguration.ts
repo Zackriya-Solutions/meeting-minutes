@@ -14,14 +14,24 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
     model: 'llama3.2:latest',
     whisperModel: 'large-v3'
   });
+  const [isLoading, setIsLoading] = useState(true);
   const [, setError] = useState<string>('');
 
   // Fetch model configuration on mount and when serverAddress changes
   useEffect(() => {
     const fetchModelConfig = async () => {
+      setIsLoading(true);
       try {
+        console.log('🔄 Fetching model configuration from database...');
         const data = await invokeTauri('api_get_model_config', {}) as any;
         if (data && data.provider !== null) {
+          console.log('✅ Loaded model config from database:', {
+            provider: data.provider,
+            model: data.model,
+            whisperModel: data.whisperModel,
+            hasApiKey: !!data.apiKey,
+            ollamaEndpoint: data.ollamaEndpoint || 'default'
+          });
           // Fetch API key if not included and provider requires it
           if (data.provider !== 'ollama' && !data.apiKey) {
             try {
@@ -34,9 +44,14 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
             }
           }
           setModelConfig(data);
+        } else {
+          console.warn('⚠️ No model config found in database, using defaults');
         }
       } catch (error) {
-        console.error('Failed to fetch model config:', error);
+        console.error('❌ Failed to fetch model config:', error);
+      } finally {
+        setIsLoading(false);
+        console.log('✅ Model configuration loading complete');
       }
     };
 
@@ -122,5 +137,6 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
     modelConfig,
     setModelConfig,
     handleSaveModelConfig,
+    isLoading,
   };
 }

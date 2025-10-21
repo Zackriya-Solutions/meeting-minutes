@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 
 interface UseMeetingDataProps {
   meeting: any;
-  summaryData: Summary;
+  summaryData: Summary | null;
   onMeetingUpdated?: () => Promise<void>;
 }
 

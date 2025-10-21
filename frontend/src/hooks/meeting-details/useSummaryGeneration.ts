@@ -12,6 +12,7 @@ interface UseSummaryGenerationProps {
   meeting: any;
   transcripts: Transcript[];
   modelConfig: ModelConfig;
+  isModelConfigLoading: boolean;
   selectedTemplate: string;
   onMeetingUpdated?: () => Promise<void>;
   updateMeetingTitle: (title: string) => void;
@@ -22,6 +23,7 @@ export function useSummaryGeneration({
   meeting,
   transcripts,
   modelConfig,
+  isModelConfigLoading,
   selectedTemplate,
   onMeetingUpdated,
   updateMeetingTitle,
@@ -262,12 +264,25 @@ export function useSummaryGeneration({
 
   // Public API: Generate summary from transcripts
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+    // Check if model config is still loading
+    if (isModelConfigLoading) {
+      console.log('⏳ Model configuration is still loading, please wait...');
+      toast.info('Loading model configuration, please wait...');
+      return;
+    }
+
     if (!transcripts.length) {
       const error_msg = 'No transcripts available for summary';
       console.log(error_msg);
       toast.error(error_msg);
       return;
     }
+
+    console.log('🚀 Starting summary generation with config:', {
+      provider: modelConfig.provider,
+      model: modelConfig.model,
+      template: selectedTemplate
+    });
 
     // Check if Ollama provider has models available
     if (modelConfig.provider === 'ollama') {
@@ -294,7 +309,7 @@ export function useSummaryGeneration({
 
     const fullTranscript = transcripts.map(t => t.text).join('\n');
     await processSummary({ transcriptText: fullTranscript, customPrompt });
-  }, [transcripts, processSummary, modelConfig]);
+  }, [transcripts, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
   // Public API: Regenerate summary from original transcript
   const handleRegenerateSummary = useCallback(async () => {
