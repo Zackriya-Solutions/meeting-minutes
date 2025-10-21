@@ -1,9 +1,18 @@
 use std::process::Command;
+use std::sync::Arc;
+use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Emitter, Runtime};
 use reqwest::Client;
 use tokio::time::{timeout, Duration, sleep};
+use tokio::sync::RwLock;
 use futures_util::StreamExt;
+use once_cell::sync::Lazy;
+
+// Global set to track models currently being downloaded
+static DOWNLOADING_MODELS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| {
+    Arc::new(RwLock::new(HashSet::new()))
+});
 
 // Error categorization for better error handling and user feedback
 #[derive(Debug)]
@@ -247,6 +256,22 @@ pub async fn pull_ollama_model<R: Runtime>(
     model_name: String,
     endpoint: Option<String>,
 ) -> Result<(), String> {
+    // Check if model is already being downloaded
+    {
+        let downloading = DOWNLOADING_MODELS.read().await;
+        if downloading.contains(&model_name) {
+            log::warn!("Model {} is already being downloaded, ignoring duplicate request", model_name);
+            return Err(format!("Model {} is already being downloaded", model_name));
+        }
+    }
+
+    // Mark model as downloading
+    {
+        let mut downloading = DOWNLOADING_MODELS.write().await;
+        downloading.insert(model_name.clone());
+        log::info!("Started download tracking for model: {}", model_name);
+    }
+
     let client = Client::new();
     let base_url = endpoint.as_deref().unwrap_or("http://localhost:11434");
     let url = format!("{}/api/pull", base_url);
@@ -276,6 +301,12 @@ pub async fn pull_ollama_model<R: Runtime>(
         let status = response.status();
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
 
+        // Remove from downloading set on error
+        {
+            let mut downloading = DOWNLOADING_MODELS.write().await;
+            downloading.remove(&model_name);
+        }
+
         // Emit error event
         let _ = app_handle.emit(
             "ollama-model-download-error",
@@ -296,6 +327,14 @@ pub async fn pull_ollama_model<R: Runtime>(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| {
             let error_msg = format!("Failed to read stream: {}", e);
+
+            // Remove from downloading set on stream error
+            let model_name_clone = model_name.clone();
+            tokio::spawn(async move {
+                let mut downloading = DOWNLOADING_MODELS.write().await;
+                downloading.remove(&model_name_clone);
+            });
+
             let _ = app_handle.emit(
                 "ollama-model-download-error",
                 serde_json::json!({
@@ -347,6 +386,13 @@ pub async fn pull_ollama_model<R: Runtime>(
                 // Check for error status
                 if let Some(error) = json.get("error").and_then(|v| v.as_str()) {
                     let error_msg = format!("Ollama error: {}", error);
+
+                    // Remove from downloading set on Ollama error
+                    {
+                        let mut downloading = DOWNLOADING_MODELS.write().await;
+                        downloading.remove(&model_name);
+                    }
+
                     let _ = app_handle.emit(
                         "ollama-model-download-error",
                         serde_json::json!({
@@ -358,6 +404,13 @@ pub async fn pull_ollama_model<R: Runtime>(
                 }
             }
         }
+    }
+
+    // Remove from downloading set before emitting completion
+    {
+        let mut downloading = DOWNLOADING_MODELS.write().await;
+        downloading.remove(&model_name);
+        log::info!("Removed {} from downloading set", model_name);
     }
 
     // Emit completion event

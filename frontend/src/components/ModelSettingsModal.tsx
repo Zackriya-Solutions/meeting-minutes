@@ -391,13 +391,13 @@ export function ModelSettingsModal({
   const downloadRecommendedModel = async () => {
     const recommendedModel = 'gemma3:1b';
 
-    // Prevent duplicate downloads
-    if (isDownloading(recommendedModel)) {
-      toast.info(`${recommendedModel} is already downloading`, {
-        description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
-      });
-      return;
-    }
+    // TEMPORARY: Comment out frontend check to test backend protection
+    // if (isDownloading(recommendedModel)) {
+    //   toast.info(`${recommendedModel} is already downloading`, {
+    //     description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
+    //   });
+    //   return;
+    // }
 
     try {
       const endpoint = ollamaEndpoint.trim() || null;
