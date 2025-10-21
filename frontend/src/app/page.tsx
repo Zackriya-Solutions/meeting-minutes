@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button';
 import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
+import { ButtonGroup } from '@/components/ui/button-group';
 
 
 
@@ -1586,6 +1587,7 @@ export default function Home() {
             <div className="flex flex-col space-y-3">
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
+                  <ButtonGroup>
                   {transcripts?.length > 0 && (
                     <Button
                       variant="outline"
@@ -1604,6 +1606,7 @@ export default function Home() {
                   {/* {!isRecording && transcripts?.length === 0 && ( */}
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => setShowModelSelector(true)}
                       title="Transcription Model Settings"
                     >
@@ -1615,6 +1618,7 @@ export default function Home() {
                   
                   <Button
                     variant="outline"
+                    size="sm"
                     onClick={() => setShowDeviceSettings(true)}
                     title="Input/Output devices selection"
                   >
@@ -1625,6 +1629,7 @@ export default function Home() {
                   </Button>
                   <Button
                     variant="outline"
+                    size="sm"
                     onClick={() => setShowLanguageSettings(true)}
                     title="Language"
                   >
@@ -1633,6 +1638,7 @@ export default function Home() {
                       Language
                     </span>
                   </Button>
+                  </ButtonGroup>
                   {/* {showSummary && !isRecording && (
                     <>
                       <button
