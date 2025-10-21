@@ -158,8 +158,9 @@ export default function Home() {
   useEffect(() => {
     // Only auto-scroll if user was at the bottom before new content
     if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Use requestAnimationFrame to ensure DOM is updated before scrolling
-      requestAnimationFrame(() => {
+      // Wait for Framer Motion animation to complete (150ms) before scrolling
+      // This ensures scrollHeight includes the full rendered height of the new transcript
+      const scrollTimeout = setTimeout(() => {
         const container = transcriptContainerRef.current;
         if (container) {
           container.scrollTo({
@@ -167,7 +168,9 @@ export default function Home() {
             behavior: 'smooth'
           });
         }
-      });
+      }, 150); // Match Framer Motion transition duration
+
+      return () => clearTimeout(scrollTimeout);
     }
   }, [transcripts]);
 
