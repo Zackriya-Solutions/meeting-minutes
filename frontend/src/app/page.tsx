@@ -1654,7 +1654,7 @@ export default function Home() {
         {/* Left side - Transcript */}
         <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
           {/* Title area - Sticky header */}
-          <div className="sticky top-0 z-10 bg-white p-4 border-b border-gray-200">
+          <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
             <div className="flex flex-col space-y-3">
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
