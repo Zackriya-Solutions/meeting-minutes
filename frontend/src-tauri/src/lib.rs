@@ -576,6 +576,7 @@ pub fn run() {
             console_utils::toggle_console,
             ollama::get_ollama_models,
             ollama::pull_ollama_model,
+            ollama::delete_ollama_model,
             api::api_get_meetings,
             api::api_search_transcripts,
             api::api_get_profile,
