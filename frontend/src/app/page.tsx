@@ -98,6 +98,13 @@ export default function Home() {
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
   const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('showConfidenceIndicator');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
+  });
 
   // Permission check hook
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
@@ -1461,6 +1468,55 @@ export default function Home() {
     }
   };
 
+  // Handle confidence indicator toggle
+  const handleConfidenceToggle = (checked: boolean) => {
+    setShowConfidenceIndicator(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('showConfidenceIndicator', checked.toString());
+    }
+    // Trigger a custom event to notify other components
+    window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
+  };
+
+  // Listen for model download completion to auto-close modal
+  useEffect(() => {
+    const setupDownloadListeners = async () => {
+      const unlisteners: (() => void)[] = [];
+
+      // Listen for Whisper model download complete
+      const unlistenWhisper = await listen<{ modelName: string }>('model-download-complete', (event) => {
+        const { modelName } = event.payload;
+        console.log('[HomePage] Whisper model download complete:', modelName);
+
+        // Auto-close modal if the downloaded model matches the selected one
+        if (transcriptModelConfig.provider === 'localWhisper' && transcriptModelConfig.model === modelName) {
+          toast.success('Model ready! Closing window...', { duration: 1500 });
+          setTimeout(() => setShowModelSelector(false), 1500);
+        }
+      });
+      unlisteners.push(unlistenWhisper);
+
+      // Listen for Parakeet model download complete
+      const unlistenParakeet = await listen<{ modelName: string }>('parakeet-model-download-complete', (event) => {
+        const { modelName } = event.payload;
+        console.log('[HomePage] Parakeet model download complete:', modelName);
+
+        // Auto-close modal if the downloaded model matches the selected one
+        if (transcriptModelConfig.provider === 'parakeet' && transcriptModelConfig.model === modelName) {
+          toast.success('Model ready! Closing window...', { duration: 1500 });
+          setTimeout(() => setShowModelSelector(false), 1500);
+        }
+      });
+      unlisteners.push(unlistenParakeet);
+
+      return () => {
+        unlisteners.forEach(unsub => unsub());
+      };
+    };
+
+    setupDownloadListeners();
+  }, [transcriptModelConfig]);
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript
@@ -2074,12 +2130,33 @@ export default function Home() {
                   <TranscriptSettings
                     transcriptModelConfig={transcriptModelConfig}
                     setTranscriptModelConfig={setTranscriptModelConfig}
-                    // onSave={handleSaveTranscriptConfig}
+                    onModelSelect={() => {
+                      setShowModelSelector(false);
+                      setModelSelectorMessage('');
+                    }}
                   />
                 </div>
 
                 {/* Fixed Footer */}
-                <div className="p-6 pt-4 border-t border-gray-200 flex justify-end">
+                <div className="p-6 pt-4 border-t border-gray-200 flex items-center justify-between">
+                  {/* Left side: Confidence Indicator Toggle */}
+                  <div className="flex items-center gap-3">
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showConfidenceIndicator}
+                        onChange={(e) => handleConfidenceToggle(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Show Confidence Indicators</p>
+                      <p className="text-xs text-gray-500">Display colored dots showing transcription confidence quality</p>
+                    </div>
+                  </div>
+
+                  {/* Right side: Done Button */}
                   <button
                     onClick={() => {
                       setShowModelSelector(false);
