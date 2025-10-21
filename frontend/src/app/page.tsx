@@ -128,6 +128,9 @@ export default function Home() {
 
   const isUserAtBottomRef = useRef<boolean>(true);
 
+  // Ref for the transcript scrollable container
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
   // Keep ref updated with current transcripts
   useEffect(() => {
     transcriptsRef.current = transcripts;
@@ -136,25 +139,34 @@ export default function Home() {
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+      const container = transcriptContainerRef.current;
+      if (!container) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = container;
       const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
       isUserAtBottomRef.current = isAtBottom;
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const container = transcriptContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
   }, []);
 
   // Auto-scroll when transcripts change (only if user is at bottom)
   useEffect(() => {
     // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current) {
+    if (isUserAtBottomRef.current && transcriptContainerRef.current) {
       // Use requestAnimationFrame to ensure DOM is updated before scrolling
       requestAnimationFrame(() => {
-        window.scrollTo({
-          top: document.documentElement.scrollHeight,
-          behavior: 'smooth'
-        });
+        const container = transcriptContainerRef.current;
+        if (container) {
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
       });
     }
   }, [transcripts]);
@@ -1601,7 +1613,7 @@ export default function Home() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col min-h-screen bg-gray-50 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      className="flex flex-col h-screen bg-gray-50"
     >
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1635,9 +1647,9 @@ export default function Home() {
           </Alert>
         </div>
       )}
-      <div className="flex flex-1">
+      <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
-        <div className="w-full border-r border-gray-200 bg-white flex flex-col">
+        <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
           {/* Title area - Sticky header */}
           <div className="sticky top-0 z-10 bg-white p-4 border-b border-gray-200">
             <div className="flex flex-col space-y-3">
