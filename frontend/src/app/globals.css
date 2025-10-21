@@ -85,8 +85,11 @@
   * {
     @apply border-border;
   }
+  html,
   body {
     @apply bg-background text-foreground;
+    overflow: hidden;
+    height: 100%;
   }
 
   /* Make the window draggable */
@@ -122,5 +125,37 @@
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: #d1d5db transparent;
+  }
+
+  /* BlockNote Editor - Override fixed dimensions for responsive layout */
+  .bn-container {
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+
+  .bn-editor {
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+
+  /* Disable internal scrolling - let parent handle all scrolling */
+  .ProseMirror {
+    overflow: visible !important;
+  }
+
+  /* Ensure BlockNote content area is responsive */
+  .bn-block-outer {
+    max-width: 100% !important;
+  }
+
+  .bn-default-styles {
+    max-width: none !important;
+  }
+
+  /* Disable scrolling on any BlockNote wrapper elements */
+  [data-node-type] {
+    overflow: visible !important;
   }
 }

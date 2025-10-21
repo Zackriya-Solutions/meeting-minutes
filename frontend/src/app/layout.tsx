@@ -70,7 +70,7 @@ export default function RootLayout({
             <SidebarProvider>
               <TooltipProvider>
                 {/* <div className="titlebar h-8 w-full fixed top-0 left-0 bg-transparent" /> */}
-                <div className="flex">
+                <div className="flex h-screen overflow-hidden">
                   <Sidebar />
                   <MainContent>{children}</MainContent>
                 </div>
