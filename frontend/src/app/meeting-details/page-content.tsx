@@ -79,7 +79,7 @@ export default function PageContent({
   useEffect(() => {
     const autoGenerate = async () => {
       if (shouldAutoGenerate && meetingData.transcripts.length > 0) {
-        console.log('🤖 Auto-generating summary with gemma3:1b...');
+        console.log(`🤖 Auto-generating summary with ${modelConfig.modelConfig.provider}/${modelConfig.modelConfig.model}...`);
         await summaryGeneration.handleGenerateSummary('');
 
         // Notify parent that auto-generation is complete

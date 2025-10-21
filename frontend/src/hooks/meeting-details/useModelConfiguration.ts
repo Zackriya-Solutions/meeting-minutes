@@ -9,9 +9,10 @@ interface UseModelConfigurationProps {
 }
 
 export function useModelConfiguration({ serverAddress }: UseModelConfigurationProps) {
+  // Note: No hardcoded defaults - DB is the source of truth
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
-    model: 'llama3.2:latest',
+    model: '', // Empty until loaded from DB
     whisperModel: 'large-v3'
   });
   const [isLoading, setIsLoading] = useState(true);

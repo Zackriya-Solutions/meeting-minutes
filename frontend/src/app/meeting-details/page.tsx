@@ -41,17 +41,28 @@ function MeetingDetailsContent() {
     }
   }, []);
 
-  // Set up auto-generation with gemma3:1b if available
+  // Set up auto-generation - respects DB as source of truth
   const setupAutoGeneration = useCallback(async () => {
     if (hasCheckedAutoGen) return; // Only check once
 
-    const hasGemma = await checkForGemmaModel();
+    try {
+      // ✅ STEP 1: Check what's currently in database
+      const currentConfig = await invoke('api_get_model_config') as any;
 
-    if (hasGemma) {
-      console.log('✅ gemma3:1b found, setting up auto-generation');
+      // ✅ STEP 2: If DB already has a model, use it (never override!)
+      if (currentConfig && currentConfig.model) {
+        console.log('✅ Using existing model from DB:', currentConfig.model);
+        setShouldAutoGenerate(true);
+        setHasCheckedAutoGen(true);
+        return;
+      }
 
-      // Save model config with gemma3:1b
-      try {
+      // ✅ STEP 3: DB is empty - check if gemma3:1b exists as fallback
+      const hasGemma = await checkForGemmaModel();
+
+      if (hasGemma) {
+        console.log('💾 DB empty, using gemma3:1b as initial default');
+
         await invoke('api_save_model_config', {
           provider: 'ollama',
           model: 'gemma3:1b',
@@ -60,13 +71,12 @@ function MeetingDetailsContent() {
           ollamaEndpoint: null,
         });
 
-        // Trigger auto-generation
         setShouldAutoGenerate(true);
-      } catch (error) {
-        console.error('❌ Failed to save model config:', error);
+      } else {
+        console.log('⚠️ No model configured and gemma3:1b not found');
       }
-    } else {
-      console.log('⚠️ gemma3:1b not found, user will need to select model manually');
+    } catch (error) {
+      console.error('❌ Failed to setup auto-generation:', error);
     }
 
     setHasCheckedAutoGen(true);

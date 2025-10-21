@@ -95,13 +95,9 @@ const Sidebar: React.FC = () => {
 
 
   const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
-  
+
   useEffect(() => {
-    setModelConfig({
-      provider: 'ollama',
-      model: 'llama3.2:latest',
-      whisperModel: 'large-v3',
-    });
+    // Note: Don't set hardcoded defaults - let DB be the source of truth
     const fetchModelConfig = async () => {
       // Only make API call if serverAddress is loaded
       if (!serverAddress) {
@@ -135,10 +131,7 @@ const Sidebar: React.FC = () => {
 
 
   useEffect(() => {
-    setTranscriptModelConfig({
-      provider: 'localWhisper',
-      model: 'large-v3',
-    });
+    // Note: Don't set hardcoded defaults - let DB be the source of truth
     const fetchTranscriptSettings = async () => {
       // Only make API call if serverAddress is loaded
       if (!serverAddress) {

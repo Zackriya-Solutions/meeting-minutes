@@ -414,8 +414,8 @@ export function ModelSettingsModal({
       // Refresh the models list after successful download
       await fetchOllamaModels(true);
 
-      // Auto-select the downloaded model
-      setModelConfig((prev: ModelConfig) => ({ ...prev, model: recommendedModel }));
+      // Note: Model is NOT auto-selected - user must explicitly choose it
+      // This respects the database as the single source of truth
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to download model';
       console.error('Error downloading model:', err);
