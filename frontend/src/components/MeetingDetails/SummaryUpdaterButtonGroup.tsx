@@ -66,7 +66,7 @@ export function SummaryUpdaterButtonGroup({
       </Button>
 
       {/* Find button */}
-      {onFind && (
+      {/* {onFind && (
         <Button
           variant="outline"
           size="sm"
@@ -81,7 +81,7 @@ export function SummaryUpdaterButtonGroup({
           <Search />
           <span className="hidden lg:inline">Find</span>
         </Button>
-      )}
+      )} */}
     </ButtonGroup>
   );
 }

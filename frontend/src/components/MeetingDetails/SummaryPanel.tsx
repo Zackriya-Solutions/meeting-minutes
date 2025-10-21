@@ -93,7 +93,7 @@ export function SummaryPanel({
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-between w-full pt-0 gap-2">
+          <div className="flex items-center justify-center w-full pt-0 gap-2">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup
@@ -129,10 +129,28 @@ export function SummaryPanel({
       </div>
 
       {isSummaryLoading ? (
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-            <p className="text-gray-600">Generating AI Summary...</p>
+        <div className="flex flex-col h-full">
+          {/* Show button group during generation */}
+          <div className="flex items-center justify-center pt-8 pb-4">
+            <SummaryGeneratorButtonGroup
+              modelConfig={modelConfig}
+              setModelConfig={setModelConfig}
+              onSaveModelConfig={onSaveModelConfig}
+              onGenerateSummary={onGenerateSummary}
+              customPrompt={customPrompt}
+              summaryStatus={summaryStatus}
+              availableTemplates={availableTemplates}
+              selectedTemplate={selectedTemplate}
+              onTemplateSelect={onTemplateSelect}
+              hasTranscripts={transcripts.length > 0}
+            />
+          </div>
+          {/* Loading spinner */}
+          <div className="flex items-center justify-center flex-1">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+              <p className="text-gray-600">Generating AI Summary...</p>
+            </div>
           </div>
         </div>
       ) : !aiSummary ? (

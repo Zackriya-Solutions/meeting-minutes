@@ -391,13 +391,13 @@ export function ModelSettingsModal({
   const downloadRecommendedModel = async () => {
     const recommendedModel = 'gemma3:1b';
 
-    // TEMPORARY: Comment out frontend check to test backend protection
-    // if (isDownloading(recommendedModel)) {
-    //   toast.info(`${recommendedModel} is already downloading`, {
-    //     description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
-    //   });
-    //   return;
-    // }
+    // Prevent duplicate downloads (defense in depth - backend also checks)
+    if (isDownloading(recommendedModel)) {
+      toast.info(`${recommendedModel} is already downloading`, {
+        description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
+      });
+      return;
+    }
 
     try {
       const endpoint = ollamaEndpoint.trim() || null;
@@ -441,29 +441,26 @@ export function ModelSettingsModal({
     }
   };
 
+  // Track previous downloading models to detect completions
+  const previousDownloadingRef = useRef<Set<string>>(new Set());
+
   // Refresh models list when download completes
-  // This uses the global download context which persists across modal close/open
   useEffect(() => {
-    // When a download completes, the context will handle it
-    // We just need to refresh the models list if the modal is open
-    const previousDownloads = new Set<string>();
+    const current = downloadingModels;
+    const previous = previousDownloadingRef.current;
 
-    downloadingModels.forEach(modelName => {
-      previousDownloads.add(modelName);
-    });
-
-    // Check if any downloads completed (were downloading, now not)
-    const checkCompleted = async () => {
-      for (const modelName of previousDownloads) {
-        if (!downloadingModels.has(modelName)) {
-          // Download completed, refresh models list
-          console.log(`[ModelSettingsModal] Download completed for ${modelName}, refreshing list`);
-          await fetchOllamaModels(true);
-        }
+    // Check if any downloads completed (were in previous, not in current)
+    for (const modelName of previous) {
+      if (!current.has(modelName)) {
+        // Download completed, refresh models list
+        console.log(`[ModelSettingsModal] Download completed for ${modelName}, refreshing list`);
+        fetchOllamaModels(true);
+        break; // Only refresh once even if multiple completed
       }
-    };
+    }
 
-    checkCompleted();
+    // Update ref for next comparison
+    previousDownloadingRef.current = new Set(current);
   }, [downloadingModels]);
 
   // Filter Ollama models based on search query
