@@ -17,10 +17,14 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 export default function PageContent({
   meeting,
   summaryData,
+  shouldAutoGenerate = false,
+  onAutoGenerateComplete,
   onMeetingUpdated
 }: {
   meeting: any;
   summaryData: Summary;
+  shouldAutoGenerate?: boolean;
+  onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
 }) {
   console.log('📄 PAGE CONTENT: Initializing with data:', {
@@ -64,6 +68,23 @@ export default function PageContent({
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
   }, []);
+
+  // Auto-generate summary when flag is set
+  useEffect(() => {
+    const autoGenerate = async () => {
+      if (shouldAutoGenerate && meetingData.transcripts.length > 0) {
+        console.log('🤖 Auto-generating summary with gemma3:1b...');
+        await summaryGeneration.handleGenerateSummary('');
+
+        // Notify parent that auto-generation is complete
+        if (onAutoGenerateComplete) {
+          onAutoGenerateComplete();
+        }
+      }
+    };
+
+    autoGenerate();
+  }, [shouldAutoGenerate]); // Only trigger when flag changes
 
   return (
     <motion.div
