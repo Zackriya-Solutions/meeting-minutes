@@ -13,6 +13,7 @@ import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGenerati
 import { useModelConfiguration } from '@/hooks/meeting-details/useModelConfiguration';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
+import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 
 export default function PageContent({
   meeting,
@@ -65,6 +66,10 @@ export default function PageContent({
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
   });
 
+  const meetingOperations = useMeetingOperations({
+    meeting,
+  });
+
   // Track page view
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
@@ -102,6 +107,7 @@ export default function PageContent({
           customPrompt={customPrompt}
           onPromptChange={setCustomPrompt}
           onCopyTranscript={copyOperations.handleCopyTranscript}
+          onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
           isRecording={isRecording}
         />
 
@@ -117,6 +123,7 @@ export default function PageContent({
           isSaving={meetingData.isSaving}
           onSaveAll={meetingData.saveAllChanges}
           onCopySummary={copyOperations.handleCopySummary}
+          onOpenFolder={meetingOperations.handleOpenMeetingFolder}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}
           transcripts={meetingData.transcripts}

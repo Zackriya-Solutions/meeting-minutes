@@ -9,6 +9,7 @@ interface TranscriptPanelProps {
   customPrompt: string;
   onPromptChange: (value: string) => void;
   onCopyTranscript: () => void;
+  onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
 }
 
@@ -17,6 +18,7 @@ export function TranscriptPanel({
   customPrompt,
   onPromptChange,
   onCopyTranscript,
+  onOpenMeetingFolder,
   isRecording
 }: TranscriptPanelProps) {
   return (
@@ -26,6 +28,7 @@ export function TranscriptPanel({
         <TranscriptButtonGroup
           transcriptCount={transcripts?.length || 0}
           onCopyTranscript={onCopyTranscript}
+          onOpenMeetingFolder={onOpenMeetingFolder}
         />
       </div>
 

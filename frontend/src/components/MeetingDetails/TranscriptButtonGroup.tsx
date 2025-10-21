@@ -2,28 +2,22 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, Music } from 'lucide-react';
+import { Copy, FolderOpen } from 'lucide-react';
 import Analytics from '@/lib/analytics';
-import { invoke } from '@tauri-apps/api/core';
+
 
 interface TranscriptButtonGroupProps {
   transcriptCount: number;
   onCopyTranscript: () => void;
+  onOpenMeetingFolder: () => Promise<void>;
 }
+
 
 export function TranscriptButtonGroup({
   transcriptCount,
-  onCopyTranscript
+  onCopyTranscript,
+  onOpenMeetingFolder
 }: TranscriptButtonGroupProps) {
-  const handleOpenFolder = async () => {
-    try {
-      Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
-      await invoke('open_recordings_folder');
-    } catch (error) {
-      console.error('Failed to open recording folder:', error);
-    }
-  };
-
   return (
     <div className="flex items-center justify-center w-full gap-2">
       <ButtonGroup>
@@ -42,12 +36,16 @@ export function TranscriptButtonGroup({
         </Button>
 
         <Button
-          variant="outline"
           size="sm"
-          onClick={handleOpenFolder}
+          variant="outline"
+          className="xl:px-4"
+          onClick={() => {
+            Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
+            onOpenMeetingFolder();
+          }}
           title="Open Recording Folder"
         >
-          <Music />
+          <FolderOpen className="xl:mr-2" size={18} />
           <span className="hidden lg:inline">Recording</span>
         </Button>
       </ButtonGroup>

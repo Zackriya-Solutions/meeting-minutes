@@ -128,6 +128,7 @@ export function SummaryGeneratorButtonGroup({
       <Button
         variant="outline"
         size="sm"
+        className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
         onClick={() => {
           Analytics.trackButtonClick('generate_summary', 'meeting_details');
           checkOllamaModelsAndGenerate();
@@ -145,15 +146,13 @@ export function SummaryGeneratorButtonGroup({
       >
         {summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading ? (
           <>
-            <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">
-              {isModelConfigLoading ? 'Loading...' : isCheckingModels ? 'Checking...' : 'Processing...'}
-            </span>
+            <Loader2 className="animate-spin xl:mr-2" size={18} />
+            <span className="hidden xl:inline">Processing...</span>
           </>
         ) : (
           <>
-            <Sparkles />
-            <span className="hidden lg:inline">Generate</span>
+            <Sparkles className="xl:mr-2" size={18} />
+            <span className="hidden lg:inline xl:inline">Generate Note</span>
           </>
         )}
       </Button>

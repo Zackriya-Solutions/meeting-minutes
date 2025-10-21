@@ -816,12 +816,14 @@ pub async fn api_save_transcript<R: Runtime>(
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
+    folder_path: Option<String>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_transcript called for meeting: {}, transcripts: {}, auth_token: {}",
+        "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
         meeting_title,
         transcripts.len(),
+        folder_path,
         auth_token.is_some()
     );
 
@@ -855,7 +857,14 @@ pub async fn api_save_transcript<R: Runtime>(
     let pool = state.db_manager.pool();
 
     // Now, call the repository with the correctly typed data.
-    match TranscriptsRepository::save_transcript(pool, &meeting_title, &transcripts_to_save).await {
+    match TranscriptsRepository::save_transcript(
+        pool,
+        &meeting_title,
+        &transcripts_to_save,
+        folder_path,
+    )
+    .await
+    {
         Ok(meeting_id) => {
             log_info!(
                 "Successfully saved transcript and created meeting with id: {}",
@@ -874,6 +883,77 @@ pub async fn api_save_transcript<R: Runtime>(
                 e
             );
             Err(format!("Failed to save transcript: {}", e))
+        }
+    }
+}
+
+/// Opens the meeting's recording folder in the system file explorer
+#[tauri::command]
+pub async fn open_meeting_folder<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<(), String> {
+    log_info!("open_meeting_folder called for meeting_id: {}", meeting_id);
+
+    let pool = state.db_manager.pool();
+
+    // Get meeting with folder_path
+    let meeting: Option<MeetingModel> = sqlx::query_as(
+        "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+    )
+    .bind(&meeting_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Database error: {}", e))?;
+
+    match meeting {
+        Some(m) => {
+            if let Some(folder_path) = m.folder_path {
+                log_info!("Opening meeting folder: {}", folder_path);
+
+                // Verify folder exists
+                let path = std::path::Path::new(&folder_path);
+                if !path.exists() {
+                    log_warn!("Folder path does not exist: {}", folder_path);
+                    return Err(format!("Recording folder not found: {}", folder_path));
+                }
+
+                // Open folder based on OS
+                #[cfg(target_os = "macos")]
+                {
+                    std::process::Command::new("open")
+                        .arg(&folder_path)
+                        .spawn()
+                        .map_err(|e| format!("Failed to open folder: {}", e))?;
+                }
+
+                #[cfg(target_os = "windows")]
+                {
+                    std::process::Command::new("explorer")
+                        .arg(&folder_path)
+                        .spawn()
+                        .map_err(|e| format!("Failed to open folder: {}", e))?;
+                }
+
+                #[cfg(target_os = "linux")]
+                {
+                    std::process::Command::new("xdg-open")
+                        .arg(&folder_path)
+                        .spawn()
+                        .map_err(|e| format!("Failed to open folder: {}", e))?;
+                }
+
+                log_info!("Successfully opened folder: {}", folder_path);
+                Ok(())
+            } else {
+                log_warn!("Meeting {} has no folder_path set", meeting_id);
+                Err("Recording folder path not available for this meeting".to_string())
+            }
+        }
+        None => {
+            log_warn!("Meeting not found: {}", meeting_id);
+            Err("Meeting not found".to_string())
         }
     }
 }
