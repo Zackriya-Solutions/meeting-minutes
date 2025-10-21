@@ -83,17 +83,17 @@ export function SummaryPanel({
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
       {/* Title area */}
       <div className="p-4 border-b border-gray-200">
-        <EditableTitle
+        {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
           onStartEditing={onStartEditTitle}
           onFinishEditing={onFinishEditTitle}
           onChange={onTitleChange}
-        />
+        /> */}
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-between border-t w-full pt-4 gap-2">
+          <div className="flex items-center justify-between w-full pt-0 gap-2">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup

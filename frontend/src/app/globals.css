@@ -85,7 +85,7 @@
   * {
     @apply border-border;
   }
-  html,
+  /* html, */
   body {
     @apply bg-background text-foreground;
     overflow: hidden;

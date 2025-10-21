@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import { useOllamaDownload } from '@/contexts/OllamaDownloadContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -74,7 +75,9 @@ export function ModelSettingsModal({
   const [autoGenerateEnabled, setAutoGenerateEnabled] = useState<boolean>(true); // Default to true
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
-  const [isDownloadingModel, setIsDownloadingModel] = useState<boolean>(false);
+
+  // Use global download context instead of local state
+  const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
 
   // Cache models by endpoint to avoid refetching when reverting endpoint changes
   const modelsCache = useRef<Map<string, OllamaModel[]>>(new Map());
@@ -366,13 +369,13 @@ export function ModelSettingsModal({
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
 
     // Save auto-generate setting
-    try {
-      await invoke('api_save_auto_generate_setting', { enabled: autoGenerateEnabled });
-      console.log('Auto-generate setting saved:', autoGenerateEnabled);
-    } catch (err) {
-      console.error('Failed to save auto-generate setting:', err);
-      toast.error('Failed to save auto-generate setting');
-    }
+    // try {
+    //   await invoke('api_save_auto_generate_setting', { enabled: autoGenerateEnabled });
+    //   console.log('Auto-generate setting saved:', autoGenerateEnabled);
+    // } catch (err) {
+    //   console.error('Failed to save auto-generate setting:', err);
+    //   toast.error('Failed to save auto-generate setting');
+    // }
 
     onSave(updatedConfig);
   };
@@ -387,18 +390,26 @@ export function ModelSettingsModal({
   // Function to download recommended model
   const downloadRecommendedModel = async () => {
     const recommendedModel = 'gemma3:1b';
-    setIsDownloadingModel(true);
+
+    // Prevent duplicate downloads
+    if (isDownloading(recommendedModel)) {
+      toast.info(`${recommendedModel} is already downloading`, {
+        description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
+      });
+      return;
+    }
 
     try {
       const endpoint = ollamaEndpoint.trim() || null;
-      toast.info(`Downloading ${recommendedModel}... This may take a few minutes.`);
+      toast.info(`Downloading ${recommendedModel}...`, {
+        description: 'This may take a few minutes'
+      });
 
+      // The download will be tracked by the global context via events
       await invoke('pull_ollama_model', {
         modelName: recommendedModel,
         endpoint
       });
-
-      toast.success(`Successfully downloaded ${recommendedModel}!`);
 
       // Refresh the models list after successful download
       await fetchOllamaModels(true);
@@ -407,12 +418,53 @@ export function ModelSettingsModal({
       setModelConfig((prev: ModelConfig) => ({ ...prev, model: recommendedModel }));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to download model';
-      toast.error(errorMsg);
       console.error('Error downloading model:', err);
-    } finally {
-      setIsDownloadingModel(false);
+      // Error toast is handled by the context
     }
   };
+
+  // Function to delete Ollama model
+  const deleteOllamaModel = async (modelName: string) => {
+    try {
+      const endpoint = ollamaEndpoint.trim() || null;
+      await invoke('delete_ollama_model', {
+        modelName,
+        endpoint
+      });
+
+      toast.success(`Model ${modelName} deleted`);
+      await fetchOllamaModels(true); // Refresh list
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to delete model';
+      toast.error(errorMsg);
+      console.error('Error deleting model:', err);
+    }
+  };
+
+  // Refresh models list when download completes
+  // This uses the global download context which persists across modal close/open
+  useEffect(() => {
+    // When a download completes, the context will handle it
+    // We just need to refresh the models list if the modal is open
+    const previousDownloads = new Set<string>();
+
+    downloadingModels.forEach(modelName => {
+      previousDownloads.add(modelName);
+    });
+
+    // Check if any downloads completed (were downloading, now not)
+    const checkCompleted = async () => {
+      for (const modelName of previousDownloads) {
+        if (!downloadingModels.has(modelName)) {
+          // Download completed, refresh models list
+          console.log(`[ModelSettingsModal] Download completed for ${modelName}, refreshing list`);
+          await fetchOllamaModels(true);
+        }
+      }
+    };
+
+    checkCompleted();
+  }, [downloadingModels]);
 
   // Filter Ollama models based on search query
   const filteredModels = models.filter((model) => {
@@ -662,25 +714,45 @@ export function ModelSettingsModal({
                   </AlertDescription>
                 </Alert>
                 {!ollamaEndpointChanged && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={downloadRecommendedModel}
-                    disabled={isDownloadingModel}
-                    className="w-full"
-                  >
-                    {isDownloadingModel ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Downloading gemma3:1b...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="mr-2 h-4 w-4" />
-                        Download gemma3:1b (Recommended, ~800MB)
-                      </>
+                  <div className="space-y-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={downloadRecommendedModel}
+                      disabled={isDownloading('gemma3:1b')}
+                      className="w-full"
+                    >
+                      {isDownloading('gemma3:1b') ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                          Downloading gemma3:1b...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="mr-2 h-4 w-4" />
+                          Download gemma3:1b (Recommended, ~800MB)
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Show progress for gemma3:1b download */}
+                    {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
+                      <div className="bg-white rounded-md border p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
+                          <span className="text-sm font-semibold text-blue-600">
+                            {Math.round(getProgress('gemma3:1b')!)}%
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
+                            style={{ width: `${getProgress('gemma3:1b')}%` }}
+                          />
+                        </div>
+                      </div>
                     )}
-                  </Button>
+                  </div>
                 )}
               </div>
             ) : !ollamaEndpointChanged && (
@@ -693,26 +765,50 @@ export function ModelSettingsModal({
                   </Alert>
                 ) : (
                   <div className="grid gap-4">
-                    {filteredModels.map((model) => (
-                      <div
-                        key={model.id}
-                        className={cn(
-                          'bg-card p-2 m-0 rounded-md border cursor-pointer transition-colors',
-                          modelConfig.model === model.name
-                            ? 'ring-1 ring-blue-500 border-blue-500 background-blue-100'
-                            : 'hover:bg-muted/50'
-                        )}
-                        onClick={() =>
-                          setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))
-                        }
-                      >
-                        <b className="font-bold">{model.name}&nbsp;</b>
-                        <span className="text-muted-foreground">with a size of </span>
-                        <span className="font-mono font-bold text-sm">{model.size}</span>
-                        <br />
-                        {/* <p className="text-muted-foreground">Modified: {model.modified}</p> */}
-                      </div>
-                    ))}
+                    {filteredModels.map((model) => {
+                      const progress = getProgress(model.name);
+                      const modelIsDownloading = isDownloading(model.name);
+
+                      return (
+                        <div
+                          key={model.id}
+                          className={cn(
+                            'bg-card p-2 m-0 rounded-md border transition-colors',
+                            modelConfig.model === model.name
+                              ? 'ring-1 ring-blue-500 border-blue-500 background-blue-100'
+                              : 'hover:bg-muted/50',
+                            !modelIsDownloading && 'cursor-pointer'
+                          )}
+                          onClick={() => {
+                            if (!modelIsDownloading) {
+                              setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))
+                            }
+                          }}
+                        >
+                          <div>
+                            <b className="font-bold">{model.name}&nbsp;</b>
+                            <span className="text-muted-foreground">with a size of </span>
+                            <span className="font-mono font-bold text-sm">{model.size}</span>
+                          </div>
+
+                          {/* Progress bar for downloading models */}
+                          {modelIsDownloading && progress !== undefined && (
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm font-medium text-blue-600">Downloading...</span>
+                                <span className="text-sm font-semibold text-blue-600">{Math.round(progress)}%</span>
+                              </div>
+                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
+                                  style={{ width: `${progress}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </ScrollArea>
@@ -722,7 +818,7 @@ export function ModelSettingsModal({
       </div>
 
       {/* Auto-generate summaries toggle */}
-      <div className="mt-6 pt-6 border-t border-gray-200">
+      {/* <div className="mt-6 pt-6 border-t border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <Label htmlFor="auto-generate" className="text-base font-medium">
@@ -738,7 +834,7 @@ export function ModelSettingsModal({
             onCheckedChange={setAutoGenerateEnabled}
           />
         </div>
-      </div>
+      </div> */}
 
       <div className="mt-6 flex justify-end">
         <Button
