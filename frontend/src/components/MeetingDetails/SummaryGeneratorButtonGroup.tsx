@@ -33,6 +33,7 @@ interface SummaryGeneratorButtonGroupProps {
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
   hasTranscripts?: boolean;
+  isModelConfigLoading?: boolean;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -45,7 +46,8 @@ export function SummaryGeneratorButtonGroup({
   availableTemplates,
   selectedTemplate,
   onTemplateSelect,
-  hasTranscripts = true
+  hasTranscripts = true,
+  isModelConfigLoading = false
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -130,20 +132,22 @@ export function SummaryGeneratorButtonGroup({
           Analytics.trackButtonClick('generate_summary', 'meeting_details');
           checkOllamaModelsAndGenerate();
         }}
-        disabled={summaryStatus === 'processing' || isCheckingModels}
+        disabled={summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading}
         title={
-          summaryStatus === 'processing'
+          isModelConfigLoading
+            ? 'Loading model configuration...'
+            : summaryStatus === 'processing'
             ? 'Generating summary...'
             : isCheckingModels
             ? 'Checking models...'
             : 'Generate AI Summary'
         }
       >
-        {summaryStatus === 'processing' || isCheckingModels ? (
+        {summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading ? (
           <>
             <Loader2 className="animate-spin" />
             <span className="hidden lg:inline">
-              {isCheckingModels ? 'Checking...' : 'Processing...'}
+              {isModelConfigLoading ? 'Loading...' : isCheckingModels ? 'Checking...' : 'Processing...'}
             </span>
           </>
         ) : (

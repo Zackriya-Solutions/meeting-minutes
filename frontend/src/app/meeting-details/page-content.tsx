@@ -22,7 +22,7 @@ export default function PageContent({
   onMeetingUpdated
 }: {
   meeting: any;
-  summaryData: Summary;
+  summaryData: Summary | null;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -50,6 +50,7 @@ export default function PageContent({
     meeting,
     transcripts: meetingData.transcripts,
     modelConfig: modelConfig.modelConfig,
+    isModelConfigLoading: modelConfig.isLoading,
     selectedTemplate: templates.selectedTemplate,
     onMeetingUpdated,
     updateMeetingTitle: meetingData.updateMeetingTitle,
@@ -134,6 +135,7 @@ export default function PageContent({
           availableTemplates={templates.availableTemplates}
           selectedTemplate={templates.selectedTemplate}
           onTemplateSelect={templates.handleTemplateSelection}
+          isModelConfigLoading={modelConfig.isLoading}
         />
 
       </div>

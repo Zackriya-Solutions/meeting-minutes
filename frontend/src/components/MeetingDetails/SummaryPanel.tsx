@@ -30,7 +30,7 @@ interface SummaryPanelProps {
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
   modelConfig: ModelConfig;
-  setModelConfig: (config: ModelConfig) => void;
+  setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
   onGenerateSummary: (customPrompt: string) => Promise<void>;
   customPrompt: string;
@@ -44,6 +44,7 @@ interface SummaryPanelProps {
   availableTemplates: Array<{id: string, name: string, description: string}>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
+  isModelConfigLoading?: boolean;
 }
 
 export function SummaryPanel({
@@ -75,7 +76,8 @@ export function SummaryPanel({
   getSummaryStatusMessage,
   availableTemplates,
   selectedTemplate,
-  onTemplateSelect
+  onTemplateSelect,
+  isModelConfigLoading = false
 }: SummaryPanelProps) {
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
@@ -107,6 +109,7 @@ export function SummaryPanel({
                 selectedTemplate={selectedTemplate}
                 onTemplateSelect={onTemplateSelect}
                 hasTranscripts={transcripts.length > 0}
+                isModelConfigLoading={isModelConfigLoading}
               />
             </div>
 
@@ -143,6 +146,7 @@ export function SummaryPanel({
               selectedTemplate={selectedTemplate}
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
+              isModelConfigLoading={isModelConfigLoading}
             />
           </div>
           {/* Loading spinner */}
@@ -168,6 +172,7 @@ export function SummaryPanel({
               selectedTemplate={selectedTemplate}
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
+              isModelConfigLoading={isModelConfigLoading}
             />
           </div>
           {/* Empty state message */}
