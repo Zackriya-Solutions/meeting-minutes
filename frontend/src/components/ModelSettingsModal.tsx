@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import { useOllamaDownload } from '@/contexts/OllamaDownloadContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -13,7 +14,8 @@ import {
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -70,6 +72,12 @@ export function ModelSettingsModal({
   const [hasAutoFetched, setHasAutoFetched] = useState<boolean>(false);
   const hasSyncedFromParent = useRef<boolean>(false);
   const hasLoadedInitialConfig = useRef<boolean>(false);
+  const [autoGenerateEnabled, setAutoGenerateEnabled] = useState<boolean>(true); // Default to true
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
+
+  // Use global download context instead of local state
+  const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
 
   // Cache models by endpoint to avoid refetching when reverting endpoint changes
   const modelsCache = useRef<Map<string, OllamaModel[]>>(new Map());
@@ -209,6 +217,22 @@ export function ModelSettingsModal({
     fetchModelConfig();
   }, [skipInitialFetch]);
 
+  // Fetch auto-generate setting on mount
+  useEffect(() => {
+    const fetchAutoGenerateSetting = async () => {
+      try {
+        const enabled = (await invoke('api_get_auto_generate_setting')) as boolean;
+        setAutoGenerateEnabled(enabled);
+        console.log('Auto-generate setting loaded:', enabled);
+      } catch (err) {
+        console.error('Failed to fetch auto-generate setting:', err);
+        // Keep default value (true) on error
+      }
+    };
+
+    fetchAutoGenerateSetting();
+  }, []);
+
   // Sync ollamaEndpoint state when modelConfig.ollamaEndpoint changes from parent
   useEffect(() => {
     const endpoint = modelConfig.ollamaEndpoint || '';
@@ -333,7 +357,7 @@ export function ModelSettingsModal({
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const updatedConfig = {
       ...modelConfig,
       apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
@@ -343,6 +367,16 @@ export function ModelSettingsModal({
     };
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
+
+    // Save auto-generate setting
+    // try {
+    //   await invoke('api_save_auto_generate_setting', { enabled: autoGenerateEnabled });
+    //   console.log('Auto-generate setting saved:', autoGenerateEnabled);
+    // } catch (err) {
+    //   console.error('Failed to save auto-generate setting:', err);
+    //   toast.error('Failed to save auto-generate setting');
+    // }
+
     onSave(updatedConfig);
   };
 
@@ -352,6 +386,97 @@ export function ModelSettingsModal({
       setTimeout(() => setIsLockButtonVibrating(false), 500);
     }
   };
+
+  // Function to download recommended model
+  const downloadRecommendedModel = async () => {
+    const recommendedModel = 'gemma3:1b';
+
+    // Prevent duplicate downloads (defense in depth - backend also checks)
+    if (isDownloading(recommendedModel)) {
+      toast.info(`${recommendedModel} is already downloading`, {
+        description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
+      });
+      return;
+    }
+
+    try {
+      const endpoint = ollamaEndpoint.trim() || null;
+      toast.info(`Downloading ${recommendedModel}...`, {
+        description: 'This may take a few minutes'
+      });
+
+      // The download will be tracked by the global context via events
+      await invoke('pull_ollama_model', {
+        modelName: recommendedModel,
+        endpoint
+      });
+
+      // Refresh the models list after successful download
+      await fetchOllamaModels(true);
+
+      // Note: Model is NOT auto-selected - user must explicitly choose it
+      // This respects the database as the single source of truth
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to download model';
+      console.error('Error downloading model:', err);
+      // Error toast is handled by the context
+    }
+  };
+
+  // Function to delete Ollama model
+  const deleteOllamaModel = async (modelName: string) => {
+    try {
+      const endpoint = ollamaEndpoint.trim() || null;
+      await invoke('delete_ollama_model', {
+        modelName,
+        endpoint
+      });
+
+      toast.success(`Model ${modelName} deleted`);
+      await fetchOllamaModels(true); // Refresh list
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to delete model';
+      toast.error(errorMsg);
+      console.error('Error deleting model:', err);
+    }
+  };
+
+  // Track previous downloading models to detect completions
+  const previousDownloadingRef = useRef<Set<string>>(new Set());
+
+  // Refresh models list when download completes
+  useEffect(() => {
+    const current = downloadingModels;
+    const previous = previousDownloadingRef.current;
+
+    // Check if any downloads completed (were in previous, not in current)
+    for (const modelName of previous) {
+      if (!current.has(modelName)) {
+        // Download completed, refresh models list
+        console.log(`[ModelSettingsModal] Download completed for ${modelName}, refreshing list`);
+        fetchOllamaModels(true);
+        break; // Only refresh once even if multiple completed
+      }
+    }
+
+    // Update ref for next comparison
+    previousDownloadingRef.current = new Set(current);
+  }, [downloadingModels]);
+
+  // Filter Ollama models based on search query
+  const filteredModels = models.filter((model) => {
+    if (!searchQuery.trim()) return true;
+
+    const query = searchQuery.toLowerCase();
+    const isLoaded = modelConfig.model === model.name;
+    const loadedText = isLoaded ? 'loaded' : '';
+
+    return (
+      model.name.toLowerCase().includes(query) ||
+      model.size.toLowerCase().includes(query) ||
+      loadedText.includes(query)
+    );
+  });
 
   return (
     <div>
@@ -472,63 +597,78 @@ export function ModelSettingsModal({
 
         {modelConfig.provider === 'ollama' && (
           <div>
-            <Label>Ollama Endpoint (optional)</Label>
-            <p className="text-sm text-muted-foreground mt-1 mb-2">
-              Leave empty to use http://localhost:11434 or enter a custom endpoint (e.g., http://192.168.1.100:11434)
-            </p>
-            <div className="flex gap-2 mt-1">
-              <div className="relative flex-1">
-                <Input
-                  type="url"
-                  value={ollamaEndpoint}
-                  onChange={(e) => {
-                    setOllamaEndpoint(e.target.value);
-                    // Clear models and errors when endpoint changes to avoid showing stale data
-                    if (e.target.value.trim() !== lastFetchedEndpoint.trim()) {
-                      setModels([]);
-                      setError(''); // Clear error state
-                    }
-                  }}
-                  placeholder="http://localhost:11434"
-                  className={cn(
-                    "pr-10",
-                    endpointValidationState === 'invalid' && "border-red-500"
-                  )}
-                />
-                {endpointValidationState === 'valid' && (
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
-                )}
-                {endpointValidationState === 'invalid' && (
-                  <XCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-red-500" />
-                )}
-              </div>
-              <Button
-                type="button"
-                size={'sm'}
-                onClick={() => fetchOllamaModels()}
-                disabled={isLoadingOllama}
-                variant="outline"
-                className="whitespace-nowrap"
-              >
-                {isLoadingOllama ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Fetching...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Fetch Models
-                  </>
-                )}
-              </Button>
+            <div
+              className="flex items-center justify-between cursor-pointer py-2"
+              onClick={() => setIsEndpointSectionCollapsed(!isEndpointSectionCollapsed)}
+            >
+              <Label className="cursor-pointer">Custom Endpoint (optional)</Label>
+              {isEndpointSectionCollapsed ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              )}
             </div>
-            {ollamaEndpointChanged && !error && (
-              <Alert className="mt-3 border-yellow-500 bg-yellow-50">
-                <AlertDescription className="text-yellow-800">
-                  Endpoint changed. Please click "Fetch Models" to load models from the new endpoint before saving.
-                </AlertDescription>
-              </Alert>
+
+            {!isEndpointSectionCollapsed && (
+              <>
+                <p className="text-sm text-muted-foreground mt-1 mb-2">
+                  Leave empty or enter a custom endpoint (e.g., http://x.yy.zz:11434)
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <div className="relative flex-1">
+                    <Input
+                      type="url"
+                      value={ollamaEndpoint}
+                      onChange={(e) => {
+                        setOllamaEndpoint(e.target.value);
+                        // Clear models and errors when endpoint changes to avoid showing stale data
+                        if (e.target.value.trim() !== lastFetchedEndpoint.trim()) {
+                          setModels([]);
+                          setError(''); // Clear error state
+                        }
+                      }}
+                      placeholder="http://localhost:11434"
+                      className={cn(
+                        "pr-10",
+                        endpointValidationState === 'invalid' && "border-red-500"
+                      )}
+                    />
+                    {endpointValidationState === 'valid' && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
+                    )}
+                    {endpointValidationState === 'invalid' && (
+                      <XCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-red-500" />
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    size={'sm'}
+                    onClick={() => fetchOllamaModels()}
+                    disabled={isLoadingOllama}
+                    variant="outline"
+                    className="whitespace-nowrap"
+                  >
+                    {isLoadingOllama ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Fetching...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Fetch Models
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {ollamaEndpointChanged && !error && (
+                  <Alert className="mt-3 border-yellow-500 bg-yellow-50">
+                    <AlertDescription className="text-yellow-800">
+                      Endpoint changed. Please click "Fetch Models" to load models from the new endpoint before saving.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </>
             )}
           </div>
         )}
@@ -536,7 +676,7 @@ export function ModelSettingsModal({
         {modelConfig.provider === 'ollama' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h4 className="text-lg font-bold">Available Ollama Models</h4>
+              <h4 className="text-sm font-bold">Available Ollama Models</h4>
               {lastFetchedEndpoint && models.length > 0 && (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted-foreground">Using:</span>
@@ -546,46 +686,152 @@ export function ModelSettingsModal({
                 </div>
               )}
             </div>
+            {models.length > 0 && (
+              <div className="mb-4">
+                <Input
+                  placeholder="Search models..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+            )}
             {isLoadingOllama ? (
               <div className="text-center py-8 text-muted-foreground">
                 <RefreshCw className="mx-auto h-8 w-8 animate-spin mb-2" />
                 Loading models...
               </div>
             ) : models.length === 0 ? (
-              <Alert className="mb-4">
-                <AlertDescription>
-                  {ollamaEndpointChanged
-                    ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
-                    : 'No models found. Click "Fetch Models" to load available Ollama models.'}
-                </AlertDescription>
-              </Alert>
+              <div className="space-y-3">
+                <Alert className="mb-4">
+                  <AlertDescription>
+                    {ollamaEndpointChanged
+                      ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
+                      : 'No models found. Download a recommended model or click "Fetch Models" to load available Ollama models.'}
+                  </AlertDescription>
+                </Alert>
+                {!ollamaEndpointChanged && (
+                  <div className="space-y-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={downloadRecommendedModel}
+                      disabled={isDownloading('gemma3:1b')}
+                      className="w-full"
+                    >
+                      {isDownloading('gemma3:1b') ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                          Downloading gemma3:1b...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="mr-2 h-4 w-4" />
+                          Download gemma3:1b (Recommended, ~800MB)
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Show progress for gemma3:1b download */}
+                    {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
+                      <div className="bg-white rounded-md border p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
+                          <span className="text-sm font-semibold text-blue-600">
+                            {Math.round(getProgress('gemma3:1b')!)}%
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
+                            style={{ width: `${getProgress('gemma3:1b')}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : !ollamaEndpointChanged && (
               <ScrollArea className="max-h-[calc(100vh-450px)] overflow-y-auto pr-4">
-                <div className="grid gap-4">
-                  {models.map((model) => (
-                    <div
-                      key={model.id}
-                      className={cn(
-                        'bg-card p-4 m-2 rounded-lg border cursor-pointer transition-colors',
-                        modelConfig.model === model.name
-                          ? 'ring-1 ring-blue-500'
-                          : 'hover:bg-muted/50'
-                      )}
-                      onClick={() =>
-                        setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))
-                      }
-                    >
-                      <h3 className="font-bold">{model.name}</h3>
-                      <p className="text-muted-foreground">Size: {model.size}</p>
-                      <p className="text-muted-foreground">Modified: {model.modified}</p>
-                    </div>
-                  ))}
-                </div>
+                {filteredModels.length === 0 ? (
+                  <Alert>
+                    <AlertDescription>
+                      No models found matching "{searchQuery}". Try a different search term.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <div className="grid gap-4">
+                    {filteredModels.map((model) => {
+                      const progress = getProgress(model.name);
+                      const modelIsDownloading = isDownloading(model.name);
+
+                      return (
+                        <div
+                          key={model.id}
+                          className={cn(
+                            'bg-card p-2 m-0 rounded-md border transition-colors',
+                            modelConfig.model === model.name
+                              ? 'ring-1 ring-blue-500 border-blue-500 background-blue-100'
+                              : 'hover:bg-muted/50',
+                            !modelIsDownloading && 'cursor-pointer'
+                          )}
+                          onClick={() => {
+                            if (!modelIsDownloading) {
+                              setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))
+                            }
+                          }}
+                        >
+                          <div>
+                            <b className="font-bold">{model.name}&nbsp;</b>
+                            <span className="text-muted-foreground">with a size of </span>
+                            <span className="font-mono font-bold text-sm">{model.size}</span>
+                          </div>
+
+                          {/* Progress bar for downloading models */}
+                          {modelIsDownloading && progress !== undefined && (
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm font-medium text-blue-600">Downloading...</span>
+                                <span className="text-sm font-semibold text-blue-600">{Math.round(progress)}%</span>
+                              </div>
+                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
+                                  style={{ width: `${progress}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </ScrollArea>
             )}
           </div>
         )}
       </div>
+
+      {/* Auto-generate summaries toggle */}
+      {/* <div className="mt-6 pt-6 border-t border-gray-200">
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <Label htmlFor="auto-generate" className="text-base font-medium">
+              Auto-generate summaries
+            </Label>
+            <p className="text-sm text-muted-foreground mt-1">
+              Automatically generate summary when opening meetings without one
+            </p>
+          </div>
+          <Switch
+            id="auto-generate"
+            checked={autoGenerateEnabled}
+            onCheckedChange={setAutoGenerateEnabled}
+          />
+        </div>
+      </div> */}
 
       <div className="mt-6 flex justify-end">
         <Button

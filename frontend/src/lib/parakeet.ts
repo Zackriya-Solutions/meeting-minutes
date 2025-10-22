@@ -41,14 +41,14 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'parakeet-tdt-0.6b-v3-int8': {
     friendlyName: 'Lightning',
     icon: '⚡',
-    tagline: 'Real time • Best for speed',
+    tagline: 'Real time • Best for speed, great accuracy',
     recommended: true,
     tier: 'fastest'
   },
   'parakeet-tdt-0.6b-v2-int8': {
     friendlyName: 'Compact',
     icon: '📦',
-    tagline: 'Real time • Smaller size, great accuracy',
+    tagline: 'Real time • Smaller size',
     tier: 'balanced'
   },
   'parakeet-tdt-0.6b-v3-fp32': {

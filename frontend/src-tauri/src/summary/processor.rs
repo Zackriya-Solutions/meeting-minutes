@@ -1,4 +1,5 @@
 use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::templates;
 use regex::Regex;
 use reqwest::Client;
 use tracing::{error, info};
@@ -125,6 +126,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `api_key` - API key for the provider
 /// * `text` - Full transcript text to summarize
 /// * `custom_prompt` - Optional user-provided context
+/// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
 /// * `token_threshold` - Token limit for single-pass processing (default 4000)
 /// * `ollama_endpoint` - Optional custom Ollama endpoint
 ///
@@ -137,6 +139,7 @@ pub async fn generate_meeting_summary(
     api_key: &str,
     text: &str,
     custom_prompt: &str,
+    template_id: &str,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
 ) -> Result<(String, i64), String> {
@@ -239,74 +242,15 @@ pub async fn generate_meeting_summary(
         };
     }
 
-    info!("Generating final markdown report");
+    info!("Generating final markdown report with template: {}", template_id);
 
-    // Markdown template definition (can be externalized later)
-    let template_json = r#"
-{
-  "name": "Standard Meeting Notes",
-  "description": "A standard template for general meetings, focusing on key outcomes and actions.",
-  "sections": [
-    {
-      "title": "Summary",
-      "instruction": "Provide a brief, one-paragraph executive summary of the entire meeting.",
-      "format": "paragraph"
-    },
-    {
-      "title": "Key Decisions",
-      "instruction": "List the most important decisions made during the meeting.",
-      "format": "list"
-    },
-    {
-      "title": "Action Items",
-      "instruction": "List all assigned tasks with their owners and due date.",
-      "format": "list",
-      "item_format": "- **[Owner]** - [Task] - (Due: [Date])"
-    },
-    {
-      "title": "Discussion Highlights",
-      "instruction": "Summarize the main topics of discussion, key arguments, and important insights.",
-      "format": "paragraph"
-    }
-  ]
-}"#;
+    // Load the template using the provided template_id
+    let template = templates::get_template(template_id)
+        .map_err(|e| format!("Failed to load template '{}': {}", template_id, e))?;
 
-    let template: serde_json::Value =
-        serde_json::from_str(template_json).map_err(|e| format!("Failed to parse template: {}", e))?;
-
-    // Build clean markdown template
-    let mut clean_template_markdown = String::new();
-    clean_template_markdown.push_str("# [AI-Generated Title]\n\n");
-
-    if let Some(sections) = template.get("sections").and_then(serde_json::Value::as_array) {
-        for section in sections {
-            if let Some(title) = section.get("title").and_then(serde_json::Value::as_str) {
-                clean_template_markdown.push_str(&format!("## {}\n\n", title));
-            }
-        }
-    }
-
-    // Build section instructions
-    let mut section_instructions = String::from("- **For the main title (`# [AI-Generated Title]`):** Analyze the entire transcript and create a concise, descriptive title for the meeting.\n");
-
-    if let Some(sections) = template.get("sections").and_then(serde_json::Value::as_array) {
-        for section in sections {
-            if let Some(title) = section.get("title").and_then(serde_json::Value::as_str) {
-                if let Some(instruction) = section.get("instruction").and_then(serde_json::Value::as_str) {
-                    section_instructions.push_str(&format!(
-                        "- **For the '{}' section:** {}.\n",
-                        title, instruction
-                    ));
-                }
-                if let Some(item_format) = section.get("item_format").and_then(serde_json::Value::as_str) {
-                    section_instructions.push_str(&format!(
-                        "  - Items in this section should follow the format: `{}`.\n",
-                        item_format
-                    ));
-                }
-            }
-        }
-    }
+    // Generate markdown structure and section instructions using template methods
+    let clean_template_markdown = template.to_markdown_structure();
+    let section_instructions = template.to_section_instructions();
 
     let final_system_prompt = format!(
         r#"You are an expert meeting summarizer. Generate a final meeting report by filling in the provided Markdown template based on the source text.

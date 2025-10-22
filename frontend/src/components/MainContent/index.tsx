@@ -9,7 +9,7 @@ interface MainContentProps {
 
 const MainContent: React.FC<MainContentProps> = ({ children }) => {
   const { isCollapsed } = useSidebar();
-  
+
   return (
     <main 
       className={`flex-1 transition-all duration-300 ${

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -17,7 +17,6 @@ import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
-  DialogTrigger,
   DialogFooter,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -69,6 +68,14 @@ const Sidebar: React.FC = () => {
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
 
+  // State for edit modal
+  const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
+    isOpen: false,
+    meetingId: null,
+    currentTitle: ''
+  });
+  const [editingTitle, setEditingTitle] = useState<string>('');
+
   // Ensure 'meetings' folder is always expanded
   useEffect(() => {
     if (!expandedFolders.has('meetings')) {
@@ -88,13 +95,9 @@ const Sidebar: React.FC = () => {
 
 
   const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
-  
+
   useEffect(() => {
-    setModelConfig({
-      provider: 'ollama',
-      model: 'llama3.2:latest',
-      whisperModel: 'large-v3',
-    });
+    // Note: Don't set hardcoded defaults - let DB be the source of truth
     const fetchModelConfig = async () => {
       // Only make API call if serverAddress is loaded
       if (!serverAddress) {
@@ -128,10 +131,7 @@ const Sidebar: React.FC = () => {
 
 
   useEffect(() => {
-    setTranscriptModelConfig({
-      provider: 'localWhisper',
-      model: 'large-v3',
-    });
+    // Note: Don't set hardcoded defaults - let DB be the source of truth
     const fetchTranscriptSettings = async () => {
       // Only make API call if serverAddress is loaded
       if (!serverAddress) {
@@ -352,6 +352,66 @@ const Sidebar: React.FC = () => {
     setDeleteModalState({ isOpen: false, itemId: null });
   };
 
+  // Handle modal editing of meeting names
+  const handleEditStart = (meetingId: string, currentTitle: string) => {
+    setEditModalState({
+      isOpen: true,
+      meetingId: meetingId,
+      currentTitle: currentTitle
+    });
+    setEditingTitle(currentTitle);
+  };
+
+  const handleEditConfirm = async () => {
+    const newTitle = editingTitle.trim();
+    const meetingId = editModalState.meetingId;
+
+    if (!meetingId) return;
+
+    // Prevent empty titles
+    if (!newTitle) {
+      toast.error("Meeting title cannot be empty");
+      return;
+    }
+
+    try {
+      await invoke('api_save_meeting_title', {
+        meetingId: meetingId,
+        title: newTitle,
+      });
+
+      // Update local state
+      const updatedMeetings = meetings.map((m: CurrentMeeting) =>
+        m.id === meetingId ? { ...m, title: newTitle } : m
+      );
+      setMeetings(updatedMeetings);
+
+      // Update current meeting if it's the one being edited
+      if (currentMeeting?.id === meetingId) {
+        setCurrentMeeting({ id: meetingId, title: newTitle });
+      }
+
+      // Track the edit
+      Analytics.trackButtonClick('edit_meeting_title', 'sidebar');
+
+      toast.success("Meeting title updated successfully");
+
+      // Close modal and reset state
+      setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
+      setEditingTitle('');
+    } catch (error) {
+      console.error('Failed to update meeting title:', error);
+      toast.error("Failed to update meeting title", {
+        description: error instanceof Error ? error.message : String(error)
+      });
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
+    setEditingTitle('');
+  };
+
   const toggleFolder = (folderId: string) => {
     // Normal toggle behavior for all folders
     const newExpanded = new Set(expandedFolders);
@@ -537,16 +597,28 @@ const Sidebar: React.FC = () => {
                 )}
                 <span className="flex-1 break-words">{item.title}</span>
                 {isMeetingItem && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteModalState({ isOpen: true, itemId: item.id });
-                    }}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition-opacity duration-150 flex-shrink-0 ml-auto"
-                    aria-label="Delete meeting"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditStart(item.id, item.title);
+                      }}
+                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
+                      aria-label="Edit meeting title"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteModalState({ isOpen: true, itemId: item.id });
+                      }}
+                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
+                      aria-label="Delete meeting"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
               </div>
               
@@ -725,6 +797,57 @@ const Sidebar: React.FC = () => {
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
+
+      {/* Edit Meeting Title Modal */}
+      <Dialog open={editModalState.isOpen} onOpenChange={(open) => {
+        if (!open) handleEditCancel();
+      }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <VisuallyHidden>
+            <DialogTitle>Edit Meeting Title</DialogTitle>
+          </VisuallyHidden>
+          <div className="py-4">
+            <h3 className="text-lg font-semibold mb-4">Edit Meeting Title</h3>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="meeting-title" className="block text-sm font-medium text-gray-700 mb-2">
+                  Meeting Title
+                </label>
+                <input
+                  id="meeting-title"
+                  type="text"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleEditConfirm();
+                    } else if (e.key === 'Escape') {
+                      handleEditCancel();
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter meeting title"
+                  autoFocus
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={handleEditCancel}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEditConfirm}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+            >
+              Save
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

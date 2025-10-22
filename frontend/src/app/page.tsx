@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button';
 import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
+import { ButtonGroup } from '@/components/ui/button-group';
 
 
 
@@ -97,6 +98,13 @@ export default function Home() {
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
   const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('showConfidenceIndicator');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
+  });
 
   // Permission check hook
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
@@ -108,7 +116,7 @@ export default function Home() {
   // This ensures immediate UI feedback when stop is pressed, while preserving backend-synced state for reload functionality
   const effectiveIsRecording = isProcessingTranscript ? false : recordingState.isRecording;
 
-  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed } = useSidebar();
+  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
   const router = useRouter();
 
@@ -120,6 +128,9 @@ export default function Home() {
 
   const isUserAtBottomRef = useRef<boolean>(true);
 
+  // Ref for the transcript scrollable container
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
   // Keep ref updated with current transcripts
   useEffect(() => {
     transcriptsRef.current = transcripts;
@@ -128,26 +139,38 @@ export default function Home() {
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+      const container = transcriptContainerRef.current;
+      if (!container) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = container;
       const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
       isUserAtBottomRef.current = isAtBottom;
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const container = transcriptContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
   }, []);
 
   // Auto-scroll when transcripts change (only if user is at bottom)
   useEffect(() => {
     // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current) {
-      // Use requestAnimationFrame to ensure DOM is updated before scrolling
-      requestAnimationFrame(() => {
-        window.scrollTo({
-          top: document.documentElement.scrollHeight,
-          behavior: 'smooth'
-        });
-      });
+    if (isUserAtBottomRef.current && transcriptContainerRef.current) {
+      // Wait for Framer Motion animation to complete (150ms) before scrolling
+      // This ensures scrollHeight includes the full rendered height of the new transcript
+      const scrollTimeout = setTimeout(() => {
+        const container = transcriptContainerRef.current;
+        if (container) {
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
+      }, 150); // Match Framer Motion transition duration
+
+      return () => clearTimeout(scrollTimeout);
     }
   }, [transcripts]);
 
@@ -555,32 +578,25 @@ export default function Home() {
     const setupRecordingStoppedListener = async () => {
       try {
         console.log('Setting up recording-stopped listener for navigation...');
-        unlistenFn = await listen<{ message: string; meeting_id?: string }>('recording-stopped', (event) => {
+        unlistenFn = await listen<{
+          message: string;
+          folder_path?: string;
+          meeting_name?: string;
+        }>('recording-stopped', async (event) => {
           console.log('Recording stopped event received:', event.payload);
 
-          const { meeting_id } = event.payload;
-          if (meeting_id) {
-            console.log('Meeting ID found, navigating to meeting details:', meeting_id);
+          const { folder_path, meeting_name } = event.payload;
 
-            // Show success toast with navigation option
-            toast.success('Recording saved successfully!', {
-              description: 'Your meeting has been saved.',
-              action: {
-                label: 'View Meeting',
-                onClick: () => {
-                  router.push(`/meeting-details?id=${meeting_id}`);
-                  Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
-                }
-              },
-              duration: 10000, // Keep toast visible for 10 seconds
-            });
-
-            // Auto-navigate after a short delay (optional - user can click toast action)
-            setTimeout(() => {
-              router.push(`/meeting-details?id=${meeting_id}`);
-              Analytics.trackPageView('meeting_details');
-            }, 2000); // 2 second delay before auto-navigation
+          // Store folder_path and meeting_name for later use in handleRecordingStop2
+          if (folder_path) {
+            sessionStorage.setItem('last_recording_folder_path', folder_path);
+            console.log('✅ Stored folder_path for frontend save:', folder_path);
           }
+          if (meeting_name) {
+            sessionStorage.setItem('last_recording_meeting_name', meeting_name);
+            console.log('✅ Stored meeting_name for frontend save:', meeting_name);
+          }
+
         });
         console.log('Recording stopped listener setup complete');
       } catch (error) {
@@ -932,51 +948,89 @@ export default function Home() {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Save to SQLite
+      // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
+      // This ensures user sees all transcripts streaming in before database save
       if (isCallApi && transcriptionComplete == true) {
 
-        // await new Promise(resolve => setTimeout(resolve, 5000));
         setIsSavingTranscript(true);
 
-        // Fix stale closure issue: Use ref to get fresh transcript state
-        console.log('🔄 Solving stale closure - getting fresh transcript state at save time...');
-
-        // // Force final buffer flush to capture any remaining transcripts
-        // if (finalFlushRef.current) {
-        //   finalFlushRef.current();
-        // }
-
-        // // Wait a moment for any final state updates to propagate
-        // await new Promise(resolve => setTimeout(resolve, 300));
-
-        // Get fresh transcript state using ref (avoids stale closure)
+        // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];
 
-        console.log('💾 Saving transcript to database with fresh state...', {
-          fresh_transcript_count: freshTranscripts.length,
+        // Get folder_path and meeting_name from recording-stopped event
+        const folderPath = sessionStorage.getItem('last_recording_folder_path');
+        const savedMeetingName = sessionStorage.getItem('last_recording_meeting_name');
+
+        console.log('💾 Saving COMPLETE transcripts to database...', {
+          transcript_count: freshTranscripts.length,
+          meeting_name: meetingTitle || savedMeetingName,
+          folder_path: folderPath,
           sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
           last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none',
-          // DEBUG: Check if timestamp fields are present
-          first_has_audio_start_time: freshTranscripts.length > 0 ? freshTranscripts[0].audio_start_time : 'N/A',
-          first_audio_start_time_value: freshTranscripts.length > 0 ? freshTranscripts[0].audio_start_time : undefined,
         });
 
-        const responseData = await invoke('api_save_transcript', {
-          meetingTitle: meetingTitle,
-          transcripts: freshTranscripts, // Use fresh state, not stale closure
-        }) as any;
-
-        const meetingId = responseData.meeting_id;
-        if (!meetingId) {
-          console.error('No meeting_id in response:', responseData);
-          throw new Error('No meeting ID received from save operation');
-        }
-
-        console.log('Successfully saved transcript with meeting ID:', meetingId);
-        setMeetings([{ id: meetingId, title: meetingTitle }, ...meetings]);
-
-        // Track meeting completion analytics
         try {
-          // Calculate meeting duration from transcript timestamps
+          const responseData = await invoke('api_save_transcript', {
+            meetingTitle: meetingTitle || savedMeetingName,
+            transcripts: freshTranscripts, 
+            folderPath: folderPath, 
+          }) as any;
+
+          const meetingId = responseData.meeting_id;
+          if (!meetingId) {
+            console.error('No meeting_id in response:', responseData);
+            throw new Error('No meeting ID received from save operation');
+          }
+
+          console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
+          console.log('   Transcripts:', freshTranscripts.length);
+          console.log('   folder_path:', folderPath);
+
+          // Clean up session storage
+          sessionStorage.removeItem('last_recording_folder_path');
+          sessionStorage.removeItem('last_recording_meeting_name');
+
+          // Refetch meetings and set current meeting
+          await refetchMeetings();
+
+          try {
+            const meetingData = await invoke('api_get_meeting', { meetingId }) as any;
+            if (meetingData) {
+              setCurrentMeeting({
+                id: meetingId,
+                title: meetingData.title
+              });
+              console.log('✅ Current meeting set:', meetingData.title);
+            }
+          } catch (error) {
+            console.warn('Could not fetch meeting details, using ID only:', error);
+            setCurrentMeeting({ id: meetingId, title: meetingTitle || 'New Meeting' });
+          }
+
+          // Show success toast with navigation option
+          toast.success('Recording saved successfully!', {
+            description: `${freshTranscripts.length} transcript segments saved.`,
+            action: {
+              label: 'View Meeting',
+              onClick: () => {
+                router.push(`/meeting-details?id=${meetingId}`);
+                Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
+              }
+            },
+            duration: 10000,
+          });
+
+          // Auto-navigate after a short delay
+          setTimeout(() => {
+            router.push(`/meeting-details?id=${meetingId}`);
+            Analytics.trackPageView('meeting_details');
+          }, 2000);
+
+          setMeetings([{ id: meetingId, title: meetingTitle || savedMeetingName || 'New Meeting' }, ...meetings]);
+
+          // Track meeting completion analytics
+          try {
+            // Calculate meeting duration from transcript timestamps
           let durationSeconds = 0;
           if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
             // Use audio_end_time of last transcript if available
@@ -1025,15 +1079,15 @@ export default function Home() {
           // Don't block user flow on analytics errors
         }
 
-        // Wait a moment to ensure backend has fully processed the save
-        console.log('Waiting for backend processing to complete...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Set current meeting and navigate
-        console.log('Setting current meeting and navigating to details page');
-        setCurrentMeeting({ id: meetingId, title: meetingTitle });
-        setIsMeetingActive(false);
-        router.push(`/meeting-details?id=${meetingId}`);
+        } catch (saveError) {
+          console.error('Failed to save meeting to database:', saveError);
+          toast.error('Failed to save meeting', {
+            description: saveError instanceof Error ? saveError.message : 'Unknown error'
+          });
+          throw saveError;
+        } finally {
+          setIsSavingTranscript(false);
+        }
       }
       setIsMeetingActive(false);
       // isRecordingState already set to false at function start
@@ -1429,6 +1483,55 @@ export default function Home() {
     }
   };
 
+  // Handle confidence indicator toggle
+  const handleConfidenceToggle = (checked: boolean) => {
+    setShowConfidenceIndicator(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('showConfidenceIndicator', checked.toString());
+    }
+    // Trigger a custom event to notify other components
+    window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
+  };
+
+  // Listen for model download completion to auto-close modal
+  useEffect(() => {
+    const setupDownloadListeners = async () => {
+      const unlisteners: (() => void)[] = [];
+
+      // Listen for Whisper model download complete
+      const unlistenWhisper = await listen<{ modelName: string }>('model-download-complete', (event) => {
+        const { modelName } = event.payload;
+        console.log('[HomePage] Whisper model download complete:', modelName);
+
+        // Auto-close modal if the downloaded model matches the selected one
+        if (transcriptModelConfig.provider === 'localWhisper' && transcriptModelConfig.model === modelName) {
+          toast.success('Model ready! Closing window...', { duration: 1500 });
+          setTimeout(() => setShowModelSelector(false), 1500);
+        }
+      });
+      unlisteners.push(unlistenWhisper);
+
+      // Listen for Parakeet model download complete
+      const unlistenParakeet = await listen<{ modelName: string }>('parakeet-model-download-complete', (event) => {
+        const { modelName } = event.payload;
+        console.log('[HomePage] Parakeet model download complete:', modelName);
+
+        // Auto-close modal if the downloaded model matches the selected one
+        if (transcriptModelConfig.provider === 'parakeet' && transcriptModelConfig.model === modelName) {
+          toast.success('Model ready! Closing window...', { duration: 1500 });
+          setTimeout(() => setShowModelSelector(false), 1500);
+        }
+      });
+      unlisteners.push(unlistenParakeet);
+
+      return () => {
+        unlisteners.forEach(unsub => unsub());
+      };
+    };
+
+    setupDownloadListeners();
+  }, [transcriptModelConfig]);
+
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript
@@ -1513,7 +1616,7 @@ export default function Home() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col min-h-screen bg-gray-50 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      className="flex flex-col h-screen bg-gray-50"
     >
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1547,14 +1650,15 @@ export default function Home() {
           </Alert>
         </div>
       )}
-      <div className="flex flex-1">
+      <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
-        <div className="w-full border-r border-gray-200 bg-white flex flex-col">
+        <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
           {/* Title area - Sticky header */}
-          <div className="sticky top-0 z-10 bg-white p-4 border-b border-gray-200">
+          <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
             <div className="flex flex-col space-y-3">
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
+                  <ButtonGroup>
                   {transcripts?.length > 0 && (
                     <Button
                       variant="outline"
@@ -1573,6 +1677,7 @@ export default function Home() {
                   {/* {!isRecording && transcripts?.length === 0 && ( */}
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => setShowModelSelector(true)}
                       title="Transcription Model Settings"
                     >
@@ -1584,6 +1689,7 @@ export default function Home() {
                   
                   <Button
                     variant="outline"
+                    size="sm"
                     onClick={() => setShowDeviceSettings(true)}
                     title="Input/Output devices selection"
                   >
@@ -1594,6 +1700,7 @@ export default function Home() {
                   </Button>
                   <Button
                     variant="outline"
+                    size="sm"
                     onClick={() => setShowLanguageSettings(true)}
                     title="Language"
                   >
@@ -1602,6 +1709,7 @@ export default function Home() {
                       Language
                     </span>
                   </Button>
+                  </ButtonGroup>
                   {/* {showSummary && !isRecording && (
                     <>
                       <button
@@ -2037,12 +2145,33 @@ export default function Home() {
                   <TranscriptSettings
                     transcriptModelConfig={transcriptModelConfig}
                     setTranscriptModelConfig={setTranscriptModelConfig}
-                    // onSave={handleSaveTranscriptConfig}
+                    onModelSelect={() => {
+                      setShowModelSelector(false);
+                      setModelSelectorMessage('');
+                    }}
                   />
                 </div>
 
                 {/* Fixed Footer */}
-                <div className="p-6 pt-4 border-t border-gray-200 flex justify-end">
+                <div className="p-6 pt-4 border-t border-gray-200 flex items-center justify-between">
+                  {/* Left side: Confidence Indicator Toggle */}
+                  <div className="flex items-center gap-3">
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showConfidenceIndicator}
+                        onChange={(e) => handleConfidenceToggle(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Show Confidence Indicators</p>
+                      <p className="text-xs text-gray-500">Display colored dots showing transcription confidence quality</p>
+                    </div>
+                  </div>
+
+                  {/* Right side: Done Button */}
                   <button
                     onClick={() => {
                       setShowModelSelector(false);

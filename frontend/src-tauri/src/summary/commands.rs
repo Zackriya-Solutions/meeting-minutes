@@ -177,6 +177,7 @@ pub async fn api_process_transcript<R: Runtime>(
     _chunk_size: Option<i32>,
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
+    template_id: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<ProcessTranscriptResponse, String> {
     use uuid::Uuid;
@@ -190,6 +191,7 @@ pub async fn api_process_transcript<R: Runtime>(
 
     let pool = state.db_manager.pool().clone();
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
+    let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 
     // Create or reset the process entry in the database
     SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
@@ -227,6 +229,7 @@ pub async fn api_process_transcript<R: Runtime>(
             model,
             model_name,
             final_prompt,
+            final_template_id,
         )
         .await;
     });

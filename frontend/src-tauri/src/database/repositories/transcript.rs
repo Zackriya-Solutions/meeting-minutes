@@ -14,6 +14,7 @@ impl TranscriptsRepository {
         pool: &SqlitePool,
         meeting_title: &str,
         transcripts: &[TranscriptSegment],
+        folder_path: Option<String>,
     ) -> Result<String, SqlxError> {
         let meeting_id = format!("meeting-{}", Uuid::new_v4());
 
@@ -24,12 +25,13 @@ impl TranscriptsRepository {
 
         // 1. Create the new meeting
         let result = sqlx::query(
-            "INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO meetings (id, title, created_at, updated_at, folder_path) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(&meeting_id)
         .bind(meeting_title)
         .bind(now)
         .bind(now)
+        .bind(&folder_path)
         .execute(&mut *transaction)
         .await;
 

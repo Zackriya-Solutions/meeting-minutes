@@ -471,7 +471,7 @@ function ModelCard({
       onMouseLeave={() => setIsHovered(false)}
       className={`
         relative rounded-lg border-2 transition-all cursor-pointer
-        ${isSelected
+        ${isSelected && isAvailable
           ? 'border-blue-500 bg-blue-50'
           : isAvailable
             ? 'border-gray-200 hover:border-gray-300 bg-white'
@@ -497,13 +497,13 @@ function ModelCard({
             <div className="flex items-center gap-2 mb-1">
               <span className="text-2xl">{icon}</span>
               <h3 className="font-semibold text-gray-900">{displayName}</h3>
-              {isSelected && (
+              {isSelected && isAvailable && (
                 <motion.span
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   className="bg-blue-600 text-white px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
                 >
-                  ✓ Active
+                  ✓
                 </motion.span>
               )}
             </div>

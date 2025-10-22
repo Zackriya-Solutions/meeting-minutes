@@ -1,0 +1,51 @@
+{
+  "name": "Project Sync / Status Update",
+  "description": "Weekly or bi-weekly project status meeting focusing on milestones and risks.",
+  "sections": [
+    {
+      "title": "Meeting Date & Time",
+      "instruction": "Date, start/end time, facilitator name",
+      "format": "string"
+    },
+    {
+      "title": "Attendees",
+      "instruction": "List attendees and their roles",
+      "format": "list"
+    },
+    {
+      "title": "Milestones & Status",
+      "instruction": "Current milestones with status and estimated completion date",
+      "format": "list",
+      "item_format": "| **Milestone** | **Status** | **ETA** |\n| --- | --- | --- |"
+    },
+    {
+      "title": "Progress Summary",
+      "instruction": "Short paragraph summarizing progress since last sync meeting",
+      "format": "paragraph"
+    },
+    {
+      "title": "Top Risks & Mitigations",
+      "instruction": "List top risks with impact level, mitigation plan, and owner",
+      "format": "list",
+      "item_format": "| **Risk** | **Impact** | **Mitigation** | **Owner** |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Key Decisions",
+      "instruction": "Decisions made in this meeting with rationale and timestamp",
+      "format": "list",
+      "item_format": "| **Decision** | **Rationale** | **Timestamp** |\n| --- | --- | --- |"
+    },
+    {
+      "title": "Action Items",
+      "instruction": "Tasks with owners, due dates, priority, and status",
+      "format": "list",
+      "item_format": "| **Owner** | **Task** | **Due Date** | **Priority** | **Status** |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Related Documents",
+      "instruction": "Links to relevant documents, tickets, or designs discussed",
+      "format": "list",
+      "item_format": "| **Document Title** | **URL** | **Type** |\n| --- | --- | --- |"
+    }
+  ]
+}
