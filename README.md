@@ -34,9 +34,9 @@
 </p>
 
 <p align="center">
-    <img src="docs/demo_small.gif" width="650" alt="Meetily Demo" />
+    <img src="docs/meetily_demo.gif" width="650" alt="Meetily Demo" />
     <br>
-    <a href="https://youtu.be/5k_Q5Wlahuk">View full Demo Video</a>
+    <a href="https://youtu.be/6FnhSC_eSz8">View full Demo Video</a>
 </p>
 
 </div>
@@ -144,7 +144,7 @@ pnpm run tauri:build
 
 Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
 <p align="center">
-    <img src="docs/transcription.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
+    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
 </p>
 
 ### 🤖 AI-Powered Summaries
@@ -155,12 +155,16 @@ Generate meeting summaries with your choice of AI provider. **Ollama** (local) i
     <img src="docs/summary.png" width="650" style="border-radius: 10px;" alt="Summary generation" />
 </p>
 
+<p align="center">
+    <img src="docs/editor1.png" width="650" style="border-radius: 10px;" alt="Editor Summary generation" />
+</p>
+
 ### 🔒 Privacy-First Design
 
 All data stays on your machine. Transcription models, recordings, and transcripts are stored locally.
 
 <p align="center">
-    <img src="docs/local.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
+    <img src="docs/settings.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
 </p>
 
 ### 🎙️ Professional Audio Mixing
@@ -168,7 +172,7 @@ All data stays on your machine. Transcription models, recordings, and transcript
 Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention.
 
 <p align="center">
-    <img src="docs/device_selection.png" width="650" style="border-radius: 10px;" alt="Device selection" />
+    <img src="docs/audio.png" width="650" style="border-radius: 10px;" alt="Device selection" />
 </p>
 
 ### ⚡ GPU Acceleration
