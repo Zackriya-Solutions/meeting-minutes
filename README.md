@@ -222,8 +222,11 @@ We welcome contributions from the community! If you have any questions or sugges
 
 ## Acknowledgments
 
-- We borrowes some code from [Whisper.cpp](https://github.com/ggerganov/whisper.cpp)
-- We borrowes some code from [Screenpipe](https://github.com/mediar-ai/screenpipe)
+- We borrowed some code from [Whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+- We borrowed some code from [Screenpipe](https://github.com/mediar-ai/screenpipe).
+- We borrowed some code from [transcribe-rs](https://crates.io/crates/transcribe-rs).
+- Thanks to **NVIDIA** for developing the **Parakeet** model.
+- Thanks to [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) for providing the **ONNX conversion** of the Parakeet model.
 
 ## Star History
 
