@@ -20,7 +20,7 @@ import { Sparkles, Settings, Loader2, FileText, Check } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface SummaryGeneratorButtonGroupProps {
   modelConfig: ModelConfig;
@@ -34,6 +34,7 @@ interface SummaryGeneratorButtonGroupProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   hasTranscripts?: boolean;
   isModelConfigLoading?: boolean;
+  onOpenModelSettings?: (openFn: () => void) => void;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -47,10 +48,28 @@ export function SummaryGeneratorButtonGroup({
   selectedTemplate,
   onTemplateSelect,
   hasTranscripts = true,
-  isModelConfigLoading = false
+  isModelConfigLoading = false,
+  onOpenModelSettings
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+
+  // Expose the function to open the modal via callback registration
+  useEffect(() => {
+    if (onOpenModelSettings) {
+      // Register our open dialog function with the parent by calling the callback
+      // This allows the parent to store a reference to this function
+      const openDialog = () => {
+        console.log('📱 Opening model settings dialog via callback');
+        setSettingsDialogOpen(true);
+      };
+
+      // Call the parent's callback with our open function
+      // Note: This assumes onOpenModelSettings accepts a function parameter
+      // We'll need to adjust the signature
+      onOpenModelSettings(openDialog);
+    }
+  }, [onOpenModelSettings]);
 
   if (!hasTranscripts) {
     return null;

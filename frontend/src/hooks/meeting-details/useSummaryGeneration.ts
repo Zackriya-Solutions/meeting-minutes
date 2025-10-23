@@ -17,6 +17,7 @@ interface UseSummaryGenerationProps {
   onMeetingUpdated?: () => Promise<void>;
   updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: Summary | null) => void;
+  onOpenModelSettings?: () => void;
 }
 
 export function useSummaryGeneration({
@@ -28,6 +29,7 @@ export function useSummaryGeneration({
   onMeetingUpdated,
   updateMeetingTitle,
   setAiSummary,
+  onOpenModelSettings,
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -119,11 +121,23 @@ export function useSummaryGeneration({
           setSummaryError(errorMessage);
           setSummaryStatus('error');
 
+          // Check if this is a "model is required" error
+          const isModelRequiredError = errorMessage.includes('model is required') ||
+                                        errorMessage.includes('"model":"required"') ||
+                                        errorMessage.toLowerCase().includes('model') && errorMessage.toLowerCase().includes('required');
+
+          // Show error toast
           toast.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary`, {
             description: errorMessage.includes('Connection refused')
               ? 'Could not connect to LLM service. Please ensure Ollama or your configured LLM provider is running.'
               : errorMessage,
           });
+
+          // Auto-open model settings modal if model is missing
+          if (isModelRequiredError && onOpenModelSettings) {
+            console.log('🔧 Model required error detected, opening model settings...');
+            onOpenModelSettings();
+          }
 
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,

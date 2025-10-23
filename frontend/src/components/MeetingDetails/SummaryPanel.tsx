@@ -46,6 +46,7 @@ interface SummaryPanelProps {
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
+  onOpenModelSettings?: (openFn: () => void) => void;
 }
 
 export function SummaryPanel({
@@ -79,7 +80,8 @@ export function SummaryPanel({
   availableTemplates,
   selectedTemplate,
   onTemplateSelect,
-  isModelConfigLoading = false
+  isModelConfigLoading = false,
+  onOpenModelSettings
 }: SummaryPanelProps) {
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
@@ -112,6 +114,7 @@ export function SummaryPanel({
                 onTemplateSelect={onTemplateSelect}
                 hasTranscripts={transcripts.length > 0}
                 isModelConfigLoading={isModelConfigLoading}
+                onOpenModelSettings={onOpenModelSettings}
               />
             </div>
 
@@ -150,6 +153,7 @@ export function SummaryPanel({
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              onOpenModelSettings={onOpenModelSettings}
             />
           </div>
           {/* Loading spinner */}
@@ -176,6 +180,7 @@ export function SummaryPanel({
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              onOpenModelSettings={onOpenModelSettings}
             />
           </div>
           {/* Empty state message */}
