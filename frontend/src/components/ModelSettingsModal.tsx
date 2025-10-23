@@ -59,7 +59,7 @@ export function ModelSettingsModal({
   const [error, setError] = useState<string>('');
   const [apiKey, setApiKey] = useState<string | null>(modelConfig.apiKey || null);
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
-  const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
+  const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(!!modelConfig.apiKey?.trim());
   const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
   const { serverAddress } = useSidebar();
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
@@ -128,6 +128,14 @@ export function ModelSettingsModal({
       setApiKey(modelConfig.apiKey || null);
     }
   }, [modelConfig.apiKey]);
+
+  // Auto-unlock when API key becomes empty, 
+  useEffect(() => {
+    const hasContent = !!apiKey?.trim();
+    if (!hasContent) {
+      setIsApiKeyLocked(false);
+    }
+  }, [apiKey]);
 
   const modelOptions = {
     ollama: models.map((model) => model.name),
@@ -565,23 +573,25 @@ export function ModelSettingsModal({
                 placeholder="Enter your API key"
                 className="pr-24"
               />
-              {isApiKeyLocked && (
+              {isApiKeyLocked && apiKey?.trim() && (
                 <div
                   onClick={handleInputClick}
                   className="absolute inset-0 flex items-center justify-center bg-muted/50 rounded-md cursor-not-allowed"
                 />
               )}
               <div className="absolute inset-y-0 right-0 pr-1 flex items-center space-x-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
-                  className={isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}
-                  title={isApiKeyLocked ? 'Unlock to edit' : 'Lock to prevent editing'}
-                >
-                  {isApiKeyLocked ? <Lock /> : <Unlock />}
-                </Button>
+                {apiKey?.trim() && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
+                    className={isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}
+                    title={isApiKeyLocked ? 'Unlock to edit' : 'Lock to prevent editing'}
+                  >
+                    {isApiKeyLocked ? <Lock /> : <Unlock />}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
