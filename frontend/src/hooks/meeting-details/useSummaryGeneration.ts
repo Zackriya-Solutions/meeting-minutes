@@ -5,6 +5,7 @@ import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { isOllamaNotInstalledError } from '@/lib/utils';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -17,6 +18,7 @@ interface UseSummaryGenerationProps {
   onMeetingUpdated?: () => Promise<void>;
   updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: Summary | null) => void;
+  onOpenModelSettings?: () => void;
 }
 
 export function useSummaryGeneration({
@@ -28,6 +30,7 @@ export function useSummaryGeneration({
   onMeetingUpdated,
   updateMeetingTitle,
   setAiSummary,
+  onOpenModelSettings,
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -119,11 +122,23 @@ export function useSummaryGeneration({
           setSummaryError(errorMessage);
           setSummaryStatus('error');
 
+          // Check if this is a "model is required" error
+          const isModelRequiredError = errorMessage.includes('model is required') ||
+                                        errorMessage.includes('"model":"required"') ||
+                                        errorMessage.toLowerCase().includes('model') && errorMessage.toLowerCase().includes('required');
+
+          // Show error toast
           toast.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary`, {
             description: errorMessage.includes('Connection refused')
               ? 'Could not connect to LLM service. Please ensure Ollama or your configured LLM provider is running.'
               : errorMessage,
           });
+
+          // Auto-open model settings modal if model is missing
+          if (isModelRequiredError && onOpenModelSettings) {
+            console.log('🔧 Model required error detected, opening model settings...');
+            onOpenModelSettings();
+          }
 
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,
@@ -299,10 +314,28 @@ export function useSummaryGeneration({
         }
       } catch (error) {
         console.error('Error checking Ollama models:', error);
-        toast.error(
-          'Failed to check Ollama models. Please ensure Ollama is running and download a model from Settings.',
-          { duration: 5000 }
-        );
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        if (isOllamaNotInstalledError(errorMessage)) {
+          // Ollama is not installed - show specific message with download link
+          toast.error(
+            'Ollama is not installed',
+            {
+              description: 'Please download and install Ollama to use local models.',
+              duration: 7000,
+              action: {
+                label: 'Download',
+                onClick: () => invokeTauri('open_external_url', { url: 'https://ollama.com/download' })
+              }
+            }
+          );
+        } else {
+          // Other error - generic message
+          toast.error(
+            'Failed to check Ollama models. Please ensure Ollama is running and download a model from Settings.',
+            { duration: 5000 }
+          );
+        }
         return;
       }
     }

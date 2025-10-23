@@ -15,8 +15,8 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink } from 'lucide-react';
+import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface ModelConfig {
@@ -59,7 +59,7 @@ export function ModelSettingsModal({
   const [error, setError] = useState<string>('');
   const [apiKey, setApiKey] = useState<string | null>(modelConfig.apiKey || null);
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
-  const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
+  const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(!!modelConfig.apiKey?.trim());
   const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
   const { serverAddress } = useSidebar();
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
@@ -75,6 +75,7 @@ export function ModelSettingsModal({
   const [autoGenerateEnabled, setAutoGenerateEnabled] = useState<boolean>(true); // Default to true
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
+  const [ollamaNotInstalled, setOllamaNotInstalled] = useState<boolean>(false); // Track if Ollama is not installed
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -128,6 +129,14 @@ export function ModelSettingsModal({
       setApiKey(modelConfig.apiKey || null);
     }
   }, [modelConfig.apiKey]);
+
+  // Auto-unlock when API key becomes empty, 
+  useEffect(() => {
+    const hasContent = !!apiKey?.trim();
+    if (!hasContent) {
+      setIsApiKeyLocked(false);
+    }
+  }, [apiKey]);
 
   const modelOptions = {
     ollama: models.map((model) => model.name),
@@ -252,6 +261,7 @@ export function ModelSettingsModal({
       setHasAutoFetched(false); // Reset flag so it can auto-fetch again if user switches back
       setModels([]); // Clear models list
       setError(''); // Clear any error state
+      setOllamaNotInstalled(false); // Reset installation status
     }
   }, [modelConfig.provider]);
 
@@ -302,9 +312,20 @@ export function ModelSettingsModal({
 
       // Cache the fetched models for this endpoint
       modelsCache.current.set(trimmedEndpoint, modelList);
+
+      // Successfully fetched models, Ollama is installed
+      setOllamaNotInstalled(false);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to load Ollama models';
       setError(errorMsg);
+
+      // Check if error indicates Ollama is not installed
+      if (isOllamaNotInstalledError(errorMsg)) {
+        setOllamaNotInstalled(true);
+      } else {
+        setOllamaNotInstalled(false);
+      }
+
       if (!silent) {
         toast.error(errorMsg);
       }
@@ -401,11 +422,9 @@ export function ModelSettingsModal({
 
     try {
       const endpoint = ollamaEndpoint.trim() || null;
-      toast.info(`Downloading ${recommendedModel}...`, {
-        description: 'This may take a few minutes'
-      });
 
       // The download will be tracked by the global context via events
+      // Progress toasts are shown automatically by OllamaDownloadContext
       await invoke('pull_ollama_model', {
         modelName: recommendedModel,
         endpoint
@@ -419,7 +438,21 @@ export function ModelSettingsModal({
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to download model';
       console.error('Error downloading model:', err);
-      // Error toast is handled by the context
+
+      // Check if Ollama is not installed and show appropriate error
+      if (isOllamaNotInstalledError(errorMsg)) {
+        toast.error('Ollama is not installed', {
+          description: 'Please download and install Ollama before downloading models.',
+          duration: 7000,
+          action: {
+            label: 'Download',
+            onClick: () => invoke('open_external_url', { url: 'https://ollama.com/download' })
+          }
+        });
+        // Update the installation status flag
+        setOllamaNotInstalled(true);
+      }
+      // Other errors are handled by the context
     }
   };
 
@@ -565,23 +598,25 @@ export function ModelSettingsModal({
                 placeholder="Enter your API key"
                 className="pr-24"
               />
-              {isApiKeyLocked && (
+              {isApiKeyLocked && apiKey?.trim() && (
                 <div
                   onClick={handleInputClick}
                   className="absolute inset-0 flex items-center justify-center bg-muted/50 rounded-md cursor-not-allowed"
                 />
               )}
               <div className="absolute inset-y-0 right-0 pr-1 flex items-center space-x-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
-                  className={isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}
-                  title={isApiKeyLocked ? 'Unlock to edit' : 'Lock to prevent editing'}
-                >
-                  {isApiKeyLocked ? <Lock /> : <Unlock />}
-                </Button>
+                {apiKey?.trim() && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
+                    className={isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}
+                    title={isApiKeyLocked ? 'Unlock to edit' : 'Lock to prevent editing'}
+                  >
+                    {isApiKeyLocked ? <Lock /> : <Unlock />}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
@@ -703,53 +738,79 @@ export function ModelSettingsModal({
               </div>
             ) : models.length === 0 ? (
               <div className="space-y-3">
-                <Alert className="mb-4">
-                  <AlertDescription>
-                    {ollamaEndpointChanged
-                      ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
-                      : 'No models found. Download a recommended model or click "Fetch Models" to load available Ollama models.'}
-                  </AlertDescription>
-                </Alert>
-                {!ollamaEndpointChanged && (
-                  <div className="space-y-3">
+                {ollamaNotInstalled ? (
+                  /* Show Ollama download link when not installed */
+                  <div className="space-y-4">
+                    <Alert className="border-orange-500 bg-orange-50">
+                      <AlertDescription className="text-orange-800">
+                        Ollama is not installed or not running. Please download and install Ollama to use local models.
+                      </AlertDescription>
+                    </Alert>
                     <Button
-                      variant="outline"
+                      variant="default"
                       size="sm"
-                      onClick={downloadRecommendedModel}
-                      disabled={isDownloading('gemma3:1b')}
-                      className="w-full"
+                      onClick={() => invoke('open_external_url', { url: 'https://ollama.com/download' })}
+                      className="w-full bg-blue-600 hover:bg-blue-700"
                     >
-                      {isDownloading('gemma3:1b') ? (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                          Downloading gemma3:1b...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="mr-2 h-4 w-4" />
-                          Download gemma3:1b (Recommended, ~800MB)
-                        </>
-                      )}
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Download Ollama
                     </Button>
+                    <div className="text-sm text-muted-foreground text-center">
+                      After installing Ollama, restart this application and click "Fetch Models" to continue.
+                    </div>
+                  </div>
+                ) : (
+                  /* Show model download option when Ollama is installed but no models */
+                  <>
+                    <Alert className="mb-4">
+                      <AlertDescription>
+                        {ollamaEndpointChanged
+                          ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
+                          : 'No models found. Download a recommended model or click "Fetch Models" to load available Ollama models.'}
+                      </AlertDescription>
+                    </Alert>
+                    {!ollamaEndpointChanged && (
+                      <div className="space-y-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={downloadRecommendedModel}
+                          disabled={isDownloading('gemma3:1b')}
+                          className="w-full"
+                        >
+                          {isDownloading('gemma3:1b') ? (
+                            <>
+                              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                              Downloading gemma3:1b...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="mr-2 h-4 w-4" />
+                              Download gemma3:1b (Recommended, ~800MB)
+                            </>
+                          )}
+                        </Button>
 
-                    {/* Show progress for gemma3:1b download */}
-                    {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
-                      <div className="bg-white rounded-md border p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
-                          <span className="text-sm font-semibold text-blue-600">
-                            {Math.round(getProgress('gemma3:1b')!)}%
-                          </span>
-                        </div>
-                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
-                            style={{ width: `${getProgress('gemma3:1b')}%` }}
-                          />
-                        </div>
+                        {/* Show progress for gemma3:1b download */}
+                        {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
+                          <div className="bg-white rounded-md border p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
+                              <span className="text-sm font-semibold text-blue-600">
+                                {Math.round(getProgress('gemma3:1b')!)}%
+                              </span>
+                            </div>
+                            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
+                                style={{ width: `${getProgress('gemma3:1b')}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
               </div>
             ) : !ollamaEndpointChanged && (

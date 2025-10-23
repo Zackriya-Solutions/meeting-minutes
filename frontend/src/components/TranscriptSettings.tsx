@@ -92,7 +92,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     };
 
     return (
-        <div className='max-h-[calc(100vh-200px)]'>
+        <div>
             <div>
                 {/* <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-semibold text-gray-900">Transcript Settings</h3>

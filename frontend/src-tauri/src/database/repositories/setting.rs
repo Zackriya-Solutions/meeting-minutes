@@ -132,8 +132,6 @@ impl SettingsRepository {
                 .await?;
         Ok(setting)
 
-        // TODO: In higher layer if provider is not found(not returned anything from  here),
-        // return default values parakeet and parakeet-tdt-0.6b-v3-int8
     }
 
     pub async fn save_transcript_config(
@@ -180,7 +178,7 @@ impl SettingsRepository {
         let query = format!(
             r#"
             INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'localWhisper', 'large-v3', $1)
+            VALUES ('1', 'parakeet', 'parakeet-tdt-0.6b-v3-int8', $1)
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,

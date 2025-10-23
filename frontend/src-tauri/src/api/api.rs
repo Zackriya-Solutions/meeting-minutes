@@ -606,8 +606,8 @@ pub async fn api_get_transcript_config<R: Runtime>(
         Ok(None) => {
             log_info!("No transcript config found, returning default.");
             Ok(Some(TranscriptConfig {
-                provider: "localWhisper".to_string(),
-                model: "large-v3".to_string(),
+                provider: "parakeet".to_string(),
+                model: "parakeet-tdt-0.6b-v3-int8".to_string(),
                 api_key: None,
             }))
         }

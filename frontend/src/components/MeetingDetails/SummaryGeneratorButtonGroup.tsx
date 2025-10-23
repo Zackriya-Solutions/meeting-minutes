@@ -20,7 +20,8 @@ import { Sparkles, Settings, Loader2, FileText, Check } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { isOllamaNotInstalledError } from '@/lib/utils';
 
 interface SummaryGeneratorButtonGroupProps {
   modelConfig: ModelConfig;
@@ -34,6 +35,7 @@ interface SummaryGeneratorButtonGroupProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   hasTranscripts?: boolean;
   isModelConfigLoading?: boolean;
+  onOpenModelSettings?: (openFn: () => void) => void;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -47,10 +49,28 @@ export function SummaryGeneratorButtonGroup({
   selectedTemplate,
   onTemplateSelect,
   hasTranscripts = true,
-  isModelConfigLoading = false
+  isModelConfigLoading = false,
+  onOpenModelSettings
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+
+  // Expose the function to open the modal via callback registration
+  useEffect(() => {
+    if (onOpenModelSettings) {
+      // Register our open dialog function with the parent by calling the callback
+      // This allows the parent to store a reference to this function
+      const openDialog = () => {
+        console.log('📱 Opening model settings dialog via callback');
+        setSettingsDialogOpen(true);
+      };
+
+      // Call the parent's callback with our open function
+      // Note: This assumes onOpenModelSettings accepts a function parameter
+      // We'll need to adjust the signature
+      onOpenModelSettings(openDialog);
+    }
+  }, [onOpenModelSettings]);
 
   if (!hasTranscripts) {
     return null;
@@ -82,10 +102,28 @@ export function SummaryGeneratorButtonGroup({
       onGenerateSummary(customPrompt);
     } catch (error) {
       console.error('Error checking Ollama models:', error);
-      toast.error(
-        'Failed to check Ollama models. Please check if Ollama is running and download a model.',
-        { duration: 5000 }
-      );
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (isOllamaNotInstalledError(errorMessage)) {
+        // Ollama is not installed - show specific message with download link
+        toast.error(
+          'Ollama is not installed',
+          {
+            description: 'Please download and install Ollama to use local models.',
+            duration: 7000,
+            action: {
+              label: 'Download',
+              onClick: () => invoke('open_external_url', { url: 'https://ollama.com/download' })
+            }
+          }
+        );
+      } else {
+        // Other error - generic message
+        toast.error(
+          'Failed to check Ollama models. Please check if Ollama is running and download a model.',
+          { duration: 5000 }
+        );
+      }
       setSettingsDialogOpen(true);
     } finally {
       setIsCheckingModels(false);
@@ -122,7 +160,7 @@ export function SummaryGeneratorButtonGroup({
         ) : (
           <>
             <Sparkles className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline xl:inline">Generate Note</span>
+            <span className="hidden lg:inline xl:inline">Generate Summary</span>
           </>
         )}
       </Button>

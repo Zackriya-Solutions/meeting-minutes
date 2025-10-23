@@ -1675,40 +1675,42 @@ export default function Home() {
                     </Button>
                   )}
                   {/* {!isRecording && transcripts?.length === 0 && ( */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowModelSelector(true)}
-                      title="Transcription Model Settings"
-                    >
-                      <Settings />
-                      <span className='hidden md:inline'>
-                        Model
-                      </span>
-                    </Button>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowDeviceSettings(true)}
-                    title="Input/Output devices selection"
-                  >
-                    <MicrophoneIcon />
-                    <span className='hidden md:inline'>
-                      Devices
-                    </span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowLanguageSettings(true)}
-                    title="Language"
-                  >
-                    <GlobeIcon />
-                    <span className='hidden md:inline'>
-                      Language
-                    </span>
-                  </Button>
+                  {/*   <Button */}
+                  {/*     variant="outline" */}
+                  {/*     size="sm" */}
+                  {/*     onClick={() => setShowModelSelector(true)} */}
+                  {/*     title="Transcription Model Settings" */}
+                  {/*   > */}
+                  {/*     <Settings /> */}
+                  {/*     <span className='hidden md:inline'> */}
+                  {/*       Model */}
+                  {/*     </span> */}
+                  {/*   </Button> */}
+                  {/**/}
+                  {/* <Button */}
+                  {/*   variant="outline" */}
+                  {/*   size="sm" */}
+                  {/*   onClick={() => setShowDeviceSettings(true)} */}
+                  {/*   title="Input/Output devices selection" */}
+                  {/* > */}
+                  {/*   <MicrophoneIcon /> */}
+                  {/*   <span className='hidden md:inline'> */}
+                  {/*     Devices */}
+                  {/*   </span> */}
+                  {/* </Button> */}
+                  {transcriptModelConfig.provider === "localWhisper" &&
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowLanguageSettings(true)}
+                        title="Language"
+                      >
+                        <GlobeIcon />
+                        <span className='hidden md:inline'>
+                          Language
+                        </span>
+                      </Button>
+                    }
                   </ButtonGroup>
                   {/* {showSummary && !isRecording && (
                     <>
@@ -2128,19 +2130,19 @@ export default function Home() {
                 {/* Scrollable Content */}
                 <div className="flex-1 overflow-y-auto p-6 pt-4">
                   {/* Only show warning if there's an error message (triggered by transcription error) */}
-                  {modelSelectorMessage && (
-                    <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <div className="flex items-start space-x-3">
-                        <span className="text-yellow-600 text-xl">⚠️</span>
-                        <div>
-                          <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4>
-                          <p className="text-sm text-yellow-700">
-                            {modelSelectorMessage}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  {/* {modelSelectorMessage && ( */}
+                  {/*   <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg"> */}
+                  {/*     <div className="flex items-start space-x-3"> */}
+                  {/*       <span className="text-yellow-600 text-xl">⚠️</span> */}
+                  {/*       <div> */}
+                  {/*         <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4> */}
+                  {/*         <p className="text-sm text-yellow-700"> */}
+                  {/*           {modelSelectorMessage} */}
+                  {/*         </p> */}
+                  {/*       </div> */}
+                  {/*     </div> */}
+                  {/*   </div> */}
+                  {/* )} */}
 
                   <TranscriptSettings
                     transcriptModelConfig={transcriptModelConfig}

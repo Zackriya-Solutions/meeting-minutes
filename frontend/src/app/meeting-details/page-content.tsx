@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -39,6 +39,9 @@ export default function PageContent({
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
 
+  // Ref to store the modal open function from SummaryGeneratorButtonGroup
+  const openModelSettingsRef = useRef<(() => void) | null>(null);
+
   // Sidebar context
   const { serverAddress } = useSidebar();
 
@@ -46,6 +49,22 @@ export default function PageContent({
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const modelConfig = useModelConfiguration({ serverAddress });
   const templates = useTemplates();
+
+  // Callback to register the modal open function
+  const handleRegisterModalOpen = (openFn: () => void) => {
+    console.log('📝 Registering modal open function in PageContent');
+    openModelSettingsRef.current = openFn;
+  };
+
+  // Callback to trigger modal open (called from error handler)
+  const handleOpenModelSettings = () => {
+    console.log('🔔 Opening model settings from PageContent');
+    if (openModelSettingsRef.current) {
+      openModelSettingsRef.current();
+    } else {
+      console.warn('⚠️ Modal open function not yet registered');
+    }
+  };
 
   const summaryGeneration = useSummaryGeneration({
     meeting,
@@ -56,6 +75,7 @@ export default function PageContent({
     onMeetingUpdated,
     updateMeetingTitle: meetingData.updateMeetingTitle,
     setAiSummary: meetingData.setAiSummary,
+    onOpenModelSettings: handleOpenModelSettings,
   });
 
   const copyOperations = useCopyOperations({
@@ -143,6 +163,7 @@ export default function PageContent({
           selectedTemplate={templates.selectedTemplate}
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={modelConfig.isLoading}
+          onOpenModelSettings={handleRegisterModalOpen}
         />
 
       </div>
