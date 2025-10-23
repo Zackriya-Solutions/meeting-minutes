@@ -5,6 +5,7 @@ import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { isOllamaNotInstalledError } from '@/lib/utils';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -313,10 +314,28 @@ export function useSummaryGeneration({
         }
       } catch (error) {
         console.error('Error checking Ollama models:', error);
-        toast.error(
-          'Failed to check Ollama models. Please ensure Ollama is running and download a model from Settings.',
-          { duration: 5000 }
-        );
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        if (isOllamaNotInstalledError(errorMessage)) {
+          // Ollama is not installed - show specific message with download link
+          toast.error(
+            'Ollama is not installed',
+            {
+              description: 'Please download and install Ollama to use local models.',
+              duration: 7000,
+              action: {
+                label: 'Download',
+                onClick: () => invokeTauri('open_external_url', { url: 'https://ollama.com/download' })
+              }
+            }
+          );
+        } else {
+          // Other error - generic message
+          toast.error(
+            'Failed to check Ollama models. Please ensure Ollama is running and download a model from Settings.',
+            { duration: 5000 }
+          );
+        }
         return;
       }
     }
