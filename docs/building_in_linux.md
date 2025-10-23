@@ -22,7 +22,11 @@ sudo dnf install gcc-c++ cmake git
 sudo pacman -S base-devel cmake git
 ```
 
-### 2. Build and Run
+### 2. Install Tauri Dependencies
+
+https://v2.tauri.app/start/prerequisites/#linux
+
+### 3. Build and Run
 
 ```bash
 # Development mode (with hot reload)
