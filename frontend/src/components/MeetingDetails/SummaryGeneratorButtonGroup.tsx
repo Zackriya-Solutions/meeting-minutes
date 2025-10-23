@@ -122,7 +122,7 @@ export function SummaryGeneratorButtonGroup({
         ) : (
           <>
             <Sparkles className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline xl:inline">Generate Note</span>
+            <span className="hidden lg:inline xl:inline">Generate Summary</span>
           </>
         )}
       </Button>
