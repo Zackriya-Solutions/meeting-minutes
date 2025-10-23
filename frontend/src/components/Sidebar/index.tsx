@@ -59,14 +59,14 @@ const Sidebar: React.FC = () => {
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
-    model: 'llama3.2:latest',
-    whisperModel: 'large-v3',
+    model: '',
+    whisperModel: '',
     apiKey: null,
     ollamaEndpoint: null
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'localWhisper',
-    model: 'large-v3',
+    provider: 'parakeet',
+    model: 'parakeet-tdt-0.6b-v3-int8',
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
 
