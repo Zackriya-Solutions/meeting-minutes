@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'gemini' | 'perplexity';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -159,13 +159,28 @@ export function ModelSettingsModal({
       'gpt-3.5-turbo-1106'
     ],
     openrouter: openRouterModels.map((m) => m.id),
+    gemini: [
+      'gemini-2.0-flash-exp',
+      'gemini-exp-1206',
+      'gemini-2.0-flash-thinking-exp-1219',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-8b'
+    ],
+    perplexity: [
+      'llama-3.1-sonar-small-128k-online',
+      'llama-3.1-sonar-large-128k-online',
+      'llama-3.1-sonar-huge-128k-online'
+    ],
   };
 
   const requiresApiKey =
     modelConfig.provider === 'claude' ||
     modelConfig.provider === 'groq' ||
     modelConfig.provider === 'openai' ||
-    modelConfig.provider === 'openrouter';
+    modelConfig.provider === 'openrouter' ||
+    modelConfig.provider === 'gemini' ||
+    modelConfig.provider === 'perplexity';
 
   // Check if Ollama endpoint has changed but models haven't been fetched yet
   const ollamaEndpointChanged = modelConfig.provider === 'ollama' &&
@@ -524,6 +539,8 @@ export function ModelSettingsModal({
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
+                <SelectItem value="gemini">Google Gemini</SelectItem>
+                <SelectItem value="perplexity">Perplexity</SelectItem>
               </SelectContent>
             </Select>
 

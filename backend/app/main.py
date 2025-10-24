@@ -225,11 +225,11 @@ async def process_transcript_background(process_id: str, transcript: TranscriptR
         if not transcript.text or not transcript.text.strip():
             raise ValueError("Empty transcript text provided")
         
-        if transcript.model in ["claude", "groq", "openai"]:
+        if transcript.model in ["claude", "groq", "openai", "gemini", "perplexity"]:
             # Check if API key is available for cloud providers
             api_key = await processor.db.get_api_key(transcript.model)
             if not api_key:
-                provider_names = {"claude": "Anthropic", "groq": "Groq", "openai": "OpenAI"}
+                provider_names = {"claude": "Anthropic", "groq": "Groq", "openai": "OpenAI", "gemini": "Google Gemini", "perplexity": "Perplexity"}
                 raise ValueError(f"{provider_names.get(transcript.model, transcript.model)} API key not configured. Please set your API key in the model settings.")
 
         _, all_json_data = await processor.process_transcript(

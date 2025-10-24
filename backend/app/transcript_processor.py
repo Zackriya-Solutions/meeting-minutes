@@ -4,9 +4,11 @@ from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.groq import GroqModel
 from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.gemini import GeminiModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.groq import GroqProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.gemini import GeminiProvider
 
 import logging
 import os
@@ -90,7 +92,7 @@ class TranscriptProcessor:
 
         Args:
             text: The transcript text.
-            model: The AI model provider ('claude', 'ollama', 'groq', 'openai').
+            model: The AI model provider ('claude', 'ollama', 'groq', 'openai', 'gemini', 'perplexity').
             model_name: The specific model name.
             chunk_size: The size of each text chunk.
             overlap: The overlap between consecutive chunks.
@@ -142,6 +144,20 @@ class TranscriptProcessor:
                 llm = OpenAIModel(model_name, provider=OpenAIProvider(api_key=api_key))
                 logger.info(f"Using OpenAI model: {model_name}")
             # --- END OPENAI SUPPORT ---
+            elif model == "gemini":
+                api_key = await db.get_api_key("gemini")
+                if not api_key: raise ValueError("GEMINI_API_KEY not configured")
+                llm = GeminiModel(model_name, provider=GeminiProvider(api_key=api_key))
+                logger.info(f"Using Gemini model: {model_name}")
+            elif model == "perplexity":
+                api_key = await db.get_api_key("perplexity")
+                if not api_key: raise ValueError("PERPLEXITY_API_KEY not configured")
+                perplexity_base_url = "https://api.perplexity.ai"
+                llm = OpenAIModel(
+                    model_name=model_name, 
+                    provider=OpenAIProvider(api_key=api_key, base_url=perplexity_base_url)
+                )
+                logger.info(f"Using Perplexity model: {model_name}")
             else:
                 logger.error(f"Unsupported model provider requested: {model}")
                 raise ValueError(f"Unsupported model provider: {model}")
