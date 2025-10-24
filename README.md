@@ -101,6 +101,8 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 2. Right-click the downloaded file → **Properties** → Check **Unblock** → Click **OK**
 3. Run the installer (if Windows shows a security warning: Click **More info** → **Run anyway**)
 
+> **📝 Note for Windows Users:** Starting from future releases, pre-built whisper-server binaries for Windows will be available. For detailed Windows setup instructions, including how to build from source, see the [Windows Setup Guide](docs/WINDOWS_SETUP.md).
+
 ### 🍎 **macOS**
 
 Install via Homebrew:
@@ -192,7 +194,15 @@ For more details, see the [Architecture documentation](docs/architecture.md).
 
 ## For Developers
 
-If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
+If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see:
+
+- [Building from Source guide](docs/BUILDING.md) - General build instructions for all platforms
+- [Windows Setup Guide](docs/WINDOWS_SETUP.md) - Detailed Windows-specific instructions
+- [Building on Linux](docs/building_in_linux.md) - Linux-specific build guide
+
+### Cross-Platform Binary Distribution
+
+The project now includes automated GitHub Actions workflows that build whisper-server binaries for Windows, macOS, and Linux. These binaries are automatically attached to releases, making it easier for users to get started without building from source. Maintainers can trigger manual builds from the Actions tab.
 
 ## Enterprise Solutions
 
