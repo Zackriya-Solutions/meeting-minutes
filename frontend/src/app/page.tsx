@@ -27,7 +27,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 
 
 interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter';
+  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai';
   model: string;
   whisperModel: string;
 }
@@ -154,6 +154,7 @@ export default function Home() {
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
     openrouter: [],
+    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
   };
 
   useEffect(() => {
@@ -1176,6 +1177,7 @@ export default function Home() {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
+      {/* SettingsModal starts here; Remove the content*/}
       {showErrorAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
@@ -1208,6 +1210,7 @@ export default function Home() {
           </Alert>
         </div>
       )}
+      {/* SettingsModal ends here */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
         <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
@@ -1347,7 +1350,7 @@ export default function Home() {
               </div>
             </div>
           )}
-
+          {/* SettingModal is enough you can remove from here */}
           {/* Preferences Modal (Settings) */}
           {showModelSettings && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1594,6 +1597,7 @@ export default function Home() {
               </div>
             </div>
           )}
+          {/* SettingModal is enough you can remove to here */}
         </div>
       </div>
     </motion.div>
