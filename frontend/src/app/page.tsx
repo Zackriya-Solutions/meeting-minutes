@@ -1,12 +1,10 @@
 'use client';
 
-import { useState, useEffect, useContext, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Transcript, TranscriptUpdate, Summary, SummaryResponse } from '@/types';
-import { EditableTitle } from '@/components/EditableTitle';
+import { Transcript, TranscriptUpdate } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { RecordingControls } from '@/components/RecordingControls';
-import { AISummary } from '@/components/AISummary';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { TranscriptSettings, TranscriptModelProps } from '@/components/TranscriptSettings';
@@ -16,19 +14,13 @@ import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { listen } from '@tauri-apps/api/event';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { downloadDir } from '@tauri-apps/api/path';
-import { listenerCount } from 'process';
 import { invoke } from '@tauri-apps/api/core';
-import { useNavigation } from '@/hooks/useNavigation';
 import { useRouter } from 'next/navigation';
-import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { Button } from '@/components/ui/button';
-import { Copy, GlobeIcon, Settings } from 'lucide-react';
-import { MicrophoneIcon } from '@heroicons/react/24/outline';
+import { Copy, GlobeIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { ButtonGroup } from '@/components/ui/button-group';
 
@@ -52,21 +44,10 @@ interface OllamaModel {
 export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [showSummary, setShowSummary] = useState(false);
+  // const [showSummary, setShowSummary] = useState(false);
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [customPrompt, setCustomPrompt] = useState('');
-  const [aiSummary, setAiSummary] = useState<Summary | null>({
-    key_points: { title: "Key Points", blocks: [] },
-    action_items: { title: "Action Items", blocks: [] },
-    decisions: { title: "Decisions", blocks: [] },
-    main_topics: { title: "Main Topics", blocks: [] }
-  });
-  const [summaryResponse, setSummaryResponse] = useState<SummaryResponse | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
     model: 'llama3.2:latest',
@@ -77,7 +58,6 @@ export default function Home() {
     model: 'parakeet-tdt-0.6b-v3-int8',
     apiKey: null
   });
-  const [originalTranscript, setOriginalTranscript] = useState<string>('');
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -112,12 +92,7 @@ export default function Home() {
   // Recording state context - provides backend-synced state
   const recordingState = useRecordingState();
 
-  // Compute effective recording state for UI: override with local state during stop transition
-  // This ensures immediate UI feedback when stop is pressed, while preserving backend-synced state for reload functionality
-  const effectiveIsRecording = isProcessingTranscript ? false : recordingState.isRecording;
-
-  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, serverAddress, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
-  const handleNavigation = useNavigation('', ''); // Initialize with empty values
+  const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const router = useRouter();
 
   // Ref for final buffer flush functionality
@@ -189,39 +164,6 @@ export default function Home() {
       }));
     }
   }, [models]);
-
-  const whisperModels = [
-    'tiny',
-    'tiny.en',
-    'tiny-q5_1',
-    'tiny.en-q5_1',
-    'tiny-q8_0',
-    'base',
-    'base.en',
-    'base-q5_1',
-    'base.en-q5_1',
-    'base-q8_0',
-    'small',
-    'small.en',
-    'small.en-tdrz',
-    'small-q5_1',
-    'small.en-q5_1',
-    'small-q8_0',
-    'medium',
-    'medium.en',
-    'medium-q5_0',
-    'medium.en-q5_0',
-    'medium-q8_0',
-    'large-v1',
-    'large-v2',
-    'large-v2-q5_0',
-    'large-v2-q8_0',
-    'large-v3',
-    'large-v3-q5_0',
-    'large-v3-turbo',
-    'large-v3-turbo-q5_0',
-    'large-v3-turbo-q8_0'
-  ];
 
   useEffect(() => {
     // Track page view
@@ -549,11 +491,6 @@ export default function Home() {
           console.log('Chunk drop warning received:', event.payload);
           setChunkDropMessage(event.payload);
           setShowChunkDropWarning(true);
-
-          // // Auto-dismiss after 8 seconds
-          // setTimeout(() => {
-          //   setShowChunkDropWarning(false);
-          // }, 8000);
         });
         console.log('Chunk drop warning listener setup complete');
       } catch (error) {
@@ -777,62 +714,6 @@ export default function Home() {
     checkAutoStartRecording();
   }, [isRecording, isMeetingActive, selectedDevices]);
 
-  const handleRecordingStop = async () => {
-    try {
-      console.log('Stopping recording...');
-      const { invoke } = await import('@tauri-apps/api/core');
-      const { appDataDir } = await import('@tauri-apps/api/path');
-
-      const dataDir = await appDataDir();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const transcriptPath = `${dataDir}transcript-${timestamp}.txt`;
-      const audioPath = `${dataDir}recording-${timestamp}.wav`;
-
-      // Stop recording and save audio
-      await invoke('stop_recording', {
-        args: {
-          save_path: audioPath,
-          model_config: modelConfig
-        }
-      });
-      console.log('Recording stopped successfully');
-
-      // Format and save transcript
-      const formattedTranscript = transcripts
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-        .map(t => `[${t.timestamp}] ${t.text}`)
-        .join('\n\n');
-
-      // const documentContent = `Meeting Title: ${meetingTitle}\nDate: ${new Date().toLocaleString()}\n\nTranscript:\n${formattedTranscript}`;
-
-      // await invoke('save_transcript', { 
-      //   filePath: transcriptPath,
-      //   content: documentContent
-      // });
-      // console.log('Transcript saved to:', transcriptPath);
-
-      setIsRecordingState(false);
-
-      // Show summary button if we have transcript content
-      if (formattedTranscript.trim()) {
-        setShowSummary(true);
-      } else {
-        console.log('No transcript content available');
-      }
-    } catch (error) {
-      console.error('Failed to stop recording:', error);
-      if (error instanceof Error) {
-        console.error('Error details:', {
-          message: error.message,
-          name: error.name,
-          stack: error.stack,
-        });
-      }
-      alert('Failed to stop recording. Check console for details.');
-      setIsRecordingState(false); // Reset state on error
-    }
-  };
-
   const handleRecordingStop2 = async (isCallApi: boolean) => {
     // Immediately update UI state to reflect that recording has stopped
     // Note: setIsStopping(true) is now called via onStopInitiated callback before this function
@@ -846,7 +727,6 @@ export default function Home() {
         current_transcript_count: transcripts.length
       });
       const { invoke } = await import('@tauri-apps/api/core');
-      const { appDataDir } = await import('@tauri-apps/api/path');
       const { listen } = await import('@tauri-apps/api/event');
 
       // Note: stop_recording is already called by RecordingControls.stopRecordingAction
@@ -972,8 +852,8 @@ export default function Home() {
         try {
           const responseData = await invoke('api_save_transcript', {
             meetingTitle: meetingTitle || savedMeetingName,
-            transcripts: freshTranscripts, 
-            folderPath: folderPath, 
+            transcripts: freshTranscripts,
+            folderPath: folderPath,
           }) as any;
 
           const meetingId = responseData.meeting_id;
@@ -1031,53 +911,53 @@ export default function Home() {
           // Track meeting completion analytics
           try {
             // Calculate meeting duration from transcript timestamps
-          let durationSeconds = 0;
-          if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
-            // Use audio_end_time of last transcript if available
-            const lastTranscript = freshTranscripts[freshTranscripts.length - 1];
-            durationSeconds = lastTranscript.audio_end_time || lastTranscript.audio_start_time || 0;
-          }
+            let durationSeconds = 0;
+            if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
+              // Use audio_end_time of last transcript if available
+              const lastTranscript = freshTranscripts[freshTranscripts.length - 1];
+              durationSeconds = lastTranscript.audio_end_time || lastTranscript.audio_start_time || 0;
+            }
 
-          // Calculate word count
-          const transcriptWordCount = freshTranscripts
-            .map(t => t.text.split(/\s+/).length)
-            .reduce((a, b) => a + b, 0);
+            // Calculate word count
+            const transcriptWordCount = freshTranscripts
+              .map(t => t.text.split(/\s+/).length)
+              .reduce((a, b) => a + b, 0);
 
-          // Calculate words per minute
-          const wordsPerMinute = durationSeconds > 0 ? transcriptWordCount / (durationSeconds / 60) : 0;
+            // Calculate words per minute
+            const wordsPerMinute = durationSeconds > 0 ? transcriptWordCount / (durationSeconds / 60) : 0;
 
-          // Get meetings count today
-          const meetingsToday = await Analytics.getMeetingsCountToday();
+            // Get meetings count today
+            const meetingsToday = await Analytics.getMeetingsCountToday();
 
-          // Track meeting completed
-          await Analytics.trackMeetingCompleted(meetingId, {
-            duration_seconds: durationSeconds,
-            transcript_segments: freshTranscripts.length,
-            transcript_word_count: transcriptWordCount,
-            words_per_minute: wordsPerMinute,
-            meetings_today: meetingsToday
-          });
-
-          // Update meeting count in analytics.json
-          await Analytics.updateMeetingCount();
-
-          // Check for activation (first meeting)
-          const { Store } = await import('@tauri-apps/plugin-store');
-          const store = await Store.load('analytics.json');
-          const totalMeetings = await store.get<number>('total_meetings');
-
-          if (totalMeetings === 1) {
-            const daysSinceInstall = await Analytics.calculateDaysSince('first_launch_date');
-            await Analytics.track('user_activated', {
-              meetings_count: '1',
-              days_since_install: daysSinceInstall?.toString() || 'null',
-              first_meeting_duration_seconds: durationSeconds.toString()
+            // Track meeting completed
+            await Analytics.trackMeetingCompleted(meetingId, {
+              duration_seconds: durationSeconds,
+              transcript_segments: freshTranscripts.length,
+              transcript_word_count: transcriptWordCount,
+              words_per_minute: wordsPerMinute,
+              meetings_today: meetingsToday
             });
+
+            // Update meeting count in analytics.json
+            await Analytics.updateMeetingCount();
+
+            // Check for activation (first meeting)
+            const { Store } = await import('@tauri-apps/plugin-store');
+            const store = await Store.load('analytics.json');
+            const totalMeetings = await store.get<number>('total_meetings');
+
+            if (totalMeetings === 1) {
+              const daysSinceInstall = await Analytics.calculateDaysSince('first_launch_date');
+              await Analytics.track('user_activated', {
+                meetings_count: '1',
+                days_since_install: daysSinceInstall?.toString() || 'null',
+                first_meeting_duration_seconds: durationSeconds.toString()
+              });
+            }
+          } catch (analyticsError) {
+            console.error('Failed to track meeting completion analytics:', analyticsError);
+            // Don't block user flow on analytics errors
           }
-        } catch (analyticsError) {
-          console.error('Failed to track meeting completion analytics:', analyticsError);
-          // Don't block user flow on analytics errors
-        }
 
         } catch (saveError) {
           console.error('Failed to save meeting to database:', saveError);
@@ -1092,12 +972,6 @@ export default function Home() {
       setIsMeetingActive(false);
       // isRecordingState already set to false at function start
       setIsRecordingDisabled(false);
-      // Show summary button if we have transcript content
-      if (transcripts.length > 0) {
-        setShowSummary(true);
-      } else {
-        console.log('No transcript content available');
-      }
     } catch (error) {
       console.error('Error in handleRecordingStop2:', error);
       // isRecordingState already set to false at function start
@@ -1151,287 +1025,6 @@ export default function Home() {
     });
   };
 
-  const generateAISummary = useCallback(async (prompt: string = '') => {
-    setSummaryStatus('processing');
-    setSummaryError(null);
-
-    try {
-      const fullTranscript = transcripts.map(t => t.text).join('\n');
-      if (!fullTranscript.trim()) {
-        throw new Error('No transcript text available. Please add some text first.');
-      }
-
-      // Store the original transcript for regeneration
-      setOriginalTranscript(fullTranscript);
-
-      console.log('Generating summary for transcript length:', fullTranscript.length);
-
-      // Process transcript and get process_id
-      console.log('Processing transcript...');
-      const result = await invoke('api_process_transcript', {
-        text: fullTranscript,
-        model: modelConfig.provider,
-        modelName: modelConfig.model,
-        chunkSize: 40000,
-        overlap: 1000,
-        customPrompt: prompt,
-      }) as any;
-
-      const process_id = result.process_id;
-      console.log('Process ID:', process_id);
-
-
-      // Poll for summary status
-      const pollInterval = setInterval(async () => {
-        try {
-          const result = await invoke('api_get_summary', {
-            meetingId: process_id,
-          }) as any;
-          console.log('Summary status:', result);
-
-          if (result.status === 'error') {
-            setSummaryError(result.error || 'Unknown error');
-            setSummaryStatus('error');
-            clearInterval(pollInterval);
-            return;
-          }
-
-          if (result.status === 'completed' && result.data) {
-            clearInterval(pollInterval);
-
-            // Remove MeetingName from data before formatting
-            const { MeetingName, ...summaryData } = result.data;
-
-            // Update meeting title if available
-            if (MeetingName) {
-              setMeetingTitle(MeetingName);
-            }
-
-            // Format the summary data with consistent styling
-            const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              acc[key] = {
-                title: section.title,
-                blocks: section.blocks.map((block: any) => ({
-                  ...block,
-                  // type: 'bullet',
-                  color: 'default',
-                  content: block.content.trim() // Remove trailing newlines
-                }))
-              };
-              return acc;
-            }, {} as Summary);
-
-            setAiSummary(formattedSummary);
-            setSummaryStatus('completed');
-          }
-        } catch (error) {
-          console.error('Failed to get summary status:', error);
-          if (error instanceof Error) {
-            setSummaryError(`Failed to get summary status: ${error.message}`);
-          } else {
-            setSummaryError('Failed to get summary status: Unknown error');
-          }
-          setSummaryStatus('error');
-          clearInterval(pollInterval);
-        }
-      }, 3000); // Poll every 3 seconds
-
-      // Cleanup interval on component unmount
-      return () => clearInterval(pollInterval);
-
-    } catch (error) {
-      console.error('Failed to generate summary:', error);
-      if (error instanceof Error) {
-        setSummaryError(`Failed to generate summary: ${error.message}`);
-      } else {
-        setSummaryError('Failed to generate summary: Unknown error');
-      }
-      setSummaryStatus('error');
-    }
-  }, [transcripts, modelConfig]);
-
-  const handleSummary = useCallback((summary: any) => {
-    setAiSummary(summary);
-  }, []);
-
-  const handleSummaryChange = (newSummary: Summary) => {
-    console.log('Summary changed:', newSummary);
-    setAiSummary(newSummary);
-  };
-
-  const handleTitleChange = (newTitle: string) => {
-    setMeetingTitle(newTitle);
-    setCurrentMeeting({ id: 'intro-call', title: newTitle });
-  };
-
-  const getSummaryStatusMessage = (status: SummaryStatus) => {
-    switch (status) {
-      case 'idle':
-        return 'Ready to generate summary';
-      case 'processing':
-        return isRecording ? 'Processing transcript...' : 'Finalizing transcription...';
-      case 'summarizing':
-        return 'Generating AI summary...';
-      case 'regenerating':
-        return 'Regenerating AI summary...';
-      case 'completed':
-        return 'Summary generated successfully!';
-      case 'error':
-        return summaryError || 'An error occurred';
-      default:
-        return '';
-    }
-  };
-
-  const handleDownloadTranscript = async () => {
-    try {
-      // Create transcript object with metadata
-      const transcriptData = {
-        title: meetingTitle,
-        timestamp: new Date().toISOString(),
-        transcripts: transcripts
-      };
-
-      // Generate filename
-      const sanitizedTitle = meetingTitle.replace(/[^a-zA-Z0-9]/g, '_');
-      const filename = `${sanitizedTitle}_transcript.json`;
-
-      // Get download directory path
-      const downloadPath = await downloadDir();
-
-      // Write file to downloads directory
-      await writeTextFile(`${downloadPath}/${filename}`, JSON.stringify(transcriptData, null, 2));
-
-      console.log('Transcript saved successfully to:', `${downloadPath}/${filename}`);
-      alert('Transcript downloaded successfully!');
-    } catch (error) {
-      console.error('Failed to save transcript:', error);
-      alert('Failed to save transcript. Please try again.');
-    }
-  };
-
-  const handleUploadTranscript = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-
-      // Validate the uploaded file structure
-      if (!data.transcripts || !Array.isArray(data.transcripts)) {
-        throw new Error('Invalid transcript file format');
-      }
-
-      // Update state with uploaded data
-      setMeetingTitle(data.title || 'Uploaded Transcript');
-      setTranscripts(data.transcripts);
-
-      // Generate summary for the uploaded transcript
-      handleSummary(data.transcripts);
-    } catch (error) {
-      console.error('Error uploading transcript:', error);
-      alert('Failed to upload transcript. Please make sure the file format is correct.');
-    }
-  };
-
-  const handleRegenerateSummary = useCallback(async () => {
-    if (!originalTranscript.trim()) {
-      console.error('No original transcript available for regeneration');
-      return;
-    }
-
-    setSummaryStatus('regenerating');
-    setSummaryError(null);
-
-    try {
-      console.log('Regenerating summary with original transcript...');
-
-      // Process transcript and get process_id
-      console.log('Processing transcript...');
-      const result = await invoke('api_process_transcript', {
-        text: originalTranscript,
-        model: modelConfig.provider,
-        modelName: modelConfig.model,
-        chunkSize: 40000,
-        overlap: 1000,
-      }) as any;
-
-      const process_id = result.process_id;
-      console.log('Process ID:', process_id);
-
-      // Poll for summary status
-      const pollInterval = setInterval(async () => {
-        try {
-          const result = await invoke('api_get_summary', {
-            meetingId: process_id,
-          }) as any;
-          console.log('Summary status:', result);
-
-          if (result.status === 'error') {
-            setSummaryError(result.error || 'Unknown error');
-            setSummaryStatus('error');
-            clearInterval(pollInterval);
-            return;
-          }
-
-          if (result.status === 'completed' && result.data) {
-            clearInterval(pollInterval);
-
-            // Remove MeetingName from data before formatting
-            const { MeetingName, ...summaryData } = result.data;
-
-            // Update meeting title if available
-            if (MeetingName) {
-              setMeetingTitle(MeetingName);
-            }
-
-            // Format the summary data with consistent styling
-            const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              acc[key] = {
-                title: section.title,
-                blocks: section.blocks.map((block: any) => ({
-                  ...block,
-                  // type: 'bullet',
-                  color: 'default',
-                  content: block.content.trim()
-                }))
-              };
-              return acc;
-            }, {} as Summary);
-
-            setAiSummary(formattedSummary);
-            setSummaryStatus('completed');
-          } else if (result.status === 'error') {
-            clearInterval(pollInterval);
-            throw new Error(result.error || 'Failed to generate summary');
-          }
-        } catch (error) {
-          clearInterval(pollInterval);
-          console.error('Failed to get summary status:', error);
-          if (error instanceof Error) {
-            setSummaryError(error.message);
-          } else {
-            setSummaryError('An unexpected error occurred');
-          }
-          setSummaryStatus('error');
-          setAiSummary(null);
-        }
-      }, 1000);
-
-      return () => clearInterval(pollInterval);
-    } catch (error) {
-      console.error('Failed to regenerate summary:', error);
-      if (error instanceof Error) {
-        setSummaryError(error.message);
-      } else {
-        setSummaryError('An unexpected error occurred');
-      }
-      setSummaryStatus('error');
-      setAiSummary(null);
-    }
-  }, [originalTranscript, modelConfig]);
-
   const handleCopyTranscript = useCallback(() => {
     // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
     const formatTime = (seconds: number | undefined): string => {
@@ -1449,39 +1042,6 @@ export default function Home() {
 
     toast.success("Transcript copied to clipboard");
   }, [transcripts]);
-
-  const handleGenerateSummary = useCallback(async () => {
-    if (!transcripts.length) {
-      console.log('No transcripts available for summary');
-      return;
-    }
-
-    try {
-      await generateAISummary(customPrompt);
-    } catch (error) {
-      console.error('Failed to generate summary:', error);
-      if (error instanceof Error) {
-        setSummaryError(error.message);
-      } else {
-        setSummaryError('Failed to generate summary: Unknown error');
-      }
-    }
-  }, [transcripts, generateAISummary]);
-
-  // Handle transcript configuration save
-  const handleSaveTranscriptConfig = async (config: TranscriptModelProps) => {
-    try {
-      console.log('[HomePage] Saving transcript config:', config);
-      await invoke('api_save_transcript_config', {
-        provider: config.provider,
-        model: config.model,
-        apiKey: config.apiKey
-      });
-      console.log('[HomePage] ✅ Successfully saved transcript config');
-    } catch (error) {
-      console.error('[HomePage] ❌ Failed to save transcript config:', error);
-    }
-  };
 
   // Handle confidence indicator toggle
   const handleConfidenceToggle = (checked: boolean) => {
@@ -1531,8 +1091,6 @@ export default function Home() {
 
     setupDownloadListeners();
   }, [transcriptModelConfig]);
-
-  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript
   const handleRecordingStop2Ref = useRef(handleRecordingStop2);
@@ -1659,46 +1217,22 @@ export default function Home() {
               <div className="flex  flex-col space-y-2">
                 <div className="flex justify-center  items-center space-x-2">
                   <ButtonGroup>
-                  {transcripts?.length > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        handleCopyTranscript();
-                      }}
-                      title="Copy Transcript"
-                    >
-                      <Copy />
-                      <span className='hidden md:inline'>
-                        Copy
-                      </span>
-                    </Button>
-                  )}
-                  {/* {!isRecording && transcripts?.length === 0 && ( */}
-                  {/*   <Button */}
-                  {/*     variant="outline" */}
-                  {/*     size="sm" */}
-                  {/*     onClick={() => setShowModelSelector(true)} */}
-                  {/*     title="Transcription Model Settings" */}
-                  {/*   > */}
-                  {/*     <Settings /> */}
-                  {/*     <span className='hidden md:inline'> */}
-                  {/*       Model */}
-                  {/*     </span> */}
-                  {/*   </Button> */}
-                  {/**/}
-                  {/* <Button */}
-                  {/*   variant="outline" */}
-                  {/*   size="sm" */}
-                  {/*   onClick={() => setShowDeviceSettings(true)} */}
-                  {/*   title="Input/Output devices selection" */}
-                  {/* > */}
-                  {/*   <MicrophoneIcon /> */}
-                  {/*   <span className='hidden md:inline'> */}
-                  {/*     Devices */}
-                  {/*   </span> */}
-                  {/* </Button> */}
-                  {transcriptModelConfig.provider === "localWhisper" &&
+                    {transcripts?.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          handleCopyTranscript();
+                        }}
+                        title="Copy Transcript"
+                      >
+                        <Copy />
+                        <span className='hidden md:inline'>
+                          Copy
+                        </span>
+                      </Button>
+                    )}
+                    {transcriptModelConfig.provider === "localWhisper" &&
                       <Button
                         variant="outline"
                         size="sm"
@@ -1712,106 +1246,7 @@ export default function Home() {
                       </Button>
                     }
                   </ButtonGroup>
-                  {/* {showSummary && !isRecording && (
-                    <>
-                      <button
-                        onClick={handleGenerateSummary}
-                        disabled={summaryStatus === 'processing'}
-                        className={`px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm ${
-                          summaryStatus === 'processing'
-                            ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
-                            : transcripts.length === 0
-                            ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
-                            : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100 hover:border-green-300 active:bg-green-200'
-                        }`}
-                        title={
-                          summaryStatus === 'processing'
-                            ? 'Generating summary...'
-                            : transcripts.length === 0
-                            ? 'No transcript available'
-                            : 'Generate AI Summary'
-                        }
-                      >
-                        {summaryStatus === 'processing' ? (
-                          <>
-                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <span className="text-sm">Processing...</span>
-                          </>
-                        ) : (
-                          <>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                            <span className="text-sm">Generate Note</span>
-                          </>
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setShowModelSettings(true)}
-                        className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
-                        title="Model Settings"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                      </button>
-                    </>
-                  )} */}
                 </div>
-
-                {/* {showSummary && !isRecording && (
-                  <>
-                    <button
-                      onClick={handleGenerateSummary}
-                      disabled={summaryStatus === 'processing'}
-                      className={`px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm ${
-                        summaryStatus === 'processing'
-                          ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
-                          : transcripts.length === 0
-                          ? 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed'
-                          : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100 hover:border-green-300 active:bg-green-200'
-                      }`}
-                      title={
-                        summaryStatus === 'processing'
-                          ? 'Generating summary...'
-                          : transcripts.length === 0
-                          ? 'No transcript available'
-                          : 'Generate AI Summary'
-                      }
-                    >
-                      {summaryStatus === 'processing' ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <span className="text-sm">Processing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                          <span className="text-sm">Generate Note</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setShowModelSettings(true)}
-                      className="px-3 py-2 border rounded-md transition-all duration-200 inline-flex items-center gap-2 shadow-sm bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-200"
-                      title="Model Settings"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    </button>
-                  </>
-                )} */}
               </div>
             </div>
           </div>
@@ -1838,24 +1273,11 @@ export default function Home() {
                   isPaused={recordingState.isPaused}
                   isProcessing={isProcessingStop}
                   isStopping={isStopping}
-                  enableStreaming={recordingState.isRecording }
+                  enableStreaming={recordingState.isRecording}
                 />
               </div>
             </div>
           </div>
-
-          {/* Custom prompt input at bottom of transcript section */}
-          {/* {!isRecording && transcripts.length > 0 && !isMeetingActive && (
-            <div className="p-4 border-t border-gray-200">
-              <textarea
-                placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
-                value={customPrompt}
-                onChange={(e) => setCustomPrompt(e.target.value)}
-                disabled={summaryStatus === 'processing'}
-              />
-            </div>
-          )} */}
 
           {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
           {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
@@ -1869,21 +1291,21 @@ export default function Home() {
                 <div className="w-2/3 max-w-[750px] flex justify-center">
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
-                  isRecording={recordingState.isRecording}
-                  onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
-                  onRecordingStart={handleRecordingStart}
-                  onTranscriptReceived={handleTranscriptUpdate}
-                  onStopInitiated={() => setIsStopping(true)}
-                  barHeights={barHeights}
-                  onTranscriptionError={(message) => {
-                    setErrorMessage(message);
-                    setShowErrorAlert(true);
-                  }}
-                  isRecordingDisabled={isRecordingDisabled}
-                  isParentProcessing={isProcessingStop}
-                  selectedDevices={selectedDevices}
-                  meetingName={meetingTitle}
-                />
+                      isRecording={recordingState.isRecording}
+                      onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
+                      onRecordingStart={handleRecordingStart}
+                      onTranscriptReceived={handleTranscriptUpdate}
+                      onStopInitiated={() => setIsStopping(true)}
+                      barHeights={barHeights}
+                      onTranscriptionError={(message) => {
+                        setErrorMessage(message);
+                        setShowErrorAlert(true);
+                      }}
+                      isRecordingDisabled={isRecordingDisabled}
+                      isParentProcessing={isProcessingStop}
+                      selectedDevices={selectedDevices}
+                      meetingName={meetingTitle}
+                    />
                   </div>
                 </div>
               </div>
@@ -2129,21 +1551,6 @@ export default function Home() {
 
                 {/* Scrollable Content */}
                 <div className="flex-1 overflow-y-auto p-6 pt-4">
-                  {/* Only show warning if there's an error message (triggered by transcription error) */}
-                  {/* {modelSelectorMessage && ( */}
-                  {/*   <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg"> */}
-                  {/*     <div className="flex items-start space-x-3"> */}
-                  {/*       <span className="text-yellow-600 text-xl">⚠️</span> */}
-                  {/*       <div> */}
-                  {/*         <h4 className="font-medium text-yellow-800 mb-1">Model Required</h4> */}
-                  {/*         <p className="text-sm text-yellow-700"> */}
-                  {/*           {modelSelectorMessage} */}
-                  {/*         </p> */}
-                  {/*       </div> */}
-                  {/*     </div> */}
-                  {/*   </div> */}
-                  {/* )} */}
-
                   <TranscriptSettings
                     transcriptModelConfig={transcriptModelConfig}
                     setTranscriptModelConfig={setTranscriptModelConfig}
@@ -2188,94 +1595,6 @@ export default function Home() {
             </div>
           )}
         </div>
-
-        {/* Right side - AI Summary */}
-        {/* <div className="flex-1 overflow-y-auto bg-white"> */}
-        {/*   <div className="p-4 border-b border-gray-200"> */}
-        {/*     <div className="flex items-center"> */}
-        {/*       <EditableTitle */}
-        {/*         title={meetingTitle} */}
-        {/*         isEditing={isEditingTitle} */}
-        {/*         onStartEditing={() => setIsEditingTitle(true)} */}
-        {/*         onFinishEditing={() => setIsEditingTitle(false)} */}
-        {/*         onChange={handleTitleChange} */}
-        {/*       /> */}
-        {/*     </div> */}
-        {/*   </div> */}
-        {/*   {/* {isSummaryLoading ? ( */}
-        {/*     <div className="flex items-center justify-center h-full"> */}
-        {/*       <div className="text-center"> */}
-        {/*         <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div> */}
-        {/*         <p className="text-gray-600">Generating AI Summary...</p> */}
-        {/*       </div> */}
-        {/*     </div> */}
-        {/*   ) : showSummary && ( */}
-        {/*     <div className="max-w-4xl mx-auto p-6"> */}
-        {/*       {summaryResponse && ( */}
-        {/*         <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto"> */}
-        {/*           <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3> */}
-        {/*           <div className="grid grid-cols-2 gap-4"> */}
-        {/*             <div className="bg-white p-4 rounded-lg shadow-sm"> */}
-        {/*               <h4 className="font-medium mb-1">Key Points</h4> */}
-        {/*               <ul className="list-disc pl-4"> */}
-        {/*                 {summaryResponse.summary.key_points.blocks.map((block, i) => ( */}
-        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
-        {/*                 ))} */}
-        {/*               </ul> */}
-        {/*             </div> */}
-        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
-        {/*               <h4 className="font-medium mb-1">Action Items</h4> */}
-        {/*               <ul className="list-disc pl-4"> */}
-        {/*                 {summaryResponse.summary.action_items.blocks.map((block, i) => ( */}
-        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
-        {/*                 ))} */}
-        {/*               </ul> */}
-        {/*             </div> */}
-        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
-        {/*               <h4 className="font-medium mb-1">Decisions</h4> */}
-        {/*               <ul className="list-disc pl-4"> */}
-        {/*                 {summaryResponse.summary.decisions.blocks.map((block, i) => ( */}
-        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
-        {/*                 ))} */}
-        {/*               </ul> */}
-        {/*             </div> */}
-        {/*             <div className="bg-white p-4 rounded-lg shadow-sm mt-4"> */}
-        {/*               <h4 className="font-medium mb-1">Main Topics</h4> */}
-        {/*               <ul className="list-disc pl-4"> */}
-        {/*                 {summaryResponse.summary.main_topics.blocks.map((block, i) => ( */}
-        {/*                   <li key={i} className="text-sm">{block.content}</li> */}
-        {/*                 ))} */}
-        {/*               </ul> */}
-        {/*             </div> */}
-        {/*           </div> */}
-        {/*           {summaryResponse.raw_summary ? ( */}
-        {/*             <div className="mt-4"> */}
-        {/*               <h4 className="font-medium mb-1">Full Summary</h4> */}
-        {/*               <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p> */}
-        {/*             </div> */}
-        {/*           ) : null} */}
-        {/*         </div> */}
-        {/*       )} */}
-        {/*       <div className="flex-1 overflow-y-auto p-4"> */}
-        {/*         <AISummary  */}
-        {/*           summary={aiSummary}  */}
-        {/*           status={summaryStatus}  */}
-        {/*           error={summaryError} */}
-        {/*           onSummaryChange={(newSummary) => setAiSummary(newSummary)} */}
-        {/*           onRegenerateSummary={handleRegenerateSummary} */}
-        {/*         /> */}
-        {/*       </div> */}
-        {/*       {summaryStatus !== 'idle' && ( */}
-        {/*         <div className={`mt-4 p-4 rounded-lg ${ */}
-        {/*           summaryStatus === 'error' ? 'bg-red-100 text-red-700' : */}
-        {/*           summaryStatus === 'completed' ? 'bg-green-100 text-green-700' : */}
-        {/*           'bg-blue-100 text-blue-700' */}
-        {/*         }`}> */}
-        {/*           <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p> */}
-        {/*         </div> */}
-        {/*       )} */}
-        {/*     </div> */}
-        {/*   )} */}        {/* </div> */}
       </div>
     </motion.div>
   );
