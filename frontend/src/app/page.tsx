@@ -3,26 +3,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Transcript, TranscriptUpdate } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
 import { RecordingControls } from '@/components/RecordingControls';
-import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
+import { SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { TranscriptSettings, TranscriptModelProps } from '@/components/TranscriptSettings';
-import { LanguageSelection } from '@/components/LanguageSelection';
-import { PermissionWarning } from '@/components/PermissionWarning';
-import { PreferenceSettings } from '@/components/PreferenceSettings';
+import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
-import { Button } from '@/components/ui/button';
-import { Copy, GlobeIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { ButtonGroup } from '@/components/ui/button-group';
+import { SettingsModals } from './_components/SettingsModal';
+import { TranscriptPanel } from './_components/TranscriptPanel';
 
 
 
@@ -44,7 +39,6 @@ interface OllamaModel {
 export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  // const [showSummary, setShowSummary] = useState(false);
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
@@ -1177,430 +1171,102 @@ export default function Home() {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
-      {/* SettingsModal starts here; Remove the content*/}
-      {showErrorAlert && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
-            <AlertTitle className="text-red-800">Recording Stopped</AlertTitle>
-            <AlertDescription className="text-red-700">
-              {errorMessage}
-              <button
-                onClick={() => setShowErrorAlert(false)}
-                className="ml-2 text-red-600 hover:text-red-800 underline"
-              >
-                Dismiss
-              </button>
-            </AlertDescription>
-          </Alert>
-        </div>
-      )}
-      {showChunkDropWarning && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Alert className="max-w-lg mx-4 border-yellow-200 bg-white shadow-xl">
-            <AlertTitle className="text-yellow-800">Transcription Performance Warning</AlertTitle>
-            <AlertDescription className="text-yellow-700">
-              {chunkDropMessage}
-              <button
-                onClick={() => setShowChunkDropWarning(false)}
-                className="ml-2 text-yellow-600 hover:text-yellow-800 underline"
-              >
-                Dismiss
-              </button>
-            </AlertDescription>
-          </Alert>
-        </div>
-      )}
-      {/* SettingsModal ends here */}
+      {/* All Modals supported*/}
+      <SettingsModals
+        modals={{
+          modelSettings: showModelSettings,
+          deviceSettings: showDeviceSettings,
+          languageSettings: showLanguageSettings,
+          modelSelector: showModelSelector,
+          errorAlert: showErrorAlert,
+          chunkDropWarning: showChunkDropWarning,
+        }}
+        messages={{
+          errorAlert: errorMessage,
+          chunkDropWarning: chunkDropMessage,
+          modelSelector: modelSelectorMessage,
+        }}
+        onClose={(name) => {
+          if (name === 'modelSettings') setShowModelSettings(false);
+          if (name === 'deviceSettings') setShowDeviceSettings(false);
+          if (name === 'languageSettings') setShowLanguageSettings(false);
+          if (name === 'modelSelector') {
+            setShowModelSelector(false);
+            setModelSelectorMessage('');
+          }
+          if (name === 'errorAlert') setShowErrorAlert(false);
+          if (name === 'chunkDropWarning') setShowChunkDropWarning(false);
+        }}
+        modelConfig={modelConfig}
+        setModelConfig={setModelConfig}
+        models={models}
+        error={error}
+        selectedDevices={selectedDevices}
+        setSelectedDevices={setSelectedDevices}
+        isRecording={isRecording}
+        selectedLanguage={selectedLanguage}
+        setSelectedLanguage={setSelectedLanguage}
+        transcriptModelConfig={transcriptModelConfig}
+        setTranscriptModelConfig={setTranscriptModelConfig}
+        showConfidenceIndicator={showConfidenceIndicator}
+        handleConfidenceToggle={handleConfidenceToggle}
+      />
       <div className="flex flex-1 overflow-hidden">
-        {/* Left side - Transcript */}
-        {/* TranscriptPanel starts here*/}
-        <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
-          {/* Title area - Sticky header */}
-          <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
-            <div className="flex flex-col space-y-3">
-              <div className="flex  flex-col space-y-2">
-                <div className="flex justify-center  items-center space-x-2">
-                  <ButtonGroup>
-                    {transcripts?.length > 0 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          handleCopyTranscript();
-                        }}
-                        title="Copy Transcript"
-                      >
-                        <Copy />
-                        <span className='hidden md:inline'>
-                          Copy
-                        </span>
-                      </Button>
-                    )}
-                    {transcriptModelConfig.provider === "localWhisper" &&
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowLanguageSettings(true)}
-                        title="Language"
-                      >
-                        <GlobeIcon />
-                        <span className='hidden md:inline'>
-                          Language
-                        </span>
-                      </Button>
-                    }
-                  </ButtonGroup>
-                </div>
-              </div>
-            </div>
-          </div>
+        <TranscriptPanel
+          transcripts={transcripts}
+          isRecording={recordingState.isRecording}
+          isPaused={recordingState.isPaused}
+          isProcessingStop={isProcessingStop}
+          isStopping={isStopping}
+          hasMicrophone={hasMicrophone}
+          hasSystemAudio={hasSystemAudio}
+          isCheckingPermissions={isCheckingPermissions}
+          onCheckPermissions={checkPermissions}
+          transcriptModelConfig={transcriptModelConfig}
+          onCopyTranscript={handleCopyTranscript}
+          onOpenLanguageSettings={() => setShowLanguageSettings(true)}
+          containerRef={transcriptContainerRef}
+        />
 
-          {/* Permission Warning */}
-          {!isRecording && !isCheckingPermissions && (
-            <div className="flex justify-center px-4 pt-4">
-              <PermissionWarning
-                hasMicrophone={hasMicrophone}
-                hasSystemAudio={hasSystemAudio}
-                onRecheck={checkPermissions}
-                isRechecking={isCheckingPermissions}
-              />
-            </div>
-          )}
-
-          {/* Transcript content */}
-          <div className="pb-20">
-            <div className="flex justify-center">
-              <div className="w-2/3 max-w-[750px]">
-                <TranscriptView
-                  transcripts={transcripts}
-                  isRecording={recordingState.isRecording}
-                  isPaused={recordingState.isPaused}
-                  isProcessing={isProcessingStop}
-                  isStopping={isStopping}
-                  enableStreaming={recordingState.isRecording}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-          {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
-              <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-                }}
-              >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="bg-white rounded-full shadow-lg flex items-center">
-                    <RecordingControls
-                      isRecording={recordingState.isRecording}
-                      onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
-                      onRecordingStart={handleRecordingStart}
-                      onTranscriptReceived={handleTranscriptUpdate}
-                      onStopInitiated={() => setIsStopping(true)}
-                      barHeights={barHeights}
-                      onTranscriptionError={(message) => {
-                        setErrorMessage(message);
-                        setShowErrorAlert(true);
-                      }}
-                      isRecordingDisabled={isRecordingDisabled}
-                      isParentProcessing={isProcessingStop}
-                      selectedDevices={selectedDevices}
-                      meetingName={meetingTitle}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Processing status overlay */}
-          {summaryStatus === 'processing' && !isRecording && (
-            <div className="fixed bottom-4 left-0 right-0 z-10">
-              <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-                }}
-              >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-                    <span className="text-sm text-gray-700">Finalizing transcription...</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {isSavingTranscript && (
-            <div className="fixed bottom-4 left-0 right-0 z-10">
-              <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-                }}
-              >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-                    <span className="text-sm text-gray-700">Saving transcript...</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {/* SettingModal is enough you can remove from here */}
-          {/* Preferences Modal (Settings) */}
-          {showModelSettings && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-                {/* Header */}
-                <div className="flex justify-between items-center p-6 border-b">
-                  <h3 className="text-xl font-semibold text-gray-900">Preferences</h3>
-                  <button
-                    onClick={() => setShowModelSettings(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Content - Scrollable */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                  {/* General Preferences Section */}
-                  <PreferenceSettings />
-
-                  {/* Divider */}
-                  <div className="border-t pt-8">
-                    <h4 className="text-lg font-semibold text-gray-900 mb-4">AI Model Configuration</h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Summarization Model
-                        </label>
-                        <div className="flex space-x-2">
-                          <select
-                            className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                            value={modelConfig.provider}
-                            onChange={(e) => {
-                              const provider = e.target.value as ModelConfig['provider'];
-                              setModelConfig({
-                                ...modelConfig,
-                                provider,
-                                model: modelOptions[provider][0]
-                              });
-                            }}
-                          >
-                            <option value="claude">Claude</option>
-                            <option value="groq">Groq</option>
-                            <option value="ollama">Ollama</option>
-                            <option value="openrouter">OpenRouter</option>
-                          </select>
-
-                          <select
-                            className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                            value={modelConfig.model}
-                            onChange={(e) => setModelConfig(prev => ({ ...prev, model: e.target.value }))}
-                          >
-                            {modelOptions[modelConfig.provider].map(model => (
-                              <option key={model} value={model}>
-                                {model}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      {modelConfig.provider === 'ollama' && (
-                        <div>
-                          <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
-                          {error && (
-                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                              {error}
-                            </div>
-                          )}
-                          <div className="grid gap-4 max-h-[400px] overflow-y-auto pr-2">
-                            {models.map((model) => (
-                              <div
-                                key={model.id}
-                                className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
-                                  }`}
-                                onClick={() => setModelConfig(prev => ({ ...prev, model: model.name }))}
-                              >
-                                <h3 className="font-bold">{model.name}</h3>
-                                <p className="text-gray-600">Size: {model.size}</p>
-                                <p className="text-gray-600">Modified: {model.modified}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="border-t p-6 flex justify-end">
-                  <button
-                    onClick={() => setShowModelSettings(false)}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Device Settings Modal */}
-          {showDeviceSettings && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Audio Device Settings</h3>
-                  <button
-                    onClick={() => setShowDeviceSettings(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                <DeviceSelection
-                  selectedDevices={selectedDevices}
-                  onDeviceChange={setSelectedDevices}
-                  disabled={isRecording}
-                />
-
-                <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={() => {
-                      const micDevice = selectedDevices.micDevice || 'Default';
-                      const systemDevice = selectedDevices.systemDevice || 'Default';
-                      toast.success("Devices selected", {
-                        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
-                      });
-                      setShowDeviceSettings(false);
+        {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
+        {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
+          <div className="fixed bottom-12 left-0 right-0 z-10">
+            <div
+              className="flex justify-center pl-8 transition-[margin] duration-300"
+              style={{
+                marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+              }}
+            >
+              <div className="w-2/3 max-w-[750px] flex justify-center">
+                <div className="bg-white rounded-full shadow-lg flex items-center">
+                  <RecordingControls
+                    isRecording={recordingState.isRecording}
+                    onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
+                    onRecordingStart={handleRecordingStart}
+                    onTranscriptReceived={handleTranscriptUpdate}
+                    onStopInitiated={() => setIsStopping(true)}
+                    barHeights={barHeights}
+                    onTranscriptionError={(message) => {
+                      setErrorMessage(message);
+                      setShowErrorAlert(true);
                     }}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Language Settings Modal */}
-          {showLanguageSettings && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Language Settings</h3>
-                  <button
-                    onClick={() => setShowLanguageSettings(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                <LanguageSelection
-                  selectedLanguage={selectedLanguage}
-                  onLanguageChange={setSelectedLanguage}
-                  disabled={isRecording}
-                  provider={transcriptModelConfig.provider}
-                />
-
-                <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={() => setShowLanguageSettings(false)}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Model Selection Modal - shown when model loading fails */}
-          {showModelSelector && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] flex flex-col">
-                {/* Fixed Header */}
-                <div className="flex justify-between items-center p-6 pb-4 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {modelSelectorMessage ? 'Speech Recognition Setup Required' : 'Transcription Model Settings'}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowModelSelector(false);
-                      setModelSelectorMessage(''); // Clear the message when closing
-                    }}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Scrollable Content */}
-                <div className="flex-1 overflow-y-auto p-6 pt-4">
-                  <TranscriptSettings
-                    transcriptModelConfig={transcriptModelConfig}
-                    setTranscriptModelConfig={setTranscriptModelConfig}
-                    onModelSelect={() => {
-                      setShowModelSelector(false);
-                      setModelSelectorMessage('');
-                    }}
+                    isRecordingDisabled={isRecordingDisabled}
+                    isParentProcessing={isProcessingStop}
+                    selectedDevices={selectedDevices}
+                    meetingName={meetingTitle}
                   />
                 </div>
-
-                {/* Fixed Footer */}
-                <div className="p-6 pt-4 border-t border-gray-200 flex items-center justify-between">
-                  {/* Left side: Confidence Indicator Toggle */}
-                  <div className="flex items-center gap-3">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showConfidenceIndicator}
-                        onChange={(e) => handleConfidenceToggle(e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Show Confidence Indicators</p>
-                      <p className="text-xs text-gray-500">Display colored dots showing transcription confidence quality</p>
-                    </div>
-                  </div>
-
-                  {/* Right side: Done Button */}
-                  <button
-                    onClick={() => {
-                      setShowModelSelector(false);
-                      setModelSelectorMessage(''); // Clear the message when closing
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-                  >
-                    {modelSelectorMessage ? 'Cancel' : 'Done'}
-                  </button>
-                </div>
               </div>
             </div>
-          )}
-          {/* SettingModal is enough you can remove to here */}
-        </div>
-        {/* TranscriptPanel ends here */}
+          </div>
+        )}
+
+        {/* Status Overlays - Processing and Saving */}
+        <StatusOverlays
+          isProcessing={summaryStatus === 'processing' && !isRecording}
+          isSaving={isSavingTranscript}
+          sidebarCollapsed={sidebarCollapsed}
+        />
       </div>
     </motion.div>
   );
