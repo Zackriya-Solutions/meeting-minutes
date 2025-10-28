@@ -1213,6 +1213,7 @@ export default function Home() {
       {/* SettingsModal ends here */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left side - Transcript */}
+        {/* TranscriptPanel starts here*/}
         <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
           {/* Title area - Sticky header */}
           <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
@@ -1599,6 +1600,7 @@ export default function Home() {
           )}
           {/* SettingModal is enough you can remove to here */}
         </div>
+        {/* TranscriptPanel ends here */}
       </div>
     </motion.div>
   );
