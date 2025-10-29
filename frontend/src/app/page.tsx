@@ -80,7 +80,6 @@ export default function Home() {
         onClose={hideModal}
       />
       <div className="flex flex-1 overflow-hidden">
-        // Could be simplified
         <TranscriptPanel
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
