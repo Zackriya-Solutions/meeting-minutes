@@ -1,12 +1,3 @@
-// The props would get updated after the full refactor(hooks, context)
-// StatusOverlays Component Extracted from page.tsx
-// Usage example:
-// <StatusOverlays
-//   isProcessing={summaryStatus === 'processing' && !isRecording}
-//   isSaving={isSavingTranscript}
-//   sidebarCollapsed={sidebarCollapsed}
-// />
-
 interface StatusOverlaysProps {
   // Status flags
   isProcessing: boolean;      // Processing transcription after recording stops

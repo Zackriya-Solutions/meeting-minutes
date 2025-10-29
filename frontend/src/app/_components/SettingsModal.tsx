@@ -1,64 +1,21 @@
 import { ModelConfig } from "@/components/ModelSettingsModal";
 import { PreferenceSettings } from "@/components/PreferenceSettings";
-import { DeviceSelection, SelectedDevices } from "@/components/DeviceSelection";
+import { DeviceSelection } from "@/components/DeviceSelection";
 import { LanguageSelection } from "@/components/LanguageSelection";
-import { TranscriptSettings, TranscriptModelProps } from "@/components/TranscriptSettings";
+import { TranscriptSettings } from "@/components/TranscriptSettings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Dispatch, SetStateAction } from "react";
+import { useConfig } from "@/contexts/ConfigContext";
+import { useRecordingState } from "@/contexts/RecordingStateContext";
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
-// The props would get updated after the full refactor(hooks, context)
-// All Modals Extracted to SettingsModals Component
-// Usage example :  
-// <SettingsModals
-//   modals={{
-//     modelSettings: showModelSettings,
-//     deviceSettings: showDeviceSettings,
-//     languageSettings: showLanguageSettings,
-//     modelSelector: showModelSelector,
-//     errorAlert: showErrorAlert,
-//     chunkDropWarning: showChunkDropWarning,
-//   }}
-//   messages={{
-//     errorAlert: errorMessage,
-//     chunkDropWarning: chunkDropMessage,
-//     modelSelector: modelSelectorMessage,
-//   }}
-//   onClose={(name) => {
-//     if (name === 'modelSettings') setShowModelSettings(false);
-//     if (name === 'deviceSettings') setShowDeviceSettings(false);
-//     if (name === 'languageSettings') setShowLanguageSettings(false);
-//     if (name === 'modelSelector') {
-//       setShowModelSelector(false);
-//       setModelSelectorMessage('');
-//     }
-//     if (name === 'errorAlert') setShowErrorAlert(false);
-//     if (name === 'chunkDropWarning') setShowChunkDropWarning(false);
-//   }}
-//   modelConfig={modelConfig}
-//   setModelConfig={setModelConfig}
-//   models={models}
-//   error={error}
-//   selectedDevices={selectedDevices}
-//   setSelectedDevices={setSelectedDevices}
-//   isRecording={isRecording}
-//   selectedLanguage={selectedLanguage}
-//   setSelectedLanguage={setSelectedLanguage}
-//   transcriptModelConfig={transcriptModelConfig}
-//   setTranscriptModelConfig={setTranscriptModelConfig}
-//   showConfidenceIndicator={showConfidenceIndicator}
-//   handleConfidenceToggle={handleConfidenceToggle}
-// />
-
-
-interface OllamaModel {
-  name: string;
-  id: string;
-  size: string;
-  modified: string;
-}
+/**
+ * SettingsModals Component
+ *
+ * All settings modals consolidated into a single component.
+ * Uses ConfigContext and RecordingStateContext internally - no prop drilling needed!
+ */
 
 interface SettingsModalsProps {
   modals: {
@@ -75,55 +32,31 @@ interface SettingsModalsProps {
     modelSelector: string;
   };
   onClose: (name: modalType) => void;
-
-  // Props for Preferences Modal
-  modelConfig: ModelConfig;
-  setModelConfig: Dispatch<SetStateAction<ModelConfig>>;
-  models: OllamaModel[];
-  error: string;
-
-  // Props for Device Settings Modal
-  selectedDevices: SelectedDevices;
-  setSelectedDevices: (devices: SelectedDevices) => void;
-  isRecording: boolean;
-
-  // Props for Language Settings Modal
-  selectedLanguage: string;
-  setSelectedLanguage: (lang: string) => void;
-  transcriptModelConfig: TranscriptModelProps;
-
-  // Props for Model Selector Modal
-  setTranscriptModelConfig: (config: TranscriptModelProps) => void;
-  showConfidenceIndicator: boolean;
-  handleConfidenceToggle: (checked: boolean) => void;
 }
 
 export function SettingsModals({
   modals,
   messages,
   onClose,
-  modelConfig,
-  setModelConfig,
-  models,
-  error,
-  selectedDevices,
-  setSelectedDevices,
-  isRecording,
-  selectedLanguage,
-  setSelectedLanguage,
-  transcriptModelConfig,
-  setTranscriptModelConfig,
-  showConfidenceIndicator,
-  handleConfidenceToggle,
 }: SettingsModalsProps) {
-  // Calculate modelOptions from models prop
-  const modelOptions: Record<ModelConfig['provider'], string[]> = {
-    ollama: models.map(model => model.name),
-    claude: ['claude-3-5-sonnet-latest'],
-    groq: ['llama-3.3-70b-versatile'],
-    openrouter: [],
-    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  };
+  // Contexts
+  const {
+    modelConfig,
+    setModelConfig,
+    models,
+    modelOptions,
+    error,
+    selectedDevices,
+    setSelectedDevices,
+    selectedLanguage,
+    setSelectedLanguage,
+    transcriptModelConfig,
+    setTranscriptModelConfig,
+    showConfidenceIndicator,
+    toggleConfidenceIndicator,
+  } = useConfig();
+
+  const { isRecording } = useRecordingState();
 
   return <>
     {/* Legacy Settings Modal */}
@@ -343,7 +276,7 @@ export function SettingsModals({
                 <input
                   type="checkbox"
                   checked={showConfidenceIndicator}
-                  onChange={(e) => handleConfidenceToggle(e.target.checked)}
+                  onChange={(e) => toggleConfidenceIndicator(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
