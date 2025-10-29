@@ -2,10 +2,10 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
 import { Transcript, TranscriptUpdate } from '@/types';
-import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
+import { transcriptService } from '@/services/transcriptService';
+import { recordingService } from '@/services/recordingService';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -185,41 +185,41 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     const setupListener = async () => {
       try {
         console.log('🔥 Setting up MAIN transcript listener during component initialization...');
-        unlistenFn = await listen<TranscriptUpdate>('transcript-update', (event) => {
+        unlistenFn = await transcriptService.onTranscriptUpdate((update) => {
           const now = Date.now();
           console.log('🎯 MAIN LISTENER: Received transcript update:', {
-            sequence_id: event.payload.sequence_id,
-            text: event.payload.text.substring(0, 50) + '...',
-            timestamp: event.payload.timestamp,
-            is_partial: event.payload.is_partial,
+            sequence_id: update.sequence_id,
+            text: update.text.substring(0, 50) + '...',
+            timestamp: update.timestamp,
+            is_partial: update.is_partial,
             received_at: new Date(now).toISOString(),
             buffer_size_before: transcriptBuffer.size
           });
 
           // Check for duplicate sequence_id before processing
-          if (transcriptBuffer.has(event.payload.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', event.payload.sequence_id);
+          if (transcriptBuffer.has(update.sequence_id)) {
+            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
             return;
           }
 
           // Create transcript for buffer with NEW timestamp fields
           const newTranscript: Transcript = {
             id: `${Date.now()}-${transcriptCounter++}`,
-            text: event.payload.text,
-            timestamp: event.payload.timestamp,
-            sequence_id: event.payload.sequence_id,
-            chunk_start_time: event.payload.chunk_start_time,
-            is_partial: event.payload.is_partial,
-            confidence: event.payload.confidence,
+            text: update.text,
+            timestamp: update.timestamp,
+            sequence_id: update.sequence_id,
+            chunk_start_time: update.chunk_start_time,
+            is_partial: update.is_partial,
+            confidence: update.confidence,
             // NEW: Recording-relative timestamps for playback sync
-            audio_start_time: event.payload.audio_start_time,
-            audio_end_time: event.payload.audio_end_time,
-            duration: event.payload.duration,
+            audio_start_time: update.audio_start_time,
+            audio_end_time: update.audio_end_time,
+            duration: update.duration,
           };
 
           // Add to buffer
-          transcriptBuffer.set(event.payload.sequence_id, newTranscript);
-          console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${event.payload.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
+          transcriptBuffer.set(update.sequence_id, newTranscript);
+          console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${update.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
 
           // Clear any existing timer and set a new one
           if (processingTimer) {
@@ -262,7 +262,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           console.log('[Reload Sync] Recording active after reload, syncing transcript history...');
 
           // Fetch transcript history from backend
-          const history = await invoke<any[]>('get_transcript_history');
+          const history = await transcriptService.getTranscriptHistory();
           console.log(`[Reload Sync] Retrieved ${history.length} transcript segments from backend`);
 
           // Convert backend format to frontend Transcript format
@@ -283,7 +283,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           console.log('[Reload Sync] ✅ Transcript history synced successfully');
 
           // Fetch meeting name from backend
-          const meetingName = await invoke<string | null>('get_recording_meeting_name');
+          const meetingName = await recordingService.getRecordingMeetingName();
           if (meetingName) {
             console.log('[Reload Sync] Retrieved meeting name:', meetingName);
             setMeetingTitle(meetingName);

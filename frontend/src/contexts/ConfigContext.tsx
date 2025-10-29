@@ -1,15 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
-
-export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai';
-  model: string;
-  whisperModel: string;
-}
+import { configService, ModelConfig } from '@/services/configService';
 
 export interface OllamaModel {
   name: string;
@@ -143,7 +137,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loadTranscriptConfig = async () => {
       try {
-        const config = await invoke('api_get_transcript_config') as any;
+        const config = await configService.getTranscriptConfig();
         if (config) {
           console.log('Loaded saved transcript config:', config);
           setTranscriptModelConfig({
@@ -163,7 +157,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const fetchModelConfig = async () => {
       try {
-        const data = await invoke('api_get_model_config') as any;
+        const data = await configService.getModelConfig();
         if (data && data.provider) {
           setModelConfig(prev => ({
             ...prev,
@@ -183,7 +177,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loadDevicePreferences = async () => {
       try {
-        const prefs = await invoke('get_recording_preferences') as any;
+        const prefs = await configService.getRecordingPreferences();
         if (prefs && (prefs.preferred_mic_device || prefs.preferred_system_device)) {
           setSelectedDevices({
             micDevice: prefs.preferred_mic_device,
@@ -202,7 +196,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loadLanguagePreference = async () => {
       try {
-        const language = await invoke('get_language_preference') as string;
+        const language = await configService.getLanguagePreference();
         if (language) {
           setSelectedLanguage(language);
           console.log('Loaded language preference:', language);

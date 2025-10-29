@@ -17,6 +17,9 @@ import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
+import { storageService } from '@/services/storageService';
+import { recordingService } from '@/services/recordingService';
+import { transcriptService } from '@/services/transcriptService';
 
 
 
@@ -95,9 +98,8 @@ export default function Home() {
     const checkRecordingState = async () => {
       try {
         console.log('checkRecordingState called');
-        const { invoke } = await import('@tauri-apps/api/core');
         console.log('About to call is_recording command');
-        const isCurrentlyRecording = await invoke('is_recording');
+        const isCurrentlyRecording = await recordingService.isRecording();
         console.log('checkRecordingState: backend recording =', isCurrentlyRecording, 'UI recording =', isRecording);
 
         if (isCurrentlyRecording && !isRecording) {
@@ -304,8 +306,6 @@ export default function Home() {
 
           // Start the actual backend recording
           try {
-            const { invoke } = await import('@tauri-apps/api/core');
-
             // Generate meeting title
             const now = new Date();
             const day = String(now.getDate()).padStart(2, '0');
@@ -317,11 +317,11 @@ export default function Home() {
             const generatedMeetingTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
 
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
-            const result = await invoke('start_recording_with_devices_and_meeting', {
-              mic_device_name: selectedDevices?.micDevice || null,
-              system_device_name: selectedDevices?.systemDevice || null,
-              meeting_name: generatedMeetingTitle
-            });
+            const result = await recordingService.startRecordingWithDevices(
+              selectedDevices?.micDevice || null,
+              selectedDevices?.systemDevice || null,
+              generatedMeetingTitle
+            );
             console.log('Auto-start backend recording result:', result);
 
             // Update UI state after successful backend start
@@ -357,8 +357,6 @@ export default function Home() {
         stop_initiated_at: new Date(stopStartTime).toISOString(),
         current_transcript_count: transcripts.length
       });
-      const { invoke } = await import('@tauri-apps/api/core');
-      const { listen } = await import('@tauri-apps/api/event');
 
       // Note: stop_recording is already called by RecordingControls.stopRecordingAction
       // This function only handles post-stop processing (transcription wait, API call, navigation)
@@ -384,7 +382,7 @@ export default function Home() {
       // Poll for transcription status
       while (elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
         try {
-          const status = await invoke<{ chunks_in_queue: number, is_processing: boolean, last_activity_ms: number }>('get_transcription_status');
+          const status = await transcriptService.getTranscriptionStatus();
           console.log('Transcription status:', status);
 
           // Check if transcription is complete
@@ -477,11 +475,11 @@ export default function Home() {
         });
 
         try {
-          const responseData = await invoke('api_save_transcript', {
-            meetingTitle: meetingTitle || savedMeetingName,
-            transcripts: freshTranscripts,
-            folderPath: folderPath,
-          }) as any;
+          const responseData = await storageService.saveMeeting(
+            meetingTitle || savedMeetingName || 'New Meeting',
+            freshTranscripts,
+            folderPath
+          );
 
           const meetingId = responseData.meeting_id;
           if (!meetingId) {
@@ -501,7 +499,7 @@ export default function Home() {
           await refetchMeetings();
 
           try {
-            const meetingData = await invoke('api_get_meeting', { meetingId }) as any;
+            const meetingData = await storageService.getMeeting(meetingId);
             if (meetingData) {
               setCurrentMeeting({
                 id: meetingId,
