@@ -2,16 +2,15 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Transcript, TranscriptUpdate } from '@/types';
+import { TranscriptUpdate } from '@/types';
 import { RecordingControls } from '@/components/RecordingControls';
-import { SelectedDevices } from '@/components/DeviceSelection';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useConfig } from '@/contexts/ConfigContext';
 import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
@@ -21,39 +20,42 @@ import { TranscriptPanel } from './_components/TranscriptPanel';
 
 
 
-interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai';
-  model: string;
-  whisperModel: string;
-}
-
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
-interface OllamaModel {
-  name: string;
-  id: string;
-  size: string;
-  modified: string;
-}
-
 export default function Home() {
+  // Use contexts for state management
+  const {
+    transcripts,
+    transcriptsRef,
+    addTranscript,
+    copyTranscript,
+    flushBuffer,
+    transcriptContainerRef,
+    meetingTitle,
+    setMeetingTitle,
+    clearTranscripts
+  } = useTranscripts();
+
+  const {
+    modelConfig,
+    setModelConfig,
+    transcriptModelConfig,
+    setTranscriptModelConfig,
+    selectedDevices,
+    setSelectedDevices,
+    selectedLanguage,
+    setSelectedLanguage,
+    showConfidenceIndicator,
+    toggleConfidenceIndicator,
+    models,
+    modelOptions,
+    error
+  } = useConfig();
+
+  // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
-  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
-  const [meetingTitle, setMeetingTitle] = useState('+ New Call');
-  const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
-    whisperModel: 'large-v3'
-  });
-  const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'parakeet',
-    model: 'parakeet-tdt-0.6b-v3-int8',
-    apiKey: null
-  });
-  const [models, setModels] = useState<OllamaModel[]>([]);
-  const [error, setError] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -61,24 +63,12 @@ export default function Home() {
   const [chunkDropMessage, setChunkDropMessage] = useState('');
   const [isSavingTranscript, setIsSavingTranscript] = useState(false);
   const [isRecordingDisabled, setIsRecordingDisabled] = useState(false);
-  const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
-    micDevice: null,
-    systemDevice: null
-  });
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
-  const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
   const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-  const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('showConfidenceIndicator');
-      return saved !== null ? saved === 'true' : true;
-    }
-    return true;
-  });
 
   // Permission check hook
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
@@ -89,100 +79,9 @@ export default function Home() {
   const { setCurrentMeeting, setMeetings, meetings, isMeetingActive, setIsMeetingActive, setIsRecording: setSidebarIsRecording, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const router = useRouter();
 
-  // Ref for final buffer flush functionality
-  const finalFlushRef = useRef<(() => void) | null>(null);
-
-  // Ref to avoid stale closure issues with transcripts
-  const transcriptsRef = useRef<Transcript[]>(transcripts);
-
-  const isUserAtBottomRef = useRef<boolean>(true);
-
-  // Ref for the transcript scrollable container
-  const transcriptContainerRef = useRef<HTMLDivElement>(null);
-
-  // Keep ref updated with current transcripts
-  useEffect(() => {
-    transcriptsRef.current = transcripts;
-  }, [transcripts]);
-
-  // Smart auto-scroll: Track user scroll position
-  useEffect(() => {
-    const handleScroll = () => {
-      const container = transcriptContainerRef.current;
-      if (!container) return;
-
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
-      isUserAtBottomRef.current = isAtBottom;
-    };
-
-    const container = transcriptContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleScroll);
-      return () => container.removeEventListener('scroll', handleScroll);
-    }
-  }, []);
-
-  // Auto-scroll when transcripts change (only if user is at bottom)
-  useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
-      const scrollTimeout = setTimeout(() => {
-        const container = transcriptContainerRef.current;
-        if (container) {
-          container.scrollTo({
-            top: container.scrollHeight,
-            behavior: 'smooth'
-          });
-        }
-      }, 150); // Match Framer Motion transition duration
-
-      return () => clearTimeout(scrollTimeout);
-    }
-  }, [transcripts]);
-
-  const modelOptions = {
-    ollama: models.map(model => model.name),
-    claude: ['claude-3-5-sonnet-latest'],
-    groq: ['llama-3.3-70b-versatile'],
-    openrouter: [],
-    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  };
-
-  useEffect(() => {
-    if (models.length > 0 && modelConfig.provider === 'ollama') {
-      setModelConfig(prev => ({
-        ...prev,
-        model: models[0].name
-      }));
-    }
-  }, [models]);
-
   useEffect(() => {
     // Track page view
     Analytics.trackPageView('home');
-  }, []);
-
-  // Load saved transcript configuration on mount
-  useEffect(() => {
-    const loadTranscriptConfig = async () => {
-      try {
-        const config = await invoke('api_get_transcript_config') as any;
-        if (config) {
-          console.log('Loaded saved transcript config:', config);
-          setTranscriptModelConfig({
-            provider: config.provider || 'parakeet',
-            model: config.model || 'parakeet-tdt-0.6b-v3-int8',
-            apiKey: config.apiKey || null
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load transcript config:', error);
-      }
-    };
-    loadTranscriptConfig();
   }, []);
 
   useEffect(() => {
@@ -254,226 +153,6 @@ export default function Home() {
   useEffect(() => {
     setSidebarIsRecording(recordingState.isRecording);
   }, [recordingState.isRecording, setSidebarIsRecording]);
-
-  useEffect(() => {
-    let unlistenFn: (() => void) | undefined;
-    let transcriptCounter = 0;
-    let transcriptBuffer = new Map<number, Transcript>();
-    let lastProcessedSequence = 0;
-    let processingTimer: NodeJS.Timeout | undefined;
-
-    const processBufferedTranscripts = (forceFlush = false) => {
-      const sortedTranscripts: Transcript[] = [];
-
-      // Process all available sequential transcripts
-      let nextSequence = lastProcessedSequence + 1;
-      while (transcriptBuffer.has(nextSequence)) {
-        const bufferedTranscript = transcriptBuffer.get(nextSequence)!;
-        sortedTranscripts.push(bufferedTranscript);
-        transcriptBuffer.delete(nextSequence);
-        lastProcessedSequence = nextSequence;
-        nextSequence++;
-      }
-
-      // Add any buffered transcripts that might be out of order
-      const now = Date.now();
-      const staleThreshold = 100;  // 100ms safety net only (serial workers = sequential order)
-      const recentThreshold = 0;    // Show immediately - no delay needed with serial processing
-      const staleTranscripts: Transcript[] = [];
-      const recentTranscripts: Transcript[] = [];
-      const forceFlushTranscripts: Transcript[] = [];
-
-      for (const [sequenceId, transcript] of transcriptBuffer.entries()) {
-        if (forceFlush) {
-          // Force flush mode: process ALL remaining transcripts regardless of timing
-          forceFlushTranscripts.push(transcript);
-          transcriptBuffer.delete(sequenceId);
-          console.log(`Force flush: processing transcript with sequence_id ${sequenceId}`);
-        } else {
-          const transcriptAge = now - parseInt(transcript.id.split('-')[0]);
-          if (transcriptAge > staleThreshold) {
-            // Process stale transcripts (>100ms old - safety net)
-            staleTranscripts.push(transcript);
-            transcriptBuffer.delete(sequenceId);
-          } else if (transcriptAge >= recentThreshold) {
-            // Process immediately (0ms threshold with serial workers)
-            recentTranscripts.push(transcript);
-            transcriptBuffer.delete(sequenceId);
-            console.log(`Processing transcript with sequence_id ${sequenceId}, age: ${transcriptAge}ms`);
-          }
-        }
-      }
-
-      // Sort both stale and recent transcripts by chunk_start_time, then by sequence_id
-      const sortTranscripts = (transcripts: Transcript[]) => {
-        return transcripts.sort((a, b) => {
-          const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
-          if (chunkTimeDiff !== 0) return chunkTimeDiff;
-          return (a.sequence_id || 0) - (b.sequence_id || 0);
-        });
-      };
-
-      const sortedStaleTranscripts = sortTranscripts(staleTranscripts);
-      const sortedRecentTranscripts = sortTranscripts(recentTranscripts);
-      const sortedForceFlushTranscripts = sortTranscripts(forceFlushTranscripts);
-
-      const allNewTranscripts = [...sortedTranscripts, ...sortedRecentTranscripts, ...sortedStaleTranscripts, ...sortedForceFlushTranscripts];
-
-      if (allNewTranscripts.length > 0) {
-        setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-
-          // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
-            transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
-          );
-
-          // Only combine if we have unique new transcripts
-          if (uniqueNewTranscripts.length === 0) {
-            console.log('No unique transcripts to add - all were duplicates');
-            return prev; // No new unique transcripts to add
-          }
-
-          console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
-
-          // Merge with existing transcripts, maintaining chronological order
-          const combined = [...prev, ...uniqueNewTranscripts];
-
-          // Sort by chunk_start_time first, then by sequence_id
-          return combined.sort((a, b) => {
-            const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
-            if (chunkTimeDiff !== 0) return chunkTimeDiff;
-            return (a.sequence_id || 0) - (b.sequence_id || 0);
-          });
-        });
-
-        // Log the processing summary
-        const logMessage = forceFlush
-          ? `Force flush processed ${allNewTranscripts.length} transcripts (${sortedTranscripts.length} sequential, ${forceFlushTranscripts.length} forced)`
-          : `Processed ${allNewTranscripts.length} transcripts (${sortedTranscripts.length} sequential, ${recentTranscripts.length} recent, ${staleTranscripts.length} stale)`;
-        console.log(logMessage);
-      }
-    };
-
-    // Assign final flush function to ref for external access
-    finalFlushRef.current = () => processBufferedTranscripts(true);
-
-    const setupListener = async () => {
-      try {
-        console.log('🔥 Setting up MAIN transcript listener during component initialization...');
-        unlistenFn = await listen<TranscriptUpdate>('transcript-update', (event) => {
-          const now = Date.now();
-          console.log('🎯 MAIN LISTENER: Received transcript update:', {
-            sequence_id: event.payload.sequence_id,
-            text: event.payload.text.substring(0, 50) + '...',
-            timestamp: event.payload.timestamp,
-            is_partial: event.payload.is_partial,
-            received_at: new Date(now).toISOString(),
-            buffer_size_before: transcriptBuffer.size
-          });
-
-          // Check for duplicate sequence_id before processing
-          if (transcriptBuffer.has(event.payload.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', event.payload.sequence_id);
-            return;
-          }
-
-          // Create transcript for buffer with NEW timestamp fields
-          const newTranscript: Transcript = {
-            id: `${Date.now()}-${transcriptCounter++}`,
-            text: event.payload.text,
-            timestamp: event.payload.timestamp,
-            sequence_id: event.payload.sequence_id,
-            chunk_start_time: event.payload.chunk_start_time,
-            is_partial: event.payload.is_partial,
-            confidence: event.payload.confidence,
-            // NEW: Recording-relative timestamps for playback sync
-            audio_start_time: event.payload.audio_start_time,
-            audio_end_time: event.payload.audio_end_time,
-            duration: event.payload.duration,
-          };
-
-          // Add to buffer
-          transcriptBuffer.set(event.payload.sequence_id, newTranscript);
-          console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${event.payload.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
-
-          // Clear any existing timer and set a new one
-          if (processingTimer) {
-            clearTimeout(processingTimer);
-          }
-
-          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
-          processingTimer = setTimeout(processBufferedTranscripts, 10);
-        });
-        console.log('✅ MAIN transcript listener setup complete');
-      } catch (error) {
-        console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
-      }
-    };
-
-    setupListener();
-    console.log('Started enhanced listener setup');
-
-    return () => {
-      console.log('🧹 CLEANUP: Cleaning up MAIN transcript listener...');
-      if (processingTimer) {
-        clearTimeout(processingTimer);
-        console.log('🧹 CLEANUP: Cleared processing timer');
-      }
-      if (unlistenFn) {
-        unlistenFn();
-        console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
-      }
-    };
-  }, []);
-
-  // Sync transcript history and meeting name from backend on reload
-  // This fixes the issue where reloading during active recording causes state desync
-  useEffect(() => {
-    const syncFromBackend = async () => {
-      // Only sync if recording is active but we have no local transcripts
-      if (recordingState.isRecording && transcripts.length === 0) {
-        try {
-          console.log('[Reload Sync] Recording active after reload, syncing transcript history...');
-
-          // Fetch transcript history from backend
-          const history = await invoke<any[]>('get_transcript_history');
-          console.log(`[Reload Sync] Retrieved ${history.length} transcript segments from backend`);
-
-          // Convert backend format to frontend Transcript format
-          const formattedTranscripts: Transcript[] = history.map((segment: any) => ({
-            id: segment.id,
-            text: segment.text,
-            timestamp: segment.display_time, // Use display_time for UI
-            sequence_id: segment.sequence_id,
-            chunk_start_time: segment.audio_start_time,
-            is_partial: false, // History segments are always final
-            confidence: segment.confidence,
-            audio_start_time: segment.audio_start_time,
-            audio_end_time: segment.audio_end_time,
-            duration: segment.duration,
-          }));
-
-          setTranscripts(formattedTranscripts);
-          console.log('[Reload Sync] ✅ Transcript history synced successfully');
-
-          // Fetch meeting name from backend
-          const meetingName = await invoke<string | null>('get_recording_meeting_name');
-          if (meetingName) {
-            console.log('[Reload Sync] Retrieved meeting name:', meetingName);
-            setMeetingTitle(meetingName);
-            console.log('[Reload Sync] ✅ Meeting title synced successfully');
-          }
-        } catch (error) {
-          console.error('[Reload Sync] Failed to sync from backend:', error);
-        }
-      }
-    };
-
-    syncFromBackend();
-  }, [recordingState.isRecording]); // Run when recording state changes
 
   // Set up chunk drop warning listener
   useEffect(() => {
@@ -583,49 +262,6 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const response = await fetch('http://localhost:11434/api/tags', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const modelList = data.models.map((model: any) => ({
-          name: model.name,
-          id: model.model,
-          size: formatSize(model.size),
-          modified: model.modified_at
-        }));
-        setModels(modelList);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load Ollama models');
-        console.error('Error loading models:', err);
-      }
-    };
-
-    loadModels();
-  }, []);
-
-  const formatSize = (size: number): string => {
-    if (size < 1024) {
-      return `${size} B`;
-    } else if (size < 1024 * 1024) {
-      return `${(size / 1024).toFixed(1)} KB`;
-    } else if (size < 1024 * 1024 * 1024) {
-      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-    } else {
-      return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-    }
-  };
-
   const handleRecordingStart = async () => {
     try {
       console.log('handleRecordingStart called - setting up meeting title and state');
@@ -643,7 +279,7 @@ export default function Home() {
       // Update state - the actual recording is already started by RecordingControls
       console.log('Setting isRecordingState to true');
       setIsRecordingState(true); // This will also update the sidebar via the useEffect
-      setTranscripts([]); // Clear previous transcripts when starting new recording
+      clearTranscripts(); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
       Analytics.trackButtonClick('start_recording', 'home_page');
 
@@ -691,7 +327,7 @@ export default function Home() {
             // Update UI state after successful backend start
             setMeetingTitle(generatedMeetingTitle);
             setIsRecordingState(true);
-            setTranscripts([]);
+            clearTranscripts();
             setIsMeetingActive(true);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
 
@@ -802,17 +438,13 @@ export default function Home() {
         time_since_stop: flushStartTime - stopStartTime,
         current_transcript_count: transcripts.length
       });
-      if (finalFlushRef.current) {
-        finalFlushRef.current();
-        const flushEndTime = Date.now();
-        console.log('✅ Final buffer flush completed', {
-          flush_duration: flushEndTime - flushStartTime,
-          total_time_since_stop: flushEndTime - stopStartTime,
-          final_transcript_count: transcripts.length
-        });
-      } else {
-        console.log('⚠️ Final flush function not available');
-      }
+      flushBuffer();
+      const flushEndTime = Date.now();
+      console.log('✅ Final buffer flush completed', {
+        flush_duration: flushEndTime - flushStartTime,
+        total_time_since_stop: flushEndTime - stopStartTime,
+        final_transcript_count: transcripts.length
+      });
 
       setSummaryStatus('idle');
       setIsProcessingTranscript(false); // Reset processing flag
@@ -898,6 +530,7 @@ export default function Home() {
           // Auto-navigate after a short delay
           setTimeout(() => {
             router.push(`/meeting-details?id=${meetingId}`);
+            clearTranscripts()
             Analytics.trackPageView('meeting_details');
           }, 2000);
 
@@ -978,75 +611,15 @@ export default function Home() {
     }
   };
 
-  const handleTranscriptUpdate = (update: any) => {
-    console.log('🎯 handleTranscriptUpdate called with:', {
-      sequence_id: update.sequence_id,
-      text: update.text.substring(0, 50) + '...',
-      timestamp: update.timestamp,
-      is_partial: update.is_partial
-    });
+  // handleTranscriptUpdate - delegate to context
+  const handleTranscriptUpdate = useCallback((update: TranscriptUpdate) => {
+    addTranscript(update);
+  }, [addTranscript]);
 
-    const newTranscript = {
-      id: update.sequence_id ? update.sequence_id.toString() : Date.now().toString(),
-      text: update.text,
-      timestamp: update.timestamp,
-      sequence_id: update.sequence_id || 0,
-    };
-
-    setTranscripts(prev => {
-      console.log('📊 Current transcripts count before update:', prev.length);
-
-      // Check if this transcript already exists
-      const exists = prev.some(
-        t => t.text === update.text && t.timestamp === update.timestamp
-      );
-      if (exists) {
-        console.log('🚫 Duplicate transcript detected, skipping:', update.text.substring(0, 30) + '...');
-        return prev;
-      }
-
-      // Add new transcript and sort by sequence_id to maintain order
-      const updated = [...prev, newTranscript];
-      const sorted = updated.sort((a, b) => (a.sequence_id || 0) - (b.sequence_id || 0));
-
-      console.log('✅ Added new transcript. New count:', sorted.length);
-      console.log('📝 Latest transcript:', {
-        id: newTranscript.id,
-        text: newTranscript.text.substring(0, 30) + '...',
-        sequence_id: newTranscript.sequence_id
-      });
-
-      return sorted;
-    });
-  };
-
+  // handleCopyTranscript - delegate to context
   const handleCopyTranscript = useCallback(() => {
-    // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
-    const formatTime = (seconds: number | undefined): string => {
-      if (seconds === undefined) return '[--:--]';
-      const totalSecs = Math.floor(seconds);
-      const mins = Math.floor(totalSecs / 60);
-      const secs = totalSecs % 60;
-      return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
-    };
-
-    const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
-      .join('\n');
-    navigator.clipboard.writeText(fullTranscript);
-
-    toast.success("Transcript copied to clipboard");
-  }, [transcripts]);
-
-  // Handle confidence indicator toggle
-  const handleConfidenceToggle = (checked: boolean) => {
-    setShowConfidenceIndicator(checked);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('showConfidenceIndicator', checked.toString());
-    }
-    // Trigger a custom event to notify other components
-    window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
-  };
+    copyTranscript();
+  }, [copyTranscript]);
 
   // Listen for model download completion to auto-close modal
   useEffect(() => {
@@ -1107,63 +680,6 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
-    // Honor saved model settings from backend (including OpenRouter)
-    const fetchModelConfig = async () => {
-      try {
-        const data = await invoke('api_get_model_config') as any;
-        if (data && data.provider) {
-          setModelConfig(prev => ({
-            ...prev,
-            provider: data.provider,
-            model: data.model || prev.model,
-            whisperModel: data.whisperModel || prev.whisperModel,
-          }));
-        }
-      } catch (error) {
-        console.error('Failed to fetch saved model config in page.tsx:', error);
-      }
-    };
-    fetchModelConfig();
-  }, []);
-
-  // Load device preferences on startup
-  useEffect(() => {
-    const loadDevicePreferences = async () => {
-      try {
-        const prefs = await invoke('get_recording_preferences') as any;
-        if (prefs && (prefs.preferred_mic_device || prefs.preferred_system_device)) {
-          setSelectedDevices({
-            micDevice: prefs.preferred_mic_device,
-            systemDevice: prefs.preferred_system_device
-          });
-          console.log('Loaded device preferences:', prefs);
-        }
-      } catch (error) {
-        console.log('No device preferences found or failed to load:', error);
-      }
-    };
-    loadDevicePreferences();
-  }, []);
-
-  // Load language preference on startup
-  useEffect(() => {
-    const loadLanguagePreference = async () => {
-      try {
-        const language = await invoke('get_language_preference') as string;
-        if (language) {
-          setSelectedLanguage(language);
-          console.log('Loaded language preference:', language);
-        }
-      } catch (error) {
-        console.log('No language preference found or failed to load, using default (auto-translate):', error);
-        // Default to 'auto-translate' (Auto Detect with English translation) if no preference is saved
-        setSelectedLanguage('auto-translate');
-      }
-    };
-    loadLanguagePreference();
-  }, []);
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1209,7 +725,7 @@ export default function Home() {
         transcriptModelConfig={transcriptModelConfig}
         setTranscriptModelConfig={setTranscriptModelConfig}
         showConfidenceIndicator={showConfidenceIndicator}
-        handleConfidenceToggle={handleConfidenceToggle}
+        handleConfidenceToggle={toggleConfidenceIndicator}
       />
       <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
@@ -1243,7 +759,7 @@ export default function Home() {
                     isRecording={recordingState.isRecording}
                     onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
                     onRecordingStart={handleRecordingStart}
-                    onTranscriptReceived={handleTranscriptUpdate}
+                    onTranscriptReceived={() => { }} // Not actually used by RecordingControls
                     onStopInitiated={() => setIsStopping(true)}
                     barHeights={barHeights}
                     onTranscriptionError={(message) => {
