@@ -36,7 +36,7 @@ export function useSummaryGeneration({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [originalTranscript, setOriginalTranscript] = useState<string>('');
 
-  const { startSummaryPolling } = useSidebar();
+  const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -96,6 +96,12 @@ export function useSummaryGeneration({
         await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
       }
 
+      // Show toast notification for generation start
+      toast.info(`${isRegeneration ? 'Regenerating' : 'Generating'} summary...`, {
+        description: `Using ${modelConfig.provider}/${modelConfig.model}`,
+        duration: 3000,
+      });
+
       // Process transcript and get process_id
       const result = await invokeTauri('api_process_transcript', {
         text: transcriptText,
@@ -114,6 +120,14 @@ export function useSummaryGeneration({
       // Start global polling via context
       startSummaryPolling(meeting.id, process_id, async (pollingResult) => {
         console.log('Summary status:', pollingResult);
+
+        // Handle cancellation
+        if (pollingResult.status === 'cancelled') {
+          console.log('🛑 Summary generation was cancelled');
+          setSummaryStatus('idle');
+          setSummaryError(null);
+          return;
+        }
 
         // Handle errors
         if (pollingResult.status === 'error' || pollingResult.status === 'failed') {
@@ -165,6 +179,12 @@ export function useSummaryGeneration({
             console.log('📝 Received markdown format from backend');
             setAiSummary({ markdown: pollingResult.data.markdown } as any);
             setSummaryStatus('completed');
+
+            // Show success toast
+            toast.success('Summary generated successfully!', {
+              description: 'Your meeting summary is ready',
+              duration: 4000,
+            });
 
             if (meetingName && onMeetingUpdated) {
               await onMeetingUpdated();
@@ -233,6 +253,12 @@ export function useSummaryGeneration({
 
           setAiSummary(formattedSummary);
           setSummaryStatus('completed');
+
+          // Show success toast
+          toast.success('Summary generated successfully!', {
+            description: 'Your meeting summary is ready',
+            duration: 4000,
+          });
 
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,
@@ -357,11 +383,41 @@ export function useSummaryGeneration({
     });
   }, [originalTranscript, processSummary]);
 
+  // Public API: Stop ongoing summary generation
+  const handleStopGeneration = useCallback(async () => {
+    console.log('🛑 Stopping summary generation for meeting:', meeting.id);
+
+    try {
+      // Call backend to cancel the summary generation
+      await invokeTauri('api_cancel_summary', {
+        meetingId: meeting.id
+      });
+      console.log('✓ Backend cancellation request sent for meeting:', meeting.id);
+    } catch (error) {
+      console.error('Failed to cancel summary generation:', error);
+      // Continue with frontend cleanup even if backend call fails
+    }
+
+    // Stop polling
+    stopSummaryPolling(meeting.id);
+
+    // Reset status to idle
+    setSummaryStatus('idle');
+    setSummaryError(null);
+
+    // Show toast notification
+    toast.info('Summary generation stopped', {
+      description: 'You can generate a new summary anytime',
+      duration: 3000,
+    });
+  }, [meeting.id, stopSummaryPolling]);
+
   return {
     summaryStatus,
     summaryError,
     handleGenerateSummary,
     handleRegenerateSummary,
+    handleStopGeneration,
     getSummaryStatusMessage,
   };
 }

@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
+import { useConfig } from "@/contexts/ConfigContext";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -19,7 +20,9 @@ interface MeetingDetailsResponse {
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
-  const { setCurrentMeeting, refetchMeetings } = useSidebar();
+  const source = searchParams.get('source'); // Check if navigated from recording
+  const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
+  const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
@@ -44,6 +47,20 @@ function MeetingDetailsContent() {
   // Set up auto-generation - respects DB as source of truth
   const setupAutoGeneration = useCallback(async () => {
     if (hasCheckedAutoGen) return; // Only check once
+
+    // ✅ CHECK 1: Only auto-generate if navigated from recording
+    if (source !== 'recording') {
+      console.log('⚠️ Not from recording navigation, skipping auto-generation');
+      setHasCheckedAutoGen(true);
+      return;
+    }
+
+    // ✅ CHECK 2: Respect user's auto-summary toggle preference
+    if (!isAutoSummary) {
+      console.log('⚠️ Auto-summary is disabled in settings');
+      setHasCheckedAutoGen(true);
+      return;
+    }
 
     try {
       // ✅ STEP 1: Check what's currently in database
@@ -80,7 +97,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
 
   // Extract fetchMeetingDetails so it can be called from child components
   const fetchMeetingDetails = useCallback(async () => {
@@ -103,13 +120,26 @@ function MeetingDetailsContent() {
     }
   }, [meetingId, setCurrentMeeting]);
 
-  // Reset states when meetingId changes
+  // Reset states when meetingId changes (prevent race conditions)
   useEffect(() => {
     setMeetingDetails(null);
     setMeetingSummary(null);
     setError(null);
     setIsLoading(true);
+    // Reset auto-generation state to allow new meeting to be checked
+    setHasCheckedAutoGen(false);
+    setShouldAutoGenerate(false);
   }, [meetingId]);
+
+  // Cleanup: Stop polling when navigating away from a meeting
+  useEffect(() => {
+    return () => {
+      if (meetingId) {
+        console.log('🧹 Cleaning up: Stopping summary polling for meeting:', meetingId);
+        stopSummaryPolling(meetingId);
+      }
+    };
+  }, [meetingId, stopSummaryPolling]);
 
   useEffect(() => {
     console.log('🔍 MeetingDetails useEffect triggered - meetingId:', meetingId);

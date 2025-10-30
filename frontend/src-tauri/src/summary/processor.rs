@@ -2,6 +2,7 @@ use crate::summary::llm_client::{generate_summary, LLMProvider};
 use crate::summary::templates;
 use regex::Regex;
 use reqwest::Client;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 /// Rough token count estimation (4 characters ≈ 1 token)
@@ -129,6 +130,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
 /// * `token_threshold` - Token limit for single-pass processing (default 4000)
 /// * `ollama_endpoint` - Optional custom Ollama endpoint
+/// * `cancellation_token` - Optional cancellation token to stop processing
 ///
 /// # Returns
 /// Tuple of (final_summary_markdown, number_of_chunks_processed)
@@ -142,7 +144,14 @@ pub async fn generate_meeting_summary(
     template_id: &str,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
+    cancellation_token: Option<&CancellationToken>,
 ) -> Result<(String, i64), String> {
+    // Check cancellation at the start
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
     info!(
         "Starting summary generation with provider: {:?}, model: {}",
         provider, model_name
@@ -179,6 +188,14 @@ pub async fn generate_meeting_summary(
         let user_prompt_template_chunk = "Provide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{}\n</transcript_chunk>";
 
         for (i, chunk) in chunks.iter().enumerate() {
+            // Check for cancellation before processing each chunk
+            if let Some(token) = cancellation_token {
+                if token.is_cancelled() {
+                    info!("🛑 Summary generation cancelled during chunk {}/{}", i + 1, num_chunks);
+                    return Err("Summary generation was cancelled".to_string());
+                }
+            }
+
             info!("⏲️ Processing chunk {}/{}", i + 1, num_chunks);
             let user_prompt_chunk = user_prompt_template_chunk.replace("{}", chunk.as_str());
 
@@ -190,6 +207,7 @@ pub async fn generate_meeting_summary(
                 system_prompt_chunk,
                 &user_prompt_chunk,
                 ollama_endpoint,
+                cancellation_token,
             )
             .await
             {
@@ -198,6 +216,10 @@ pub async fn generate_meeting_summary(
                     info!("✓ Chunk {}/{} processed successfully", i + 1, num_chunks);
                 }
                 Err(e) => {
+                    // Check if error is due to cancellation
+                    if e.contains("cancelled") {
+                        return Err(e);
+                    }
                     error!("⚠️ Failed processing chunk {}/{}: {}", i + 1, num_chunks, e);
                 }
             }
@@ -235,6 +257,7 @@ pub async fn generate_meeting_summary(
                 system_prompt_combine,
                 &user_prompt_combine,
                 ollama_endpoint,
+                cancellation_token,
             )
             .await?
         } else {
@@ -288,6 +311,14 @@ pub async fn generate_meeting_summary(
         final_user_prompt.push_str("\n</user_context>");
     }
 
+    // Check cancellation before final summary generation
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            info!("🛑 Summary generation cancelled before final summary");
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
+
     let raw_markdown = generate_summary(
         client,
         provider,
@@ -296,6 +327,7 @@ pub async fn generate_meeting_summary(
         &final_system_prompt,
         &final_user_prompt,
         ollama_endpoint,
+        cancellation_token,
     )
     .await?;
 

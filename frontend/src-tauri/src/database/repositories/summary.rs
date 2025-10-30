@@ -162,4 +162,25 @@ impl SummaryProcessesRepository {
         .await?;
         Ok(())
     }
+
+    pub async fn update_process_cancelled(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        let now = Utc::now();
+        sqlx::query(
+            r#"
+            UPDATE summary_processes
+            SET status = 'cancelled', updated_at = ?, end_time = ?, error = NULL
+            WHERE meeting_id = ?
+            "#,
+        )
+        .bind(now)
+        .bind(now)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+        log_info!("🛑 Marked summary process as cancelled for meeting_id: {}", meeting_id);
+        Ok(())
+    }
 }

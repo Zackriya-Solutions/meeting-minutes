@@ -279,9 +279,9 @@ export function useRecordingStop(
             duration: 10000,
           });
 
-          // Auto-navigate after a short delay
+          // Auto-navigate after a short delay with source parameter
           setTimeout(() => {
-            router.push(`/meeting-details?id=${meetingId}`);
+            router.push(`/meeting-details?id=${meetingId}&source=recording`);
             clearTranscripts()
             Analytics.trackPageView('meeting_details');
           }, 2000);

@@ -241,3 +241,40 @@ pub async fn api_process_transcript<R: Runtime>(
         process_id: m_id,
     })
 }
+
+/// Cancels an ongoing summary generation process
+///
+/// This command triggers the cancellation token for the specified meeting,
+/// stopping the summary generation gracefully.
+#[tauri::command]
+pub async fn api_cancel_summary<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<serde_json::Value, String> {
+    log_info!("api_cancel_summary called for meeting_id: {}", meeting_id);
+
+    // Trigger cancellation via the service
+    let cancelled = SummaryService::cancel_summary(&meeting_id);
+
+    if cancelled {
+        // Update database status to cancelled
+        let pool = state.db_manager.pool();
+        if let Err(e) = SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await {
+            log_error!("Failed to update DB status to cancelled for {}: {}", meeting_id, e);
+            return Err(format!("Failed to update cancellation status: {}", e));
+        }
+
+        log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id);
+        Ok(serde_json::json!({
+            "message": "Summary generation cancelled successfully",
+            "meeting_id": meeting_id,
+        }))
+    } else {
+        log_warn!("No active summary generation found for meeting_id: {}", meeting_id);
+        Ok(serde_json::json!({
+            "message": "No active summary generation to cancel",
+            "meeting_id": meeting_id,
+        }))
+    }
+}

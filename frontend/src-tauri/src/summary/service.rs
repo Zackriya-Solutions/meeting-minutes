@@ -5,8 +5,11 @@ use crate::summary::llm_client::LLMProvider;
 use crate::summary::processor::{extract_meeting_name_from_markdown, generate_meeting_summary};
 use crate::ollama::metadata::ModelMetadataCache;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use once_cell::sync::Lazy;
 
@@ -15,10 +18,46 @@ static METADATA_CACHE: Lazy<ModelMetadataCache> = Lazy::new(|| {
     ModelMetadataCache::new(Duration::from_secs(300))
 });
 
+// Global registry for cancellation tokens (thread-safe)
+static CANCELLATION_REGISTRY: Lazy<Arc<Mutex<HashMap<String, CancellationToken>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
 /// Summary service - handles all summary generation logic
 pub struct SummaryService;
 
 impl SummaryService {
+    /// Registers a new cancellation token for a meeting
+    fn register_cancellation_token(meeting_id: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
+            registry.insert(meeting_id.to_string(), token.clone());
+            info!("🔑 Registered cancellation token for meeting: {}", meeting_id);
+        }
+        token
+    }
+
+    /// Cancels the summary generation for a meeting
+    pub fn cancel_summary(meeting_id: &str) -> bool {
+        if let Ok(registry) = CANCELLATION_REGISTRY.lock() {
+            if let Some(token) = registry.get(meeting_id) {
+                info!("🛑 Cancelling summary generation for meeting: {}", meeting_id);
+                token.cancel();
+                return true;
+            }
+        }
+        warn!("⚠️ No active summary generation found for meeting: {}", meeting_id);
+        false
+    }
+
+    /// Cleans up the cancellation token after processing completes
+    fn cleanup_cancellation_token(meeting_id: &str) {
+        if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
+            if registry.remove(meeting_id).is_some() {
+                info!("🧹 Cleaned up cancellation token for meeting: {}", meeting_id);
+            }
+        }
+    }
+
     /// Processes transcript in the background and generates summary
     ///
     /// This function is designed to be spawned as an async task and does not block
@@ -48,6 +87,9 @@ impl SummaryService {
             "🚀 Starting background processing for meeting_id: {}",
             meeting_id
         );
+
+        // Register cancellation token for this meeting
+        let cancellation_token = Self::register_cancellation_token(&meeting_id);
 
         // Parse provider
         let provider = match LLMProvider::from_str(&model_provider) {
@@ -127,10 +169,14 @@ impl SummaryService {
             &template_id,
             token_threshold,
             ollama_endpoint.as_deref(),
+            Some(&cancellation_token),
         )
         .await;
 
         let duration = start_time.elapsed().as_secs_f64();
+
+        // Clean up cancellation token regardless of outcome
+        Self::cleanup_cancellation_token(&meeting_id);
 
         match result {
             Ok((mut final_markdown, num_chunks)) => {
@@ -209,7 +255,15 @@ impl SummaryService {
                 }
             }
             Err(e) => {
-                Self::update_process_failed(&pool, &meeting_id, &e).await;
+                // Check if error is due to cancellation
+                if e.contains("cancelled") {
+                    info!("🛑 Summary generation was cancelled for meeting_id: {}", meeting_id);
+                    if let Err(db_err) = SummaryProcessesRepository::update_process_cancelled(&pool, &meeting_id).await {
+                        error!("⚠️ Failed to update DB status to cancelled for {}: {}", meeting_id, db_err);
+                    }
+                } else {
+                    Self::update_process_failed(&pool, &meeting_id, &e).await;
+                }
             }
         }
     }

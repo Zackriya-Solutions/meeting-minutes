@@ -16,8 +16,9 @@ pub mod templates;
 
 // Re-export Tauri commands (with their generated __cmd__ variants)
 pub use commands::{
-    __cmd__api_get_summary, __cmd__api_process_transcript, __cmd__api_save_meeting_summary,
-    api_get_summary, api_process_transcript, api_save_meeting_summary,
+    __cmd__api_cancel_summary, __cmd__api_get_summary, __cmd__api_process_transcript,
+    __cmd__api_save_meeting_summary, api_cancel_summary, api_get_summary,
+    api_process_transcript, api_save_meeting_summary,
 };
 
 // Re-export template commands

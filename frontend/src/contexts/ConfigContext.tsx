@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, Dispatch, SetStateAction } from 'react';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
@@ -37,9 +37,14 @@ interface ConfigContextType {
   models: OllamaModel[];
   modelOptions: Record<ModelConfig['provider'], string[]>;
   error: string;
+
+  // Summary configuration
+  isAutoSummary: boolean;
+  toggleIsAutoSummary: (checked: boolean) => void;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
+
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
@@ -77,6 +82,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     return true;
   });
+
+  // Summary configs
+  const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('isAutoSummary');
+      return saved !== null ? saved === 'true' : false
+    }
+    return false;
+  });
+
 
   // Format size helper function for Ollama models
   const formatSize = (size: number): string => {
@@ -229,9 +244,18 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
 
+  const toggleIsAutoSummary = useCallback((checked: boolean) => {
+    setisAutoSummary(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('isAutoSummary', checked.toString());
+    }
+  }, [])
+
   const value: ConfigContextType = {
     modelConfig,
     setModelConfig,
+    isAutoSummary,
+    toggleIsAutoSummary,
     transcriptModelConfig,
     setTranscriptModelConfig,
     selectedDevices,
