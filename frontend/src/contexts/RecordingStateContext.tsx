@@ -1,8 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { recordingService } from '@/services/recordingService';
 
 /**
  * Recording state synchronized with backend
@@ -53,13 +52,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
    */
   const syncWithBackend = async () => {
     try {
-      const backendState = await invoke('get_recording_state') as {
-        is_recording: boolean;
-        is_paused: boolean;
-        is_active: boolean;
-        recording_duration: number | null;
-        active_duration: number | null;
-      };
+      const backendState = await recordingService.getRecordingState();
 
       setState({
         isRecording: backendState.is_recording,
@@ -109,8 +102,8 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     const setupListeners = async () => {
       try {
         // Recording started
-        const unlistenStarted = await listen('recording-started', (event) => {
-          console.log('[RecordingStateContext] Recording started event:', event.payload);
+        const unlistenStarted = await recordingService.onRecordingStarted(() => {
+          console.log('[RecordingStateContext] Recording started event');
           setState(prev => ({
             ...prev,
             isRecording: true,
@@ -122,8 +115,8 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         unsubscribers.push(unlistenStarted);
 
         // Recording stopped
-        const unlistenStopped = await listen('recording-stopped', (event) => {
-          console.log('[RecordingStateContext] Recording stopped event:', event.payload);
+        const unlistenStopped = await recordingService.onRecordingStopped((payload) => {
+          console.log('[RecordingStateContext] Recording stopped event:', payload);
           setState({
             isRecording: false,
             isPaused: false,
@@ -136,8 +129,8 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         unsubscribers.push(unlistenStopped);
 
         // Recording paused
-        const unlistenPaused = await listen('recording-paused', (event) => {
-          console.log('[RecordingStateContext] Recording paused event:', event.payload);
+        const unlistenPaused = await recordingService.onRecordingPaused(() => {
+          console.log('[RecordingStateContext] Recording paused event');
           setState(prev => ({
             ...prev,
             isPaused: true,
@@ -147,8 +140,8 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         unsubscribers.push(unlistenPaused);
 
         // Recording resumed
-        const unlistenResumed = await listen('recording-resumed', (event) => {
-          console.log('[RecordingStateContext] Recording resumed event:', event.payload);
+        const unlistenResumed = await recordingService.onRecordingResumed(() => {
+          console.log('[RecordingStateContext] Recording resumed event');
           setState(prev => ({
             ...prev,
             isPaused: false,
