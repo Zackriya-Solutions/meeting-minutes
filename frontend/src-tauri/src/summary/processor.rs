@@ -191,12 +191,12 @@ pub async fn generate_meeting_summary(
             // Check for cancellation before processing each chunk
             if let Some(token) = cancellation_token {
                 if token.is_cancelled() {
-                    info!("🛑 Summary generation cancelled during chunk {}/{}", i + 1, num_chunks);
+                    info!("Summary generation cancelled during chunk {}/{}", i + 1, num_chunks);
                     return Err("Summary generation was cancelled".to_string());
                 }
             }
 
-            info!("⏲️ Processing chunk {}/{}", i + 1, num_chunks);
+            info!("Processing chunk {}/{}", i + 1, num_chunks);
             let user_prompt_chunk = user_prompt_template_chunk.replace("{}", chunk.as_str());
 
             match generate_summary(
@@ -220,7 +220,7 @@ pub async fn generate_meeting_summary(
                     if e.contains("cancelled") {
                         return Err(e);
                     }
-                    error!("⚠️ Failed processing chunk {}/{}: {}", i + 1, num_chunks, e);
+                    error!("Failed processing chunk {}/{}: {}", i + 1, num_chunks, e);
                 }
             }
         }
@@ -314,7 +314,7 @@ pub async fn generate_meeting_summary(
     // Check cancellation before final summary generation
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
-            info!("🛑 Summary generation cancelled before final summary");
+            info!("Summary generation cancelled before final summary");
             return Err("Summary generation was cancelled".to_string());
         }
     }

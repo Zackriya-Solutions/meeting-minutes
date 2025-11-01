@@ -31,7 +31,7 @@ impl SummaryService {
         let token = CancellationToken::new();
         if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
             registry.insert(meeting_id.to_string(), token.clone());
-            info!("🔑 Registered cancellation token for meeting: {}", meeting_id);
+            info!("Registered cancellation token for meeting: {}", meeting_id);
         }
         token
     }
@@ -40,12 +40,12 @@ impl SummaryService {
     pub fn cancel_summary(meeting_id: &str) -> bool {
         if let Ok(registry) = CANCELLATION_REGISTRY.lock() {
             if let Some(token) = registry.get(meeting_id) {
-                info!("🛑 Cancelling summary generation for meeting: {}", meeting_id);
+                info!("Cancelling summary generation for meeting: {}", meeting_id);
                 token.cancel();
                 return true;
             }
         }
-        warn!("⚠️ No active summary generation found for meeting: {}", meeting_id);
+        warn!("No active summary generation found for meeting: {}", meeting_id);
         false
     }
 
@@ -53,7 +53,7 @@ impl SummaryService {
     fn cleanup_cancellation_token(meeting_id: &str) {
         if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
             if registry.remove(meeting_id).is_some() {
-                info!("🧹 Cleaned up cancellation token for meeting: {}", meeting_id);
+                info!("Cleaned up cancellation token for meeting: {}", meeting_id);
             }
         }
     }
@@ -84,7 +84,7 @@ impl SummaryService {
     ) {
         let start_time = Instant::now();
         info!(
-            "🚀 Starting background processing for meeting_id: {}",
+            "Starting background processing for meeting_id: {}",
             meeting_id
         );
 
@@ -146,7 +146,7 @@ impl SummaryService {
                 }
                 Err(e) => {
                     warn!(
-                        "⚠️ Failed to fetch context for {}: {}. Using default 4000",
+                        "Failed to fetch context for {}: {}. Using default 4000",
                         model_name, e
                     );
                     4000  // Fallback to safe default
@@ -200,17 +200,17 @@ impl SummaryService {
                 if let Some(name) = extract_meeting_name_from_markdown(&final_markdown) {
                     if !name.is_empty() {
                         info!(
-                            "📝 Updating meeting name to '{}' for meeting_id: {}",
+                            "Updating meeting name to '{}' for meeting_id: {}",
                             name, meeting_id
                         );
                         if let Err(e) =
                             MeetingsRepository::update_meeting_title(&pool, &meeting_id, &name).await
                         {
-                            error!("⚠️ Failed to update meeting name for {}: {}", meeting_id, e);
+                            error!("Failed to update meeting name for {}: {}", meeting_id, e);
                         }
 
                         // Strip the title line from markdown
-                        info!("✂️ Stripping title from final_markdown");
+                        info!("Stripping title from final_markdown");
                         if let Some(hash_pos) = final_markdown.find('#') {
                             // Find end of first line after '#'
                             let body_start =
@@ -244,12 +244,12 @@ impl SummaryService {
                 .await
                 {
                     error!(
-                        "⚠️ Failed to save completed process for {}: {}",
+                        "Failed to save completed process for {}: {}",
                         meeting_id, e
                     );
                 } else {
                     info!(
-                        "💾 Summary saved successfully for meeting_id: {}",
+                        "Summary saved successfully for meeting_id: {}",
                         meeting_id
                     );
                 }
@@ -257,9 +257,9 @@ impl SummaryService {
             Err(e) => {
                 // Check if error is due to cancellation
                 if e.contains("cancelled") {
-                    info!("🛑 Summary generation was cancelled for meeting_id: {}", meeting_id);
+                    info!("Summary generation was cancelled for meeting_id: {}", meeting_id);
                     if let Err(db_err) = SummaryProcessesRepository::update_process_cancelled(&pool, &meeting_id).await {
-                        error!("⚠️ Failed to update DB status to cancelled for {}: {}", meeting_id, db_err);
+                        error!("Failed to update DB status to cancelled for {}: {}", meeting_id, db_err);
                     }
                 } else {
                     Self::update_process_failed(&pool, &meeting_id, &e).await;
@@ -276,14 +276,14 @@ impl SummaryService {
     /// * `error_msg` - Error message to store
     async fn update_process_failed(pool: &SqlitePool, meeting_id: &str, error_msg: &str) {
         error!(
-            "❌ Processing failed for meeting_id {}: {}",
+            "Processing failed for meeting_id {}: {}",
             meeting_id, error_msg
         );
         if let Err(e) =
             SummaryProcessesRepository::update_process_failed(pool, meeting_id, error_msg).await
         {
             error!(
-                "⚠️ Failed to update DB status to failed for {}: {}",
+                "Failed to update DB status to failed for {}: {}",
                 meeting_id, e
             );
         }

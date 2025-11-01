@@ -123,7 +123,7 @@ export function useSummaryGeneration({
 
         // Handle cancellation
         if (pollingResult.status === 'cancelled') {
-          console.log('🛑 Summary generation was cancelled');
+          console.log('Summary generation was cancelled');
 
           // Reload summary from database (backend has already restored from backup)
           try {
@@ -132,7 +132,7 @@ export function useSummaryGeneration({
             }) as any;
 
             if (existingSummary?.data) {
-              console.log('✅ Restored previous summary after cancellation');
+              console.log('Restored previous summary after cancellation');
               setAiSummary(existingSummary.data);
               setSummaryStatus('completed');
             } else {
@@ -160,7 +160,7 @@ export function useSummaryGeneration({
               }) as any;
 
               if (existingSummary?.data) {
-                console.log('✅ Restored previous summary after regeneration failure');
+                console.log('Restored previous summary after regeneration failure');
                 setAiSummary(existingSummary.data);
                 setSummaryStatus('completed');
                 setSummaryError(null);
@@ -218,7 +218,7 @@ export function useSummaryGeneration({
 
         // Handle successful completion
         if (pollingResult.status === 'completed' && pollingResult.data) {
-          console.log('✅ Summary generation completed:', pollingResult.data);
+          console.log('Summary generation completed:', pollingResult.data);
 
           // Update meeting title if available
           const meetingName = pollingResult.data.MeetingName || pollingResult.meetingName;
@@ -228,7 +228,7 @@ export function useSummaryGeneration({
 
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
-            console.log('📝 Received markdown format from backend');
+            console.log('Received markdown format from backend');
             setAiSummary({ markdown: pollingResult.data.markdown } as any);
             setSummaryStatus('completed');
 
@@ -435,7 +435,7 @@ export function useSummaryGeneration({
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {
-    console.log('🛑 Stopping summary generation for meeting:', meeting.id);
+    console.log('Stopping summary generation for meeting:', meeting.id);
 
     try {
       // Call backend to cancel the summary generation

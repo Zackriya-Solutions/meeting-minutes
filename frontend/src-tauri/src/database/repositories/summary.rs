@@ -111,7 +111,10 @@ impl SummaryProcessesRepository {
         .bind(now)
         .execute(pool)
         .await?;
-        log_info!("💾 Backed up existing summary before regeneration for meeting_id: {}", meeting_id);
+        log_info!(
+            "Backed up existing summary before regeneration for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 
@@ -141,7 +144,10 @@ impl SummaryProcessesRepository {
         .bind(meeting_id)
         .execute(pool)
         .await?;
-        log_info!("✅ Summary completed and backup cleared for meeting_id: {}", meeting_id);
+        log_info!(
+            "Summary completed and backup cleared for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 
@@ -173,7 +179,10 @@ impl SummaryProcessesRepository {
         .bind(meeting_id)
         .execute(pool)
         .await?;
-        log_info!("❌ Summary generation failed and backup restored for meeting_id: {}", meeting_id);
+        log_info!(
+            "Summary generation failed and backup restored for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 
@@ -203,7 +212,10 @@ impl SummaryProcessesRepository {
         .bind(meeting_id)
         .execute(pool)
         .await?;
-        log_info!("🛑 Marked summary process as cancelled and restored backup for meeting_id: {}", meeting_id);
+        log_info!(
+            "Marked summary process as cancelled and restored backup for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 }
