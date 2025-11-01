@@ -168,8 +168,9 @@ function MeetingDetailsContent() {
         console.log('🔍 FETCH SUMMARY: Raw response:', summary);
 
         // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
-        if (summary.status === 'error' || summary.error || summary.status === 'idle') {
-          console.warn('Meeting summary not found, error occurred, or no summary generated yet:', summary.error || 'idle');
+        // Note: 'cancelled' and 'failed' statuses can still have data if backup was restored
+        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
+          console.warn('Meeting summary not found or no summary generated yet:', summary.error || 'idle');
           setMeetingSummary(null);
           return;
         }

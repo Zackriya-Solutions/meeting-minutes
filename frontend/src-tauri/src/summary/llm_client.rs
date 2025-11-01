@@ -4,6 +4,8 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
+const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(120);
+
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
 pub struct ChatMessage {
@@ -198,7 +200,7 @@ pub async fn generate_summary(
         .post(api_url)
         .headers(headers)
         .json(&request_body)
-        .timeout(Duration::from_secs(60))  // 60 second timeout per request
+        .timeout(REQUEST_TIMEOUT_DURATION)
         .send();
 
     // Use tokio::select to race between cancellation and request completion

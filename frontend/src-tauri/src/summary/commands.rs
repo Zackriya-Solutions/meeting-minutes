@@ -85,18 +85,15 @@ pub async fn api_get_summary<R: Runtime>(
             let status = process.status.to_lowercase();
             let error = process.error;
 
-            // Parse result data if completed
-            let data = if status == "completed" {
-                if let Some(result_str) = process.result {
-                    match serde_json::from_str::<serde_json::Value>(&result_str) {
-                        Ok(parsed) => Some(parsed),
-                        Err(e) => {
-                            log_error!("Failed to parse summary result JSON: {}", e);
-                            None
-                        }
+            // Parse result data if it exists (regardless of status)
+            // This allows displaying restored summaries after cancellation or failure
+            let data = if let Some(result_str) = process.result {
+                match serde_json::from_str::<serde_json::Value>(&result_str) {
+                    Ok(parsed) => Some(parsed),
+                    Err(e) => {
+                        log_error!("Failed to parse summary result JSON: {}", e);
+                        None
                     }
-                } else {
-                    None
                 }
             } else {
                 None

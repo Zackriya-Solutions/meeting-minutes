@@ -124,7 +124,25 @@ export function useSummaryGeneration({
         // Handle cancellation
         if (pollingResult.status === 'cancelled') {
           console.log('🛑 Summary generation was cancelled');
-          setSummaryStatus('idle');
+
+          // Reload summary from database (backend has already restored from backup)
+          try {
+            const existingSummary = await invokeTauri('api_get_summary', {
+              meetingId: meeting.id
+            }) as any;
+
+            if (existingSummary?.data) {
+              console.log('✅ Restored previous summary after cancellation');
+              setAiSummary(existingSummary.data);
+              setSummaryStatus('completed');
+            } else {
+              setSummaryStatus('idle');
+            }
+          } catch (error) {
+            console.error('Failed to reload summary after cancellation:', error);
+            setSummaryStatus('idle');
+          }
+
           setSummaryError(null);
           return;
         }
@@ -133,6 +151,40 @@ export function useSummaryGeneration({
         if (pollingResult.status === 'error' || pollingResult.status === 'failed') {
           console.error('Backend returned error:', pollingResult.error);
           const errorMessage = pollingResult.error || `Summary ${isRegeneration ? 'regeneration' : 'generation'} failed`;
+
+          // If this was a regeneration, try to restore previous summary from database
+          if (isRegeneration) {
+            try {
+              const existingSummary = await invokeTauri('api_get_summary', {
+                meetingId: meeting.id
+              }) as any;
+
+              if (existingSummary?.data) {
+                console.log('✅ Restored previous summary after regeneration failure');
+                setAiSummary(existingSummary.data);
+                setSummaryStatus('completed');
+                setSummaryError(null);
+
+                // Show error toast with restoration message
+                toast.error(`Failed to regenerate summary`, {
+                  description: `${errorMessage}. Your previous summary has been restored.`,
+                });
+
+                await Analytics.trackSummaryGenerationCompleted(
+                  modelConfig.provider,
+                  modelConfig.model,
+                  false,
+                  undefined,
+                  errorMessage
+                );
+                return;
+              }
+            } catch (error) {
+              console.error('Failed to reload summary after error:', error);
+            }
+          }
+
+          // Continue with normal error handling if not regeneration or reload failed
           setSummaryError(errorMessage);
           setSummaryStatus('error');
 
@@ -276,9 +328,7 @@ export function useSummaryGeneration({
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setSummaryError(errorMessage);
       setSummaryStatus('error');
-      if (isRegeneration) {
-        setAiSummary(null);
-      }
+      // Note: We don't clear the summary here because the backend has already restored from backup
 
       toast.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary`, {
         description: errorMessage,
