@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check } from 'lucide-react';
+import { Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -28,6 +28,7 @@ interface SummaryGeneratorButtonGroupProps {
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
   onGenerateSummary: (customPrompt: string) => Promise<void>;
+  onStopGeneration: () => void;
   customPrompt: string;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   availableTemplates: Array<{id: string, name: string, description: string}>;
@@ -43,6 +44,7 @@ export function SummaryGeneratorButtonGroup({
   setModelConfig,
   onSaveModelConfig,
   onGenerateSummary,
+  onStopGeneration,
   customPrompt,
   summaryStatus,
   availableTemplates,
@@ -130,40 +132,56 @@ export function SummaryGeneratorButtonGroup({
     }
   };
 
+  const isGenerating = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+
   return (
     <ButtonGroup>
-      {/* Generate Summary button */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
-        onClick={() => {
-          Analytics.trackButtonClick('generate_summary', 'meeting_details');
-          checkOllamaModelsAndGenerate();
-        }}
-        disabled={summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading}
-        title={
-          isModelConfigLoading
-            ? 'Loading model configuration...'
-            : summaryStatus === 'processing'
-            ? 'Generating summary...'
-            : isCheckingModels
-            ? 'Checking models...'
-            : 'Generate AI Summary'
-        }
-      >
-        {summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading ? (
-          <>
-            <Loader2 className="animate-spin xl:mr-2" size={18} />
-            <span className="hidden xl:inline">Processing...</span>
-          </>
-        ) : (
-          <>
-            <Sparkles className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline xl:inline">Generate Summary</span>
-          </>
-        )}
-      </Button>
+      {/* Generate Summary or Stop button */}
+      {isGenerating ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border-red-200 xl:px-4"
+          onClick={() => {
+            Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
+            onStopGeneration();
+          }}
+          title="Stop summary generation"
+        >
+          <Square className="xl:mr-2" size={18} fill="currentColor" />
+          <span className="hidden lg:inline xl:inline">Stop</span>
+        </Button>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+          onClick={() => {
+            Analytics.trackButtonClick('generate_summary', 'meeting_details');
+            checkOllamaModelsAndGenerate();
+          }}
+          disabled={isCheckingModels || isModelConfigLoading}
+          title={
+            isModelConfigLoading
+              ? 'Loading model configuration...'
+              : isCheckingModels
+              ? 'Checking models...'
+              : 'Generate AI Summary'
+          }
+        >
+          {isCheckingModels || isModelConfigLoading ? (
+            <>
+              <Loader2 className="animate-spin xl:mr-2" size={18} />
+              <span className="hidden xl:inline">Processing...</span>
+            </>
+          ) : (
+            <>
+              <Sparkles className="xl:mr-2" size={18} />
+              <span className="hidden lg:inline xl:inline">Generate Summary</span>
+            </>
+          )}
+        </Button>
+      )}
       
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>

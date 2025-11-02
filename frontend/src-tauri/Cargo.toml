@@ -105,6 +105,7 @@ thiserror = "2.0.16"                # Error handling for Parakeet
 
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
+tokio-util = "0.7"  # Utilities for tokio including CancellationToken
 async-trait = "0.1"  # Trait abstraction for async methods
 
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }

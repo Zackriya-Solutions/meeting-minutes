@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
+import { useConfig } from "@/contexts/ConfigContext";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -19,7 +20,9 @@ interface MeetingDetailsResponse {
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
-  const { setCurrentMeeting, refetchMeetings } = useSidebar();
+  const source = searchParams.get('source'); // Check if navigated from recording
+  const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
+  const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
@@ -45,19 +48,33 @@ function MeetingDetailsContent() {
   const setupAutoGeneration = useCallback(async () => {
     if (hasCheckedAutoGen) return; // Only check once
 
+    // Only auto-generate if navigated from recording
+    if (source !== 'recording') {
+      console.log('Not from recording navigation, skipping auto-generation');
+      setHasCheckedAutoGen(true);
+      return;
+    }
+
+    // Respect user's auto-summary toggle preference
+    if (!isAutoSummary) {
+      console.log('Auto-summary is disabled in settings');
+      setHasCheckedAutoGen(true);
+      return;
+    }
+
     try {
-      // ✅ STEP 1: Check what's currently in database
+      // Check what's currently in database
       const currentConfig = await invoke('api_get_model_config') as any;
 
-      // ✅ STEP 2: If DB already has a model, use it (never override!)
+      // If DB already has a model, use it (never override!)
       if (currentConfig && currentConfig.model) {
-        console.log('✅ Using existing model from DB:', currentConfig.model);
+        console.log('Using existing model from DB:', currentConfig.model);
         setShouldAutoGenerate(true);
         setHasCheckedAutoGen(true);
         return;
       }
 
-      // ✅ STEP 3: DB is empty - check if gemma3:1b exists as fallback
+      // DB is empty - check if gemma3:1b exists as fallback
       const hasGemma = await checkForGemmaModel();
 
       if (hasGemma) {
@@ -80,7 +97,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
 
   // Extract fetchMeetingDetails so it can be called from child components
   const fetchMeetingDetails = useCallback(async () => {
@@ -103,26 +120,39 @@ function MeetingDetailsContent() {
     }
   }, [meetingId, setCurrentMeeting]);
 
-  // Reset states when meetingId changes
+  // Reset states when meetingId changes (prevent race conditions)
   useEffect(() => {
     setMeetingDetails(null);
     setMeetingSummary(null);
     setError(null);
     setIsLoading(true);
+    // Reset auto-generation state to allow new meeting to be checked
+    setHasCheckedAutoGen(false);
+    setShouldAutoGenerate(false);
   }, [meetingId]);
 
+  // Cleanup: Stop polling when navigating away from a meeting
   useEffect(() => {
-    console.log('🔍 MeetingDetails useEffect triggered - meetingId:', meetingId);
+    return () => {
+      if (meetingId) {
+        console.log('Cleaning up: Stopping summary polling for meeting:', meetingId);
+        stopSummaryPolling(meetingId);
+      }
+    };
+  }, [meetingId, stopSummaryPolling]);
+
+  useEffect(() => {
+    console.log('MeetingDetails useEffect triggered - meetingId:', meetingId);
 
     if (!meetingId || meetingId === 'intro-call') {
-      console.warn('⚠️ No valid meeting ID in URL - meetingId:', meetingId);
+      console.warn('No valid meeting ID in URL - meetingId:', meetingId);
       setError("No meeting selected");
       setIsLoading(false);
       Analytics.trackPageView('meeting_details');
       return;
     }
 
-    console.log('✅ Valid meeting ID found, fetching details for:', meetingId);
+    console.log('Valid meeting ID found, fetching details for:', meetingId);
 
     setMeetingDetails(null);
     setMeetingSummary(null);
@@ -135,11 +165,12 @@ function MeetingDetailsContent() {
           meetingId: meetingId,
         }) as any;
 
-        console.log('🔍 FETCH SUMMARY: Raw response:', summary);
+        console.log('FETCH SUMMARY: Raw response:', summary);
 
         // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
-        if (summary.status === 'error' || summary.error || summary.status === 'idle') {
-          console.warn('Meeting summary not found, error occurred, or no summary generated yet:', summary.error || 'idle');
+        // Note: 'cancelled' and 'failed' statuses can still have data if backup was restored
+        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
+          console.warn('Meeting summary not found or no summary generated yet:', summary.error || 'idle');
           setMeetingSummary(null);
           return;
         }
@@ -171,7 +202,7 @@ function MeetingDetailsContent() {
         }
 
         // Legacy format - apply formatting
-        console.log('📦 LEGACY FORMAT: Detected legacy format, applying section formatting');
+        console.log('LEGACY FORMAT: Detected legacy format, applying section formatting');
 
         const { MeetingName, _section_order, ...restSummaryData } = parsedData;
 
@@ -181,7 +212,7 @@ function MeetingDetailsContent() {
         // Use section order if available to maintain exact order and handle duplicates
         const sectionKeys = _section_order || Object.keys(restSummaryData);
 
-        console.log('📦 LEGACY FORMAT: Processing sections:', sectionKeys);
+        console.log('LEGACY FORMAT: Processing sections:', sectionKeys);
 
         for (const key of sectionKeys) {
           try {
@@ -207,25 +238,25 @@ function MeetingDetailsContent() {
                 };
               } else {
                 // Handle case where blocks is not an array
-                console.warn(`📦 LEGACY FORMAT: Section ${key} has invalid blocks:`, typedSection.blocks);
+                console.warn(`LEGACY FORMAT: Section ${key} has invalid blocks:`, typedSection.blocks);
                 formattedSummary[key] = {
                   title: typedSection.title || key,
                   blocks: []
                 };
               }
             } else {
-              console.warn(`📦 LEGACY FORMAT: Skipping invalid section ${key}:`, section);
+              console.warn(`LEGACY FORMAT: Skipping invalid section ${key}:`, section);
             }
           } catch (error) {
-            console.warn(`📦 LEGACY FORMAT: Error processing section ${key}:`, error);
+            console.warn(`LEGACY FORMAT: Error processing section ${key}:`, error);
             // Continue processing other sections
           }
         }
 
-        console.log('📦 LEGACY FORMAT: Formatted summary:', formattedSummary);
+        console.log('LEGACY FORMAT: Formatted summary:', formattedSummary);
         setMeetingSummary(formattedSummary);
       } catch (error) {
-        console.error('❌ FETCH SUMMARY: Error fetching meeting summary:', error);
+        console.error('FETCH SUMMARY: Error fetching meeting summary:', error);
         // Don't set error state for summary fetch failure, set to null to show generate button
         setMeetingSummary(null);
       }
@@ -260,7 +291,7 @@ function MeetingDetailsContent() {
         meetingDetails.transcripts.length > 0 &&
         !hasCheckedAutoGen
       ) {
-        console.log('🚀 No summary found, checking for auto-generation...');
+        console.log('No summary found, checking for auto-generation...');
         await setupAutoGeneration();
       }
     };

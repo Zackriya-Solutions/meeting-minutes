@@ -224,9 +224,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         // Call the update callback with result
         onUpdate(result);
 
-        // Stop polling if completed, error, failed, or idle (after initial processing)
-        if (result.status === 'completed' || result.status === 'error' || result.status === 'failed') {
-          console.log(`✅ Polling completed for ${meetingId}, status: ${result.status}`);
+        // Stop polling if completed, error, failed, cancelled, or idle (after initial processing)
+        if (result.status === 'completed' || result.status === 'error' || result.status === 'failed' || result.status === 'cancelled') {
+          console.log(`Polling completed for ${meetingId}, status: ${result.status}`);
           clearInterval(pollInterval);
           setActiveSummaryPolls(prev => {
             const next = new Map(prev);
@@ -235,7 +235,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           });
         } else if (result.status === 'idle' && pollCount > 1) {
           // If we get 'idle' after polling started, process completed/disappeared
-          console.log(`✅ Process completed or not found for ${meetingId}, stopping poll`);
+          console.log(`Process completed or not found for ${meetingId}, stopping poll`);
           clearInterval(pollInterval);
           setActiveSummaryPolls(prev => {
             const next = new Map(prev);
@@ -244,7 +244,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           });
         }
       } catch (error) {
-        console.error(`❌ Polling error for ${meetingId}:`, error);
+        console.error(`Polling error for ${meetingId}:`, error);
         // Report error to callback
         onUpdate({
           status: 'error',

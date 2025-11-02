@@ -50,6 +50,8 @@ pub struct SummaryProcess {
     pub chunk_count: i64,
     pub processing_time: f64,
     pub metadata: Option<String>, // JSON
+    pub result_backup: Option<String>, // Backup of result before regeneration
+    pub result_backup_timestamp: Option<chrono::DateTime<chrono::Utc>>, // When backup was created
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

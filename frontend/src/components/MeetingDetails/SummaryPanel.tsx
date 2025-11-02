@@ -34,6 +34,7 @@ interface SummaryPanelProps {
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
   onGenerateSummary: (customPrompt: string) => Promise<void>;
+  onStopGeneration: () => void;
   customPrompt: string;
   summaryResponse: SummaryResponse | null;
   onSaveSummary: (summary: Summary | { markdown?: string; summary_json?: any[] }) => Promise<void>;
@@ -69,6 +70,7 @@ export function SummaryPanel({
   setModelConfig,
   onSaveModelConfig,
   onGenerateSummary,
+  onStopGeneration,
   customPrompt,
   summaryResponse,
   onSaveSummary,
@@ -107,6 +109,7 @@ export function SummaryPanel({
                 setModelConfig={setModelConfig}
                 onSaveModelConfig={onSaveModelConfig}
                 onGenerateSummary={onGenerateSummary}
+                onStopGeneration={onStopGeneration}
                 customPrompt={customPrompt}
                 summaryStatus={summaryStatus}
                 availableTemplates={availableTemplates}
@@ -146,6 +149,7 @@ export function SummaryPanel({
               setModelConfig={setModelConfig}
               onSaveModelConfig={onSaveModelConfig}
               onGenerateSummary={onGenerateSummary}
+              onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}
               summaryStatus={summaryStatus}
               availableTemplates={availableTemplates}
@@ -173,6 +177,7 @@ export function SummaryPanel({
               setModelConfig={setModelConfig}
               onSaveModelConfig={onSaveModelConfig}
               onGenerateSummary={onGenerateSummary}
+              onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}
               summaryStatus={summaryStatus}
               availableTemplates={availableTemplates}

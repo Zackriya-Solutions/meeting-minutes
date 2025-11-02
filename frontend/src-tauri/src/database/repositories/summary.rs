@@ -99,7 +99,9 @@ impl SummaryProcessesRepository {
                 status = 'PENDING',
                 updated_at = excluded.updated_at,
                 start_time = excluded.start_time,
-                result = NULL,
+                result_backup = result,
+                result_backup_timestamp = excluded.updated_at,
+                result = result,
                 error = NULL
             "#
         )
@@ -109,6 +111,10 @@ impl SummaryProcessesRepository {
         .bind(now)
         .execute(pool)
         .await?;
+        log_info!(
+            "Backed up existing summary before regeneration for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 
@@ -126,7 +132,7 @@ impl SummaryProcessesRepository {
         sqlx::query(
             r#"
             UPDATE summary_processes
-            SET status = 'completed', result = ?, updated_at = ?, end_time = ?, chunk_count = ?, processing_time = ?, error = NULL
+            SET status = 'completed', result = ?, updated_at = ?, end_time = ?, chunk_count = ?, processing_time = ?, error = NULL, result_backup = NULL, result_backup_timestamp = NULL
             WHERE meeting_id = ?
             "#
         )
@@ -138,6 +144,10 @@ impl SummaryProcessesRepository {
         .bind(meeting_id)
         .execute(pool)
         .await?;
+        log_info!(
+            "Summary completed and backup cleared for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 
@@ -147,10 +157,19 @@ impl SummaryProcessesRepository {
         error: &str,
     ) -> Result<(), sqlx::Error> {
         let now = Utc::now();
+
+        // Restore from backup if it exists, otherwise keep current result
         sqlx::query(
             r#"
             UPDATE summary_processes
-            SET status = 'failed', error = ?, updated_at = ?, end_time = ?
+            SET
+                status = 'failed',
+                error = ?,
+                updated_at = ?,
+                end_time = ?,
+                result = COALESCE(result_backup, result),
+                result_backup = NULL,
+                result_backup_timestamp = NULL
             WHERE meeting_id = ?
             "#,
         )
@@ -160,6 +179,43 @@ impl SummaryProcessesRepository {
         .bind(meeting_id)
         .execute(pool)
         .await?;
+        log_info!(
+            "Summary generation failed and backup restored for meeting_id: {}",
+            meeting_id
+        );
+        Ok(())
+    }
+
+    pub async fn update_process_cancelled(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        let now = Utc::now();
+
+        // Restore from backup if it exists, otherwise keep current result
+        sqlx::query(
+            r#"
+            UPDATE summary_processes
+            SET
+                status = 'cancelled',
+                updated_at = ?,
+                end_time = ?,
+                error = 'Generation was cancelled by user',
+                result = COALESCE(result_backup, result),
+                result_backup = NULL,
+                result_backup_timestamp = NULL
+            WHERE meeting_id = ?
+            "#,
+        )
+        .bind(now)
+        .bind(now)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+        log_info!(
+            "Marked summary process as cancelled and restored backup for meeting_id: {}",
+            meeting_id
+        );
         Ok(())
     }
 }

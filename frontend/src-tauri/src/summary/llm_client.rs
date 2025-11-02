@@ -1,6 +1,10 @@
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
+
+const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(120);
 
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
@@ -86,6 +90,7 @@ impl LLMProvider {
 /// * `system_prompt` - System instructions for the LLM
 /// * `user_prompt` - User query/content to process
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
+/// * `cancellation_token` - Optional token to cancel the request
 ///
 /// # Returns
 /// The generated summary text or an error message
@@ -97,7 +102,14 @@ pub async fn generate_summary(
     system_prompt: &str,
     user_prompt: &str,
     ollama_endpoint: Option<&str>,
+    cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
+    // Check if cancelled before starting
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
     let (api_url, mut headers) = match provider {
         LLMProvider::OpenAI => (
             "https://api.openai.com/v1/chat/completions".to_string(),
@@ -183,14 +195,39 @@ pub async fn generate_summary(
 
     info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
 
-    // Send request
-    let response = client
+    // Send request with timeout and cancellation support
+    let request_future = client
         .post(api_url)
         .headers(headers)
         .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send request to LLM: {}", e))?;
+        .timeout(REQUEST_TIMEOUT_DURATION)
+        .send();
+
+    // Use tokio::select to race between cancellation and request completion
+    let response = if let Some(token) = cancellation_token {
+        tokio::select! {
+            result = request_future => {
+                result.map_err(|e| {
+                    if e.is_timeout() {
+                        format!("LLM request timed out after 60 seconds")
+                    } else {
+                        format!("Failed to send request to LLM: {}", e)
+                    }
+                })?
+            }
+            _ = token.cancelled() => {
+                return Err("Summary generation was cancelled".to_string());
+            }
+        }
+    } else {
+        request_future.await.map_err(|e| {
+            if e.is_timeout() {
+                format!("LLM request timed out after 60 seconds")
+            } else {
+                format!("Failed to send request to LLM: {}", e)
+            }
+        })?
+    };
 
     if !response.status().is_success() {
         let error_body = response

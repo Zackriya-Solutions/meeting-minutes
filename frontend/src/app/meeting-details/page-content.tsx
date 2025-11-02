@@ -97,20 +97,27 @@ export default function PageContent({
 
   // Auto-generate summary when flag is set
   useEffect(() => {
+    let cancelled = false;
+
     const autoGenerate = async () => {
-      if (shouldAutoGenerate && meetingData.transcripts.length > 0) {
+      if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
         console.log(`🤖 Auto-generating summary with ${modelConfig.modelConfig.provider}/${modelConfig.modelConfig.model}...`);
         await summaryGeneration.handleGenerateSummary('');
 
-        // Notify parent that auto-generation is complete
-        if (onAutoGenerateComplete) {
+        // Notify parent that auto-generation is complete (only if not cancelled)
+        if (onAutoGenerateComplete && !cancelled) {
           onAutoGenerateComplete();
         }
       }
     };
 
     autoGenerate();
-  }, [shouldAutoGenerate]); // Only trigger when flag changes
+
+    // Cleanup: cancel if component unmounts or meeting changes
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
 
   return (
     <motion.div
@@ -151,6 +158,7 @@ export default function PageContent({
           setModelConfig={modelConfig.setModelConfig}
           onSaveModelConfig={modelConfig.handleSaveModelConfig}
           onGenerateSummary={summaryGeneration.handleGenerateSummary}
+          onStopGeneration={summaryGeneration.handleStopGeneration}
           customPrompt={customPrompt}
           summaryResponse={summaryResponse}
           onSaveSummary={meetingData.handleSaveSummary}
