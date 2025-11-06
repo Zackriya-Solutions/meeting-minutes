@@ -139,8 +139,18 @@ class TranscriptProcessor:
             elif model == "openai":
                 api_key = await db.get_api_key("openai")
                 if not api_key: raise ValueError("OPENAI_API_KEY environment variable not set")
-                llm = OpenAIModel(model_name, provider=OpenAIProvider(api_key=api_key))
-                logger.info(f"Using OpenAI model: {model_name}")
+
+                # Get custom base URL if configured
+                model_config = await db.get_model_config()
+                openai_base_url = model_config.get("openaiBaseUrl") if model_config else None
+
+                # Create provider with custom base URL if specified
+                if openai_base_url and openai_base_url.strip():
+                    llm = OpenAIModel(model_name, provider=OpenAIProvider(api_key=api_key, base_url=openai_base_url.strip()))
+                    logger.info(f"Using OpenAI model: {model_name} with custom base URL: {openai_base_url}")
+                else:
+                    llm = OpenAIModel(model_name, provider=OpenAIProvider(api_key=api_key))
+                    logger.info(f"Using OpenAI model: {model_name}")
             # --- END OPENAI SUPPORT ---
             else:
                 logger.error(f"Unsupported model provider requested: {model}")

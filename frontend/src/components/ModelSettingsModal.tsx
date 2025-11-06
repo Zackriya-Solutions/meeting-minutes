@@ -25,6 +25,7 @@ export interface ModelConfig {
   whisperModel: string;
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  openaiBaseUrl?: string | null;
 }
 
 interface OllamaModel {
@@ -76,6 +77,8 @@ export function ModelSettingsModal({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
   const [ollamaNotInstalled, setOllamaNotInstalled] = useState<boolean>(false); // Track if Ollama is not installed
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState<string>(modelConfig.openaiBaseUrl || '');
+  const [isOpenaiEndpointSectionCollapsed, setIsOpenaiEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -255,6 +258,14 @@ export function ModelSettingsModal({
     }
   }, [modelConfig.ollamaEndpoint, modelConfig.provider]);
 
+  // Sync openaiBaseUrl state when modelConfig.openaiBaseUrl changes from parent
+  useEffect(() => {
+    const baseUrl = modelConfig.openaiBaseUrl || '';
+    if (baseUrl !== openaiBaseUrl) {
+      setOpenaiBaseUrl(baseUrl);
+    }
+  }, [modelConfig.openaiBaseUrl]);
+
   // Reset hasAutoFetched flag and clear models when switching away from Ollama
   useEffect(() => {
     if (modelConfig.provider !== 'ollama') {
@@ -384,6 +395,9 @@ export function ModelSettingsModal({
       apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
       ollamaEndpoint: modelConfig.provider === 'ollama' && ollamaEndpoint.trim()
         ? ollamaEndpoint.trim()
+        : null,
+      openaiBaseUrl: modelConfig.provider === 'openai' && openaiBaseUrl.trim()
+        ? openaiBaseUrl.trim()
         : null,
     };
     setModelConfig(updatedConfig);
@@ -627,6 +641,39 @@ export function ModelSettingsModal({
                 </Button>
               </div>
             </div>
+          </div>
+        )}
+
+        {modelConfig.provider === 'openai' && (
+          <div>
+            <div
+              className="flex items-center justify-between cursor-pointer py-2"
+              onClick={() => setIsOpenaiEndpointSectionCollapsed(!isOpenaiEndpointSectionCollapsed)}
+            >
+              <Label className="cursor-pointer">Custom Base URL (optional)</Label>
+              {isOpenaiEndpointSectionCollapsed ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              )}
+            </div>
+
+            {!isOpenaiEndpointSectionCollapsed && (
+              <>
+                <p className="text-sm text-muted-foreground mt-1 mb-2">
+                  Leave empty to use the default OpenAI API, or enter a custom base URL for OpenAI-compatible providers
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    type="url"
+                    value={openaiBaseUrl}
+                    onChange={(e) => setOpenaiBaseUrl(e.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                    className="flex-1"
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
 

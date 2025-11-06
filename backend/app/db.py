@@ -138,9 +138,17 @@ class DatabaseManager:
                     groqApiKey TEXT,
                     openaiApiKey TEXT,
                     anthropicApiKey TEXT,
-                    ollamaApiKey TEXT
+                    ollamaApiKey TEXT,
+                    openaiBaseUrl TEXT
                 )
             """)
+
+            # Migration: Add openaiBaseUrl column to existing settings table
+            try:
+                cursor.execute("ALTER TABLE settings ADD COLUMN openaiBaseUrl TEXT")
+                logger.info("Added openaiBaseUrl column to settings table")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
             # Create transcript_settings table
             cursor.execute("""
@@ -530,11 +538,11 @@ class DatabaseManager:
     async def get_model_config(self):
         """Get the current model configuration"""
         async with self._get_connection() as conn:
-            cursor = await conn.execute("SELECT provider, model, whisperModel FROM settings")
+            cursor = await conn.execute("SELECT provider, model, whisperModel, openaiBaseUrl FROM settings")
             row = await cursor.fetchone()
             return dict(zip([col[0] for col in cursor.description], row)) if row else None
 
-    async def save_model_config(self, provider: str, model: str, whisperModel: str):
+    async def save_model_config(self, provider: str, model: str, whisperModel: str, openaiBaseUrl: Optional[str] = None):
         """Save the model configuration"""
         # Input validation
         if not provider or not provider.strip():
@@ -543,11 +551,11 @@ class DatabaseManager:
             raise ValueError("Model cannot be empty")
         if not whisperModel or not whisperModel.strip():
             raise ValueError("Whisper model cannot be empty")
-            
+
         try:
             async with self._get_connection() as conn:
                 await conn.execute("BEGIN TRANSACTION")
-                
+
                 try:
                     # Check if the configuration already exists
                     cursor = await conn.execute("SELECT id FROM settings")
@@ -555,25 +563,25 @@ class DatabaseManager:
                     if existing_config:
                         # Update existing configuration
                         await conn.execute("""
-                            UPDATE settings 
-                            SET provider = ?, model = ?, whisperModel = ?
-                            WHERE id = '1'    
-                        """, (provider, model, whisperModel))
+                            UPDATE settings
+                            SET provider = ?, model = ?, whisperModel = ?, openaiBaseUrl = ?
+                            WHERE id = '1'
+                        """, (provider, model, whisperModel, openaiBaseUrl))
                     else:
                         # Insert new configuration
                         await conn.execute("""
-                            INSERT INTO settings (id, provider, model, whisperModel)
-                            VALUES (?, ?, ?, ?)
-                        """, ('1', provider, model, whisperModel))
-                    
+                            INSERT INTO settings (id, provider, model, whisperModel, openaiBaseUrl)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, ('1', provider, model, whisperModel, openaiBaseUrl))
+
                     await conn.commit()
                     logger.info(f"Successfully saved model configuration: {provider}/{model}")
-                    
+
                 except Exception as e:
                     await conn.rollback()
                     logger.error(f"Failed to save model configuration: {str(e)}", exc_info=True)
                     raise
-                    
+
         except Exception as e:
             logger.error(f"Database connection error in save_model_config: {str(e)}", exc_info=True)
             raise

@@ -91,6 +91,7 @@ class SaveModelConfigRequest(BaseModel):
     model: str
     whisperModel: str
     apiKey: Optional[str] = None
+    openaiBaseUrl: Optional[str] = None
 
 class SaveTranscriptConfigRequest(BaseModel):
     provider: str
@@ -560,7 +561,7 @@ async def get_model_config():
 @app.post("/save-model-config")
 async def save_model_config(request: SaveModelConfigRequest):
     """Save the model configuration"""
-    await db.save_model_config(request.provider, request.model, request.whisperModel)
+    await db.save_model_config(request.provider, request.model, request.whisperModel, request.openaiBaseUrl)
     if request.apiKey != None:
         await db.save_api_key(request.apiKey, request.provider)
     return {"status": "success", "message": "Model configuration saved successfully"}  

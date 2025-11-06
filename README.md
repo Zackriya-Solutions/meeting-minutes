@@ -149,7 +149,7 @@ Transcribe meetings entirely on your device using **Whisper** or **Parakeet** mo
 
 ### 🤖 AI-Powered Summaries
 
-Generate meeting summaries with your choice of AI provider. **Ollama** (local) is recommended, with support for Claude, Groq, OpenRouter, and OpenAI.
+Generate meeting summaries with your choice of AI provider. **Ollama** (local) is recommended, with support for Claude, Groq, OpenRouter, OpenAI or any OpenAI compatible API provider (LM Studio, llama.cpp, vLLM, Ollama etc.).
 
 <p align="center">
     <img src="docs/summary.png" width="650" style="border-radius: 10px;" alt="Summary generation" />
