@@ -78,6 +78,7 @@ export default function Home() {
         <TranscriptPanel
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
+          showModal={showModal}
         />
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
