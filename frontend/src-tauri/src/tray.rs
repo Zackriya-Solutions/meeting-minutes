@@ -42,7 +42,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
         "settings" => {
             focus_main_window(app);
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("(window.openSettings && window.openSettings())");
+                let _ = window.eval("window.location.assign('/settings')");
             }
         }
         "quit" => app.exit(0),
@@ -76,9 +76,10 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
             let stop_result = crate::audio::recording_commands::stop_recording(
                 app_clone.clone(),
                 crate::audio::recording_commands::RecordingArgs {
-                    save_path: save_path.to_string_lossy().to_string()
-                }
-            ).await;
+                    save_path: save_path.to_string_lossy().to_string(),
+                },
+            )
+            .await;
 
             // Handle result
             match stop_result {
@@ -88,9 +89,12 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
                     // Trigger frontend post-processing AFTER Rust completes
                     // (SQLite save, navigation, analytics)
                     if let Some(window) = app_clone.get_webview_window("main") {
-                        let _ = window.eval("window.handleRecordingStop && window.handleRecordingStop(true)");
+                        let _ = window
+                            .eval("window.handleRecordingStop && window.handleRecordingStop(true)");
                     } else {
-                        log::warn!("Tray toggle: Main window not found for post-processing callback");
+                        log::warn!(
+                            "Tray toggle: Main window not found for post-processing callback"
+                        );
                     }
                 }
                 Err(e) => {
@@ -135,7 +139,8 @@ fn resume_recording_handler<R: Runtime>(app: &AppHandle<R>) {
 
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = crate::audio::recording_commands::resume_recording(app_clone.clone()).await {
+        if let Err(e) = crate::audio::recording_commands::resume_recording(app_clone.clone()).await
+        {
             log::error!("Failed to resume recording from tray: {}", e);
             // Revert to current state on error
             update_tray_menu_async(&app_clone).await;
@@ -172,9 +177,10 @@ fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
         let stop_result = crate::audio::recording_commands::stop_recording(
             app_clone.clone(),
             crate::audio::recording_commands::RecordingArgs {
-                save_path: save_path.to_string_lossy().to_string()
-            }
-        ).await;
+                save_path: save_path.to_string_lossy().to_string(),
+            },
+        )
+        .await;
 
         // Handle result
         match stop_result {
@@ -184,7 +190,8 @@ fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
                 // Trigger frontend post-processing AFTER Rust completes
                 // (SQLite save, navigation, analytics)
                 if let Some(window) = app_clone.get_webview_window("main") {
-                    let _ = window.eval("window.handleRecordingStop && window.handleRecordingStop(true)");
+                    let _ = window
+                        .eval("window.handleRecordingStop && window.handleRecordingStop(true)");
                 } else {
                     log::warn!("Tray: Main window not found for post-processing callback");
                 }
@@ -225,7 +232,10 @@ pub fn set_tray_state<R: Runtime>(app: &AppHandle<R>, state: RecordingState) {
 async fn get_current_recording_state() -> RecordingState {
     // Check if currently recording
     let is_recording = crate::audio::recording_commands::is_recording().await;
-    log::info!("Tray: get_current_recording_state - is_recording: {}", is_recording);
+    log::info!(
+        "Tray: get_current_recording_state - is_recording: {}",
+        is_recording
+    );
 
     if !is_recording {
         log::info!("Tray: Recording state is Stopped");
@@ -271,10 +281,15 @@ fn build_menu<R: Runtime>(
 
     match state {
         RecordingState::Stopped => {
-            builder = builder.item(&MenuItemBuilder::with_id("toggle_recording", "Start Recording").build(app)?);
+            builder = builder
+                .item(&MenuItemBuilder::with_id("toggle_recording", "Start Recording").build(app)?);
         }
         RecordingState::Starting => {
-            builder = builder.item(&MenuItemBuilder::new("🔄 Starting Recording...").enabled(false).build(app)?);
+            builder = builder.item(
+                &MenuItemBuilder::new("🔄 Starting Recording...")
+                    .enabled(false)
+                    .build(app)?,
+            );
         }
         RecordingState::Recording => {
             builder = builder
@@ -283,21 +298,36 @@ fn build_menu<R: Runtime>(
         }
         RecordingState::Pausing => {
             builder = builder
-                .item(&MenuItemBuilder::new("⏸ Pausing...").enabled(false).build(app)?)
+                .item(
+                    &MenuItemBuilder::new("⏸ Pausing...")
+                        .enabled(false)
+                        .build(app)?,
+                )
                 .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
         }
         RecordingState::Paused => {
             builder = builder
-                .item(&MenuItemBuilder::with_id("resume_recording", "▶ Resume Recording").build(app)?)
+                .item(
+                    &MenuItemBuilder::with_id("resume_recording", "▶ Resume Recording")
+                        .build(app)?,
+                )
                 .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
         }
         RecordingState::Resuming => {
             builder = builder
-                .item(&MenuItemBuilder::new("▶ Resuming...").enabled(false).build(app)?)
+                .item(
+                    &MenuItemBuilder::new("▶ Resuming...")
+                        .enabled(false)
+                        .build(app)?,
+                )
                 .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
         }
         RecordingState::Stopping => {
-            builder = builder.item(&MenuItemBuilder::new("⏹ Stopping...").enabled(false).build(app)?);
+            builder = builder.item(
+                &MenuItemBuilder::new("⏹ Stopping...")
+                    .enabled(false)
+                    .build(app)?,
+            );
         }
     }
 
