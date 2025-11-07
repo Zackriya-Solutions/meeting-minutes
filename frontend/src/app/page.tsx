@@ -29,7 +29,7 @@ export default function Home() {
 
   // Hooks
   const { hasMicrophone } = usePermissionCheck();
-  const { setIsMeetingActive, setIsRecording: setSidebarIsRecording, isCollapsed: sidebarCollapsed } = useSidebar();
+  const { setIsMeetingActive, isCollapsed: sidebarCollapsed } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
   const { handleRecordingStart } = useRecordingStart(isRecording, setIsRecordingState);
@@ -58,11 +58,6 @@ export default function Home() {
       return () => clearInterval(interval);
     }
   }, [recordingState.isRecording]);
-
-  // Update sidebar recording state when backend-synced recording state changes
-  useEffect(() => {
-    setSidebarIsRecording(recordingState.isRecording);
-  }, [recordingState.isRecording, setSidebarIsRecording]);
 
   const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript;
 

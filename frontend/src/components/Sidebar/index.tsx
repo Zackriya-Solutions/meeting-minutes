@@ -13,6 +13,7 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 
 import {
   Dialog,
@@ -45,7 +46,6 @@ const Sidebar: React.FC = () => {
     sidebarItems,
     isCollapsed,
     toggleCollapse,
-    isRecording,
     handleRecordingToggle,
     searchTranscripts,
     searchResults,
@@ -54,6 +54,9 @@ const Sidebar: React.FC = () => {
     setMeetings,
     serverAddress
   } = useSidebar();
+
+  // Get recording state from RecordingStateContext (single source of truth)
+  const { isRecording } = useRecordingState();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);

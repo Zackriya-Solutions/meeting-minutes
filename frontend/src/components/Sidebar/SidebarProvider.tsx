@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 
 
 interface SidebarItem {
@@ -36,8 +37,6 @@ interface SidebarContextType {
   setMeetings: (meetings: CurrentMeeting[]) => void;
   isMeetingActive: boolean;
   setIsMeetingActive: (active: boolean) => void;
-  isRecording: boolean;
-  setIsRecording: (recording: boolean) => void;
   handleRecordingToggle: () => void;
   searchTranscripts: (query: string) => Promise<void>;
   searchResults: TranscriptSearchResult[];
@@ -71,13 +70,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
   const [activeSummaryPolls, setActiveSummaryPolls] = useState<Map<string, NodeJS.Timeout>>(new Map());
 
+  // Use recording state from RecordingStateContext (single source of truth)
+  const { isRecording } = useRecordingState();
 
   const pathname = usePathname();
   const router = useRouter();
@@ -149,10 +149,18 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {
     if (!isRecording) {
-      // If not recording, navigate to home page and set flag to start recording automatically
-      sessionStorage.setItem('autoStartRecording', 'true');
-      router.push('/');
-      
+      // Check if already on home page
+      if (pathname === '/') {
+        // Already on home - trigger recording directly via custom event
+        console.log('Triggering recording from sidebar (already on home page)');
+        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+      } else {
+        // Not on home - navigate and use auto-start mechanism
+        console.log('Navigating to home page with auto-start flag');
+        sessionStorage.setItem('autoStartRecording', 'true');
+        router.push('/');
+      }
+
       // Track recording initiation from sidebar
       Analytics.trackButtonClick('start_recording', 'sidebar');
     }
@@ -296,8 +304,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setMeetings,
       isMeetingActive,
       setIsMeetingActive,
-      isRecording,
-      setIsRecording,
       handleRecordingToggle,
       searchTranscripts,
       searchResults,

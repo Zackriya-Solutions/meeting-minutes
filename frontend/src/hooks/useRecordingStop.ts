@@ -58,6 +58,9 @@ export function useRecordingStop(
 
   const router = useRouter();
 
+  // Guard to prevent duplicate/concurrent stop calls (e.g., from UI and tray simultaneously)
+  const stopInProgressRef = useRef(false);
+
   // Set up recording-stopped listener for meeting navigation
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -103,6 +106,13 @@ export function useRecordingStop(
 
   // Main recording stop handler
   const handleRecordingStop = useCallback(async (isCallApi: boolean) => {
+    // Guard: prevent duplicate/concurrent stop calls
+    if (stopInProgressRef.current) {
+      console.log('Stop already in progress, ignoring duplicate call');
+      return;
+    }
+    stopInProgressRef.current = true;
+
     // Immediately update UI state to reflect that recording has stopped
     // Note: setIsStopping(true) is called via onStopInitiated callback before this function
     setIsRecording(false);
@@ -360,6 +370,9 @@ export function useRecordingStop(
       setIsStopping(false); // Reset stopping flag on error
       setIsSavingTranscript(false);
       setIsRecordingDisabled(false);
+    } finally {
+      // Always reset the guard flag when done
+      stopInProgressRef.current = false;
     }
   }, [
     setIsRecording,

@@ -124,6 +124,63 @@ export function useRecordingStart(
     setIsMeetingActive,
   ]);
 
+  // Listen for direct recording trigger from sidebar when already on home page
+  useEffect(() => {
+    const handleDirectStart = async () => {
+      if (isRecording || isAutoStarting) {
+        console.log('Recording already in progress, ignoring direct start event');
+        return;
+      }
+
+      console.log('Direct start from sidebar - triggering recording');
+      setIsAutoStarting(true);
+
+      try {
+        // Generate meeting title
+        const generatedMeetingTitle = generateMeetingTitle();
+
+        console.log('Starting backend recording with meeting:', generatedMeetingTitle);
+        const result = await recordingService.startRecordingWithDevices(
+          selectedDevices?.micDevice || null,
+          selectedDevices?.systemDevice || null,
+          generatedMeetingTitle
+        );
+        console.log('Backend recording result:', result);
+
+        // Update UI state after successful backend start
+        setMeetingTitle(generatedMeetingTitle);
+        setIsRecording(true);
+        clearTranscripts();
+        setIsMeetingActive(true);
+        Analytics.trackButtonClick('start_recording', 'sidebar_direct');
+
+        // Show recording notification if enabled
+        await showRecordingNotification();
+      } catch (error) {
+        console.error('Failed to start recording from sidebar:', error);
+        alert('Failed to start recording. Check console for details.');
+        Analytics.trackButtonClick('start_recording_error', 'sidebar_direct');
+      } finally {
+        setIsAutoStarting(false);
+      }
+    };
+
+    window.addEventListener('start-recording-from-sidebar', handleDirectStart);
+
+    return () => {
+      window.removeEventListener('start-recording-from-sidebar', handleDirectStart);
+    };
+  }, [
+    isRecording,
+    isAutoStarting,
+    selectedDevices,
+    generateMeetingTitle,
+    setMeetingTitle,
+    setIsRecording,
+    clearTranscripts,
+    setIsMeetingActive,
+  ]);
+
   return {
     handleRecordingStart,
     isAutoStarting,
