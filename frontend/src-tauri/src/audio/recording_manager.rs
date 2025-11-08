@@ -55,19 +55,26 @@ impl RecordingManager {
     // Remove app handle storage for now - will be passed directly when saving
 
     /// Start recording with specified devices
+    ///
+    /// # Arguments
+    /// * `microphone_device` - Optional microphone device to use
+    /// * `system_device` - Optional system audio device to use
+    /// * `auto_save` - Whether to save audio checkpoints (true) or just transcripts/metadata (false)
     pub async fn start_recording(
         &mut self,
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
+        auto_save: bool,
     ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
-        info!("Starting recording manager");
+        info!("Starting recording manager (auto_save: {})", auto_save);
 
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
 
         // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
         // Pipeline will mix mic + system audio professionally and send to this channel
-        let recording_sender = self.recording_saver.start_accumulation();
+        // Pass auto_save to control whether audio checkpoints are created
+        let recording_sender = self.recording_saver.start_accumulation(auto_save);
 
         // Start recording state first
         self.state.start_recording()?;
@@ -134,7 +141,10 @@ impl RecordingManager {
         Ok(transcription_receiver)
     }
 
-    /// Start recording with default devices (with automatic Bluetooth fallback on macOS)
+    /// Start recording with default devices and auto_save setting
+    ///
+    /// # Arguments
+    /// * `auto_save` - Whether to save audio checkpoints (true) or just transcripts/metadata (false)
     ///
     /// # Platform-Specific Behavior
     ///
@@ -157,7 +167,7 @@ impl RecordingManager {
     ///
     /// User still hears audio via Bluetooth (playback), but recording captures
     /// via stable wired path for best quality.
-    pub async fn start_recording_with_defaults(&mut self) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         #[cfg(target_os = "macos")]
         {
             info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
@@ -175,8 +185,8 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("❌ No microphone device available for recording"));
             }
 
-            // Start recording with selected devices
-            self.start_recording(microphone_device, system_device).await
+            // Start recording with selected devices and auto_save setting
+            self.start_recording(microphone_device, system_device, auto_save).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -211,7 +221,7 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device).await
+            self.start_recording(microphone_device, system_device, auto_save).await
         }
     }
 
