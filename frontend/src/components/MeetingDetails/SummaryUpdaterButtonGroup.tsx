@@ -67,21 +67,6 @@ export function SummaryUpdaterButtonGroup({
         <span className="hidden lg:inline">Copy</span>
       </Button>
 
-      {/* Recording folder button */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="xl:px-4"
-        onClick={() => {
-          Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
-          onOpenFolder();
-        }}
-        title="Open Recording Folder"
-      >
-        <FolderOpen className="xl:mr-2" size={18} />
-        <span className="hidden xl:inline">Recording</span>
-      </Button>
-
       {/* Find button */}
       {/* {onFind && (
         <Button

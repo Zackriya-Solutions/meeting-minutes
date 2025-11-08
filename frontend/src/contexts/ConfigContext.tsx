@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, Dispatch, SetStateAction } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
@@ -154,7 +154,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       try {
         const config = await configService.getTranscriptConfig();
         if (config) {
-          console.log('Loaded saved transcript config:', config);
+          console.log('[ConfigContext] Loaded saved transcript config:', config);
           setTranscriptModelConfig({
             provider: config.provider || 'parakeet',
             model: config.model || 'parakeet-tdt-0.6b-v3-int8',
@@ -162,7 +162,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           });
         }
       } catch (error) {
-        console.error('Failed to load transcript config:', error);
+        console.error('[ConfigContext] Failed to load transcript config:', error);
       }
     };
     loadTranscriptConfig();
@@ -251,7 +251,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const value: ConfigContextType = {
+  const value: ConfigContextType = useMemo(() => ({
     modelConfig,
     setModelConfig,
     isAutoSummary,
@@ -267,7 +267,19 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     models,
     modelOptions,
     error,
-  };
+  }), [
+    modelConfig,
+    isAutoSummary,
+    toggleIsAutoSummary,
+    transcriptModelConfig,
+    selectedDevices,
+    selectedLanguage,
+    showConfidenceIndicator,
+    toggleConfidenceIndicator,
+    models,
+    modelOptions,
+    error,
+  ]);
 
   return (
     <ConfigContext.Provider value={value}>

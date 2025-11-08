@@ -8,17 +8,14 @@ import { TranscriptSettings, TranscriptModelProps } from '@/components/Transcrip
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
+import { useConfig } from '@/contexts/ConfigContext';
 
 type SettingsTab = 'general' | 'recording' | 'Transcriptionmodels' | 'summaryModels';
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { transcriptModelConfig, setTranscriptModelConfig } = useConfig()
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'localWhisper',
-    model: 'large-v3',
-    apiKey: null
-  });
 
   const tabs = [
     { id: 'general' as const, label: 'General', icon: <Settings2 className="w-4 h-4" /> },
@@ -91,8 +88,8 @@ export default function SettingsPage() {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === tab.id
-                      ? 'border-b-2 border-blue-600 text-blue-600 bg-blue-50'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    ? 'border-b-2 border-blue-600 text-blue-600 bg-blue-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                 >
                   {tab.icon}
@@ -109,7 +106,7 @@ export default function SettingsPage() {
                 <TranscriptSettings
                   transcriptModelConfig={transcriptModelConfig}
                   setTranscriptModelConfig={setTranscriptModelConfig}
-                  // onSave={handleSaveConfig}
+                // onSave={handleSaveConfig}
                 />
               )}
               {activeTab === 'summaryModels' && <SummaryModelSettings />}
