@@ -705,7 +705,7 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer  min-w-48"
               >
                 <Home className="w-4 h-4 mr-2" />
                 <span>Home</span>
@@ -722,7 +722,7 @@ const Sidebar: React.FC = () => {
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
                     <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
+                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg min-w-64"
                     >
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
                       <span className="text-gray-700">{item.title}</span>
@@ -737,7 +737,7 @@ const Sidebar: React.FC = () => {
 
             {/* Scrollable meeting items */}
             {!isCollapsed && (
-              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
+              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 min-w-64">
                 {filteredSidebarItems
                   .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
                   .map(item => (
