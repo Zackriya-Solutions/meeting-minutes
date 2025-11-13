@@ -10,6 +10,7 @@
 pub mod commands;
 pub mod llm_client;
 pub mod processor;
+pub mod prompts;
 pub mod service;
 pub mod template_commands;
 pub mod templates;

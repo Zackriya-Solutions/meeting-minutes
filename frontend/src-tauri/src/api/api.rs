@@ -712,6 +712,65 @@ pub async fn api_delete_api_key<R: Runtime>(
     }
 }
 
+/// Get the current user language preference
+///
+/// Returns 'pt' (Portuguese) or 'en' (English), defaults to 'pt'
+/// Date: 13/11/2025 - Author: Luiz
+#[tauri::command]
+pub async fn api_get_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
+) -> Result<String, String> {
+    log_info!("🌐 api_get_language called (native)");
+    match SettingsRepository::get_language(&state.db_manager.pool()).await {
+        Ok(language) => {
+            log_info!("✅ Successfully retrieved language setting: '{}'", &language);
+            Ok(language)
+        }
+        Err(e) => {
+            log_error!("❌ Failed to get language setting: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Set the user language preference
+///
+/// Accepts 'pt' (Portuguese) or 'en' (English)
+/// Date: 13/11/2025 - Author: Luiz
+#[tauri::command]
+pub async fn api_set_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    language: String,
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!("🌐 api_set_language called (native) with language='{}'", &language);
+
+    // Validate language input
+    if language != "pt" && language != "en" {
+        let err_msg = format!("Invalid language '{}'. Must be 'pt' or 'en'", language);
+        log_error!("❌ {}", &err_msg);
+        return Err(err_msg);
+    }
+
+    match SettingsRepository::set_language(&state.db_manager.pool(), &language).await {
+        Ok(_) => {
+            log_info!("✅ Successfully saved language setting: '{}'", &language);
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Language preference saved successfully",
+                "language": language
+            }))
+        }
+        Err(e) => {
+            log_error!("❌ Failed to save language setting: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn api_delete_meeting<R: Runtime>(
     _app: AppHandle<R>,

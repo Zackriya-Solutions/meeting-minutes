@@ -591,6 +591,10 @@ pub fn run() {
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
+            api::api_delete_api_key,
+            // Language preference commands (database-backed)
+            api::api_get_language,
+            api::api_set_language,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_save_meeting_title,

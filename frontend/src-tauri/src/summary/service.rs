@@ -155,6 +155,16 @@ impl SummaryService {
             None
         };
 
+        // Fetch user language preference for prompts
+        // Date: 13/11/2025 - Author: Luiz
+        let language = match SettingsRepository::get_language(&pool).await {
+            Ok(lang) => lang,
+            Err(e) => {
+                warn!("Failed to fetch language setting: {}, defaulting to 'pt'", e);
+                "pt".to_string()
+            }
+        };
+
         // Dynamically fetch context size for Ollama models
         let token_threshold = if provider == LLMProvider::Ollama {
             match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {
@@ -192,6 +202,7 @@ impl SummaryService {
             &template_id,
             token_threshold,
             ollama_endpoint.as_deref(),
+            &language,  // Pass language for dynamic prompts - Date: 13/11/2025 - Author: Luiz
         )
         .await;
 

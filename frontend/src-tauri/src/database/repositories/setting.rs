@@ -217,6 +217,55 @@ impl SettingsRepository {
         Ok(api_key)
     }
 
+    /// Gets the current user language preference
+    ///
+    /// Returns 'pt' (Portuguese) or 'en' (English)
+    /// Defaults to 'pt' if not set or error occurs
+    ///
+    /// # Date: 13/11/2025 - Author: Luiz
+    pub async fn get_language(pool: &SqlitePool) -> std::result::Result<String, sqlx::Error> {
+        let language: Option<String> =
+            sqlx::query_scalar("SELECT language FROM settings WHERE id = '1' LIMIT 1")
+                .fetch_optional(pool)
+                .await?;
+
+        // Default to Portuguese if not set
+        Ok(language.unwrap_or_else(|| "pt".to_string()))
+    }
+
+    /// Sets the user language preference
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool
+    /// * `language` - Language code: 'pt' (Portuguese) or 'en' (English)
+    ///
+    /// # Date: 13/11/2025 - Author: Luiz
+    pub async fn set_language(
+        pool: &SqlitePool,
+        language: &str,
+    ) -> std::result::Result<(), sqlx::Error> {
+        // Validate language (only pt or en allowed)
+        if language != "pt" && language != "en" {
+            return Err(sqlx::Error::Protocol(
+                format!("Invalid language: {}. Must be 'pt' or 'en'", language).into(),
+            ));
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, language)
+            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                language = excluded.language
+            "#,
+        )
+        .bind(language)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn delete_api_key(
         pool: &SqlitePool,
         provider: &str,
