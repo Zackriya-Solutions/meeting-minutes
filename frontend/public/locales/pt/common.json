@@ -137,10 +137,19 @@
     },
     "transcription": {
       "title": "Transcrição",
+      "transcriptModel": "Modelo de Transcrição",
       "provider": "Provedor",
       "model": "Modelo",
+      "selectProvider": "Selecionar provedor",
+      "selectModel": "Selecionar modelo",
       "whisper": "Whisper Local",
-      "cloudProvider": "Provedor na Nuvem"
+      "cloudProvider": "Provedor na Nuvem",
+      "parakeetRecommended": "⚡ Parakeet (Recomendado - Tempo Real / Preciso)",
+      "localWhisperAccurate": "🏠 Whisper Local (Alta Precisão)",
+      "apiKey": "Chave de API",
+      "apiKeyPlaceholder": "Digite sua chave de API",
+      "unlockToEdit": "Desbloquear para editar",
+      "lockToPreventEditing": "Bloquear para prevenir edição"
     },
     "audioDevices": {
       "title": "Dispositivos de Áudio",

@@ -137,10 +137,19 @@
     },
     "transcription": {
       "title": "Transcription",
+      "transcriptModel": "Transcript Model",
       "provider": "Provider",
       "model": "Model",
+      "selectProvider": "Select provider",
+      "selectModel": "Select model",
       "whisper": "Local Whisper",
-      "cloudProvider": "Cloud Provider"
+      "cloudProvider": "Cloud Provider",
+      "parakeetRecommended": "⚡ Parakeet (Recommended - Real-time / Accurate)",
+      "localWhisperAccurate": "🏠 Local Whisper (High Accuracy)",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "unlockToEdit": "Unlock to edit",
+      "lockToPreventEditing": "Lock to prevent editing"
     },
     "audioDevices": {
       "title": "Audio Devices",
