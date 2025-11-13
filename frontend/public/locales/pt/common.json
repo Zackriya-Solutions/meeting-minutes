@@ -211,5 +211,24 @@
     "recordingFailed": "Falha ao iniciar gravação",
     "transcriptionFailed": "Falha ao gerar transcrição",
     "summaryFailed": "Falha ao gerar resumo"
+  },
+  "about": {
+    "version": "v0.1.1 - Pré-lançamento",
+    "tagline": "Notas e resumos em tempo real que nunca saem da sua máquina.",
+    "whatMakesDifferent": "O que torna o Meetily diferente",
+    "privacyFirst": "Privacidade em Primeiro Lugar",
+    "privacyFirstDescription": "Seus dados e fluxo de processamento de IA podem ficar dentro das suas instalações. Sem nuvem, sem vazamentos.",
+    "useAnyModel": "Use Qualquer Modelo",
+    "useAnyModelDescription": "Prefere modelo open-source local? Ótimo. Quer usar uma API externa? Também serve. Sem amarras.",
+    "costSmart": "Inteligente em Custos",
+    "costSmartDescription": "Evite contas por minuto executando modelos localmente (ou pague apenas pelas chamadas que escolher).",
+    "worksEverywhere": "Funciona em Todos os Lugares",
+    "worksEverywhereDescription": "Google Meet, Zoom, Teams - online ou offline.",
+    "comingSoon": "Em breve:",
+    "comingSoonDescription": "Uma biblioteca de agentes de IA no dispositivo - automatizando acompanhamentos, rastreamento de ações e mais.",
+    "readyToPushFurther": "Pronto para levar seu negócio ainda mais longe?",
+    "customAIDescription": "Se você está planejando construir agentes de IA personalizados com foco em privacidade ou um produto totalmente sob medida para o seu negócio, podemos ajudá-lo a construí-lo.",
+    "chatWithTeam": "Conversar com a equipe Zackriya",
+    "builtBy": "Desenvolvido por Zackriya Solutions"
   }
 }

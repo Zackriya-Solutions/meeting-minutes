@@ -211,5 +211,24 @@
     "recordingFailed": "Failed to start recording",
     "transcriptionFailed": "Failed to generate transcript",
     "summaryFailed": "Failed to generate summary"
+  },
+  "about": {
+    "version": "v0.1.1 - Pre Release",
+    "tagline": "Real-time notes and summaries that never leave your machine.",
+    "whatMakesDifferent": "What makes Meetily different",
+    "privacyFirst": "Privacy-first",
+    "privacyFirstDescription": "Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.",
+    "useAnyModel": "Use Any Model",
+    "useAnyModelDescription": "Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.",
+    "costSmart": "Cost-Smart",
+    "costSmartDescription": "Avoid pay-per-minute bills by running models locally (or pay only for the calls you choose).",
+    "worksEverywhere": "Works everywhere",
+    "worksEverywhereDescription": "Google Meet, Zoom, Teams-online or offline.",
+    "comingSoon": "Coming soon:",
+    "comingSoonDescription": "A library of on-device AI agents-automating follow-ups, action tracking, and more.",
+    "readyToPushFurther": "Ready to push your business further?",
+    "customAIDescription": "If you're planning to build privacy-first custom AI agents or a fully tailored product for your business, we can help you build it.",
+    "chatWithTeam": "Chat with the Zackriya team",
+    "builtBy": "Built by Zackriya Solutions"
   }
 }
