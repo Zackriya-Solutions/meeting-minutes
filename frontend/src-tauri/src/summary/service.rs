@@ -21,8 +21,73 @@ pub struct SummaryService;
 impl SummaryService {
     /// Processes transcript in the background and generates summary
     ///
-    /// This function is designed to be spawned as an async task and does not block
-    /// the main thread. It updates the database with progress and results.
+    /// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+    ///
+    /// Este método é o orquestrador principal do processamento de resumo em background.
+    /// Ele é chamado como uma tarefa assíncrona separada (spawned) quando o usuário
+    /// clica em "Generate Summary", e executa sem bloquear a UI do aplicativo.
+    ///
+    /// # Fluxo Completo de Processamento:
+    ///
+    /// **1. VALIDAÇÃO DE PROVIDER E API KEY (linhas 53-77)**
+    /// - Converte string do provider para enum LLMProvider
+    /// - Busca API key do banco de dados (settings table)
+    /// - EXCEÇÃO: Ollama não requer API key (execução local)
+    /// - Se provider ≠ Ollama e não há key → FALHA
+    ///
+    /// **2. CONFIGURAÇÃO OLLAMA (linhas 80-91)**
+    /// - Se provider é Ollama, busca endpoint customizado (padrão: localhost:11434)
+    /// - Permite usuário configurar Ollama em servidor remoto
+    ///
+    /// **3. DETERMINAÇÃO DE TOKEN THRESHOLD (linhas 94-116)**
+    /// - **Para Ollama**: Busca context_size dinâmico via API /api/show
+    ///   - Usa cache global (TTL 5min) para evitar chamadas repetidas
+    ///   - Exemplo: llama3.2:latest → 2048 tokens, reserve 300 → threshold 1748
+    ///   - Fallback para 4000 se falhar
+    /// - **Para Providers Cloud**: Define 100.000 (efetivamente ilimitado)
+    ///   - OpenAI GPT-4: ~128k tokens
+    ///   - Claude 3.5 Sonnet: ~200k tokens
+    ///   - Groq: Varia por modelo
+    ///
+    /// **4. GERAÇÃO DO RESUMO (linhas 119-131)**
+    /// - Chama generate_meeting_summary() com todos os parâmetros
+    /// - Retorna (markdown_final, chunk_count)
+    ///
+    /// **5. PÓS-PROCESSAMENTO DO RESULTADO (linhas 136-183)**
+    /// - **Extração do Nome da Reunião**:
+    ///   - Busca primeira linha com `# Título`
+    ///   - Atualiza tabela meetings com novo título
+    ///   - Remove a linha de título do markdown (evita duplicação na UI)
+    /// - **Formatação JSON**:
+    ///   - Cria objeto `{"markdown": "...", "summary_json": null}`
+    ///   - summary_json é preenchido posteriormente quando usuário edita
+    ///
+    /// **6. PERSISTÊNCIA (linhas 191-209)**
+    /// - Atualiza summary_processes table:
+    ///   - status: "completed"
+    ///   - result: JSON com markdown
+    ///   - chunk_count: número de chunks processados
+    ///   - processing_time: duração em segundos
+    /// - Em caso de erro, chama update_process_failed()
+    ///
+    /// # Tratamento de Erros:
+    ///
+    /// - Provider inválido → Falha imediata
+    /// - API key ausente (cloud providers) → Falha imediata
+    /// - Falha na geração do resumo → Salva erro no DB
+    /// - Falha ao salvar no DB → Log de erro (já processado com sucesso)
+    ///
+    /// # Monitoring e Observabilidade:
+    ///
+    /// - Logs estruturados com tracing (info, warn, error)
+    /// - Emojis para facilitar busca visual nos logs:
+    ///   - 🚀 Início do processamento
+    ///   - ✓ Sucesso em etapas
+    ///   - ⚠️ Avisos e fallbacks
+    ///   - ❌ Erros críticos
+    ///   - 📝 Atualização de metadados
+    ///   - ✂️ Operações de limpeza
+    ///   - 💾 Persistência no banco
     ///
     /// # Arguments
     /// * `_app` - Tauri app handle (for future use)

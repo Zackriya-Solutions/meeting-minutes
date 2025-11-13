@@ -78,6 +78,104 @@ impl LLMProvider {
 
 /// Generates a summary using the specified LLM provider
 ///
+/// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+///
+/// Este método implementa um cliente HTTP unificado para comunicação com 5 diferentes
+/// provedores de LLM. Ele abstrai as diferenças de API entre os providers e fornece
+/// uma interface consistente para geração de resumos.
+///
+/// # Provedores Suportados e Suas Especificidades:
+///
+/// **1. OpenAI** (api.openai.com)
+/// - Formato: OpenAI Chat Completions API
+/// - Auth: Bearer token via header Authorization
+/// - Models: gpt-4, gpt-4-turbo, gpt-3.5-turbo
+///
+/// **2. Claude** (api.anthropic.com)
+/// - Formato: Anthropic Messages API (DIFERENTE de OpenAI)
+/// - Auth: x-api-key header + anthropic-version header
+/// - Max tokens: Fixo em 2048 para resumos
+/// - Models: claude-3-opus, claude-3-sonnet, claude-3-haiku
+/// - Peculiaridade: System prompt é campo separado, não message
+///
+/// **3. Groq** (api.groq.com)
+/// - Formato: OpenAI-compatible API
+/// - Auth: Bearer token
+/// - Models: llama-3.1-70b-versatile, mixtral-8x7b-32768
+///
+/// **4. Ollama** (localhost:11434 ou endpoint customizado)
+/// - Formato: OpenAI-compatible API
+/// - Auth: Nenhuma (execução local)
+/// - Endpoint configurável via settings
+/// - Models: Qualquer modelo instalado localmente
+///
+/// **5. OpenRouter** (openrouter.ai)
+/// - Formato: OpenAI-compatible API
+/// - Auth: Bearer token
+/// - Models: Acesso a múltiplos providers via proxy
+///
+/// # Fluxo de Processamento:
+///
+/// **ETAPA 1: Configuração de Endpoint e Headers (linhas 101-139)**
+/// - Match no provider para determinar URL base
+/// - Claude: Adiciona x-api-key e anthropic-version headers
+/// - Outros: Adiciona Authorization: Bearer {api_key}
+/// - Ollama: Usa endpoint customizado ou localhost:11434
+///
+/// **ETAPA 2: Construção do Request Body (linhas 158-182)**
+/// - Providers OpenAI-compatible (OpenAI, Groq, Ollama, OpenRouter):
+///   ```json
+///   {
+///     "model": "gpt-4",
+///     "messages": [
+///       {"role": "system", "content": "..."},
+///       {"role": "user", "content": "..."}
+///     ]
+///   }
+///   ```
+/// - Claude (formato diferente):
+///   ```json
+///   {
+///     "model": "claude-3-opus",
+///     "max_tokens": 2048,
+///     "system": "...",
+///     "messages": [
+///       {"role": "user", "content": "..."}
+///     ]
+///   }
+///   ```
+///
+/// **ETAPA 3: Envio da Request (linhas 187-201)**
+/// - POST para api_url com headers e body JSON
+/// - Timeout padrão do reqwest::Client
+/// - Retorna erro se status HTTP ≠ 2xx
+///
+/// **ETAPA 4: Parsing da Response (linhas 204-235)**
+/// - Claude: Usa ClaudeChatResponse → content[0].text
+/// - Outros: Usa ChatResponse → choices[0].message.content
+/// - Trim para remover espaços em branco
+///
+/// # Exemplo de Uso:
+///
+/// ```rust
+/// let summary = generate_summary(
+///     &client,
+///     &LLMProvider::OpenAI,
+///     "gpt-4",
+///     "sk-...",
+///     "Você é um especialista em resumir reuniões.",
+///     "Resuma esta transcrição: ...",
+///     None
+/// ).await?;
+/// ```
+///
+/// # Tratamento de Erros:
+///
+/// - Falha de rede → "Failed to send request to LLM: {error}"
+/// - HTTP status ≠ 2xx → "LLM API request failed: {response_body}"
+/// - JSON parsing error → "Failed to parse LLM response: {error}"
+/// - Response vazio → "No content in LLM response"
+///
 /// # Arguments
 /// * `client` - Reqwest HTTP client (reused for performance)
 /// * `provider` - The LLM provider to use
