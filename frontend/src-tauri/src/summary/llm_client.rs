@@ -78,52 +78,52 @@ impl LLMProvider {
 
 /// Generates a summary using the specified LLM provider
 ///
-/// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+/// # Detailed Documentation - Date: 13/11/2025 - Author: Luiz
 ///
-/// Este método implementa um cliente HTTP unificado para comunicação com 5 diferentes
-/// provedores de LLM. Ele abstrai as diferenças de API entre os providers e fornece
-/// uma interface consistente para geração de resumos.
+/// This method implements a unified HTTP client for communication with 5 different
+/// LLM providers. It abstracts API differences between providers and provides
+/// a consistent interface for summary generation.
 ///
-/// # Provedores Suportados e Suas Especificidades:
+/// # Supported Providers and Their Specifics:
 ///
 /// **1. OpenAI** (api.openai.com)
-/// - Formato: OpenAI Chat Completions API
-/// - Auth: Bearer token via header Authorization
+/// - Format: OpenAI Chat Completions API
+/// - Auth: Bearer token via Authorization header
 /// - Models: gpt-4, gpt-4-turbo, gpt-3.5-turbo
 ///
 /// **2. Claude** (api.anthropic.com)
-/// - Formato: Anthropic Messages API (DIFERENTE de OpenAI)
+/// - Format: Anthropic Messages API (DIFFERENT from OpenAI)
 /// - Auth: x-api-key header + anthropic-version header
-/// - Max tokens: Fixo em 2048 para resumos
+/// - Max tokens: Fixed at 2048 for summaries
 /// - Models: claude-3-opus, claude-3-sonnet, claude-3-haiku
-/// - Peculiaridade: System prompt é campo separado, não message
+/// - Peculiarity: System prompt is separate field, not a message
 ///
 /// **3. Groq** (api.groq.com)
-/// - Formato: OpenAI-compatible API
+/// - Format: OpenAI-compatible API
 /// - Auth: Bearer token
 /// - Models: llama-3.1-70b-versatile, mixtral-8x7b-32768
 ///
-/// **4. Ollama** (localhost:11434 ou endpoint customizado)
-/// - Formato: OpenAI-compatible API
-/// - Auth: Nenhuma (execução local)
-/// - Endpoint configurável via settings
-/// - Models: Qualquer modelo instalado localmente
+/// **4. Ollama** (localhost:11434 or custom endpoint)
+/// - Format: OpenAI-compatible API
+/// - Auth: None (local execution)
+/// - Configurable endpoint via settings
+/// - Models: Any locally installed model
 ///
 /// **5. OpenRouter** (openrouter.ai)
-/// - Formato: OpenAI-compatible API
+/// - Format: OpenAI-compatible API
 /// - Auth: Bearer token
-/// - Models: Acesso a múltiplos providers via proxy
+/// - Models: Access to multiple providers via proxy
 ///
-/// # Fluxo de Processamento:
+/// # Processing Flow:
 ///
-/// **ETAPA 1: Configuração de Endpoint e Headers (linhas 101-139)**
-/// - Match no provider para determinar URL base
-/// - Claude: Adiciona x-api-key e anthropic-version headers
-/// - Outros: Adiciona Authorization: Bearer {api_key}
-/// - Ollama: Usa endpoint customizado ou localhost:11434
+/// **STEP 1: Endpoint and Headers Configuration (lines 199-237)**
+/// - Match on provider to determine base URL
+/// - Claude: Adds x-api-key and anthropic-version headers
+/// - Others: Adds Authorization: Bearer {api_key}
+/// - Ollama: Uses custom endpoint or localhost:11434
 ///
-/// **ETAPA 2: Construção do Request Body (linhas 158-182)**
-/// - Providers OpenAI-compatible (OpenAI, Groq, Ollama, OpenRouter):
+/// **STEP 2: Request Body Construction (lines 256-280)**
+/// - OpenAI-compatible providers (OpenAI, Groq, Ollama, OpenRouter):
 ///   ```json
 ///   {
 ///     "model": "gpt-4",
@@ -133,7 +133,7 @@ impl LLMProvider {
 ///     ]
 ///   }
 ///   ```
-/// - Claude (formato diferente):
+/// - Claude (different format):
 ///   ```json
 ///   {
 ///     "model": "claude-3-opus",
@@ -145,17 +145,17 @@ impl LLMProvider {
 ///   }
 ///   ```
 ///
-/// **ETAPA 3: Envio da Request (linhas 187-201)**
-/// - POST para api_url com headers e body JSON
-/// - Timeout padrão do reqwest::Client
-/// - Retorna erro se status HTTP ≠ 2xx
+/// **STEP 3: Request Sending (lines 285-299)**
+/// - POST to api_url with headers and JSON body
+/// - Default reqwest::Client timeout
+/// - Returns error if HTTP status ≠ 2xx
 ///
-/// **ETAPA 4: Parsing da Response (linhas 204-235)**
-/// - Claude: Usa ClaudeChatResponse → content[0].text
-/// - Outros: Usa ChatResponse → choices[0].message.content
-/// - Trim para remover espaços em branco
+/// **STEP 4: Response Parsing (lines 302-334)**
+/// - Claude: Uses ClaudeChatResponse → content[0].text
+/// - Others: Uses ChatResponse → choices[0].message.content
+/// - Trim to remove whitespace
 ///
-/// # Exemplo de Uso:
+/// # Usage Example:
 ///
 /// ```rust
 /// let summary = generate_summary(
@@ -163,18 +163,18 @@ impl LLMProvider {
 ///     &LLMProvider::OpenAI,
 ///     "gpt-4",
 ///     "sk-...",
-///     "Você é um especialista em resumir reuniões.",
-///     "Resuma esta transcrição: ...",
+///     "You are an expert meeting summarizer.",
+///     "Summarize this transcript: ...",
 ///     None
 /// ).await?;
 /// ```
 ///
-/// # Tratamento de Erros:
+/// # Error Handling:
 ///
-/// - Falha de rede → "Failed to send request to LLM: {error}"
+/// - Network failure → "Failed to send request to LLM: {error}"
 /// - HTTP status ≠ 2xx → "LLM API request failed: {response_body}"
 /// - JSON parsing error → "Failed to parse LLM response: {error}"
-/// - Response vazio → "No content in LLM response"
+/// - Empty response → "No content in LLM response"
 ///
 /// # Arguments
 /// * `client` - Reqwest HTTP client (reused for performance)

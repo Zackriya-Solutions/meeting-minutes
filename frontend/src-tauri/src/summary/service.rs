@@ -21,73 +21,73 @@ pub struct SummaryService;
 impl SummaryService {
     /// Processes transcript in the background and generates summary
     ///
-    /// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+    /// # Detailed Documentation - Date: 13/11/2025 - Author: Luiz
     ///
-    /// Este método é o orquestrador principal do processamento de resumo em background.
-    /// Ele é chamado como uma tarefa assíncrona separada (spawned) quando o usuário
-    /// clica em "Generate Summary", e executa sem bloquear a UI do aplicativo.
+    /// This method is the main orchestrator for background summary processing.
+    /// It's called as a separate async task (spawned) when the user clicks
+    /// "Generate Summary", and executes without blocking the app UI.
     ///
-    /// # Fluxo Completo de Processamento:
+    /// # Complete Processing Flow:
     ///
-    /// **1. VALIDAÇÃO DE PROVIDER E API KEY (linhas 53-77)**
-    /// - Converte string do provider para enum LLMProvider
-    /// - Busca API key do banco de dados (settings table)
-    /// - EXCEÇÃO: Ollama não requer API key (execução local)
-    /// - Se provider ≠ Ollama e não há key → FALHA
+    /// **1. PROVIDER AND API KEY VALIDATION (lines 53-77)**
+    /// - Converts provider string to LLMProvider enum
+    /// - Fetches API key from database (settings table)
+    /// - EXCEPTION: Ollama doesn't require API key (local execution)
+    /// - If provider ≠ Ollama and no key → FAIL
     ///
-    /// **2. CONFIGURAÇÃO OLLAMA (linhas 80-91)**
-    /// - Se provider é Ollama, busca endpoint customizado (padrão: localhost:11434)
-    /// - Permite usuário configurar Ollama em servidor remoto
+    /// **2. OLLAMA CONFIGURATION (lines 80-91)**
+    /// - If provider is Ollama, fetches custom endpoint (default: localhost:11434)
+    /// - Allows user to configure Ollama on remote server
     ///
-    /// **3. DETERMINAÇÃO DE TOKEN THRESHOLD (linhas 94-116)**
-    /// - **Para Ollama**: Busca context_size dinâmico via API /api/show
-    ///   - Usa cache global (TTL 5min) para evitar chamadas repetidas
-    ///   - Exemplo: llama3.2:latest → 2048 tokens, reserve 300 → threshold 1748
-    ///   - Fallback para 4000 se falhar
-    /// - **Para Providers Cloud**: Define 100.000 (efetivamente ilimitado)
+    /// **3. TOKEN THRESHOLD DETERMINATION (lines 94-116)**
+    /// - **For Ollama**: Fetches dynamic context_size via /api/show API
+    ///   - Uses global cache (5min TTL) to avoid repeated calls
+    ///   - Example: llama3.2:latest → 2048 tokens, reserve 300 → threshold 1748
+    ///   - Fallback to 4000 if fails
+    /// - **For Cloud Providers**: Sets 100,000 (effectively unlimited)
     ///   - OpenAI GPT-4: ~128k tokens
     ///   - Claude 3.5 Sonnet: ~200k tokens
-    ///   - Groq: Varia por modelo
+    ///   - Groq: Varies by model
     ///
-    /// **4. GERAÇÃO DO RESUMO (linhas 119-131)**
-    /// - Chama generate_meeting_summary() com todos os parâmetros
-    /// - Retorna (markdown_final, chunk_count)
+    /// **4. SUMMARY GENERATION (lines 119-131)**
+    /// - Calls generate_meeting_summary() with all parameters
+    /// - Returns (final_markdown, chunk_count)
     ///
-    /// **5. PÓS-PROCESSAMENTO DO RESULTADO (linhas 136-183)**
-    /// - **Extração do Nome da Reunião**:
-    ///   - Busca primeira linha com `# Título`
-    ///   - Atualiza tabela meetings com novo título
-    ///   - Remove a linha de título do markdown (evita duplicação na UI)
-    /// - **Formatação JSON**:
-    ///   - Cria objeto `{"markdown": "...", "summary_json": null}`
-    ///   - summary_json é preenchido posteriormente quando usuário edita
+    /// **5. RESULT POST-PROCESSING (lines 136-183)**
+    /// - **Meeting Name Extraction**:
+    ///   - Searches for first line with `# Title`
+    ///   - Updates meetings table with new title
+    ///   - Removes title line from markdown (avoids duplication in UI)
+    /// - **JSON Formatting**:
+    ///   - Creates object `{"markdown": "...", "summary_json": null}`
+    ///   - summary_json is filled later when user edits
     ///
-    /// **6. PERSISTÊNCIA (linhas 191-209)**
-    /// - Atualiza summary_processes table:
+    /// **6. PERSISTENCE (lines 191-209)**
+    /// - Updates summary_processes table:
     ///   - status: "completed"
-    ///   - result: JSON com markdown
-    ///   - chunk_count: número de chunks processados
-    ///   - processing_time: duração em segundos
-    /// - Em caso de erro, chama update_process_failed()
+    ///   - result: JSON with markdown
+    ///   - chunk_count: number of chunks processed
+    ///   - processing_time: duration in seconds
+    /// - On error, calls update_process_failed()
     ///
-    /// # Tratamento de Erros:
+    /// # Error Handling:
     ///
-    /// - Provider inválido → Falha imediata
-    /// - API key ausente (cloud providers) → Falha imediata
-    /// - Falha na geração do resumo → Salva erro no DB
-    /// - Falha ao salvar no DB → Log de erro (já processado com sucesso)
+    /// - Invalid provider → Immediate failure
+    /// - Missing API key (cloud providers) → Immediate failure
+    /// - Summary generation failure → Saves error to DB
+    /// - DB save failure → Error log (already successfully processed)
     ///
-    /// # Monitoring e Observabilidade:
+    /// # Monitoring and Observability:
     ///
-    /// - Logs estruturados com tracing (info, warn, error)
-    /// - Emojis para facilitar busca visual nos logs:
-    ///   - 🚀 Início do processamento
-    ///   - ✓ Sucesso em etapas
-    ///   - ⚠️ Avisos e fallbacks
-    ///   - ❌ Erros críticos
-    ///   - 📝 Atualização de metadados
-    ///   - ✂️ Operações de limpeza
-    ///   - 💾 Persistência no banco
+    /// - Structured logs with tracing (info, warn, error)
+    /// - Emojis for quick visual search in logs:
+    ///   - 🚀 Processing start
+    ///   - ✓ Step success
+    ///   - ⚠️ Warnings and fallbacks
+    ///   - ❌ Critical errors
+    ///   - 📝 Metadata updates
+    ///   - ✂️ Cleanup operations
+    ///   - 💾 Database persistence
     ///
     /// # Arguments
     /// * `_app` - Tauri app handle (for future use)

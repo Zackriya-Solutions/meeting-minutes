@@ -11,33 +11,32 @@ pub fn rough_token_count(s: &str) -> usize {
 
 /// Chunks text into overlapping segments based on token count
 ///
-/// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+/// # Detailed Documentation - Date: 13/11/2025 - Author: Luiz
 ///
-/// Este método implementa um algoritmo sofisticado de chunking (divisão em pedaços)
-/// de texto para processamento de transcrições longas que excedem o limite de contexto
-/// do modelo LLM. O algoritmo garante que:
+/// This method implements a sophisticated chunking algorithm for processing long transcripts
+/// that exceed the LLM model's context limit. The algorithm ensures:
 ///
-/// 1. **Respeita Limites de Tokens**: Cada chunk não excede o tamanho máximo especificado
-/// 2. **Mantém Contexto com Overlap**: Chunks consecutivos compartilham tokens para preservar contexto
-/// 3. **Preserva Integridade de Palavras**: Nunca corta palavras ao meio (word-boundary detection)
-/// 4. **Otimiza Performance**: Usa estimativa rápida de tokens (4 chars ≈ 1 token)
+/// 1. **Respects Token Limits**: Each chunk does not exceed the specified maximum size
+/// 2. **Maintains Context with Overlap**: Consecutive chunks share tokens to preserve context
+/// 3. **Preserves Word Integrity**: Never cuts words in the middle (word-boundary detection)
+/// 4. **Optimizes Performance**: Uses fast token estimation (4 chars ≈ 1 token)
 ///
-/// # Fluxo do Algoritmo:
+/// # Algorithm Flow:
 ///
-/// 1. Converte tamanhos de tokens para caracteres (multiplicando por 4)
-/// 2. Se o texto for menor que chunk_size, retorna como chunk único
-/// 3. Calcula step_size = chunk_size - overlap (porção não sobreposta)
-/// 4. Itera pela string com janela deslizante:
-///    - Define end_pos = current_pos + chunk_size
-///    - Busca backward por whitespace para evitar cortar palavras
-///    - Extrai chunk e adiciona ao vetor
-///    - Avança current_pos por step_size
-/// 5. Retorna todos os chunks criados
+/// 1. Converts token sizes to characters (multiplying by 4)
+/// 2. If text is smaller than chunk_size, returns as single chunk
+/// 3. Calculates step_size = chunk_size - overlap (non-overlapping portion)
+/// 4. Iterates through string with sliding window:
+///    - Defines end_pos = current_pos + chunk_size
+///    - Searches backward for whitespace to avoid cutting words
+///    - Extracts chunk and adds to vector
+///    - Advances current_pos by step_size
+/// 5. Returns all created chunks
 ///
-/// # Exemplo Prático:
+/// # Practical Example:
 ///
 /// ```text
-/// Texto: "The quick brown fox jumps over the lazy dog and runs away"
+/// Text: "The quick brown fox jumps over the lazy dog and runs away"
 /// chunk_size_tokens: 10 (40 chars)
 /// overlap_tokens: 2 (8 chars)
 /// step_size: 8 tokens (32 chars)
@@ -111,47 +110,47 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
 
 /// Cleans markdown output from LLM by removing thinking tags and code fences
 ///
-/// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+/// # Detailed Documentation - Date: 13/11/2025 - Author: Luiz
 ///
-/// Este método realiza pós-processamento essencial no output bruto do LLM para
-/// extrair apenas o conteúdo markdown puro e utilizável. Muitos LLMs modernos
-/// (especialmente Claude) incluem tags de "pensamento" e envolvem o output em
-/// code fences (```markdown), que precisam ser removidos.
+/// This method performs essential post-processing on raw LLM output to extract
+/// only pure, usable markdown content. Many modern LLMs (especially Claude)
+/// include "thinking" tags and wrap output in code fences (```markdown),
+/// which need to be removed.
 ///
-/// # Etapas de Limpeza:
+/// # Cleaning Steps:
 ///
-/// 1. **Remoção de Thinking Tags**:
-///    - Remove blocos `<think>...</think>` ou `<thinking>...</thinking>`
-///    - Usa regex com flag `(?s)` para matching multi-linha
-///    - Esses blocos contêm raciocínio interno do LLM que não deve aparecer no output
+/// 1. **Thinking Tags Removal**:
+///    - Removes `<think>...</think>` or `<thinking>...</thinking>` blocks
+///    - Uses regex with `(?s)` flag for multi-line matching
+///    - These blocks contain internal LLM reasoning that shouldn't appear in output
 ///
-/// 2. **Remoção de Code Fences**:
-///    - Detecta se o output está envolvido em ```markdown\n ou ```\n
-///    - Extrai apenas o conteúdo entre as fences
-///    - Suporta múltiplos formatos de fence (com ou sem especificador de linguagem)
+/// 2. **Code Fences Removal**:
+///    - Detects if output is wrapped in ```markdown\n or ```\n
+///    - Extracts only content between fences
+///    - Supports multiple fence formats (with or without language specifier)
 ///
 /// 3. **Trimming**:
-///    - Remove espaços em branco no início/fim após cada etapa
-///    - Garante output limpo e pronto para uso
+///    - Removes whitespace at beginning/end after each step
+///    - Ensures clean, ready-to-use output
 ///
-/// # Exemplo:
+/// # Example:
 ///
 /// Input:
 /// ```markdown
-/// <thinking>Vou criar um resumo estruturado...</thinking>
+/// <thinking>I'll create a structured summary...</thinking>
 ///
 /// ```markdown
-/// # Reunião de Planejamento
+/// # Planning Meeting
 ///
-/// **Resumo**: Discussão sobre features...
+/// **Summary**: Discussion about features...
 /// ```
 /// ```
 ///
 /// Output:
 /// ```text
-/// # Reunião de Planejamento
+/// # Planning Meeting
 ///
-/// **Resumo**: Discussão sobre features...
+/// **Summary**: Discussion about features...
 /// ```
 ///
 /// # Arguments
@@ -198,40 +197,40 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 
 /// Generates a complete meeting summary with conditional chunking strategy
 ///
-/// # Documentação Detalhada - Data: 13/11/2025 - Autor: Luiz
+/// # Detailed Documentation - Date: 13/11/2025 - Author: Luiz
 ///
-/// Este é o método central e mais importante do sistema de geração de resumos.
-/// Ele implementa uma estratégia inteligente de sumarização que se adapta
-/// automaticamente ao tamanho da transcrição e ao provedor LLM utilizado.
+/// This is the central and most important method of the summary generation system.
+/// It implements an intelligent summarization strategy that automatically adapts
+/// to the transcript size and LLM provider being used.
 ///
-/// # Estratégia de Decisão - Chunking vs Single-Pass:
+/// # Decision Strategy - Chunking vs Single-Pass:
 ///
-/// **Single-Pass** (usado quando):
-/// - Provider é cloud-based (OpenAI, Claude, Groq, OpenRouter) - contexto ilimitado
-/// - OU transcrição é curta (< token_threshold, padrão 4000 tokens)
-/// - Vantagem: Mais rápido, uma única chamada ao LLM, contexto completo
+/// **Single-Pass** (used when):
+/// - Provider is cloud-based (OpenAI, Claude, Groq, OpenRouter) - unlimited context
+/// - OR transcript is short (< token_threshold, default 4000 tokens)
+/// - Advantage: Faster, single LLM call, complete context
 ///
-/// **Multi-Level Chunking** (usado quando):
-/// - Provider é Ollama (contexto limitado baseado no modelo)
-/// - E transcrição é longa (>= token_threshold)
-/// - Fluxo em 3 etapas:
-///   1. Divide transcrição em chunks com overlap (chunk_text)
-///   2. Gera resumo parcial de cada chunk (generate_summary para cada chunk)
-///   3. Combina resumos parciais em narrativa coerente (generate_summary de combinação)
+/// **Multi-Level Chunking** (used when):
+/// - Provider is Ollama (limited context based on model)
+/// - AND transcript is long (>= token_threshold)
+/// - Flow in 3 stages:
+///   1. Divide transcript into chunks with overlap (chunk_text)
+///   2. Generate partial summary for each chunk (generate_summary for each chunk)
+///   3. Combine partial summaries into coherent narrative (generate_summary for combination)
 ///
-/// # Processamento Final (ambas estratégias):
+/// # Final Processing (both strategies):
 ///
-/// 1. **Carrega Template**: Busca template JSON (fallback: custom → bundled → built-in)
-/// 2. **Gera Estrutura**: Cria skeleton markdown e instruções por seção
-/// 3. **Monta Prompts**: System prompt com instruções + User prompt com transcrição
-/// 4. **Chama LLM**: Envia para provider com prompts formatados
-/// 5. **Limpa Output**: Remove thinking tags e code fences
-/// 6. **Retorna**: Markdown final + contagem de chunks processados
+/// 1. **Load Template**: Fetch template JSON (fallback: custom → bundled → built-in)
+/// 2. **Generate Structure**: Create markdown skeleton and section instructions
+/// 3. **Build Prompts**: System prompt with instructions + User prompt with transcript
+/// 4. **Call LLM**: Send to provider with formatted prompts
+/// 5. **Clean Output**: Remove thinking tags and code fences
+/// 6. **Return**: Final markdown + chunk count processed
 ///
-/// # Fluxo Visual Multi-Level:
+/// # Multi-Level Visual Flow:
 ///
 /// ```text
-/// Transcrição Longa (15.000 tokens)
+/// Long Transcript (15,000 tokens)
 ///         ↓
 ///   [chunk_text]
 ///         ↓
@@ -240,16 +239,16 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 ///    │ (3700t) │ (3700t) │ (3700t) │ (3700t) │
 ///    └────┬────┴────┬────┴────┬────┴────┬────┘
 ///         │         │         │         │
-///    [Resumo 1] [Resumo 2] [Resumo 3] [Resumo 4]
+///    [Summary 1] [Summary 2] [Summary 3] [Summary 4]
 ///         └─────────┴─────────┴─────────┘
 ///                     │
-///           [Combinar Resumos]
+///           [Combine Summaries]
 ///                     ↓
-///            Resumo Unificado
+///            Unified Summary
 ///                     ↓
-///         [Aplicar Template Final]
+///         [Apply Final Template]
 ///                     ↓
-///           Relatório Markdown
+///           Markdown Report
 /// ```
 ///
 /// # Arguments
@@ -288,21 +287,21 @@ pub async fn generate_meeting_summary(
     let successful_chunk_count: i64;
 
     // =================================================================================
-    // DECISÃO DE ESTRATÉGIA - Data: 13/11/2025 - Autor: Luiz
+    // STRATEGY DECISION - Date: 13/11/2025 - Author: Luiz
     // =================================================================================
-    // Esta é a decisão crítica que determina qual estratégia de sumarização usar:
+    // This is the critical decision that determines which summarization strategy to use:
     //
-    // CONDIÇÃO: provider != Ollama OU total_tokens < threshold
+    // CONDITION: provider != Ollama OR total_tokens < threshold
     //
-    // QUANDO SINGLE-PASS (condição verdadeira):
-    // - Providers cloud (OpenAI, Claude, Groq, OpenRouter) têm contexto ~100k+ tokens
-    // - Transcrições curtas (<4000 tokens padrão) cabem em qualquer contexto
-    // - BENEFÍCIO: Mais rápido (1 chamada), melhor qualidade (contexto completo)
+    // WHEN SINGLE-PASS (condition is true):
+    // - Cloud providers (OpenAI, Claude, Groq, OpenRouter) have ~100k+ tokens context
+    // - Short transcripts (<4000 tokens default) fit in any context
+    // - BENEFIT: Faster (1 call), better quality (complete context)
     //
-    // QUANDO MULTI-LEVEL (condição falsa):
-    // - Ollama com modelos locais têm contexto limitado (ex: llama3.2 = 2048 tokens)
-    // - Transcrições longas precisam ser divididas para caber no contexto
-    // - BENEFÍCIO: Funciona com modelos limitados, processa reuniões muito longas
+    // WHEN MULTI-LEVEL (condition is false):
+    // - Ollama with local models have limited context (e.g., llama3.2 = 2048 tokens)
+    // - Long transcripts need to be divided to fit in context
+    // - BENEFIT: Works with limited models, processes very long meetings
     // =================================================================================
     if provider != &LLMProvider::Ollama || total_tokens < token_threshold {
         info!(
@@ -325,13 +324,14 @@ pub async fn generate_meeting_summary(
         let mut chunk_summaries = Vec::new();
 
         // =================================================================================
-        // MODIFICAÇÃO: Prompts em português do Brasil
-        // Data: 13/11/2025
-        // Autor: Luiz
-        // Descrição: Alterado para gerar resumos em português do Brasil por padrão.
-        //            Isso garante que todas as etapas da sumarização multi-nível
-        //            (chunking) sejam processadas em português, mantendo consistência
-        //            linguística em todo o pipeline de geração de resumo.
+        // MODIFICATION: Portuguese (BR) prompts by default
+        // Date: 13/11/2025
+        // Author: Luiz
+        // Description: Changed to generate summaries in Brazilian Portuguese by default.
+        //              This ensures all multi-level summarization steps (chunking) are
+        //              processed in Portuguese, maintaining linguistic consistency
+        //              throughout the summary generation pipeline.
+        // TODO: Make these prompts dynamic based on user language setting
         // =================================================================================
         let system_prompt_chunk = "Você é um especialista em resumir reuniões. Gere todos os resumos em português do Brasil.";
         let user_prompt_template_chunk = "Forneça um resumo conciso mas abrangente do seguinte trecho de transcrição. Capture todos os pontos-chave, decisões, itens de ação e indivíduos mencionados. IMPORTANTE: Gere o resumo em português do Brasil.\n\n<transcript_chunk>\n{}\n</transcript_chunk>";
@@ -383,13 +383,14 @@ pub async fn generate_meeting_summary(
             let combined_text = chunk_summaries.join("\n---\n");
 
             // =================================================================================
-            // MODIFICAÇÃO: Prompts em português do Brasil para combinação de resumos
-            // Data: 13/11/2025
-            // Autor: Luiz
-            // Descrição: Alterado para combinar os resumos parciais em português do Brasil.
-            //            Este prompt é usado quando há múltiplos chunks que precisam ser
-            //            sintetizados em um único resumo coerente, mantendo todos os detalhes
-            //            importantes da reunião.
+            // MODIFICATION: Portuguese (BR) prompts for combining summaries
+            // Date: 13/11/2025
+            // Author: Luiz
+            // Description: Changed to combine partial summaries in Brazilian Portuguese.
+            //              This prompt is used when multiple chunks need to be synthesized
+            //              into a single coherent summary, maintaining all important
+            //              meeting details.
+            // TODO: Make these prompts dynamic based on user language setting
             // =================================================================================
             let system_prompt_combine = "Você é um especialista em sintetizar resumos de reuniões. Trabalhe sempre em português do Brasil.";
             let user_prompt_combine_template = "A seguir estão resumos consecutivos de uma reunião. Combine-os em um único resumo narrativo coerente e detalhado que retenha todos os detalhes importantes, organizados logicamente. IMPORTANTE: Gere o resumo combinado em português do Brasil.\n\n<summaries>\n{}\n</summaries>";
@@ -421,14 +422,15 @@ pub async fn generate_meeting_summary(
     let section_instructions = template.to_section_instructions();
 
     // =================================================================================
-    // MODIFICAÇÃO: Prompt final em português do Brasil
-    // Data: 13/11/2025
-    // Autor: Luiz
-    // Descrição: Modificado para gerar o relatório final de reunião em português do Brasil.
-    //            Este é o prompt principal que formata o resumo usando o template escolhido.
-    //            Todas as instruções foram traduzidas para garantir que o LLM gere
-    //            o documento completo em português, incluindo títulos, descrições e
-    //            conteúdo das seções.
+    // MODIFICATION: Final prompt in Portuguese (BR) by default
+    // Date: 13/11/2025
+    // Author: Luiz
+    // Description: Modified to generate final meeting report in Brazilian Portuguese.
+    //              This is the main prompt that formats the summary using the chosen template.
+    //              All instructions have been translated to ensure the LLM generates
+    //              the complete document in Portuguese, including titles, descriptions,
+    //              and section content.
+    // TODO: Make these prompts dynamic based on user language setting
     // =================================================================================
     let final_system_prompt = format!(
         r#"Você é um especialista em resumir reuniões. Gere um relatório final de reunião preenchendo o template Markdown fornecido com base no texto fonte. IMPORTANTE: Todo o conteúdo deve ser gerado em português do Brasil.
