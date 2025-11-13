@@ -8,11 +8,27 @@
     "stop": "Parar Gravação",
     "pause": "Pausar",
     "resume": "Retomar",
+    "stopping": "Parando...",
     "status": {
       "recording": "Gravando",
       "paused": "Pausado",
       "stopped": "Parado",
       "processing": "Processando"
+    },
+    "settings": {
+      "title": "Configurações de Gravação",
+      "description": "Configure como suas gravações de áudio são salvas durante reuniões",
+      "saveAudioRecordings": "Salvar Gravações de Áudio",
+      "saveAudioDescription": "Salvar automaticamente arquivos de áudio quando a gravação parar",
+      "saveLocation": "Local de Salvamento",
+      "openFolder": "Abrir Pasta",
+      "fileFormat": "Formato de Arquivo",
+      "fileFormatDescription": "As gravações são salvas com timestamp: recording_YYYYMMDD_HHMMSS.",
+      "disabledWarning": "Gravação de áudio está desabilitada. Ative \"Salvar Gravações de Áudio\" para salvar automaticamente o áudio das suas reuniões.",
+      "notificationTitle": "Notificação de Início de Gravação",
+      "notificationDescription": "Mostrar lembrete de aviso legal para informar participantes quando a gravação iniciar (conformidade com leis dos EUA)",
+      "defaultDevices": "Dispositivos de Áudio Padrão",
+      "defaultDevicesDescription": "Defina seu microfone e dispositivos de áudio do sistema preferidos para gravação. Estes serão selecionados automaticamente ao iniciar novas gravações."
     }
   },
   "meetings": {
@@ -32,17 +48,28 @@
   "summary": {
     "title": "Resumo",
     "generate": "Gerar Resumo",
+    "generateNote": "Gerar Anotação",
     "regenerate": "Regenerar Resumo",
     "generating": "Gerando resumo...",
+    "processing": "Processando...",
+    "checkingModels": "Verificando modelos...",
     "empty": "Nenhum resumo disponível",
     "save": "Salvar Resumo",
     "template": "Template",
+    "selectTemplate": "Selecionar template de resumo",
     "customPrompt": "Prompt Personalizado",
-    "customPromptPlaceholder": "Adicione instruções personalizadas para o resumo..."
+    "customPromptPlaceholder": "Adicione instruções personalizadas para o resumo...",
+    "aiModel": "Modelo de IA",
+    "modelSettings": "Configurações do Modelo",
+    "loadingConfig": "Carregando configuração do modelo...",
+    "noOllamaModels": "Nenhum modelo Ollama encontrado. Por favor, baixe gemma2:2b nas Configurações do Modelo.",
+    "ollamaCheckFailed": "Falha ao verificar modelos Ollama. Por favor, verifique se o Ollama está rodando e baixe um modelo."
   },
   "settings": {
     "title": "Configurações",
     "general": "Geral",
+    "preferences": "Preferências",
+    "preferencesDescription": "Configure idioma, gravação e preferências de dispositivos",
     "models": "Modelos",
     "audio": "Áudio",
     "advanced": "Avançado",

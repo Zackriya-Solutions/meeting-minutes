@@ -6,6 +6,7 @@ import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { LanguageSelector } from '@/components/LanguageSelector';
+import { useTranslation } from 'react-i18next';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -20,6 +21,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const { t } = useTranslation('common');
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -156,9 +158,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold mb-4">Preferences</h3>
+        <h3 className="text-lg font-semibold mb-4">{t('settings.preferences')}</h3>
         <p className="text-sm text-gray-600 mb-6">
-          Configure language, recording, and device preferences.
+          {t('settings.preferencesDescription')}
         </p>
       </div>
 
@@ -170,9 +172,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Auto Save Toggle */}
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
-          <div className="font-medium">Save Audio Recordings</div>
+          <div className="font-medium">{t('recording.settings.saveAudioRecordings')}</div>
           <div className="text-sm text-gray-600">
-            Automatically save audio files when recording stops
+            {t('recording.settings.saveAudioDescription')}
           </div>
         </div>
         <Switch
@@ -186,25 +188,25 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {preferences.auto_save && (
         <div className="space-y-4">
           <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Save Location</div>
+            <div className="font-medium mb-2">{t('recording.settings.saveLocation')}</div>
             <div className="text-sm text-gray-600 mb-3 break-all">
-              {preferences.save_folder || 'Default folder'}
+              {preferences.save_folder || t('settings.recordingFolder.description')}
             </div>
             <button
               onClick={handleOpenFolder}
               className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
-              Open Folder
+              {t('recording.settings.openFolder')}
             </button>
           </div>
 
           <div className="p-4 border rounded-lg bg-blue-50">
             <div className="text-sm text-blue-800">
-              <strong>File Format:</strong> {preferences.file_format.toUpperCase()} files
+              <strong>{t('recording.settings.fileFormat')}:</strong> {preferences.file_format.toUpperCase()} files
             </div>
             <div className="text-xs text-blue-600 mt-1">
-              Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.{preferences.file_format}
+              {t('recording.settings.fileFormatDescription')}{preferences.file_format}
             </div>
           </div>
         </div>
@@ -214,7 +216,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {!preferences.auto_save && (
         <div className="p-4 border rounded-lg bg-yellow-50">
           <div className="text-sm text-yellow-800">
-            Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.
+            {t('recording.settings.disabledWarning')}
           </div>
         </div>
       )}
@@ -222,9 +224,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Recording Notification Toggle */}
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
-          <div className="font-medium">Recording Start Notification</div>
+          <div className="font-medium">{t('recording.settings.notificationTitle')}</div>
           <div className="text-sm text-gray-600">
-            Show legal notice reminder to inform participants when recording starts (US law compliance)
+            {t('recording.settings.notificationDescription')}
           </div>
         </div>
         <Switch
@@ -236,9 +238,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Device Preferences */}
       <div className="space-y-4">
         <div className="border-t pt-6">
-          <h4 className="text-base font-medium text-gray-900 mb-4">Default Audio Devices</h4>
+          <h4 className="text-base font-medium text-gray-900 mb-4">{t('recording.settings.defaultDevices')}</h4>
           <p className="text-sm text-gray-600 mb-4">
-            Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
+            {t('recording.settings.defaultDevicesDescription')}
           </p>
 
           <div className="border rounded-lg p-4 bg-gray-50">

@@ -8,11 +8,27 @@
     "stop": "Stop Recording",
     "pause": "Pause",
     "resume": "Resume",
+    "stopping": "Stopping...",
     "status": {
       "recording": "Recording",
       "paused": "Paused",
       "stopped": "Stopped",
       "processing": "Processing"
+    },
+    "settings": {
+      "title": "Recording Settings",
+      "description": "Configure how your audio recordings are saved during meetings",
+      "saveAudioRecordings": "Save Audio Recordings",
+      "saveAudioDescription": "Automatically save audio files when recording stops",
+      "saveLocation": "Save Location",
+      "openFolder": "Open Folder",
+      "fileFormat": "File Format",
+      "fileFormatDescription": "Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.",
+      "disabledWarning": "Audio recording is disabled. Enable \"Save Audio Recordings\" to automatically save your meeting audio.",
+      "notificationTitle": "Recording Start Notification",
+      "notificationDescription": "Show legal notice reminder to inform participants when recording starts (US law compliance)",
+      "defaultDevices": "Default Audio Devices",
+      "defaultDevicesDescription": "Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings."
     }
   },
   "meetings": {
@@ -32,17 +48,28 @@
   "summary": {
     "title": "Summary",
     "generate": "Generate Summary",
+    "generateNote": "Generate Note",
     "regenerate": "Regenerate Summary",
     "generating": "Generating summary...",
+    "processing": "Processing...",
+    "checkingModels": "Checking models...",
     "empty": "No summary available",
     "save": "Save Summary",
     "template": "Template",
+    "selectTemplate": "Select summary template",
     "customPrompt": "Custom Prompt",
-    "customPromptPlaceholder": "Add custom instructions for the summary..."
+    "customPromptPlaceholder": "Add custom instructions for the summary...",
+    "aiModel": "AI Model",
+    "modelSettings": "Model Settings",
+    "loadingConfig": "Loading model configuration...",
+    "noOllamaModels": "No Ollama models found. Please download gemma2:2b from Model Settings.",
+    "ollamaCheckFailed": "Failed to check Ollama models. Please check if Ollama is running and download a model."
   },
   "settings": {
     "title": "Settings",
     "general": "General",
+    "preferences": "Preferences",
+    "preferencesDescription": "Configure language, recording, and device preferences",
     "models": "Models",
     "audio": "Audio",
     "advanced": "Advanced",
