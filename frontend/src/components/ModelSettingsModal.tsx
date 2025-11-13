@@ -18,6 +18,7 @@ import { Switch } from '@/components/ui/switch';
 import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter';
@@ -55,6 +56,7 @@ export function ModelSettingsModal({
   onSave,
   skipInitialFetch = false,
 }: ModelSettingsModalProps) {
+  const { t } = useTranslation('common');
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
   const [apiKey, setApiKey] = useState<string | null>(modelConfig.apiKey || null);
@@ -481,12 +483,12 @@ export function ModelSettingsModal({
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Model Settings</h3>
+        <h3 className="text-lg font-semibold">{t('settings.llm.modelSettings')}</h3>
       </div>
 
       <div className="space-y-4">
         <div>
-          <Label>Summarization Model</Label>
+          <Label>{t('settings.llm.summarizationModel')}</Label>
           <div className="flex space-x-2 mt-1">
             <Select
               value={modelConfig.provider}
@@ -516,7 +518,7 @@ export function ModelSettingsModal({
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select provider" />
+                <SelectValue placeholder={t('settings.llm.selectProvider')} />
               </SelectTrigger>
               <SelectContent className="max-h-64 overflow-y-auto">
                 <SelectItem value="claude">Claude</SelectItem>
@@ -534,12 +536,12 @@ export function ModelSettingsModal({
               }
             >
               <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Select model" />
+                <SelectValue placeholder={t('settings.llm.selectModel')} />
               </SelectTrigger>
               <SelectContent className="max-h-48 overflow-y-auto">
                 {modelConfig.provider === 'openrouter' && isLoadingOpenRouter ? (
                   <SelectItem value="loading" disabled>
-                    Loading models...
+                    {t('settings.llm.loadingModels')}
                   </SelectItem>
                 ) : (
                   modelOptions[modelConfig.provider].map((model) => (
@@ -555,14 +557,14 @@ export function ModelSettingsModal({
 
         {requiresApiKey && (
           <div>
-            <Label>API Key</Label>
+            <Label>{t('settings.llm.apiKey')}</Label>
             <div className="relative mt-1">
               <Input
                 type={showApiKey ? 'text' : 'password'}
                 value={apiKey || ''}
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={isApiKeyLocked}
-                placeholder="Enter your API key"
+                placeholder={t('settings.llm.apiKeyPlaceholder')}
                 className="pr-24"
               />
               {isApiKeyLocked && (
@@ -578,7 +580,7 @@ export function ModelSettingsModal({
                   size="icon"
                   onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
                   className={isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}
-                  title={isApiKeyLocked ? 'Unlock to edit' : 'Lock to prevent editing'}
+                  title={isApiKeyLocked ? t('settings.llm.unlockToEdit') : t('settings.llm.lockToPreventEditing')}
                 >
                   {isApiKeyLocked ? <Lock /> : <Unlock />}
                 </Button>
@@ -601,7 +603,7 @@ export function ModelSettingsModal({
               className="flex items-center justify-between cursor-pointer py-2"
               onClick={() => setIsEndpointSectionCollapsed(!isEndpointSectionCollapsed)}
             >
-              <Label className="cursor-pointer">Custom Endpoint (optional)</Label>
+              <Label className="cursor-pointer">{t('settings.llm.customEndpoint')}</Label>
               {isEndpointSectionCollapsed ? (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               ) : (
@@ -612,7 +614,7 @@ export function ModelSettingsModal({
             {!isEndpointSectionCollapsed && (
               <>
                 <p className="text-sm text-muted-foreground mt-1 mb-2">
-                  Leave empty or enter a custom endpoint (e.g., http://x.yy.zz:11434)
+                  {t('settings.llm.customEndpointDescription')}
                 </p>
                 <div className="flex gap-2 mt-1">
                   <div className="relative flex-1">
@@ -627,7 +629,7 @@ export function ModelSettingsModal({
                           setError(''); // Clear error state
                         }
                       }}
-                      placeholder="http://localhost:11434"
+                      placeholder={t('settings.llm.endpointPlaceholder')}
                       className={cn(
                         "pr-10",
                         endpointValidationState === 'invalid' && "border-red-500"
@@ -651,12 +653,12 @@ export function ModelSettingsModal({
                     {isLoadingOllama ? (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Fetching...
+                        {t('settings.llm.fetching')}
                       </>
                     ) : (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4" />
-                        Fetch Models
+                        {t('settings.llm.fetchModels')}
                       </>
                     )}
                   </Button>
@@ -664,7 +666,7 @@ export function ModelSettingsModal({
                 {ollamaEndpointChanged && !error && (
                   <Alert className="mt-3 border-yellow-500 bg-yellow-50">
                     <AlertDescription className="text-yellow-800">
-                      Endpoint changed. Please click "Fetch Models" to load models from the new endpoint before saving.
+                      {t('settings.llm.endpointChangedWarning')}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -676,10 +678,10 @@ export function ModelSettingsModal({
         {modelConfig.provider === 'ollama' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h4 className="text-sm font-bold">Available Ollama Models</h4>
+              <h4 className="text-sm font-bold">{t('settings.llm.availableModels')}</h4>
               {lastFetchedEndpoint && models.length > 0 && (
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Using:</span>
+                  <span className="text-muted-foreground">{t('settings.llm.using')}</span>
                   <code className="px-2 py-1 bg-muted rounded text-xs">
                     {lastFetchedEndpoint || 'http://localhost:11434'}
                   </code>
@@ -689,7 +691,7 @@ export function ModelSettingsModal({
             {models.length > 0 && (
               <div className="mb-4">
                 <Input
-                  placeholder="Search models..."
+                  placeholder={t('settings.llm.searchModels')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full"
@@ -699,15 +701,15 @@ export function ModelSettingsModal({
             {isLoadingOllama ? (
               <div className="text-center py-8 text-muted-foreground">
                 <RefreshCw className="mx-auto h-8 w-8 animate-spin mb-2" />
-                Loading models...
+                {t('settings.llm.loadingModels')}
               </div>
             ) : models.length === 0 ? (
               <div className="space-y-3">
                 <Alert className="mb-4">
                   <AlertDescription>
                     {ollamaEndpointChanged
-                      ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
-                      : 'No models found. Download a recommended model or click "Fetch Models" to load available Ollama models.'}
+                      ? t('settings.llm.endpointChangedAlert')
+                      : t('settings.llm.noModelsFound')}
                   </AlertDescription>
                 </Alert>
                 {!ollamaEndpointChanged && (
@@ -722,12 +724,12 @@ export function ModelSettingsModal({
                       {isDownloading('gemma3:1b') ? (
                         <>
                           <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                          Downloading gemma3:1b...
+                          {t('settings.llm.downloadingModel')}...
                         </>
                       ) : (
                         <>
                           <Download className="mr-2 h-4 w-4" />
-                          Download gemma3:1b (Recommended, ~800MB)
+                          {t('settings.llm.downloadRecommended')}
                         </>
                       )}
                     </Button>
@@ -736,7 +738,7 @@ export function ModelSettingsModal({
                     {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
                       <div className="bg-white rounded-md border p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
+                          <span className="text-sm font-medium text-blue-600">{t('settings.llm.downloadingModel')}</span>
                           <span className="text-sm font-semibold text-blue-600">
                             {Math.round(getProgress('gemma3:1b')!)}%
                           </span>
@@ -757,7 +759,7 @@ export function ModelSettingsModal({
                 {filteredModels.length === 0 ? (
                   <Alert>
                     <AlertDescription>
-                      No models found matching "{searchQuery}". Try a different search term.
+                      {t('settings.llm.noMatchingModels', { searchQuery })}
                     </AlertDescription>
                   </Alert>
                 ) : (
@@ -784,7 +786,7 @@ export function ModelSettingsModal({
                         >
                           <div>
                             <b className="font-bold">{model.name}&nbsp;</b>
-                            <span className="text-muted-foreground">with a size of </span>
+                            <span className="text-muted-foreground">{t('settings.llm.withSize')} </span>
                             <span className="font-mono font-bold text-sm">{model.size}</span>
                           </div>
 
@@ -792,7 +794,7 @@ export function ModelSettingsModal({
                           {modelIsDownloading && progress !== undefined && (
                             <div className="mt-3 pt-3 border-t border-gray-200">
                               <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-blue-600">Downloading...</span>
+                                <span className="text-sm font-medium text-blue-600">{t('settings.llm.downloading')}</span>
                                 <span className="text-sm font-semibold text-blue-600">{Math.round(progress)}%</span>
                               </div>
                               <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -842,7 +844,7 @@ export function ModelSettingsModal({
           onClick={handleSave}
           disabled={isDoneDisabled}
         >
-          Save
+          {t('settings.llm.save')}
         </Button>
       </div>
     </div>
