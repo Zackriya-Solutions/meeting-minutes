@@ -9,11 +9,34 @@
     "pause": "Pausar",
     "resume": "Retomar",
     "stopping": "Parando...",
+    "pausing": "Pausando...",
+    "resuming": "Retomando...",
+    "processing": "Processando gravação...",
+    "validating": "Validando reconhecimento de fala...",
     "status": {
       "recording": "Gravando",
       "paused": "Pausado",
       "stopped": "Parado",
       "processing": "Processando"
+    },
+    "tooltips": {
+      "start": "Iniciar gravação",
+      "stop": "Parar gravação",
+      "pause": "Pausar gravação",
+      "resume": "Retomar gravação"
+    },
+    "errors": {
+      "initFailed": "Falha ao inicializar gravação. Por favor, verifique o console para mais detalhes.",
+      "pauseFailed": "Falha ao pausar gravação. Por favor, verifique o console para mais detalhes.",
+      "resumeFailed": "Falha ao retomar gravação. Por favor, verifique o console para mais detalhes.",
+      "micNotAvailable": "Microfone Não Disponível",
+      "micNotAvailableMessage": "Não foi possível acessar seu microfone. Por favor, verifique se:\n• Seu microfone está conectado\n• O aplicativo tem permissões de microfone\n• Nenhum outro aplicativo está usando o microfone",
+      "systemAudioNotAvailable": "Áudio do Sistema Não Disponível",
+      "systemAudioNotAvailableMessage": "Não foi possível capturar o áudio do sistema. Por favor, verifique se:\n• Um dispositivo de áudio virtual (como BlackHole) está instalado\n• O aplicativo tem permissões de gravação de tela (macOS)\n• O áudio do sistema está configurado corretamente",
+      "permissionRequired": "Permissão Necessária",
+      "permissionRequiredMessage": "Permissões de gravação são necessárias. Por favor:\n• Conceda acesso ao microfone nas Configurações do Sistema\n• Conceda acesso à gravação de tela para áudio do sistema (macOS)\n• Reinicie o aplicativo após conceder as permissões",
+      "recordingFailed": "Falha na Gravação",
+      "recordingFailedMessage": "Não foi possível iniciar a gravação. Por favor, verifique as configurações do seu dispositivo de áudio e tente novamente."
     },
     "settings": {
       "title": "Configurações de Gravação",

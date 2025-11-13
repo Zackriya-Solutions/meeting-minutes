@@ -9,11 +9,34 @@
     "pause": "Pause",
     "resume": "Resume",
     "stopping": "Stopping...",
+    "pausing": "Pausing...",
+    "resuming": "Resuming...",
+    "processing": "Processing recording...",
+    "validating": "Validating speech recognition...",
     "status": {
       "recording": "Recording",
       "paused": "Paused",
       "stopped": "Stopped",
       "processing": "Processing"
+    },
+    "tooltips": {
+      "start": "Start recording",
+      "stop": "Stop recording",
+      "pause": "Pause recording",
+      "resume": "Resume recording"
+    },
+    "errors": {
+      "initFailed": "Failed to initialize recording. Please check the console for details.",
+      "pauseFailed": "Failed to pause recording. Please check the console for details.",
+      "resumeFailed": "Failed to resume recording. Please check the console for details.",
+      "micNotAvailable": "Microphone Not Available",
+      "micNotAvailableMessage": "Unable to access your microphone. Please check that:\n• Your microphone is connected\n• The app has microphone permissions\n• No other app is using the microphone",
+      "systemAudioNotAvailable": "System Audio Not Available",
+      "systemAudioNotAvailableMessage": "Unable to capture system audio. Please check that:\n• A virtual audio device (like BlackHole) is installed\n• The app has screen recording permissions (macOS)\n• System audio is properly configured",
+      "permissionRequired": "Permission Required",
+      "permissionRequiredMessage": "Recording permissions are required. Please:\n• Grant microphone access in System Settings\n• Grant screen recording access for system audio (macOS)\n• Restart the app after granting permissions",
+      "recordingFailed": "Recording Failed",
+      "recordingFailedMessage": "Unable to start recording. Please check your audio device settings and try again."
     },
     "settings": {
       "title": "Recording Settings",

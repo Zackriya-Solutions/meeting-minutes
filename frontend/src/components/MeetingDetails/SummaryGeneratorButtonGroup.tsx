@@ -21,6 +21,7 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface SummaryGeneratorButtonGroupProps {
   modelConfig: ModelConfig;
@@ -49,6 +50,7 @@ export function SummaryGeneratorButtonGroup({
   hasTranscripts = true,
   isModelConfigLoading = false
 }: SummaryGeneratorButtonGroupProps) {
+  const { t } = useTranslation('common');
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -71,7 +73,7 @@ export function SummaryGeneratorButtonGroup({
       if (!models || models.length === 0) {
         // No models available, show message and open settings
         toast.error(
-          'No Ollama models found. Please download gemma2:2b from Model Settings.',
+          t('summary.noOllamaModels'),
           { duration: 5000 }
         );
         setSettingsDialogOpen(true);
@@ -83,7 +85,7 @@ export function SummaryGeneratorButtonGroup({
     } catch (error) {
       console.error('Error checking Ollama models:', error);
       toast.error(
-        'Failed to check Ollama models. Please check if Ollama is running and download a model.',
+        t('summary.ollamaCheckFailed'),
         { duration: 5000 }
       );
       setSettingsDialogOpen(true);
@@ -106,44 +108,44 @@ export function SummaryGeneratorButtonGroup({
         disabled={summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading}
         title={
           isModelConfigLoading
-            ? 'Loading model configuration...'
+            ? t('summary.loadingConfig')
             : summaryStatus === 'processing'
-            ? 'Generating summary...'
+            ? t('summary.generating')
             : isCheckingModels
-            ? 'Checking models...'
-            : 'Generate AI Summary'
+            ? t('summary.checkingModels')
+            : t('summary.generate')
         }
       >
         {summaryStatus === 'processing' || isCheckingModels || isModelConfigLoading ? (
           <>
             <Loader2 className="animate-spin xl:mr-2" size={18} />
-            <span className="hidden xl:inline">Processing...</span>
+            <span className="hidden xl:inline">{t('summary.processing')}</span>
           </>
         ) : (
           <>
             <Sparkles className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline xl:inline">Generate Note</span>
+            <span className="hidden lg:inline xl:inline">{t('summary.generateNote')}</span>
           </>
         )}
       </Button>
-      
+
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            title="Summary Settings"
+            title={t('summary.modelSettings')}
           >
             <Settings />
-            <span className="hidden lg:inline">AI Model</span>
+            <span className="hidden lg:inline">{t('summary.aiModel')}</span>
           </Button>
         </DialogTrigger>
         <DialogContent
           aria-describedby={undefined}
         >
           <VisuallyHidden>
-            <DialogTitle>Model Settings</DialogTitle>
+            <DialogTitle>{t('summary.modelSettings')}</DialogTitle>
           </VisuallyHidden>
           <ModelSettingsModal
             onSave={async (config) => {
@@ -166,10 +168,10 @@ export function SummaryGeneratorButtonGroup({
             <Button
               variant="outline"
               size="sm"
-              title="Select summary template"
+              title={t('summary.selectTemplate')}
             >
               <FileText />
-              <span className="hidden lg:inline">Template</span>
+              <span className="hidden lg:inline">{t('summary.template')}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
