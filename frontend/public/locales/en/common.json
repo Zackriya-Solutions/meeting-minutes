@@ -1,0 +1,131 @@
+{
+  "app": {
+    "title": "Meetily",
+    "description": "Privacy-first AI meeting assistant"
+  },
+  "recording": {
+    "start": "Start Recording",
+    "stop": "Stop Recording",
+    "pause": "Pause",
+    "resume": "Resume",
+    "status": {
+      "recording": "Recording",
+      "paused": "Paused",
+      "stopped": "Stopped",
+      "processing": "Processing"
+    }
+  },
+  "meetings": {
+    "title": "Meetings",
+    "new": "New Meeting",
+    "delete": "Delete Meeting",
+    "search": "Search meetings...",
+    "noMeetings": "No meetings found",
+    "empty": "You don't have any recorded meetings yet"
+  },
+  "transcript": {
+    "title": "Transcript",
+    "generating": "Generating transcript...",
+    "empty": "No transcript available",
+    "save": "Save Transcript"
+  },
+  "summary": {
+    "title": "Summary",
+    "generate": "Generate Summary",
+    "regenerate": "Regenerate Summary",
+    "generating": "Generating summary...",
+    "empty": "No summary available",
+    "save": "Save Summary",
+    "template": "Template",
+    "customPrompt": "Custom Prompt",
+    "customPromptPlaceholder": "Add custom instructions for the summary..."
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "models": "Models",
+    "audio": "Audio",
+    "advanced": "Advanced",
+    "language": {
+      "title": "Language",
+      "description": "Select language for AI-generated summaries",
+      "portuguese": "Portuguese (Brazil)",
+      "english": "English"
+    },
+    "llm": {
+      "title": "Language Model (LLM)",
+      "provider": "Provider",
+      "model": "Model",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "Enter your API key...",
+      "save": "Save Settings"
+    },
+    "transcription": {
+      "title": "Transcription",
+      "provider": "Provider",
+      "model": "Model",
+      "whisper": "Local Whisper",
+      "cloudProvider": "Cloud Provider"
+    },
+    "audioDevices": {
+      "title": "Audio Devices",
+      "microphone": "Microphone",
+      "systemAudio": "System Audio",
+      "selectMicrophone": "Select a microphone...",
+      "selectSystemAudio": "Select system audio..."
+    },
+    "recordingFolder": {
+      "title": "Recording Folder",
+      "description": "Location where recordings will be saved",
+      "browse": "Browse",
+      "open": "Open Folder"
+    }
+  },
+  "templates": {
+    "title": "Templates",
+    "select": "Select Template",
+    "custom": "Custom Template",
+    "standard_meeting": "Standard Meeting",
+    "daily_standup": "Daily Standup",
+    "retrospective": "Retrospective",
+    "sales_call": "Sales Call",
+    "project_sync": "Project Sync"
+  },
+  "notifications": {
+    "success": {
+      "meetingSaved": "Meeting saved successfully",
+      "transcriptSaved": "Transcript saved successfully",
+      "summarySaved": "Summary saved successfully",
+      "settingsSaved": "Settings saved successfully",
+      "languageChanged": "Language changed successfully"
+    },
+    "error": {
+      "saveFailed": "Failed to save",
+      "loadFailed": "Failed to load",
+      "networkError": "Connection error",
+      "invalidApiKey": "Invalid API key",
+      "missingApiKey": "API key not configured"
+    }
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "errors": {
+    "generic": "An error occurred. Please try again.",
+    "noMicrophone": "No microphone detected",
+    "noSystemAudio": "No system audio device detected",
+    "recordingFailed": "Failed to start recording",
+    "transcriptionFailed": "Failed to generate transcript",
+    "summaryFailed": "Failed to generate summary"
+  }
+}

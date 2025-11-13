@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { LanguageSelector } from '@/components/LanguageSelector';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -155,10 +156,15 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold mb-4">Recording Settings</h3>
+        <h3 className="text-lg font-semibold mb-4">Preferences</h3>
         <p className="text-sm text-gray-600 mb-6">
-          Configure how your audio recordings are saved during meetings.
+          Configure language, recording, and device preferences.
         </p>
+      </div>
+
+      {/* Language Selector */}
+      <div className="p-4 border rounded-lg">
+        <LanguageSelector />
       </div>
 
       {/* Auto Save Toggle */}

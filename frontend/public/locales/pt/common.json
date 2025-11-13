@@ -1,0 +1,131 @@
+{
+  "app": {
+    "title": "Meetily",
+    "description": "Assistente de reuniões com IA, focado em privacidade"
+  },
+  "recording": {
+    "start": "Iniciar Gravação",
+    "stop": "Parar Gravação",
+    "pause": "Pausar",
+    "resume": "Retomar",
+    "status": {
+      "recording": "Gravando",
+      "paused": "Pausado",
+      "stopped": "Parado",
+      "processing": "Processando"
+    }
+  },
+  "meetings": {
+    "title": "Reuniões",
+    "new": "Nova Reunião",
+    "delete": "Excluir Reunião",
+    "search": "Buscar reuniões...",
+    "noMeetings": "Nenhuma reunião encontrada",
+    "empty": "Você ainda não tem reuniões gravadas"
+  },
+  "transcript": {
+    "title": "Transcrição",
+    "generating": "Gerando transcrição...",
+    "empty": "Nenhuma transcrição disponível",
+    "save": "Salvar Transcrição"
+  },
+  "summary": {
+    "title": "Resumo",
+    "generate": "Gerar Resumo",
+    "regenerate": "Regenerar Resumo",
+    "generating": "Gerando resumo...",
+    "empty": "Nenhum resumo disponível",
+    "save": "Salvar Resumo",
+    "template": "Template",
+    "customPrompt": "Prompt Personalizado",
+    "customPromptPlaceholder": "Adicione instruções personalizadas para o resumo..."
+  },
+  "settings": {
+    "title": "Configurações",
+    "general": "Geral",
+    "models": "Modelos",
+    "audio": "Áudio",
+    "advanced": "Avançado",
+    "language": {
+      "title": "Idioma",
+      "description": "Selecione o idioma para resumos gerados por IA",
+      "portuguese": "Português (Brasil)",
+      "english": "Inglês"
+    },
+    "llm": {
+      "title": "Modelo de Linguagem (LLM)",
+      "provider": "Provedor",
+      "model": "Modelo",
+      "apiKey": "Chave de API",
+      "apiKeyPlaceholder": "Digite sua chave de API...",
+      "save": "Salvar Configurações"
+    },
+    "transcription": {
+      "title": "Transcrição",
+      "provider": "Provedor",
+      "model": "Modelo",
+      "whisper": "Whisper Local",
+      "cloudProvider": "Provedor na Nuvem"
+    },
+    "audioDevices": {
+      "title": "Dispositivos de Áudio",
+      "microphone": "Microfone",
+      "systemAudio": "Áudio do Sistema",
+      "selectMicrophone": "Selecione um microfone...",
+      "selectSystemAudio": "Selecione áudio do sistema..."
+    },
+    "recordingFolder": {
+      "title": "Pasta de Gravações",
+      "description": "Local onde as gravações serão salvas",
+      "browse": "Procurar",
+      "open": "Abrir Pasta"
+    }
+  },
+  "templates": {
+    "title": "Templates",
+    "select": "Selecionar Template",
+    "custom": "Template Personalizado",
+    "standard_meeting": "Reunião Padrão",
+    "daily_standup": "Daily Standup",
+    "retrospective": "Retrospectiva",
+    "sales_call": "Chamada de Vendas",
+    "project_sync": "Sincronização de Projeto"
+  },
+  "notifications": {
+    "success": {
+      "meetingSaved": "Reunião salva com sucesso",
+      "transcriptSaved": "Transcrição salva com sucesso",
+      "summarySaved": "Resumo salvo com sucesso",
+      "settingsSaved": "Configurações salvas com sucesso",
+      "languageChanged": "Idioma alterado com sucesso"
+    },
+    "error": {
+      "saveFailed": "Falha ao salvar",
+      "loadFailed": "Falha ao carregar",
+      "networkError": "Erro de conexão",
+      "invalidApiKey": "Chave de API inválida",
+      "missingApiKey": "Chave de API não configurada"
+    }
+  },
+  "common": {
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "close": "Fechar",
+    "loading": "Carregando...",
+    "error": "Erro",
+    "success": "Sucesso",
+    "confirm": "Confirmar",
+    "yes": "Sim",
+    "no": "Não"
+  },
+  "errors": {
+    "generic": "Ocorreu um erro. Por favor, tente novamente.",
+    "noMicrophone": "Nenhum microfone detectado",
+    "noSystemAudio": "Nenhum dispositivo de áudio do sistema detectado",
+    "recordingFailed": "Falha ao iniciar gravação",
+    "transcriptionFailed": "Falha ao gerar transcrição",
+    "summaryFailed": "Falha ao gerar resumo"
+  }
+}
