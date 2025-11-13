@@ -4,12 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
+import { useTranslation } from 'react-i18next';
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
 }
 
 export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsProps) {
+  const { t } = useTranslation('common');
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
     model: 'llama3.2:latest',
@@ -38,9 +40,9 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       }
     } catch (error) {
       console.error('Failed to fetch model config:', error);
-      toast.error('Failed to load model settings');
+      toast.error(t('notifications.error.loadFailed'));
     }
-  }, []);
+  }, [t]);
 
   // Fetch on mount
   useEffect(() => {
@@ -91,18 +93,18 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Model settings saved successfully');
+      toast.success(t('notifications.success.settingsSaved'));
     } catch (error) {
       console.error('Error saving model config:', error);
-      toast.error('Failed to save model settings');
+      toast.error(t('notifications.error.saveFailed'));
     }
   };
 
   return (
     <div>
-      <h3 className="text-lg font-semibold mb-4">Summary Model Configuration</h3>
+      <h3 className="text-lg font-semibold mb-4">{t('settings.llm.title')}</h3>
       <p className="text-sm text-gray-600 mb-6">
-        Configure the AI model used for generating meeting summaries.
+        {t('settings.llm.description')}
       </p>
       <ModelSettingsModal
         modelConfig={modelConfig}

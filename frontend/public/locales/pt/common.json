@@ -46,6 +46,7 @@
     "models": "Modelos",
     "audio": "Áudio",
     "advanced": "Avançado",
+    "about": "Sobre",
     "language": {
       "title": "Idioma",
       "description": "Selecione o idioma para resumos gerados por IA",
@@ -54,6 +55,7 @@
     },
     "llm": {
       "title": "Modelo de Linguagem (LLM)",
+      "description": "Configure o modelo de IA usado para gerar resumos de reuniões",
       "provider": "Provedor",
       "model": "Modelo",
       "apiKey": "Chave de API",

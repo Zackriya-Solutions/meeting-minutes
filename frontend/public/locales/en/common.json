@@ -46,6 +46,7 @@
     "models": "Models",
     "audio": "Audio",
     "advanced": "Advanced",
+    "about": "About",
     "language": {
       "title": "Language",
       "description": "Select language for AI-generated summaries",
@@ -54,6 +55,7 @@
     },
     "llm": {
       "title": "Language Model (LLM)",
+      "description": "Configure the AI model used for generating meeting summaries",
       "provider": "Provider",
       "model": "Model",
       "apiKey": "API Key",
