@@ -8,6 +8,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
+import { useIsLinux } from '@/hooks/usePlatform';
 
 /**
  * TranscriptPanel Component
@@ -33,6 +34,7 @@ export function TranscriptPanel({
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
+  const isLinux = useIsLinux();
 
   return (
     <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
@@ -74,8 +76,8 @@ export function TranscriptPanel({
         </div>
       </div>
 
-      {/* Permission Warning */}
-      {!isRecording && !isChecking && (
+      {/* Permission Warning - Not needed on Linux */}
+      {!isRecording && !isChecking && !isLinux && (
         <div className="flex justify-center px-4 pt-4">
           <PermissionWarning
             hasMicrophone={hasMicrophone}
