@@ -2,6 +2,7 @@ import React from 'react';
 import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { invoke } from '@tauri-apps/api/core';
+import { useIsLinux } from '@/hooks/usePlatform';
 
 interface PermissionWarningProps {
   hasMicrophone: boolean;
@@ -16,6 +17,13 @@ export function PermissionWarning({
   onRecheck,
   isRechecking = false
 }: PermissionWarningProps) {
+  const isLinux = useIsLinux();
+
+  // Don't show on Linux - permission handling is not needed
+  if (isLinux) {
+    return null;
+  }
+
   // Don't show if both permissions are granted
   if (hasMicrophone && hasSystemAudio) {
     return null;
