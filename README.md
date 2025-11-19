@@ -105,7 +105,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 
 ### 🍎 **macOS** (M Series chips)
 
-1. [meetily_0.1.1_aarch64.dmg](https://github.com/Zackriya-Solutions/meeting-minutes/releases/download/0.1.1/meetily_0.1.1_aarch64.dmg)]
+1. [meetily_0.1.1_aarch64.dmg](https://github.com/Zackriya-Solutions/meeting-minutes/releases/download/0.1.1/meetily_0.1.1_aarch64.dmg)
 2. Install the .dmg
 3. Then open **meetily.app** from Applications folder.
 
