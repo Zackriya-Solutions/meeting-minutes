@@ -103,22 +103,11 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 
 ### 🍎 **macOS**
 
-Install via Homebrew:
+### 🍎 **macOS** (M Series chips)
 
-```bash
-# Install Meetily (single application - everything included!)
-brew tap zackriya-solutions/meetily
-brew install --cask meetily
-```
-
-**Upgrading from v0.0.5?**
-
-```bash
-brew update
-brew upgrade --cask meetily
-```
-
-Then open **Meetily** from Applications folder.
+1. [meetily_0.1.1_aarch64.dmg](https://github.com/Zackriya-Solutions/meeting-minutes/releases/download/0.1.1/meetily_0.1.1_aarch64.dmg)]
+2. Install the .dmg
+3. Then open **meetily.app** from Applications folder.
 
 > **⚠️ Data Migration:** The application will ask whether to import your old database through a popup window on first launch.
 
