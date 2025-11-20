@@ -36,7 +36,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 #   .\build-gpu.ps1 (Windows PowerShell)
 #
 [features]
-default = ["platform-default"]  # Automatically enables best backend per platform
+# Automatically enables best backend per platform
+# Note: cidre is optional to prevent dependency resolution on non-macOS platforms
+default = ["platform-default"]
 
 # Platform-appropriate defaults - see target-specific dependencies below
 platform-default = []
@@ -156,7 +158,7 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
 core-graphics = "0.23"
-cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
+cidre = { git = "https://github.com/yury/cidre", rev = "efb9e060", features = ["av"], optional = true }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 
