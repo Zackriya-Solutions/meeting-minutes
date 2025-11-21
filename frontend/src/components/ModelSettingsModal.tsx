@@ -25,6 +25,7 @@ export interface ModelConfig {
   whisperModel: string;
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  openaiBaseUrl?: string | null;
 }
 
 interface OllamaModel {
@@ -76,6 +77,12 @@ export function ModelSettingsModal({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
   const [ollamaNotInstalled, setOllamaNotInstalled] = useState<boolean>(false); // Track if Ollama is not installed
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState<string>(modelConfig.openaiBaseUrl || '');
+  const [isOpenaiEndpointSectionCollapsed, setIsOpenaiEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
+  const [openaiModels, setOpenaiModels] = useState<string[]>([]);
+  const [isLoadingOpenaiModels, setIsLoadingOpenaiModels] = useState<boolean>(false);
+  const [openaiModelsError, setOpenaiModelsError] = useState<string>('');
+  const [lastFetchedOpenaiUrl, setLastFetchedOpenaiUrl] = useState<string>('');
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -142,7 +149,7 @@ export function ModelSettingsModal({
     ollama: models.map((model) => model.name),
     claude: ['claude-3-5-sonnet-latest', 'claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-20240620'],
     groq: ['llama-3.3-70b-versatile'],
-    openai: [
+    openai: openaiModels.length > 0 ? openaiModels : [
       'gpt-5',
       'gpt-5-mini',
       'gpt-4o',
@@ -255,6 +262,36 @@ export function ModelSettingsModal({
     }
   }, [modelConfig.ollamaEndpoint, modelConfig.provider]);
 
+  // Sync openaiBaseUrl state when modelConfig.openaiBaseUrl changes from parent
+  useEffect(() => {
+    const baseUrl = modelConfig.openaiBaseUrl || '';
+    if (baseUrl !== openaiBaseUrl) {
+      setOpenaiBaseUrl(baseUrl);
+    }
+  }, [modelConfig.openaiBaseUrl]);
+
+  // Auto-fetch OpenAI models when provider is openai and base URL is configured
+  useEffect(() => {
+    const shouldAutoFetch =
+      modelConfig.provider === 'openai' &&
+      openaiBaseUrl.trim() &&
+      openaiBaseUrl.trim() !== lastFetchedOpenaiUrl.trim() &&
+      openaiModels.length === 0;
+
+    if (shouldAutoFetch) {
+      fetchOpenaiModels(true); // Silent fetch on initial load
+    }
+  }, [modelConfig.provider, openaiBaseUrl]);
+
+  // Clear OpenAI models when switching away from OpenAI provider
+  useEffect(() => {
+    if (modelConfig.provider !== 'openai') {
+      setOpenaiModels([]);
+      setOpenaiModelsError('');
+      setLastFetchedOpenaiUrl('');
+    }
+  }, [modelConfig.provider]);
+
   // Reset hasAutoFetched flag and clear models when switching away from Ollama
   useEffect(() => {
     if (modelConfig.provider !== 'ollama') {
@@ -335,6 +372,74 @@ export function ModelSettingsModal({
     }
   };
 
+  // Manual fetch function for OpenAI-compatible models
+  const fetchOpenaiModels = async (silent = false) => {
+    const trimmedBaseUrl = openaiBaseUrl.trim();
+
+    // Require a base URL to fetch models
+    if (!trimmedBaseUrl) {
+      const errorMsg = 'Please enter a base URL to fetch models';
+      setOpenaiModelsError(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
+      return;
+    }
+
+    // Validate URL format
+    try {
+      new URL(trimmedBaseUrl);
+    } catch {
+      const errorMsg = 'Invalid URL format';
+      setOpenaiModelsError(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
+      return;
+    }
+
+    setIsLoadingOpenaiModels(true);
+    setOpenaiModelsError('');
+
+    try {
+      // Ensure base URL ends with /v1
+      let baseUrl = trimmedBaseUrl;
+      if (!baseUrl.endsWith('/v1')) {
+        baseUrl = baseUrl.endsWith('/') ? baseUrl + 'v1' : baseUrl + '/v1';
+      }
+
+      const modelsUrl = `${baseUrl}/models`;
+      const response = await fetch(modelsUrl);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Parse OpenAI-compatible response format: { data: [ { id: "model-name", ... }, ... ] }
+      if (data.data && Array.isArray(data.data)) {
+        const modelIds = data.data.map((model: any) => model.id);
+        setOpenaiModels(modelIds);
+        setLastFetchedOpenaiUrl(trimmedBaseUrl);
+        if (!silent) {
+          toast.success(`Loaded ${modelIds.length} models`);
+        }
+      } else {
+        throw new Error('Invalid response format from models endpoint');
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to load models';
+      setOpenaiModelsError(errorMsg);
+      if (!silent) {
+        toast.error(errorMsg);
+      }
+      console.error('Error loading OpenAI models:', err);
+    } finally {
+      setIsLoadingOpenaiModels(false);
+    }
+  };
+
   // Auto-fetch models on initial load only (not on endpoint changes)
   useEffect(() => {
     let mounted = true;
@@ -384,6 +489,9 @@ export function ModelSettingsModal({
       apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
       ollamaEndpoint: modelConfig.provider === 'ollama' && ollamaEndpoint.trim()
         ? ollamaEndpoint.trim()
+        : null,
+      openaiBaseUrl: modelConfig.provider === 'openai' && openaiBaseUrl.trim()
+        ? openaiBaseUrl.trim()
         : null,
     };
     setModelConfig(updatedConfig);
@@ -627,6 +735,80 @@ export function ModelSettingsModal({
                 </Button>
               </div>
             </div>
+          </div>
+        )}
+
+        {modelConfig.provider === 'openai' && (
+          <div>
+            <div
+              className="flex items-center justify-between cursor-pointer py-2"
+              onClick={() => setIsOpenaiEndpointSectionCollapsed(!isOpenaiEndpointSectionCollapsed)}
+            >
+              <Label className="cursor-pointer">Custom Base URL (optional)</Label>
+              {isOpenaiEndpointSectionCollapsed ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              )}
+            </div>
+
+            {!isOpenaiEndpointSectionCollapsed && (
+              <>
+                <p className="text-sm text-muted-foreground mt-1 mb-2">
+                  Leave empty to use the default OpenAI API, or enter a custom base URL for OpenAI-compatible providers
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    type="url"
+                    value={openaiBaseUrl}
+                    onChange={(e) => {
+                      setOpenaiBaseUrl(e.target.value);
+                      // Clear models when URL changes
+                      if (e.target.value.trim() !== lastFetchedOpenaiUrl.trim()) {
+                        setOpenaiModels([]);
+                        setOpenaiModelsError('');
+                      }
+                    }}
+                    placeholder="https://api.openai.com/v1"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => fetchOpenaiModels()}
+                    disabled={isLoadingOpenaiModels || !openaiBaseUrl.trim()}
+                    variant="outline"
+                    className="whitespace-nowrap"
+                  >
+                    {isLoadingOpenaiModels ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Fetching...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Fetch Models
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {openaiModelsError && (
+                  <Alert className="mt-3 border-red-500 bg-red-50">
+                    <AlertDescription className="text-red-800">
+                      {openaiModelsError}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {openaiModels.length > 0 && (
+                  <Alert className="mt-3 border-green-500 bg-green-50">
+                    <AlertDescription className="text-green-800">
+                      Loaded {openaiModels.length} models from {lastFetchedOpenaiUrl}
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </>
+            )}
           </div>
         )}
 

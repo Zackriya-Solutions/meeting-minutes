@@ -12,6 +12,7 @@ export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai';
   model: string;
   whisperModel: string;
+  openaiBaseUrl?: string | null;
 }
 
 export interface RecordingPreferences {
