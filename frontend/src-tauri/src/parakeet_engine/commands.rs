@@ -236,10 +236,19 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
     };
 
     if let Some(engine) = engine {
+        let _ = app.emit("model-loading-status", serde_json::json!({
+            "stage": "checking",
+            "message": "Checking transcription model..."
+        }));
+
         // Check if a model is currently loaded
         if engine.is_model_loaded().await {
             if let Some(current_model) = engine.get_current_model().await {
                 log::info!("Parakeet model already loaded: {}", current_model);
+                let _ = app.emit("model-loading-status", serde_json::json!({
+                    "stage": "ready",
+                    "message": format!("Model '{}' ready", current_model)
+                }));
                 return Ok(current_model);
             }
         }
@@ -332,10 +341,20 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
                 .clone()
         };
 
+        let _ = app.emit("model-loading-status", serde_json::json!({
+            "stage": "loading",
+            "message": format!("Loading model '{}'...", model_name)
+        }));
+
         engine
             .load_model(&model_name)
             .await
             .map_err(|e| format!("Failed to load Parakeet model {}: {}", model_name, e))?;
+
+        let _ = app.emit("model-loading-status", serde_json::json!({
+            "stage": "ready",
+            "message": format!("Model '{}' ready", model_name)
+        }));
 
         Ok(model_name)
     } else {
