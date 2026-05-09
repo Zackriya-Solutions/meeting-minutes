@@ -16,6 +16,17 @@ interface DownloadProgress {
   error?: string;
 }
 
+const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
+  'qwen3.5:2b': 1270,
+  'qwen3.5:4b': 2614,
+  'gemma3:1b': 1019,
+  'gemma3:4b': 2374,
+};
+
+function getSummaryModelSizeMb(modelName: string): number {
+  return SUMMARY_MODEL_SIZES_MB[modelName] ?? 0;
+}
+
 // Categorize error messages for better user experience
 function categorizeError(error: string): string {
   const lowerError = error.toLowerCase();
@@ -297,7 +308,7 @@ export function useDownloadProgressToast() {
     };
   }, [updateDownload, cleanupDownload]);
 
-  // Listen to Built-in AI (Gemma) download events
+  // Listen to Built-in AI summary model download events
   useEffect(() => {
     const unlisten = listen<{
       model: string;
@@ -315,7 +326,7 @@ export function useDownloadProgressToast() {
         displayName: `Summary Model (${model})`,
         progress: progress ?? 0,
         downloadedMb: downloaded_mb ?? 0,
-        totalMb: total_mb ?? (model.includes('4b') ? 2500 : 806),
+        totalMb: total_mb ?? getSummaryModelSizeMb(model),
         speedMbps: speed_mbps ?? 0,
         status: status === 'completed' || progress >= 100
           ? 'completed'

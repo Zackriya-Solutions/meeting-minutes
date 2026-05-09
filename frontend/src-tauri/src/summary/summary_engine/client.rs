@@ -175,15 +175,16 @@ pub async fn generate_with_builtin(
     }
 
     // Prepare generation request with model-specific sampling parameters
+    let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
         max_tokens: Some(models::DEFAULT_MAX_TOKENS),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
-        temperature: Some(model_def.sampling.temperature),
-        top_k: Some(model_def.sampling.top_k),
-        top_p: Some(model_def.sampling.top_p),
-        stop_tokens: Some(model_def.sampling.stop_tokens.clone()),
+        temperature: Some(sampling.temperature),
+        top_k: Some(sampling.top_k),
+        top_p: Some(sampling.top_p),
+        stop_tokens: Some(sampling.stop_tokens),
     };
 
     let request_json = serde_json::to_string(&request)?;

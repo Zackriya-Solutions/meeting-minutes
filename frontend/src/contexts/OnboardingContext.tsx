@@ -58,7 +58,7 @@ interface OnboardingContextType {
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
   completeOnboarding: () => Promise<void>;
-  startBackgroundDownloads: (includeGemma: boolean) => Promise<void>;
+  startBackgroundDownloads: (includeSummary: boolean) => Promise<void>;
   retryParakeetDownload: () => Promise<void>;
 }
 
@@ -83,7 +83,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     totalMb: 0,
     speedMbps: 0,
   });
-  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('gemma3:1b');
+  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('');
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
 
@@ -111,7 +111,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         console.log('[OnboardingContext] Set recommended model:', recommendedModel);
       } catch (error) {
         console.error('[OnboardingContext] Failed to get recommended model:', error);
-        // Keep default gemma3:1b
       }
     };
     fetchRecommendation();
@@ -265,8 +264,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       'builtin-ai-download-progress',
       (event) => {
         const { model, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-        // Check if this is the selected summary model (gemma3:1b or gemma3:4b)
-        if (model === selectedSummaryModel || model === 'gemma3:1b' || model === 'gemma3:4b') {
+        if (selectedSummaryModel && model === selectedSummaryModel) {
           setSummaryModelProgress(progress);
           setSummaryModelProgressInfo({
             percent: progress,
@@ -405,12 +403,18 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         saveTimeoutRef.current = undefined;
       }
 
+      let modelToSave = selectedSummaryModel;
+      if (!modelToSave) {
+        modelToSave = await invoke<string>('builtin_ai_get_recommended_model');
+        setSelectedSummaryModel(modelToSave);
+      }
+
       // Onboarding always uses builtin-ai with selected model
       await invoke('complete_onboarding', {
-        model: selectedSummaryModel,
+        model: modelToSave,
       });
       setCompleted(true);
-      console.log('[OnboardingContext] Onboarding completed with model:', selectedSummaryModel);
+      console.log('[OnboardingContext] Onboarding completed with model:', modelToSave);
 
       // Reset the flag so subsequent state updates can be saved
       isCompletingRef.current = false;
@@ -421,9 +425,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  // Start background downloads for models (parallel - Parakeet first, then Gemma immediately)
-  const startBackgroundDownloads = async (includeGemma: boolean) => {
-    console.log('[OnboardingContext] Starting background downloads, includeGemma:', includeGemma);
+  // Start background downloads for models (Parakeet first, then Summary Model after a delay)
+  const startBackgroundDownloads = async (includeSummary: boolean) => {
+    console.log('[OnboardingContext] Starting background downloads, includeSummary:', includeSummary);
     setIsBackgroundDownloading(true);
 
     try {
@@ -434,13 +438,15 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           .catch(err => console.error('[OnboardingContext] Parakeet download failed:', err));
       }
 
-      // Start Gemma download after a delay to prioritize Parakeet bandwidth
-      if (includeGemma && !summaryModelDownloaded) {
+      // Start Summary Model download after a delay to prioritize Parakeet bandwidth
+      if (includeSummary && !summaryModelDownloaded && selectedSummaryModel) {
         setTimeout(() => {
-          console.log('[OnboardingContext] Starting Gemma download (delayed to prioritize Parakeet)');
-          invoke('builtin_ai_download_model', { modelName: selectedSummaryModel || 'gemma3:1b' })
-            .catch(err => console.error('[OnboardingContext] Gemma download failed:', err));
+          console.log('[OnboardingContext] Starting Summary Model download (delayed to prioritize Parakeet)');
+          invoke('builtin_ai_download_model', { modelName: selectedSummaryModel })
+            .catch(err => console.error('[OnboardingContext] Summary Model download failed:', err));
         }, 3000); // 3 second delay to give Parakeet priority
+      } else if (includeSummary && !summaryModelDownloaded) {
+        console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
       }
     } catch (error) {
       console.error('[OnboardingContext] Failed to start background downloads:', error);
@@ -460,7 +466,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setIsBackgroundDownloading(true);
       }
       
-      // Also check for Gemma/Built-in AI downloads if possible (though less critical as Parakeet is the main blocker)
+      // Also check for Built-in AI downloads if possible (though less critical as Parakeet is the main blocker)
       
     } catch (error) {
       console.warn('[OnboardingContext] Failed to check active downloads:', error);

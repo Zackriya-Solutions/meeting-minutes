@@ -21,6 +21,31 @@ interface DownloadState {
   error?: string;
 }
 
+const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
+  'qwen3.5:2b': 1270,
+  'qwen3.5:4b': 2614,
+  'gemma3:1b': 1019,
+  'gemma3:4b': 2374,
+};
+
+function getSummaryModelSizeMb(model: string): number {
+  return SUMMARY_MODEL_SIZES_MB[model] ?? 0;
+}
+
+function getSummaryModelSizeLabel(model: string): string {
+  const sizeMb = getSummaryModelSizeMb(model);
+
+  if (sizeMb === 0) {
+    return '';
+  }
+
+  if (sizeMb >= 1024) {
+    return `~${(sizeMb / 1024).toFixed(1)} GB`;
+  }
+
+  return `~${sizeMb} MB`;
+}
+
 export function DownloadProgressStep() {
   const {
     goNext,
@@ -34,7 +59,7 @@ export function DownloadProgressStep() {
     completeOnboarding,
   } = useOnboarding();
 
-  const [recommendedModel, setRecommendedModel] = useState<string>('gemma3:1b');
+  const [recommendedModel, setRecommendedModel] = useState<string>('');
   const [isMac, setIsMac] = useState(false);
 
   const [parakeetState, setParakeetState] = useState<DownloadState>({
@@ -45,11 +70,11 @@ export function DownloadProgressStep() {
     speedMbps: 0,
   });
 
-  const [gemmaState, setGemmaState] = useState<DownloadState>({
+  const [summaryState, setSummaryState] = useState<DownloadState>({
     status: summaryModelDownloaded ? 'completed' : 'waiting',
     progress: summaryModelDownloaded ? 100 : 0,
     downloadedMb: 0,
-    totalMb: 806, // 1b model size
+    totalMb: 0,
     speedMbps: 0,
   });
 
@@ -113,21 +138,26 @@ export function DownloadProgressStep() {
     retryingSummaryRef.current = true;
 
     // Reset error state
-    setGemmaState((prev) => ({
+    setSummaryState((prev) => ({
       ...prev,
       status: 'downloading',
       error: undefined,
       progress: 0,
       downloadedMb: 0,
+      totalMb: getSummaryModelSizeMb(selectedSummaryModel || recommendedModel),
       speedMbps: 0,
     }));
 
     try {
       // Call download command directly (no retry command exists for built-in AI)
-      await invoke('builtin_ai_download_model', { modelName: selectedSummaryModel || recommendedModel });
+      const modelName = selectedSummaryModel || recommendedModel;
+      if (!modelName) {
+        throw new Error('Summary model recommendation is not ready yet');
+      }
+      await invoke('builtin_ai_download_model', { modelName });
     } catch (error) {
       console.error('[DownloadProgressStep] Summary retry failed:', error);
-      setGemmaState((prev) => ({
+      setSummaryState((prev) => ({
         ...prev,
         status: 'error',
         error: error instanceof Error ? error.message : 'Retry failed',
@@ -151,9 +181,12 @@ export function DownloadProgressStep() {
         const model = await invoke<string>('builtin_ai_get_recommended_model');
         setRecommendedModel(model);
         setSelectedSummaryModel(model);  // Update context
+        setSummaryState((prev) => ({
+          ...prev,
+          totalMb: getSummaryModelSizeMb(model),
+        }));
       } catch (error) {
         console.error('Failed to get recommended model:', error);
-        // Keep default gemma3:1b
       }
     };
 
@@ -170,13 +203,14 @@ export function DownloadProgressStep() {
     checkPlatform();
   }, []);
 
-  // Start downloads on mount
+  // Start downloads after the summary recommendation is available
   useEffect(() => {
     if (downloadStartedRef.current) return;
+    if (!selectedSummaryModel) return;
     downloadStartedRef.current = true;
 
     startDownloads();
-  }, []);
+  }, [selectedSummaryModel]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -235,7 +269,7 @@ export function DownloadProgressStep() {
     };
   }, []);
 
-  // Listen to Gemma download progress (always downloading for builtin-ai)
+  // Listen to Summary Model download progress (always downloading for builtin-ai)
   useEffect(() => {
     const unlisten = listen<{
       model: string;
@@ -247,8 +281,8 @@ export function DownloadProgressStep() {
       error?: string;
     }>('builtin-ai-download-progress', (event) => {
       const { model, progress, downloaded_mb, total_mb, speed_mbps, status, error } = event.payload;
-      if (model === selectedSummaryModel || model === 'gemma3:1b' || model === 'gemma3:4b') {
-        setGemmaState((prev) => ({
+      if (selectedSummaryModel && model === selectedSummaryModel) {
+        setSummaryState((prev) => ({
           ...prev,
           status: status === 'completed'
             ? 'completed'
@@ -257,7 +291,7 @@ export function DownloadProgressStep() {
             : 'downloading',
           progress,
           downloadedMb: downloaded_mb ?? prev.downloadedMb,
-          totalMb: total_mb ?? prev.totalMb,
+          totalMb: (total_mb ?? prev.totalMb) || getSummaryModelSizeMb(model),
           speedMbps: speed_mbps ?? prev.speedMbps,
           error: status === 'error' ? error : undefined,
         }));
@@ -274,14 +308,18 @@ export function DownloadProgressStep() {
   }, [selectedSummaryModel]);
 
   const startDownloads = async () => {
-    // Always download both Parakeet and Gemma (system-recommended)
+    // Always download both Parakeet and Summary Model (system-recommended)
     if (!parakeetDownloaded || !summaryModelDownloaded) {
       try {
         if (!parakeetDownloaded) {
           setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
         }
-        if (!summaryModelDownloaded) {
-          setGemmaState((prev) => ({ ...prev, status: 'downloading' }));
+        if (!summaryModelDownloaded && selectedSummaryModel) {
+          setSummaryState((prev) => ({
+            ...prev,
+            status: 'downloading',
+            totalMb: getSummaryModelSizeMb(selectedSummaryModel),
+          }));
         }
         await startBackgroundDownloads(true);  // Always download both
       } catch (error) {
@@ -319,7 +357,7 @@ export function DownloadProgressStep() {
 
     // Check if downloads are complete for toast notification
     const downloadsComplete = parakeetState.status === 'completed' &&
-      gemmaState.status === 'completed';
+      summaryState.status === 'completed';
 
     // Show toast if downloads still in progress
     if (!downloadsComplete) {
@@ -455,8 +493,8 @@ export function DownloadProgressStep() {
           {renderDownloadCard(
             'Summary Engine',
             <Sparkles className="w-5 h-5 text-gray-600" />,
-            gemmaState,
-            recommendedModel === 'gemma3:4b' ? '~2.5 GB' : '~806 MB'
+            summaryState,
+            getSummaryModelSizeLabel(recommendedModel || selectedSummaryModel)
           )}
         </div>
 
