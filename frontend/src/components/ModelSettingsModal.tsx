@@ -106,6 +106,7 @@ interface ModelSettingsModalProps {
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSave: (config: ModelConfig) => void;
   skipInitialFetch?: boolean; // Optional: skip fetching config from backend if parent manages it
+  layout?: 'inline' | 'dialog';
 }
 
 export function ModelSettingsModal({
@@ -113,6 +114,7 @@ export function ModelSettingsModal({
   setModelConfig: propsSetModelConfig,
   onSave,
   skipInitialFetch = false,
+  layout = 'inline',
 }: ModelSettingsModalProps) {
   // Use ConfigContext if available, fallback to props for backward compatibility
   const configContext = useConfig();
@@ -1361,6 +1363,7 @@ export function ModelSettingsModal({
           <div className="mt-6">
             <BuiltInModelManager
               selectedModel={modelConfig.model}
+              layout={layout}
               onModelSelect={(model) =>
                 setModelConfig((prev: ModelConfig) => ({ ...prev, model }))
               }

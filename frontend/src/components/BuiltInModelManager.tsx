@@ -31,9 +31,14 @@ interface DownloadProgressInfo {
 interface BuiltInModelManagerProps {
   selectedModel: string;
   onModelSelect: (model: string) => void;
+  layout?: 'inline' | 'dialog';
 }
 
-export function BuiltInModelManager({ selectedModel, onModelSelect }: BuiltInModelManagerProps) {
+export function BuiltInModelManager({
+  selectedModel,
+  onModelSelect,
+  layout = 'inline',
+}: BuiltInModelManagerProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasFetched, setHasFetched] = useState<boolean>(false);
@@ -275,7 +280,12 @@ export function BuiltInModelManager({ selectedModel, onModelSelect }: BuiltInMod
         <h4 className="text-sm font-bold">Built-in AI Models</h4>
       </div>
 
-      <div className="grid gap-4">
+      <div
+        className={cn(
+          'grid gap-4',
+          layout === 'dialog' && 'max-h-[50vh] overflow-y-auto pr-2'
+        )}
+      >
         {models.map((model) => {
           const progress = downloadProgress[model.name];
           const progressInfo = downloadProgressInfo[model.name];
