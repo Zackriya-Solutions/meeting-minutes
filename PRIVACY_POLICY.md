@@ -23,7 +23,7 @@ Meetily is built on the principle that your meeting data should remain private a
 ## Usage Analytics
 
 ### What We Collect
-To improve Meetily and ensure optimal performance, we collect minimal, anonymized usage data:
+Usage analytics is optional and off by default. When you choose to enable it, Meetily collects minimal, anonymized usage data:
 
 **Application Usage:**
 - Feature usage patterns (which tools you use most)
@@ -46,7 +46,7 @@ We never collect:
 - ❌ LLM conversations or AI-generated content
 
 ### Why We Collect This Data
-This analytics collection is necessary for:
+When enabled, analytics helps us with:
 - **Product Quality**: Identifying and fixing bugs that impact user experience
 - **Performance Optimization**: Understanding resource usage and system bottlenecks
 - **Security**: Detecting potential security issues and vulnerabilities
@@ -55,6 +55,7 @@ This analytics collection is necessary for:
 
 ### Analytics Implementation
 - **Provider**: PostHog (privacy-focused analytics platform)
+- **Default**: Off by default; analytics starts only after you enable it in settings
 - **Anonymization**: All data linked to generated user IDs only - no personal identification
 - **Data retention**: 12 months maximum, then automatically deleted
 - **Encryption**: All data encrypted in transit using industry-standard protocols
@@ -72,7 +73,7 @@ If you choose to use external LLM providers:
 ### Analytics Service (Optional)
 - **PostHog**: Used for usage analytics when enabled
 - **Data**: Only anonymized usage patterns, no meeting content
-- **Control**: Completely optional and user-controlled
+- **Control**: Completely optional, off by default, and user-controlled
 
 ## Your Privacy Rights
 
@@ -84,6 +85,7 @@ If you choose to use external LLM providers:
 
 ### Analytics Transparency
 - **Open source**: Full analytics implementation available for review in our source code
+- **Opt-in**: New and existing installs have analytics disabled until you turn it on
 - **Questions**: Contact us for any analytics-related concerns
 
 ## Data Security

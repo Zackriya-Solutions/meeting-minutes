@@ -19,7 +19,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center gap-3">
             <Shield className="w-6 h-6 text-blue-600" />
-            <h2 className="text-xl font-semibold text-gray-900">What We Collect</h2>
+            <h2 className="text-xl font-semibold text-gray-900">What Analytics Collects</h2>
           </div>
           <button
             onClick={onClose}
@@ -37,14 +37,14 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
               <Info className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
               <div className="text-sm text-green-800">
                 <p className="font-semibold mb-1">Your Privacy is Protected</p>
-                <p>We collect <strong>anonymous usage data only</strong>. No meeting content, names, or personal information is ever collected.</p>
+                <p>Analytics is off by default. If you enable it, we collect <strong>anonymous usage data only</strong>. No meeting content, names, file paths, or personal information is ever collected.</p>
               </div>
             </div>
           </div>
 
           {/* Data Categories */}
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">Data We Collect:</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Data We Collect When Enabled:</h3>
 
             {/* Model Preferences */}
             <div className="border border-gray-200 rounded-lg p-4">
@@ -108,6 +108,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
             <h4 className="font-semibold text-red-900 mb-2">What We DON'T Collect:</h4>
             <ul className="text-sm text-red-800 space-y-1 ml-4">
               <li>• ❌ Meeting names or titles</li>
+              <li>• ❌ File names, file paths, or meeting folders</li>
               <li>• ❌ Meeting transcripts or content</li>
               <li>• ❌ Audio recordings</li>
               <li>• ❌ Device names (only types: Bluetooth/Wired)</li>

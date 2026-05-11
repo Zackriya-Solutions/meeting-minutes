@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
 import AnalyticsDataModal from './AnalyticsDataModal';
 
+const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
 export default function AnalyticsConsentSwitch() {
   const { setIsAnalyticsOptedIn, isAnalyticsOptedIn } = useContext(AnalyticsContext);
@@ -77,10 +78,11 @@ export default function AnalyticsConsentSwitch() {
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: true
+          analyticsOptedIn: false
         }
       });
       await store.set('analyticsOptedIn', enabled);
+      await store.set(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY, true);
       await store.save();
 
       if (enabled) {
@@ -96,7 +98,6 @@ export default function AnalyticsConsentSwitch() {
           platform: 'tauri',
           first_seen: new Date().toISOString(),
           os: navigator.platform,
-          user_agent: navigator.userAgent,
         });
 
         // Start analytics session with the same user ID
@@ -158,7 +159,7 @@ export default function AnalyticsConsentSwitch() {
         <div>
           <h3 className="text-base font-semibold text-gray-800 mb-2">Usage Analytics</h3>
           <p className="text-sm text-gray-600 mb-4">
-            Help us improve Meetily by sharing anonymous usage data. No personal content is collected—everything stays on your device.
+            Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.
           </p>
         </div>
 
@@ -166,7 +167,7 @@ export default function AnalyticsConsentSwitch() {
           <div>
             <h4 className="font-semibold text-gray-800">Enable Analytics</h4>
             <p className="text-sm text-gray-600">
-              {isProcessing ? 'Updating...' : 'Anonymous usage patterns only'}
+              {isProcessing ? 'Updating...' : 'Off unless you choose to enable it'}
             </p>
           </div>
           <div className="flex items-center gap-2 ml-4">

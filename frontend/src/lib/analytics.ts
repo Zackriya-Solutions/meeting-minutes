@@ -531,11 +531,11 @@ export class Analytics {
   }
 
   // Meeting-specific tracking methods
-  static async trackMeetingStarted(meetingId: string, meetingTitle: string): Promise<void> {
+  static async trackMeetingStarted(meetingId: string): Promise<void> {
     if (!this.initialized) return;
 
     try {
-      await invoke('track_meeting_started', { meetingId, meetingTitle });
+      await invoke('track_meeting_started', { meetingId });
     } catch (error) {
       console.error('Failed to track meeting started:', error);
     }
@@ -833,4 +833,4 @@ export class Analytics {
   }
 }
 
-export default Analytics; 
+export default Analytics;
