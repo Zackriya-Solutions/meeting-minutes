@@ -10,5 +10,16 @@
     <string>This application needs permission to capture system audio output for meeting transcription and recording.</string>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.meetily.ai</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>meetily</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

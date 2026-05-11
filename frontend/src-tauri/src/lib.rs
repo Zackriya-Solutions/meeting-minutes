@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod distributed_notifications;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -59,7 +60,7 @@ use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
@@ -387,6 +388,167 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+/// Handle incoming deep-link URLs for external integration.
+/// Routes meetily:// URLs to existing recording commands.
+fn handle_deep_link<R: Runtime>(app: &AppHandle<R>, url_str: &str) {
+    let parsed = match url::Url::parse(url_str) {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("📥 Malformed deep-link URL '{}': {}", url_str, e);
+            return;
+        }
+    };
+
+    // meetily://start-recording parses as host="start-recording"
+    let command = parsed.host_str().unwrap_or("");
+
+    // Extract optional ?name= query parameter
+    let meeting_name: Option<String> = parsed
+        .query_pairs()
+        .find(|(key, _)| key == "name")
+        .map(|(_, value)| value.to_string());
+
+    log::info!(
+        "📥 Deep-link command: '{}', meeting_name: {:?}",
+        command,
+        meeting_name
+    );
+
+    let app_clone = app.clone();
+    match command {
+        "start-recording" => {
+            tauri::async_runtime::spawn(async move {
+                log::info!("📥 Deep-link: Starting recording...");
+                match audio::recording_commands::start_recording_with_meeting_name(
+                    app_clone.clone(),
+                    meeting_name,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        log::info!("📥 Deep-link: Recording started successfully");
+                        tray::update_tray_menu(&app_clone);
+                    }
+                    Err(e) => {
+                        // Silent failure — log and ignore (fire-and-forget semantics)
+                        log::warn!("📥 Deep-link: Failed to start recording: {}", e);
+                    }
+                }
+            });
+        }
+        "stop-recording" => {
+            tauri::async_runtime::spawn(async move {
+                log::info!("📥 Deep-link: Stopping recording...");
+
+                if !audio::recording_commands::is_recording().await {
+                    log::info!("📥 Deep-link: Not recording, ignoring stop command");
+                    return;
+                }
+
+                // Generate save path using same pattern as tray.rs
+                let save_path = match app_clone.path().app_data_dir() {
+                    Ok(dir) => {
+                        let timestamp =
+                            chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+                        dir.join(format!("recording-{}.wav", timestamp))
+                            .to_string_lossy()
+                            .to_string()
+                    }
+                    Err(e) => {
+                        log::warn!("📥 Deep-link: Failed to get app data dir: {}", e);
+                        return;
+                    }
+                };
+
+                match audio::recording_commands::stop_recording(
+                    app_clone.clone(),
+                    audio::recording_commands::RecordingArgs { save_path },
+                )
+                .await
+                {
+                    Ok(_) => {
+                        log::info!("📥 Deep-link: Recording stopped successfully");
+                        RECORDING_FLAG.store(false, Ordering::SeqCst);
+                        tray::update_tray_menu(&app_clone);
+                        // Trigger frontend post-processing (same as tray.rs)
+                        if let Err(e) = app_clone.emit("recording-stop-complete", true) {
+                            log::warn!(
+                                "📥 Deep-link: Failed to emit recording-stop-complete: {}",
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("📥 Deep-link: Failed to stop recording: {}", e);
+                    }
+                }
+            });
+        }
+        "toggle-recording" => {
+            tauri::async_runtime::spawn(async move {
+                log::info!("📥 Deep-link: Toggle recording...");
+                if audio::recording_commands::is_recording().await {
+                    // Stop flow — same as stop-recording
+                    let save_path = match app_clone.path().app_data_dir() {
+                        Ok(dir) => {
+                            let timestamp =
+                                chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+                            dir.join(format!("recording-{}.wav", timestamp))
+                                .to_string_lossy()
+                                .to_string()
+                        }
+                        Err(e) => {
+                            log::warn!("📥 Deep-link: Failed to get app data dir: {}", e);
+                            return;
+                        }
+                    };
+
+                    match audio::recording_commands::stop_recording(
+                        app_clone.clone(),
+                        audio::recording_commands::RecordingArgs { save_path },
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            log::info!("📥 Deep-link: Toggle → stopped recording");
+                            RECORDING_FLAG.store(false, Ordering::SeqCst);
+                            tray::update_tray_menu(&app_clone);
+                            if let Err(e) = app_clone.emit("recording-stop-complete", true) {
+                                log::warn!(
+                                    "📥 Deep-link: Failed to emit recording-stop-complete: {}",
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("📥 Deep-link: Failed to stop recording: {}", e);
+                        }
+                    }
+                } else {
+                    // Start flow — same as start-recording
+                    match audio::recording_commands::start_recording_with_meeting_name(
+                        app_clone.clone(),
+                        meeting_name,
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            log::info!("📥 Deep-link: Toggle → started recording");
+                            tray::update_tray_menu(&app_clone);
+                        }
+                        Err(e) => {
+                            log::warn!("📥 Deep-link: Failed to start recording: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+        _ => {
+            log::warn!("📥 Deep-link: Unknown command '{}'", command);
+        }
+    }
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -396,6 +558,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -493,6 +656,22 @@ pub fn run() {
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
             }
+
+            // Register deep-link URL handler for external integration
+            // Handles meetily://start-recording, meetily://stop-recording, meetily://toggle-recording
+            log::info!("Registering deep-link URL handler...");
+            let app_handle_for_deep_link = _app.handle().clone();
+            _app.handle().listen("deep-link://new-url", move |event| {
+                if let Ok(urls) = serde_json::from_str::<Vec<String>>(event.payload()) {
+                    for url_str in urls {
+                        log::info!("📥 Deep-link URL received: {}", url_str);
+                        handle_deep_link(&app_handle_for_deep_link, &url_str);
+                    }
+                } else {
+                    log::warn!("Failed to parse deep-link event payload: {}", event.payload());
+                }
+            });
+            log::info!("Deep-link URL handler registered");
 
             Ok(())
         })

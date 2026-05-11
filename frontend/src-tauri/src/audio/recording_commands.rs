@@ -39,7 +39,7 @@ pub use super::transcription::TranscriptUpdate;
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
 // Global recording manager and transcription task to keep them alive during recording
-static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
+pub(crate) static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
@@ -222,12 +222,14 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
             now.format("%Y-%m-%d_%H-%M-%S")
         )
     });
+    let effective_meeting_name_for_notification = effective_meeting_name.clone();
     manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
     let app_for_error = app.clone();
     manager.set_error_callback(move |error| {
         let _ = app_for_error.emit("recording-error", error.user_message());
+        crate::distributed_notifications::post_recording_error(&error.user_message());
     });
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
@@ -293,6 +295,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         "devices": ["Default Microphone", "Default System Audio"],
         "workers": 3
     })).map_err(|e| e.to_string())?;
+    crate::distributed_notifications::post_recording_started(&effective_meeting_name_for_notification);
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -390,12 +393,14 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             now.format("%Y-%m-%d_%H-%M-%S")
         )
     });
+    let effective_meeting_name_for_notification = effective_meeting_name.clone();
     manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
     let app_for_error = app.clone();
     manager.set_error_callback(move |error| {
         let _ = app_for_error.emit("recording-error", error.user_message());
+        crate::distributed_notifications::post_recording_error(&error.user_message());
     });
 
     // Start recording with specified devices and auto_save setting
@@ -464,6 +469,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         ],
         "workers": 3
     })).map_err(|e| e.to_string())?;
+    crate::distributed_notifications::post_recording_started(&effective_meeting_name_for_notification);
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -882,6 +888,10 @@ pub async fn stop_recording<R: Runtime>(
         }),
     )
     .map_err(|e| e.to_string())?;
+    crate::distributed_notifications::post_recording_stopped(
+        meeting_name_str.as_deref().unwrap_or(""),
+        folder_path_str.as_deref().unwrap_or(""),
+    );
 
     // Update tray menu to reflect stopped state
     crate::tray::update_tray_menu(&app);

@@ -371,6 +371,31 @@ pub fn start_transcription_task<R: Runtime>(
                     "🎉 ALL {} chunks processed successfully - ZERO chunks lost!",
                     final_completed
                 );
+
+                // Emit transcription-all-complete event and distributed notification
+                // This fires after ALL workers have finished, unlike transcription-queue-complete
+                // which fires when chunks are queued but before processing completes.
+                let _ = app.emit("transcription-all-complete", serde_json::json!({
+                    "total_chunks": final_completed,
+                    "message": format!("All {} chunks transcribed successfully", final_completed)
+                }));
+
+                // Post distributed notification for external listeners
+                // Access recording manager to get meeting name and folder path
+                if let Ok(manager_guard) = crate::audio::recording_commands::RECORDING_MANAGER.lock() {
+                    if let Some(manager) = manager_guard.as_ref() {
+                        let meeting_name = manager.get_meeting_name()
+                            .unwrap_or_default();
+                        let folder_path = manager.get_meeting_folder()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        crate::distributed_notifications::post_transcription_completed(
+                            &meeting_name,
+                            &folder_path,
+                        );
+                    }
+                }
+
                 break;
             } else if verification_attempts < MAX_VERIFICATION_ATTEMPTS {
                 verification_attempts += 1;
