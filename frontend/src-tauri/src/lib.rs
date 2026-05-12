@@ -636,6 +636,8 @@ pub fn run() {
             summary::api_save_meeting_summary,
             summary::api_get_meeting_summary_language,
             summary::api_save_meeting_summary_language,
+            summary::api_get_meeting_detected_summary_language,
+            summary::api_save_meeting_detected_summary_language,
             summary::api_detect_transcript_summary_language,
             summary::api_cancel_summary,
             // Template commands

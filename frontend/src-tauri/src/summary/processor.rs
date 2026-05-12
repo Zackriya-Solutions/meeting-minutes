@@ -1,5 +1,5 @@
 use crate::summary::llm_client::{generate_summary, LLMProvider};
-use crate::summary::templates;
+use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
@@ -239,6 +239,7 @@ pub async fn generate_meeting_summary(
     text: &str,
     custom_prompt: &str,
     template_id: &str,
+    template: &Template,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
     custom_openai_endpoint: Option<&str>,
@@ -386,10 +387,6 @@ pub async fn generate_meeting_summary(
         }
 
         info!("Generating final markdown report with template: {}", template_id);
-
-        // Load the template using the provided template_id
-        let template = templates::get_template(template_id)
-            .map_err(|e| format!("Failed to load template '{}': {}", template_id, e))?;
 
         // Generate markdown structure and section instructions using template methods
         let clean_template_markdown = template.to_markdown_structure();

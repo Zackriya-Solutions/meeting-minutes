@@ -8,7 +8,10 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
-import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
+import {
+  applyPinnedSummaryLanguageToMeeting,
+  detectAndCacheSummaryLanguage,
+} from '@/lib/summary-language-preferences';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -263,9 +266,15 @@ export function useRecordingStop(
           }
 
           try {
-            await applyPinnedSummaryLanguageToMeeting(meetingId);
+            const pinned = await applyPinnedSummaryLanguageToMeeting(meetingId);
+            if (!pinned) {
+              await detectAndCacheSummaryLanguage(
+                meetingId,
+                freshTranscripts.map(t => t.text)
+              );
+            }
           } catch (error) {
-            console.warn('Failed to apply pinned summary language to new meeting:', error);
+            console.warn('Failed to persist summary language preference for new meeting:', error);
           }
 
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);

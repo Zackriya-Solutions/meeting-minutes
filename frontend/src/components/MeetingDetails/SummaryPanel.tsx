@@ -113,6 +113,9 @@ export function SummaryPanel({
         }
       } catch (err) {
         console.error('Failed to load summary language:', err);
+        toast.warning('Could not load saved summary language', {
+          description: 'Using Auto until meeting metadata can be read.',
+        });
         if (!cancelled) setSummaryLang(null);
       }
     };

@@ -4,9 +4,12 @@ use crate::database::repositories::{
 };
 use crate::state::AppState;
 use crate::summary::metadata::{
-    read_summary_language_from_metadata, write_summary_language_to_metadata,
+    read_detected_summary_language_from_metadata, read_summary_language_from_metadata,
+    write_detected_summary_language_to_metadata, write_summary_language_to_metadata,
 };
-use crate::summary::language_detection::detect_dominant_summary_language;
+use crate::summary::language_detection::{
+    detect_summary_language, SummaryLanguageDetection,
+};
 use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
@@ -104,12 +107,47 @@ pub async fn api_save_meeting_summary_language<R: Runtime>(
         .map_err(|e| e.to_string())
 }
 
+/// Gets the cached Auto-detected summary language from metadata.json.
+#[tauri::command]
+pub async fn api_get_meeting_detected_summary_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<String>, String> {
+    log_info!(
+        "api_get_meeting_detected_summary_language called for meeting_id: {}",
+        meeting_id
+    );
+
+    let folder = resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await?;
+    read_detected_summary_language_from_metadata(&folder).map_err(|e| e.to_string())
+}
+
+/// Saves or clears the cached Auto-detected summary language in metadata.json.
+#[tauri::command]
+pub async fn api_save_meeting_detected_summary_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    detected_summary_language: Option<String>,
+) -> Result<(), String> {
+    log_info!(
+        "api_save_meeting_detected_summary_language called for meeting_id: {}, language: {:?}",
+        meeting_id,
+        detected_summary_language
+    );
+
+    let folder = resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await?;
+    write_detected_summary_language_to_metadata(&folder, detected_summary_language.as_deref())
+        .map_err(|e| e.to_string())
+}
+
 /// Detects the dominant supported summary language from transcript segments.
 #[tauri::command]
 pub async fn api_detect_transcript_summary_language(
     transcript_texts: Vec<String>,
-) -> Result<Option<String>, String> {
-    Ok(detect_dominant_summary_language(&transcript_texts))
+) -> Result<SummaryLanguageDetection, String> {
+    Ok(detect_summary_language(&transcript_texts))
 }
 
 async fn resolve_meeting_folder(

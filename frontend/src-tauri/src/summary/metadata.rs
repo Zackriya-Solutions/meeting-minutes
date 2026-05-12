@@ -5,10 +5,35 @@ use std::path::{Path, PathBuf};
 use super::processor::language_name_from_code;
 
 const SUMMARY_LANGUAGE_FIELD: &str = "summary_language";
+const DETECTED_SUMMARY_LANGUAGE_FIELD: &str = "detected_summary_language";
 const METADATA_FILE: &str = "metadata.json";
-const METADATA_TEMP_FILE: &str = ".metadata.json.tmp";
+const METADATA_TEMP_FILE_PREFIX: &str = ".metadata.json.";
 
 pub(crate) fn read_summary_language_from_metadata(folder: &Path) -> Result<Option<String>> {
+    read_language_field_from_metadata(folder, SUMMARY_LANGUAGE_FIELD)
+}
+
+pub(crate) fn read_detected_summary_language_from_metadata(
+    folder: &Path,
+) -> Result<Option<String>> {
+    read_language_field_from_metadata(folder, DETECTED_SUMMARY_LANGUAGE_FIELD)
+}
+
+pub(crate) fn write_summary_language_to_metadata(
+    folder: &Path,
+    summary_language: Option<&str>,
+) -> Result<()> {
+    write_language_field_to_metadata(folder, SUMMARY_LANGUAGE_FIELD, summary_language)
+}
+
+pub(crate) fn write_detected_summary_language_to_metadata(
+    folder: &Path,
+    summary_language: Option<&str>,
+) -> Result<()> {
+    write_language_field_to_metadata(folder, DETECTED_SUMMARY_LANGUAGE_FIELD, summary_language)
+}
+
+fn read_language_field_from_metadata(folder: &Path, field: &str) -> Result<Option<String>> {
     let metadata_path = metadata_path(folder);
     if !metadata_path.exists() {
         return Ok(None);
@@ -18,7 +43,7 @@ pub(crate) fn read_summary_language_from_metadata(folder: &Path) -> Result<Optio
         .with_context(|| format!("Failed to read {}", metadata_path.display()))?;
     let value = parse_metadata_json(&raw)?;
 
-    let Some(language) = value.get(SUMMARY_LANGUAGE_FIELD) else {
+    let Some(language) = value.get(field) else {
         return Ok(None);
     };
 
@@ -28,12 +53,13 @@ pub(crate) fn read_summary_language_from_metadata(folder: &Path) -> Result<Optio
     }
 }
 
-pub(crate) fn write_summary_language_to_metadata(
+fn write_language_field_to_metadata(
     folder: &Path,
+    field: &str,
     summary_language: Option<&str>,
 ) -> Result<()> {
     let metadata_path = metadata_path(folder);
-    let temp_path = folder.join(METADATA_TEMP_FILE);
+    let temp_path = metadata_temp_path(folder);
 
     let mut value = if metadata_path.exists() {
         let raw = std::fs::read_to_string(&metadata_path)
@@ -51,10 +77,10 @@ pub(crate) fn write_summary_language_to_metadata(
     match summary_language {
         Some(code) => {
             let normalised = normalise_supported_summary_language(code)?;
-            object.insert(SUMMARY_LANGUAGE_FIELD.to_string(), Value::String(normalised));
+            object.insert(field.to_string(), Value::String(normalised));
         }
         None => {
-            object.remove(SUMMARY_LANGUAGE_FIELD);
+            object.remove(field);
         }
     }
 
@@ -75,6 +101,14 @@ pub(crate) fn write_summary_language_to_metadata(
 
 fn metadata_path(folder: &Path) -> PathBuf {
     folder.join(METADATA_FILE)
+}
+
+fn metadata_temp_path(folder: &Path) -> PathBuf {
+    folder.join(format!(
+        "{}{}.tmp",
+        METADATA_TEMP_FILE_PREFIX,
+        uuid::Uuid::new_v4()
+    ))
 }
 
 fn parse_metadata_json(raw: &str) -> Result<Value> {
@@ -141,6 +175,43 @@ mod tests {
         assert_eq!(parsed["meeting_id"], "meeting-123");
         assert_eq!(parsed["meeting_name"], "Design Review");
         assert_eq!(parsed["summary_language"], "fr");
+    }
+
+    #[test]
+    fn detected_summary_language_is_stored_separately_from_user_override() {
+        let dir = tempfile::tempdir().unwrap();
+
+        write_detected_summary_language_to_metadata(dir.path(), Some("es")).unwrap();
+        write_summary_language_to_metadata(dir.path(), Some("fr")).unwrap();
+
+        assert_eq!(
+            read_detected_summary_language_from_metadata(dir.path()).unwrap(),
+            Some("es".to_string())
+        );
+        assert_eq!(
+            read_summary_language_from_metadata(dir.path()).unwrap(),
+            Some("fr".to_string())
+        );
+
+        write_summary_language_to_metadata(dir.path(), None).unwrap();
+
+        assert_eq!(
+            read_detected_summary_language_from_metadata(dir.path()).unwrap(),
+            Some("es".to_string())
+        );
+        assert_eq!(read_summary_language_from_metadata(dir.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn summary_language_temp_path_is_unique_per_write() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let first = metadata_temp_path(dir.path());
+        let second = metadata_temp_path(dir.path());
+
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), Some(dir.path()));
+        assert_eq!(second.parent(), Some(dir.path()));
     }
 
     #[test]

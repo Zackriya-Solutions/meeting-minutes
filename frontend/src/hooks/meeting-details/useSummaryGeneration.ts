@@ -8,6 +8,10 @@ import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
 import { normaliseLanguageCode } from '@/lib/summary-languages';
+import {
+  detectAndCacheSummaryLanguage,
+  readCachedDetectedSummaryLanguage,
+} from '@/lib/summary-language-preferences';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -21,13 +25,26 @@ async function resolveSummaryLanguage(
     if (normalised) return normalised;
   } catch (err) {
     console.warn('Failed to load meeting summary language:', err);
+    toast.warning('Could not load saved summary language', {
+      description: 'Using Auto for this generation.',
+    });
   }
 
   try {
-    const detected = await invokeTauri<string | null>('api_detect_transcript_summary_language', {
-      transcriptTexts,
-    });
-    return normaliseLanguageCode(detected);
+    const cachedDetected = await readCachedDetectedSummaryLanguage(meetingId);
+    if (cachedDetected) return cachedDetected;
+  } catch (err) {
+    console.warn('Failed to load cached detected summary language:', err);
+  }
+
+  try {
+    const detection = await detectAndCacheSummaryLanguage(meetingId, transcriptTexts);
+    if (detection.reason === 'tie') {
+      toast.warning('Bilingual transcript detected', {
+        description: 'Pick a summary language manually if Auto chooses the wrong fallback.',
+      });
+    }
+    return detection.language;
   } catch (err) {
     console.warn('Failed to detect transcript summary language:', err);
     return null;

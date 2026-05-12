@@ -5,6 +5,7 @@ use crate::summary::llm_client::LLMProvider;
 use crate::summary::processor::{
     extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
 };
+use crate::summary::templates::{self, Template};
 use crate::ollama::metadata::ModelMetadataCache;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -56,6 +57,7 @@ struct SummaryCacheSource {
     transcript_fingerprint: String,
     custom_prompt_fingerprint: String,
     template_id: String,
+    template_fingerprint: String,
     model_provider: String,
     model_name: String,
     ollama_endpoint: Option<String>,
@@ -89,6 +91,7 @@ fn build_summary_cache_source(
     text: &str,
     custom_prompt: &str,
     template_id: &str,
+    template_fingerprint: &str,
     model_provider: &str,
     model_name: &str,
     ollama_endpoint: Option<&str>,
@@ -101,6 +104,7 @@ fn build_summary_cache_source(
         transcript_fingerprint: stable_text_fingerprint(text),
         custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
         template_id: template_id.to_string(),
+        template_fingerprint: template_fingerprint.to_string(),
         model_provider: model_provider.to_string(),
         model_name: model_name.to_string(),
         ollama_endpoint: ollama_endpoint.map(str::to_string),
@@ -109,6 +113,15 @@ fn build_summary_cache_source(
         temperature,
         top_p,
     }
+}
+
+fn template_cache_fingerprint(template: &Template) -> String {
+    let rendered_template = format!(
+        "{}\n---SECTION-INSTRUCTIONS---\n{}",
+        template.to_markdown_structure(),
+        template.to_section_instructions()
+    );
+    stable_text_fingerprint(&rendered_template)
 }
 
 fn normalise_summary_language_for_cache(summary_language: Option<&str>) -> Option<String> {
@@ -372,10 +385,21 @@ impl SummaryService {
             info!("📝 Summary language preference: {}", code);
         }
 
+        let template = match templates::get_template(&template_id) {
+            Ok(template) => template,
+            Err(e) => {
+                let err_msg = format!("Failed to load template '{}': {}", template_id, e);
+                Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                return;
+            }
+        };
+        let template_fingerprint = template_cache_fingerprint(&template);
+
         let cache_source = build_summary_cache_source(
             &text,
             &custom_prompt,
             &template_id,
+            &template_fingerprint,
             &model_provider,
             &model_name,
             ollama_endpoint.as_deref(),
@@ -421,6 +445,7 @@ impl SummaryService {
             &text,
             &custom_prompt,
             &template_id,
+            &template,
             token_threshold,
             ollama_endpoint.as_deref(),
             custom_openai_endpoint.as_deref(),
@@ -609,10 +634,12 @@ mod tests {
     }
 
     fn sample_cache_source() -> SummaryCacheSource {
+        let template_fingerprint = stable_text_fingerprint("standard template prompt");
         build_summary_cache_source(
             "transcript body",
             "custom prompt",
             "standard_meeting",
+            &template_fingerprint,
             "ollama",
             "gemma3:1b",
             Some("http://localhost:11434"),
@@ -621,6 +648,28 @@ mod tests {
             None,
             None,
         )
+    }
+
+    fn test_template(section_title: &str) -> Template {
+        Template {
+            name: "Test".to_string(),
+            description: "Test template".to_string(),
+            sections: vec![crate::summary::templates::TemplateSection {
+                title: section_title.to_string(),
+                instruction: "Summarize this section".to_string(),
+                format: "paragraph".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn test_template_cache_fingerprint_changes_with_rendered_template() {
+        assert_ne!(
+            template_cache_fingerprint(&test_template("Summary")),
+            template_cache_fingerprint(&test_template("Decisions"))
+        );
     }
 
     #[test]
@@ -674,6 +723,7 @@ mod tests {
     #[test]
     fn test_changed_summary_inputs_reject_cache() {
         let source = sample_cache_source();
+        let template_fingerprint = source.template_fingerprint.clone();
         let raw = build_summary_result_json(
             "# Reunion\n## Points\nBonjour",
             "# Meeting\n## Points\nHello",
@@ -687,6 +737,7 @@ mod tests {
                 "changed transcript",
                 "custom prompt",
                 "standard_meeting",
+                &template_fingerprint,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -699,6 +750,7 @@ mod tests {
                 "transcript body",
                 "changed prompt",
                 "standard_meeting",
+                &template_fingerprint,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -711,6 +763,7 @@ mod tests {
                 "transcript body",
                 "custom prompt",
                 "daily_standup",
+                &template_fingerprint,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -723,6 +776,7 @@ mod tests {
                 "transcript body",
                 "custom prompt",
                 "standard_meeting",
+                &template_fingerprint,
                 "openai",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -735,6 +789,7 @@ mod tests {
                 "transcript body",
                 "custom prompt",
                 "standard_meeting",
+                &template_fingerprint,
                 "ollama",
                 "qwen2.5:3b",
                 Some("http://localhost:11434"),
@@ -747,6 +802,7 @@ mod tests {
                 "transcript body",
                 "custom prompt",
                 "standard_meeting",
+                &template_fingerprint,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11500"),
@@ -759,6 +815,7 @@ mod tests {
                 "transcript body",
                 "custom prompt",
                 "standard_meeting",
+                &template_fingerprint,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -775,6 +832,28 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn test_changed_template_content_rejects_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        let changed_template = SummaryCacheSource {
+            template_fingerprint: stable_text_fingerprint("changed template prompt"),
+            ..source
+        };
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &changed_template, Some("de")).unwrap(),
+            None
+        );
     }
 
     #[test]
