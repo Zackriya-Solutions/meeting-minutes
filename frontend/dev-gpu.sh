@@ -97,14 +97,18 @@ if [ ! -d "$HELPER_DIR" ]; then
 fi
 
 # Determine llama-helper features
-# Note: llama-cpp-2 does NOT support coreml, only metal/cuda/vulkan
-# So for macOS Apple Silicon (which returns 'coreml' for Whisper), use 'metal' for llama-helper
+# Whisper and llama-cpp-2 name the same backend differently:
+#   coreml  (whisper-rs, macOS) -> metal (llama-cpp-2 has no CoreML)
+#   hipblas (whisper-rs, AMD)   -> rocm  (llama-cpp-2's name for the same backend)
 HELPER_FEATURES=""
 if [ -n "$TAURI_GPU_FEATURE" ] && [ "$TAURI_GPU_FEATURE" != "none" ]; then
     LLAMA_FEATURE="$TAURI_GPU_FEATURE"
     if [ "$LLAMA_FEATURE" = "coreml" ]; then
         LLAMA_FEATURE="metal"
         echo -e "${YELLOW}   Note: llama-cpp-2 doesn't support CoreML, using Metal instead${NC}"
+    elif [ "$LLAMA_FEATURE" = "hipblas" ]; then
+        LLAMA_FEATURE="rocm"
+        echo -e "${YELLOW}   Note: llama-cpp-2 names ROCm 'rocm' (whisper-rs calls it 'hipblas')${NC}"
     fi
     HELPER_FEATURES="--features $LLAMA_FEATURE"
 fi
