@@ -170,7 +170,7 @@ futures-channel = "0.3.31"
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
-whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
+whisper-rs = { version = "0.16.0", features = ["raw-api", "metal", "coreml"] }
 
 # Windows-specific dependencies
 # Default: CPU-only build (no BLAS)
@@ -179,7 +179,7 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api", "vulkan"] }
+whisper-rs = { version = "0.16.0", features = ["raw-api", "vulkan"] }
 futures-channel = "0.3.31"
 
 # Linux-specific dependencies
@@ -190,7 +190,7 @@ futures-channel = "0.3.31"
 #   --features hipblas  (AMD ROCm)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api"] }
+whisper-rs = { version = "0.16.0", features = [ "raw-api"] }
 futures-channel = "0.3.31"
 
 [dev-dependencies]
