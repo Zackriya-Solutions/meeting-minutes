@@ -20,7 +20,7 @@ pub struct OnboardingStatus {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelStatus {
     pub parakeet: String,  // "downloaded" | "not_downloaded" | "downloading"
-    pub summary: String,   // Generic field for summary model (gemma3:1b or gemma3:4b)
+    pub summary: String,   // Generic field for summary model (Qwen 3.5 or legacy Gemma variants)
 }
 
 impl Default for OnboardingStatus {

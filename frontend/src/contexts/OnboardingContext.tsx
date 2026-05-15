@@ -83,7 +83,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     totalMb: 0,
     speedMbps: 0,
   });
-  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('');
+  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('qwen3.5:4b');
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
 
