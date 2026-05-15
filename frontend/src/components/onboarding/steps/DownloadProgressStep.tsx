@@ -179,10 +179,17 @@ export function DownloadProgressStep() {
     const fetchRecommendation = async () => {
       try {
         const model = await invoke<string>('builtin_ai_get_recommended_model');
+        const modelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
+          modelName: model,
+          refresh: true,
+        });
         setRecommendedModel(model);
-        setSelectedSummaryModel(model);  // Update context
+        setSummaryModelDownloaded(modelReady);
+        setSelectedSummaryModel(model);
         setSummaryState((prev) => ({
           ...prev,
+          status: modelReady ? 'completed' : 'waiting',
+          progress: modelReady ? 100 : 0,
           totalMb: getSummaryModelSizeMb(model),
         }));
       } catch (error) {
@@ -306,6 +313,25 @@ export function DownloadProgressStep() {
       unlisten.then((fn) => fn());
     };
   }, [selectedSummaryModel]);
+
+  useEffect(() => {
+    if (!selectedSummaryModel) return;
+
+    setSummaryState((prev) => ({
+      ...prev,
+      status: summaryModelDownloaded
+        ? 'completed'
+        : prev.status === 'completed'
+        ? 'waiting'
+        : prev.status,
+      progress: summaryModelDownloaded
+        ? 100
+        : prev.status === 'completed'
+        ? 0
+        : prev.progress,
+      totalMb: prev.totalMb || getSummaryModelSizeMb(selectedSummaryModel),
+    }));
+  }, [selectedSummaryModel, summaryModelDownloaded]);
 
   const startDownloads = async () => {
     // Always download both Parakeet and Summary Model (system-recommended)
