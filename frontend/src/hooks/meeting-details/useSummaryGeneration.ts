@@ -7,9 +7,9 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
-import { normaliseLanguageCode } from '@/lib/summary-languages';
 import {
   detectAndCacheSummaryLanguage,
+  readMeetingSummaryLanguage,
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
 
@@ -18,11 +18,8 @@ async function resolveSummaryLanguage(
   transcriptTexts: string[]
 ): Promise<string | null> {
   try {
-    const perMeeting = await invokeTauri<string | null>('api_get_meeting_summary_language', {
-      meetingId,
-    });
-    const normalised = normaliseLanguageCode(perMeeting);
-    if (normalised) return normalised;
+    const perMeeting = await readMeetingSummaryLanguage(meetingId);
+    if (perMeeting.language) return perMeeting.language;
   } catch (err) {
     console.warn('Failed to load meeting summary language:', err);
     toast.warning('Could not load saved summary language', {

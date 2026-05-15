@@ -15,8 +15,12 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
-import { labelForCode, normaliseLanguageCode } from '@/lib/summary-languages';
-import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { labelForCode } from '@/lib/summary-languages';
+import {
+  readMeetingSummaryLanguage,
+  saveMeetingSummaryLanguage,
+  SummaryLanguageStorage,
+} from '@/lib/summary-language-preferences';
 
 interface SummaryPanelProps {
   meeting: {
@@ -94,22 +98,25 @@ export function SummaryPanel({
   onOpenModelSettings
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
+  const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
   const { addRecent } = useRecentLanguages();
 
   const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : 'Auto';
-  const autoSubtitle = 'Uses dominant transcript language';
+  const isLocalFallbackLanguage = summaryLangStorage === 'local_fallback';
+  const autoSubtitle = isLocalFallbackLanguage
+    ? 'Saved on this device for folderless meetings'
+    : 'Uses dominant transcript language';
 
   useEffect(() => {
     let cancelled = false;
 
     const loadSummaryLanguage = async () => {
       try {
-        const stored = await invokeTauri<string | null>('api_get_meeting_summary_language', {
-          meetingId: meeting.id,
-        });
+        const stored = await readMeetingSummaryLanguage(meeting.id);
         if (!cancelled) {
-          setSummaryLang(normaliseLanguageCode(stored));
+          setSummaryLang(stored.language);
+          setSummaryLangStorage(stored.storage);
         }
       } catch (err) {
         console.error('Failed to load summary language:', err);
@@ -129,14 +136,19 @@ export function SummaryPanel({
 
   const handleLangChange = async (code: string | null) => {
     const previous = summaryLang;
+    const previousStorage = summaryLangStorage;
     const nextStored = code;
     setSummaryLang(nextStored);
     setLangPickerOpen(false);
     try {
-      await invokeTauri('api_save_meeting_summary_language', {
-        meetingId: meeting.id,
-        summaryLanguage: nextStored,
-      });
+      const saved = await saveMeetingSummaryLanguage(meeting.id, nextStored);
+      setSummaryLang(saved.language);
+      setSummaryLangStorage(saved.storage);
+      if (saved.storage === 'local_fallback') {
+        toast.info('Summary language saved on this device', {
+          description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
+        });
+      }
       if (nextStored) {
         addRecent(nextStored);
       }
@@ -144,6 +156,7 @@ export function SummaryPanel({
       console.error('Failed to persist summary language:', err);
       toast.error('Failed to save summary language');
       setSummaryLang(previous);
+      setSummaryLangStorage(previousStorage);
     }
   };
 
@@ -155,7 +168,7 @@ export function SummaryPanel({
         <Button
           variant="outline"
           size="sm"
-          title={`Summary language: ${effectiveLangLabel}`}
+          title={`Summary language: ${effectiveLangLabel}${isLocalFallbackLanguage ? ' (saved on this device)' : ''}`}
           aria-label="Set summary language"
         >
           <Languages size={18} />
