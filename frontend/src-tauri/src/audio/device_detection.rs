@@ -403,8 +403,11 @@ pub fn calculate_buffer_timeout(
         return min_timeout;
     }
 
-    // Calculate base timeout with 2x headroom for jitter (Cap's strategy).
-    let with_headroom = Duration::from_secs_f64((buffer_size as f64 / sample_rate as f64) * 2.0);
+    // Calculate base timeout from reported buffer size
+    let base = Duration::from_secs_f64(buffer_size as f64 / sample_rate as f64);
+
+    // Add 2x headroom for jitter (Cap's strategy)
+    let with_headroom = base.mul_f32(2.0);
 
     // Clamp to device-specific range
     clamp_duration(with_headroom, min_timeout, max_timeout)

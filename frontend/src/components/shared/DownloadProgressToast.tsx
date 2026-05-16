@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { X, Download, Check, Loader2, ArrowBigDownDash } from 'lucide-react';
+import { getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 
 interface DownloadProgress {
   modelName: string;
@@ -14,17 +15,6 @@ interface DownloadProgress {
   speedMbps: number;
   status: 'downloading' | 'completed' | 'error' | 'cancelled';
   error?: string;
-}
-
-const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
-  'qwen3.5:2b': 1270,
-  'qwen3.5:4b': 2614,
-  'gemma3:1b': 1019,
-  'gemma3:4b': 2374,
-};
-
-function getSummaryModelSizeMb(modelName: string): number {
-  return SUMMARY_MODEL_SIZES_MB[modelName] ?? 0;
 }
 
 // Categorize error messages for better user experience

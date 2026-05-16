@@ -489,12 +489,30 @@ mod tests {
 
         println!("Found {} segments with {} progress updates", segments.len(), progress_updates.len());
 
-        // The synthetic sine-wave signal can be treated as one continuous segment
-        // by Silero, but the large-file path should still produce speech.
+        // The synthetic signal is not real speech, so Silero may merge it into
+        // one long segment. This test is specifically for the large-file path:
+        // it must still emit speech and report monotonic progress through 100%.
         assert!(!segments.is_empty(), "Expected at least one speech segment");
+        assert!(
+            segments.iter().all(|segment| !segment.samples.is_empty()
+                && segment.end_timestamp_ms > segment.start_timestamp_ms),
+            "Expected all speech segments to contain audio with positive duration"
+        );
 
         // Should have received progress updates
         assert!(!progress_updates.is_empty(), "Expected progress updates for large file");
+        assert_eq!(
+            progress_updates.last().map(|(progress, _)| *progress),
+            Some(100),
+            "Expected progress to reach 100%"
+        );
+        assert!(
+            progress_updates
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0),
+            "Expected progress updates to increase monotonically: {:?}",
+            progress_updates
+        );
     }
 
     #[test]

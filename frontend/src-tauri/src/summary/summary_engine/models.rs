@@ -237,7 +237,6 @@ pub fn format_prompt(
 ) -> Result<String> {
     let template = match template_name {
         "gemma3" => GEMMA3_TEMPLATE,
-        "gemma3n" => GEMMA3_TEMPLATE,
         "qwen3.5_nonthinking" => QWEN35_NONTHINKING_TEMPLATE,
         _ => return Err(anyhow!("Unknown template: {}", template_name)),
     };

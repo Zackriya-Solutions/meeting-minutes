@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { Download, Info } from 'lucide-react';
+import { Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -13,24 +12,9 @@ import {
 
 export function SetupOverviewStep() {
   const { goNext } = useOnboarding();
-  const [recommendedModel, setRecommendedModel] = useState<string>('qwen3.5:4b');
-  const [modelSize, setModelSize] = useState<string>('~2.6 GB');
   const [isMac, setIsMac] = useState(false);
 
-  // Fetch recommended model on mount
   useEffect(() => {
-    const fetchRecommendedModel = async () => {
-      try {
-        const model = await invoke<string>('builtin_ai_get_recommended_model');
-        setRecommendedModel(model);
-        setModelSize(model === 'qwen3.5:2b' ? '~1.2 GB' : '~2.6 GB');
-      } catch (error) {
-        console.error('Failed to get recommended model:', error);
-      }
-    };
-    fetchRecommendedModel();
-
-    // Detect platform for totalSteps
     const checkPlatform = async () => {
       try {
         const { platform } = await import('@tauri-apps/plugin-os');

@@ -7,6 +7,7 @@ import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -19,31 +20,6 @@ interface DownloadState {
   totalMb: number;
   speedMbps: number;
   error?: string;
-}
-
-const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
-  'qwen3.5:2b': 1270,
-  'qwen3.5:4b': 2614,
-  'gemma3:1b': 1019,
-  'gemma3:4b': 2374,
-};
-
-function getSummaryModelSizeMb(model: string): number {
-  return SUMMARY_MODEL_SIZES_MB[model] ?? 0;
-}
-
-function getSummaryModelSizeLabel(model: string): string {
-  const sizeMb = getSummaryModelSizeMb(model);
-
-  if (sizeMb === 0) {
-    return '';
-  }
-
-  if (sizeMb >= 1024) {
-    return `~${(sizeMb / 1024).toFixed(1)} GB`;
-  }
-
-  return `~${sizeMb} MB`;
 }
 
 export function DownloadProgressStep() {
