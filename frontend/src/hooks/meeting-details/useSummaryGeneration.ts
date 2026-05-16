@@ -75,7 +75,6 @@ export function useSummaryGeneration({
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [originalTranscript, setOriginalTranscript] = useState<string>('');
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
@@ -115,10 +114,6 @@ export function useSummaryGeneration({
     try {
       if (!transcriptText.trim()) {
         throw new Error('No transcript text available. Please add some text first.');
-      }
-
-      if (!isRegeneration) {
-        setOriginalTranscript(transcriptText);
       }
 
       console.log('Processing transcript with template:', selectedTemplate);
@@ -438,6 +433,25 @@ export function useSummaryGeneration({
     }
   }, []);
 
+  const buildSummaryTranscriptPayload = useCallback((allTranscripts: Transcript[]) => {
+    const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
+      if (seconds === undefined) {
+        return fallbackTimestamp;
+      }
+      const totalSecs = Math.floor(seconds);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
+    };
+
+    return {
+      transcriptText: allTranscripts
+        .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
+        .join('\n'),
+      transcriptTexts: allTranscripts.map(t => t.text),
+    };
+  }, []);
+
   // Public API: Generate summary from transcripts
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
     // Check if model config is still loading
@@ -594,41 +608,29 @@ export function useSummaryGeneration({
       }
     }
 
-    // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
-    const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
-      if (seconds === undefined) {
-        // For old transcripts without audio_start_time, use wall-clock time
-        return fallbackTimestamp;
-      }
-      const totalSecs = Math.floor(seconds);
-      const mins = Math.floor(totalSecs / 60);
-      const secs = totalSecs % 60;
-      return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
-    };
-
-    const fullTranscript = allTranscripts
-      .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
-      .join('\n');
+    const summaryPayload = buildSummaryTranscriptPayload(allTranscripts);
 
     await processSummary({
-      transcriptText: fullTranscript,
-      transcriptTexts: allTranscripts.map(t => t.text),
+      ...summaryPayload,
       customPrompt,
     });
-  }, [meeting.id, fetchAllTranscripts, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
+  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
-  // Public API: Regenerate summary from original transcript
+  // Public API: Regenerate summary from the current saved transcript
   const handleRegenerateSummary = useCallback(async () => {
-    if (!originalTranscript.trim()) {
-      console.error('No original transcript available for regeneration');
+    const allTranscripts = await fetchAllTranscripts(meeting.id);
+
+    if (!allTranscripts.length) {
+      console.error('No transcripts available for regeneration');
+      toast.error('No transcripts available for summary regeneration');
       return;
     }
 
     await processSummary({
-      transcriptText: originalTranscript,
+      ...buildSummaryTranscriptPayload(allTranscripts),
       isRegeneration: true
     });
-  }, [originalTranscript, processSummary]);
+  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {

@@ -58,6 +58,7 @@ struct SummaryCacheSource {
     custom_prompt_fingerprint: String,
     template_id: String,
     template_fingerprint: String,
+    token_threshold: usize,
     model_provider: String,
     model_name: String,
     ollama_endpoint: Option<String>,
@@ -92,6 +93,7 @@ fn build_summary_cache_source(
     custom_prompt: &str,
     template_id: &str,
     template_fingerprint: &str,
+    token_threshold: usize,
     model_provider: &str,
     model_name: &str,
     ollama_endpoint: Option<&str>,
@@ -105,6 +107,7 @@ fn build_summary_cache_source(
         custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
         template_id: template_id.to_string(),
         template_fingerprint: template_fingerprint.to_string(),
+        token_threshold,
         model_provider: model_provider.to_string(),
         model_name: model_name.to_string(),
         ollama_endpoint: ollama_endpoint.map(str::to_string),
@@ -400,6 +403,7 @@ impl SummaryService {
             &custom_prompt,
             &template_id,
             &template_fingerprint,
+            token_threshold,
             &model_provider,
             &model_name,
             ollama_endpoint.as_deref(),
@@ -640,6 +644,7 @@ mod tests {
             "custom prompt",
             "standard_meeting",
             &template_fingerprint,
+            3700,
             "ollama",
             "gemma3:1b",
             Some("http://localhost:11434"),
@@ -738,6 +743,7 @@ mod tests {
                 "custom prompt",
                 "standard_meeting",
                 &template_fingerprint,
+                3700,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -751,6 +757,7 @@ mod tests {
                 "changed prompt",
                 "standard_meeting",
                 &template_fingerprint,
+                3700,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -764,6 +771,7 @@ mod tests {
                 "custom prompt",
                 "daily_standup",
                 &template_fingerprint,
+                3700,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -777,6 +785,7 @@ mod tests {
                 "custom prompt",
                 "standard_meeting",
                 &template_fingerprint,
+                3700,
                 "openai",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -790,6 +799,7 @@ mod tests {
                 "custom prompt",
                 "standard_meeting",
                 &template_fingerprint,
+                3700,
                 "ollama",
                 "qwen2.5:3b",
                 Some("http://localhost:11434"),
@@ -803,6 +813,7 @@ mod tests {
                 "custom prompt",
                 "standard_meeting",
                 &template_fingerprint,
+                3700,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11500"),
@@ -816,6 +827,7 @@ mod tests {
                 "custom prompt",
                 "standard_meeting",
                 &template_fingerprint,
+                3700,
                 "ollama",
                 "gemma3:1b",
                 Some("http://localhost:11434"),
@@ -852,6 +864,28 @@ mod tests {
 
         assert_eq!(
             extract_cached_english_markdown(&raw, &changed_template, Some("de")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_changed_token_threshold_rejects_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        let changed_threshold = SummaryCacheSource {
+            token_threshold: 8192,
+            ..source
+        };
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &changed_threshold, Some("de")).unwrap(),
             None
         );
     }

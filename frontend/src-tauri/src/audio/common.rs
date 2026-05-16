@@ -214,20 +214,23 @@ pub(crate) fn split_segment_at_silence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn test_engine_lifecycle_lock_serializes_acquirers() {
         let guard = acquire_engine_lifecycle_lock().await;
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (acquired_tx, mut acquired_rx) = tokio::sync::oneshot::channel();
         let waiter = tokio::spawn(async {
+            started_tx.send(()).unwrap();
             let _guard = acquire_engine_lifecycle_lock().await;
-            true
+            acquired_tx.send(()).unwrap();
         });
 
-        assert!(tokio::time::timeout(Duration::from_millis(25), waiter).await.is_err());
+        started_rx.await.unwrap();
+        assert!(acquired_rx.try_recv().is_err());
         drop(guard);
 
-        let guard = acquire_engine_lifecycle_lock().await;
-        drop(guard);
+        acquired_rx.await.unwrap();
+        waiter.await.unwrap();
     }
 }

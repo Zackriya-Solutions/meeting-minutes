@@ -68,14 +68,15 @@ function writeLanguageFallback(
   prefix: string,
   meetingId: string,
   language: string | null
-): void {
-  if (typeof window === 'undefined') return;
+): boolean {
+  if (typeof window === 'undefined') return false;
   try {
     const key = fallbackKey(prefix, meetingId);
     if (language) window.localStorage.setItem(key, language);
     else window.localStorage.removeItem(key);
+    return true;
   } catch {
-    // Fallback persistence is best-effort for folderless meetings.
+    return false;
   }
 }
 
@@ -128,7 +129,9 @@ export async function saveMeetingSummaryLanguage(
   );
 
   if (response.storage === 'local_fallback') {
-    writeLanguageFallback(SUMMARY_LANGUAGE_FALLBACK_PREFIX, meetingId, normalised);
+    if (!writeLanguageFallback(SUMMARY_LANGUAGE_FALLBACK_PREFIX, meetingId, normalised)) {
+      throw new Error('Failed to save summary language on this device');
+    }
     return {
       language: normalised,
       storage: 'local_fallback',

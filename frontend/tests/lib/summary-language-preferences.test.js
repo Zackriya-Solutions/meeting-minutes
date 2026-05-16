@@ -30,6 +30,22 @@ function installLocalStorage() {
   return values;
 }
 
+function installFailingLocalStorage() {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("quota exceeded");
+        },
+        removeItem: () => {},
+        clear: () => {},
+      },
+    },
+  });
+}
+
 describe("summary language local fallback", () => {
   let storageValues;
 
@@ -97,5 +113,18 @@ describe("summary language local fallback", () => {
     await prefs.saveCachedDetectedSummaryLanguage("meeting-1", "pt");
 
     expect(storageValues.get("detectedSummaryLanguageFallback:meeting-1")).toBe("pt");
+  });
+
+  test("rejects when folderless summary language cannot be persisted locally", async () => {
+    const prefs = await import("../../src/lib/summary-language-preferences");
+    installFailingLocalStorage();
+    invokeMock.mockResolvedValueOnce({
+      language: null,
+      storage: "local_fallback",
+    });
+
+    await expect(
+      prefs.saveMeetingSummaryLanguage("meeting-1", "it"),
+    ).rejects.toThrow("Failed to save summary language on this device");
   });
 });

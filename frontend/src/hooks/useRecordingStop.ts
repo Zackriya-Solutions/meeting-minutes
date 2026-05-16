@@ -265,16 +265,28 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
+          let shouldDetectSummaryLanguage = false;
           try {
-            const pinned = await applyPinnedSummaryLanguageToMeeting(meetingId);
-            if (!pinned) {
+            shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
+          } catch (error) {
+            console.warn('Failed to apply pinned summary language preference for new meeting:', error);
+            toast.warning('Could not apply default summary language', {
+              description: 'The meeting was saved, but the default summary language was not applied.',
+            });
+          }
+
+          if (shouldDetectSummaryLanguage) {
+            try {
               await detectAndCacheSummaryLanguage(
                 meetingId,
                 freshTranscripts.map(t => t.text)
               );
+            } catch (error) {
+              console.warn('Failed to detect summary language for new meeting:', error);
+              toast.warning('Could not detect summary language', {
+                description: 'The meeting was saved, but Auto could not detect the summary language.',
+              });
             }
-          } catch (error) {
-            console.warn('Failed to persist summary language preference for new meeting:', error);
           }
 
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);

@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Result};
+use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use super::processor::language_name_from_code;
 
@@ -8,6 +10,7 @@ const SUMMARY_LANGUAGE_FIELD: &str = "summary_language";
 const DETECTED_SUMMARY_LANGUAGE_FIELD: &str = "detected_summary_language";
 const METADATA_FILE: &str = "metadata.json";
 const METADATA_TEMP_FILE_PREFIX: &str = ".metadata.json.";
+static METADATA_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub(crate) fn read_summary_language_from_metadata(folder: &Path) -> Result<Option<String>> {
     read_language_field_from_metadata(folder, SUMMARY_LANGUAGE_FIELD)
@@ -58,6 +61,7 @@ fn write_language_field_to_metadata(
     field: &str,
     summary_language: Option<&str>,
 ) -> Result<()> {
+    let _guard = METADATA_WRITE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let metadata_path = metadata_path(folder);
     let temp_path = metadata_temp_path(folder);
 
@@ -200,6 +204,43 @@ mod tests {
             Some("es".to_string())
         );
         assert_eq!(read_summary_language_from_metadata(dir.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn concurrent_summary_language_writes_preserve_both_fields() {
+        for _ in 0..50 {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join("metadata.json"),
+                serde_json::to_string_pretty(&json!({
+                    "version": "1.0",
+                    "meeting_id": "meeting-123",
+                    "meeting_name": "Design Review",
+                    "padding": "x".repeat(8192)
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+
+            let summary_dir = dir.path().to_path_buf();
+            let detected_dir = dir.path().to_path_buf();
+
+            let summary_thread = std::thread::spawn(move || {
+                write_summary_language_to_metadata(&summary_dir, Some("fr")).unwrap();
+            });
+            let detected_thread = std::thread::spawn(move || {
+                write_detected_summary_language_to_metadata(&detected_dir, Some("es")).unwrap();
+            });
+
+            summary_thread.join().unwrap();
+            detected_thread.join().unwrap();
+
+            let raw = std::fs::read_to_string(dir.path().join("metadata.json")).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(parsed["summary_language"], "fr");
+            assert_eq!(parsed["detected_summary_language"], "es");
+            assert_eq!(parsed["meeting_name"], "Design Review");
+        }
     }
 
     #[test]
