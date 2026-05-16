@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHand
 import dynamic from 'next/dynamic';
 import { Summary, SummaryDataResponse, SummaryFormat, BlockNoteBlock } from '@/types';
 import { AISummary } from './index';
+import { SummaryErrorBoundary } from './SummaryErrorBoundary';
 import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
@@ -80,9 +81,15 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
 
-  // Create BlockNote editor for markdown parsing
+  // Create BlockNote editor for markdown parsing.
+  //
+  // `placeholder` is disabled because BlockNote 0.36's placeholder
+  // plugin produces a DecorationSource that's missing `localsInner`,
+  // which crashes prosemirror-view's DecorationGroup.locals() during
+  // the initial editor mount.
   const editor = useCreateBlockNote({
-    initialContent: undefined
+    initialContent: undefined,
+    disableExtensions: ['placeholder'],
   });
 
   // Parse markdown to blocks when format is markdown
@@ -219,18 +226,23 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   if (format === 'blocknote') {
     console.log('🎨 Rendering BLOCKNOTE format (direct)');
     return (
-      <div className="flex flex-col w-full">
-        <div className="w-full">
-          <Editor
-            initialContent={data.summary_json}
-            onChange={(blocks) => {
-              console.log('📝 Editor blocks changed:', blocks.length);
-              handleEditorChange(blocks);
-            }}
-            editable={true}
-          />
+      <SummaryErrorBoundary
+        rawMarkdown={data?.markdown}
+        onRetry={onRegenerateSummary}
+      >
+        <div className="flex flex-col w-full">
+          <div className="w-full">
+            <Editor
+              initialContent={data.summary_json}
+              onChange={(blocks) => {
+                console.log('📝 Editor blocks changed:', blocks.length);
+                handleEditorChange(blocks);
+              }}
+              editable={true}
+            />
+          </div>
         </div>
-      </div>
+      </SummaryErrorBoundary>
     );
   }
 
@@ -238,20 +250,25 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   if (format === 'markdown') {
     console.log('🎨 Rendering MARKDOWN format (parsed to BlockNote)');
     return (
-      <div className="flex flex-col w-full">
-        <div className="w-full">
-          <BlockNoteView
-            editor={editor}
-            editable={true}
-            onChange={() => {
-              if (isContentLoaded.current) {
-                handleEditorChange(editor.document);
-              }
-            }}
-            theme="light"
-          />
+      <SummaryErrorBoundary
+        rawMarkdown={data?.markdown}
+        onRetry={onRegenerateSummary}
+      >
+        <div className="flex flex-col w-full">
+          <div className="w-full">
+            <BlockNoteView
+              editor={editor}
+              editable={true}
+              onChange={() => {
+                if (isContentLoaded.current) {
+                  handleEditorChange(editor.document);
+                }
+              }}
+              theme="light"
+            />
+          </div>
         </div>
-      </div>
+      </SummaryErrorBoundary>
     );
   }
 
