@@ -8,14 +8,19 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
-import { useEffect, useState, RefObject } from 'react';
+import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
 import { Languages, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
-import { AUTO_VALUE, labelForCode, normaliseLanguageCode } from '@/lib/summary-languages';
+import { labelForCode } from '@/lib/summary-languages';
+import {
+  readMeetingSummaryLanguage,
+  saveMeetingSummaryLanguage,
+  SummaryLanguageStorage,
+} from '@/lib/summary-language-preferences';
 
 interface SummaryPanelProps {
   meeting: {
@@ -92,60 +97,129 @@ export function SummaryPanel({
   isModelConfigLoading = false,
   onOpenModelSettings
 }: SummaryPanelProps) {
-  const storageKey = `summaryLanguage:${meeting.id}`;
-  const [summaryLang, setSummaryLang] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      return stored === AUTO_VALUE ? null : stored;
-    } catch {
-      return null;
-    }
-  });
+  const [summaryLang, setSummaryLang] = useState<string | null>(null);
+  const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
-  const { addRecent, pinned } = useRecentLanguages();
+  const languageLoadVersionRef = useRef(0);
+  const activeMeetingIdRef = useRef(meeting.id);
+  const languageSaveVersionRef = useRef(0);
+  const languageSaveLoopRunningRef = useRef(false);
+  const latestLanguageSaveRequestRef = useRef<{
+    version: number;
+    meetingId: string;
+    language: string | null;
+    rollback: {
+      language: string | null;
+      storage: SummaryLanguageStorage;
+    };
+  } | null>(null);
+  activeMeetingIdRef.current = meeting.id;
+  const { addRecent } = useRecentLanguages();
 
-  const effectiveLangCode = summaryLang ?? pinned;
-  const effectiveLangLabel = effectiveLangCode ? labelForCode(effectiveLangCode) : 'Auto';
-  const labelFromPin = !summaryLang && pinned != null;
-
-  const autoSubtitle = (() => {
-    if (pinned) return `Uses default (${labelForCode(pinned)})`;
-    if (typeof window !== 'undefined') {
-      const raw = window.localStorage.getItem('primaryLanguage');
-      const normalised = normaliseLanguageCode(raw);
-      if (normalised) return `Matches transcription (${labelForCode(normalised)})`;
-    }
-    return 'Falls back to English';
-  })();
+  const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : 'Auto';
+  const isLocalFallbackLanguage = summaryLangStorage === 'local_fallback';
+  const autoSubtitle = isLocalFallbackLanguage
+    ? 'Saved on this device for folderless meetings'
+    : 'Uses dominant transcript language';
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    const loadVersion = languageLoadVersionRef.current + 1;
+    languageLoadVersionRef.current = loadVersion;
+
+    const loadSummaryLanguage = async () => {
+      try {
+        const stored = await readMeetingSummaryLanguage(meeting.id);
+        if (!cancelled && languageLoadVersionRef.current === loadVersion) {
+          setSummaryLang(stored.language);
+          setSummaryLangStorage(stored.storage);
+        }
+      } catch (err) {
+        console.error('Failed to load summary language:', err);
+        toast.warning('Could not load saved summary language', {
+          description: 'Using Auto until meeting metadata can be read.',
+        });
+        if (!cancelled && languageLoadVersionRef.current === loadVersion) setSummaryLang(null);
+      }
+    };
+
+    loadSummaryLanguage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting.id]);
+
+  const persistLatestLanguageSelection = async () => {
+    if (languageSaveLoopRunningRef.current) return;
+    languageSaveLoopRunningRef.current = true;
+
     try {
-      const stored = window.localStorage.getItem(storageKey);
-      setSummaryLang(stored === AUTO_VALUE ? null : stored);
-    } catch {
-      setSummaryLang(null);
+      while (true) {
+        const request = latestLanguageSaveRequestRef.current;
+        if (!request) return;
+
+        try {
+          const saved = await saveMeetingSummaryLanguage(request.meetingId, request.language);
+          const latest = latestLanguageSaveRequestRef.current;
+          if (
+            latest?.version === request.version &&
+            activeMeetingIdRef.current === request.meetingId
+          ) {
+            setSummaryLang(saved.language);
+            setSummaryLangStorage(saved.storage);
+            if (saved.storage === 'local_fallback') {
+              toast.info('Summary language saved on this device', {
+                description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
+              });
+            }
+            if (request.language) {
+              addRecent(request.language);
+            }
+            return;
+          }
+
+          if (latest?.version === request.version) return;
+        } catch (err) {
+          const latest = latestLanguageSaveRequestRef.current;
+          if (
+            latest?.version === request.version &&
+            activeMeetingIdRef.current === request.meetingId
+          ) {
+            console.error('Failed to persist summary language:', err);
+            toast.error('Failed to save summary language');
+            setSummaryLang(request.rollback.language);
+            setSummaryLangStorage(request.rollback.storage);
+            return;
+          }
+
+          console.warn('Ignoring failed stale summary language save:', err);
+          if (latest?.version === request.version) return;
+        }
+      }
+    } finally {
+      languageSaveLoopRunningRef.current = false;
     }
-  }, [storageKey]);
+  };
 
   const handleLangChange = (code: string | null) => {
     const previous = summaryLang;
+    const previousStorage = summaryLangStorage;
     const nextStored = code;
+    languageLoadVersionRef.current += 1;
+    latestLanguageSaveRequestRef.current = {
+      version: languageSaveVersionRef.current + 1,
+      meetingId: meeting.id,
+      language: nextStored,
+      rollback: {
+        language: previous,
+        storage: previousStorage,
+      },
+    };
+    languageSaveVersionRef.current += 1;
     setSummaryLang(nextStored);
     setLangPickerOpen(false);
-    try {
-      if (nextStored) {
-        window.localStorage.setItem(storageKey, nextStored);
-        addRecent(nextStored);
-      } else {
-        window.localStorage.removeItem(storageKey);
-      }
-    } catch (err) {
-      console.error('Failed to persist summary language:', err);
-      toast.error('Failed to save summary language');
-      setSummaryLang(previous);
-    }
+    void persistLatestLanguageSelection();
   };
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
@@ -156,7 +230,7 @@ export function SummaryPanel({
         <Button
           variant="outline"
           size="sm"
-          title={`Summary language: ${effectiveLangLabel}${labelFromPin ? ' (default)' : ''}`}
+          title={`Summary language: ${effectiveLangLabel}${isLocalFallbackLanguage ? ' (saved on this device)' : ''}`}
           aria-label="Set summary language"
         >
           <Languages size={18} />
@@ -169,7 +243,7 @@ export function SummaryPanel({
         className="w-auto p-0 border-0 shadow-none bg-transparent"
       >
         <LanguagePickerPopover
-          value={effectiveLangCode}
+          value={summaryLang}
           onChange={handleLangChange}
           onClose={() => setLangPickerOpen(false)}
           autoSubtitle={autoSubtitle}

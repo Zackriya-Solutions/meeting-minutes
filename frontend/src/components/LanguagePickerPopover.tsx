@@ -45,14 +45,19 @@ export function LanguagePickerPopover({
 
   const filter = query.trim().toLowerCase();
 
+  const recentCodes = useMemo(() => new Set(recents), [recents]);
+
   const filteredAll = useMemo(() => {
-    if (!filter) return LANGUAGE_OPTIONS;
-    return LANGUAGE_OPTIONS.filter(
+    const options = mode === "meeting"
+      ? LANGUAGE_OPTIONS.filter((l) => !recentCodes.has(l.code))
+      : LANGUAGE_OPTIONS;
+    if (!filter) return options;
+    return options.filter(
       (l) =>
         l.code.toLowerCase().includes(filter) ||
         l.label.toLowerCase().includes(filter),
     );
-  }, [filter]);
+  }, [filter, mode, recentCodes]);
 
   const recentsResolved = useMemo(
     () =>
@@ -102,6 +107,7 @@ export function LanguagePickerPopover({
               <button
                 key={`recent-${opt.code}`}
                 type="button"
+                aria-pressed={value === opt.code}
                 onClick={() => onChange(opt.code)}
                 className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50 text-left ${
                   value === opt.code ? "text-blue-600 font-medium" : "text-gray-800"
@@ -111,20 +117,17 @@ export function LanguagePickerPopover({
                   {opt.label}{" "}
                   <span className="text-xs text-gray-400">({opt.code})</span>
                 </span>
-                {value === opt.code && <span className="text-blue-600">✓</span>}
+                {value === opt.code && <span className="text-blue-600" aria-hidden="true">✓</span>}
               </button>
             ))}
             <div className="my-1 h-px bg-gray-100" />
           </>
         )}
 
-        <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-          All Languages
-        </div>
-
         {showAuto && (
           <button
             type="button"
+            aria-pressed={value === null}
             onClick={() => onChange(null)}
             className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50 text-left ${
               value === null ? "text-blue-600 font-medium" : "text-gray-800"
@@ -136,14 +139,21 @@ export function LanguagePickerPopover({
                 <span className="text-xs font-normal text-gray-400">{autoSubtitle}</span>
               )}
             </span>
-            {value === null && <span className="text-blue-600">✓</span>}
+            {value === null && <span className="text-blue-600" aria-hidden="true">✓</span>}
           </button>
+        )}
+
+        {filteredAll.length > 0 && (
+          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+            {mode === "meeting" ? "Other Languages" : "All Languages"}
+          </div>
         )}
 
         {filteredAll.map((opt) => (
           <button
             key={`all-${opt.code}`}
             type="button"
+            aria-pressed={value === opt.code}
             onClick={() => onChange(opt.code)}
             className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50 text-left ${
               value === opt.code ? "text-blue-600 font-medium" : "text-gray-800"
@@ -153,7 +163,7 @@ export function LanguagePickerPopover({
               {opt.label}{" "}
               <span className="text-xs text-gray-400">({opt.code})</span>
             </span>
-            {value === opt.code && <span className="text-blue-600">✓</span>}
+            {value === opt.code && <span className="text-blue-600" aria-hidden="true">✓</span>}
           </button>
         ))}
 

@@ -23,7 +23,7 @@ export function SummaryLanguageSettings() {
       </div>
       <p className="text-sm text-gray-600 mb-4">
         Pin one language as the default for new meetings. Unpinned languages remain as
-        quick-switch options in the summary generator. Auto matches the transcription language.
+        quick-switch options in the summary generator. Auto uses the dominant transcript language.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
