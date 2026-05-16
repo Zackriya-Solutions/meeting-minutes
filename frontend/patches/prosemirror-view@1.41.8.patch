@@ -1,0 +1,73 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index ce89be47cebd61a79c6039950f6dcd10df0e3c7e..d1baf2b64f4b54c7f7abc0cc3653debd71503562 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -1263,7 +1263,12 @@ var MarkViewDesc = function (_ViewDesc3) {
+     value: function create(parent, mark, inline, view) {
+       var custom = view.nodeViews[mark.type.name];
+       var spec = custom && custom(mark, view, inline);
+-      if (!spec || !spec.dom) spec = prosemirrorModel.DOMSerializer.renderSpec(document, mark.type.spec.toDOM(mark, inline), null, mark.attrs);
++      if (!spec || !spec.dom) {
++        var toDOMResult_pm_fix_m = mark.type.spec.toDOM(mark, inline);
++        spec = toDOMResult_pm_fix_m && toDOMResult_pm_fix_m.dom
++          ? toDOMResult_pm_fix_m
++          : prosemirrorModel.DOMSerializer.renderSpec(document, toDOMResult_pm_fix_m, null, mark.attrs);
++      }
+       return new MarkViewDesc(parent, mark, spec.dom, spec.contentDOM || spec.dom, spec);
+     }
+   }]);
+@@ -1464,9 +1469,15 @@ var NodeViewDesc = function (_ViewDesc4) {
+       if (node.isText) {
+         if (!dom) dom = document.createTextNode(node.text);else if (dom.nodeType != 3) throw new RangeError("Text must be rendered as a DOM text node");
+       } else if (!dom) {
+-        var _spec = prosemirrorModel.DOMSerializer.renderSpec(document, node.type.spec.toDOM(node), null, node.attrs);
+-        dom = _spec.dom;
+-        contentDOM = _spec.contentDOM;
++        var toDOMResult_pm_fix_n = node.type.spec.toDOM(node);
++        if (toDOMResult_pm_fix_n && toDOMResult_pm_fix_n.dom) {
++          dom = toDOMResult_pm_fix_n.dom;
++          contentDOM = toDOMResult_pm_fix_n.contentDOM;
++        } else {
++          var _spec = prosemirrorModel.DOMSerializer.renderSpec(document, toDOMResult_pm_fix_n, null, node.attrs);
++          dom = _spec.dom;
++          contentDOM = _spec.contentDOM;
++        }
+       }
+       if (!contentDOM && !node.isText && dom.nodeName != "BR") {
+         if (!dom.hasAttribute("contenteditable")) dom.contentEditable = "false";
+diff --git a/dist/index.js b/dist/index.js
+index 2f19364145a8bb8c0f44c738d58271c76078e6f9..86ad7d3bd83cff1a9d10790e021a2098c5d21bd4 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1226,8 +1226,12 @@ class MarkViewDesc extends ViewDesc {
+     static create(parent, mark, inline, view) {
+         let custom = view.nodeViews[mark.type.name];
+         let spec = custom && custom(mark, view, inline);
+-        if (!spec || !spec.dom)
+-            spec = DOMSerializer.renderSpec(document, mark.type.spec.toDOM(mark, inline), null, mark.attrs);
++        if (!spec || !spec.dom) {
++            const toDOMResult_pm_fix = mark.type.spec.toDOM(mark, inline);
++            spec = toDOMResult_pm_fix && toDOMResult_pm_fix.dom
++                ? toDOMResult_pm_fix
++                : DOMSerializer.renderSpec(document, toDOMResult_pm_fix, null, mark.attrs);
++        }
+         return new MarkViewDesc(parent, mark, spec.dom, spec.contentDOM || spec.dom, spec);
+     }
+     parseRule() {
+@@ -1307,8 +1311,14 @@ class NodeViewDesc extends ViewDesc {
+                 throw new RangeError("Text must be rendered as a DOM text node");
+         }
+         else if (!dom) {
+-            let spec = DOMSerializer.renderSpec(document, node.type.spec.toDOM(node), null, node.attrs);
+-            ({ dom, contentDOM } = spec);
++            const toDOMResult_pm_fix = node.type.spec.toDOM(node);
++            if (toDOMResult_pm_fix && toDOMResult_pm_fix.dom) {
++                dom = toDOMResult_pm_fix.dom;
++                contentDOM = toDOMResult_pm_fix.contentDOM;
++            } else {
++                let spec = DOMSerializer.renderSpec(document, toDOMResult_pm_fix, null, node.attrs);
++                ({ dom, contentDOM } = spec);
++            }
+         }
+         if (!contentDOM && !node.isText && dom.nodeName != "BR") { // Chrome gets confused by <br contenteditable=false>
+             if (!dom.hasAttribute("contenteditable"))

@@ -1,0 +1,2 @@
+patchedDependencies:
+  prosemirror-view@1.41.8: patches/prosemirror-view@1.41.8.patch
