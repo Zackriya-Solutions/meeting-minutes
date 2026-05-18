@@ -2,8 +2,12 @@ use crate::database::repositories::{
     meeting::MeetingsRepository, setting::SettingsRepository, summary::SummaryProcessesRepository,
 };
 use crate::summary::llm_client::LLMProvider;
-use crate::summary::processor::{extract_meeting_name_from_markdown, generate_meeting_summary};
+use crate::summary::processor::{
+    extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
+};
+use crate::summary::templates::{self, Template};
 use crate::ollama::metadata::ModelMetadataCache;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -46,17 +50,140 @@ fn strip_title_if_present(markdown: &str) -> String {
     }
 }
 
-const ENGLISH_MARKDOWN_FIELD: &str = "english_markdown";
+const ENGLISH_CACHE_FIELD: &str = "english_cache";
 
-/// Parses a `summary_processes.result` JSON blob and extracts the cached
-/// `english_markdown` field. Returns Err on malformed JSON so the caller can
-/// log loudly; Ok(None) when the field is missing or non-string.
-fn extract_english_from_result_json(raw: &str) -> Result<Option<String>, serde_json::Error> {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SummaryCacheSource {
+    transcript_fingerprint: String,
+    custom_prompt_fingerprint: String,
+    template_id: String,
+    template_fingerprint: String,
+    token_threshold: usize,
+    model_provider: String,
+    model_name: String,
+    ollama_endpoint: Option<String>,
+    custom_openai_endpoint: Option<String>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct EnglishSummaryCache {
+    markdown: String,
+    source: SummaryCacheSource,
+    output_language: Option<String>,
+}
+
+fn stable_text_fingerprint(text: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in text.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{:016x}:{}", hash, text.len())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_summary_cache_source(
+    text: &str,
+    custom_prompt: &str,
+    template_id: &str,
+    template_fingerprint: &str,
+    token_threshold: usize,
+    model_provider: &str,
+    model_name: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+) -> SummaryCacheSource {
+    SummaryCacheSource {
+        transcript_fingerprint: stable_text_fingerprint(text),
+        custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
+        template_id: template_id.to_string(),
+        template_fingerprint: template_fingerprint.to_string(),
+        token_threshold,
+        model_provider: model_provider.to_string(),
+        model_name: model_name.to_string(),
+        ollama_endpoint: ollama_endpoint.map(str::to_string),
+        custom_openai_endpoint: custom_openai_endpoint.map(str::to_string),
+        max_tokens,
+        temperature,
+        top_p,
+    }
+}
+
+fn template_cache_fingerprint(template: &Template) -> String {
+    let rendered_template = format!(
+        "{}\n---SECTION-INSTRUCTIONS---\n{}",
+        template.to_markdown_structure(),
+        template.to_section_instructions()
+    );
+    stable_text_fingerprint(&rendered_template)
+}
+
+fn normalise_summary_language_for_cache(summary_language: Option<&str>) -> Option<String> {
+    language_name_from_code(summary_language?.trim()).map(str::to_string)
+}
+
+fn build_summary_result_json(
+    final_markdown: &str,
+    english_markdown: &str,
+    source: SummaryCacheSource,
+    output_language: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "markdown": strip_title_if_present(final_markdown),
+        ENGLISH_CACHE_FIELD: EnglishSummaryCache {
+            markdown: english_markdown.to_string(),
+            source,
+            output_language: normalise_summary_language_for_cache(output_language),
+        },
+    })
+}
+
+/// Parses a `summary_processes.result` JSON blob and extracts a cached English
+/// summary only when it was produced from exactly the same source inputs and
+/// the user is switching to a different non-English target language.
+fn extract_cached_english_markdown(
+    raw: &str,
+    expected_source: &SummaryCacheSource,
+    requested_language: Option<&str>,
+) -> Result<Option<String>, serde_json::Error> {
+    let requested_language = match normalise_summary_language_for_cache(requested_language) {
+        Some(language) if language != "English" => language,
+        _ => return Ok(None),
+    };
+
     let value: serde_json::Value = serde_json::from_str(raw)?;
-    Ok(value
-        .get(ENGLISH_MARKDOWN_FIELD)
-        .and_then(|m| m.as_str())
-        .map(String::from))
+    let Some(cache_value) = value.get(ENGLISH_CACHE_FIELD) else {
+        return Ok(None);
+    };
+
+    let cache: EnglishSummaryCache = match serde_json::from_value(cache_value.clone()) {
+        Ok(cache) => cache,
+        Err(_) => return Ok(None),
+    };
+
+    if cache.source != *expected_source {
+        return Ok(None);
+    }
+
+    if cache.output_language.as_deref() == Some(requested_language.as_str()) {
+        return Ok(None);
+    }
+
+    let markdown = cache.markdown.trim();
+    if markdown.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(cache.markdown))
+    }
 }
 
 /// Summary service - handles all summary generation logic
@@ -261,6 +388,31 @@ impl SummaryService {
             info!("📝 Summary language preference: {}", code);
         }
 
+        let template = match templates::get_template(&template_id) {
+            Ok(template) => template,
+            Err(e) => {
+                let err_msg = format!("Failed to load template '{}': {}", template_id, e);
+                Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                return;
+            }
+        };
+        let template_fingerprint = template_cache_fingerprint(&template);
+
+        let cache_source = build_summary_cache_source(
+            &text,
+            &custom_prompt,
+            &template_id,
+            &template_fingerprint,
+            token_threshold,
+            &model_provider,
+            &model_name,
+            ollama_endpoint.as_deref(),
+            custom_openai_endpoint.as_deref(),
+            custom_openai_max_tokens,
+            custom_openai_temperature,
+            custom_openai_top_p,
+        );
+
         let cached_english = match SummaryProcessesRepository::get_summary_data(&pool, &meeting_id).await {
             Err(e) => {
                 warn!(
@@ -271,7 +423,11 @@ impl SummaryService {
             }
             Ok(None) => None,
             Ok(Some(process)) => process.result.and_then(|raw| {
-                match extract_english_from_result_json(&raw) {
+                match extract_cached_english_markdown(
+                    &raw,
+                    &cache_source,
+                    summary_language.as_deref(),
+                ) {
                     Ok(opt) => opt,
                     Err(e) => {
                         warn!(
@@ -293,6 +449,7 @@ impl SummaryService {
             &text,
             &custom_prompt,
             &template_id,
+            &template,
             token_threshold,
             ollama_endpoint.as_deref(),
             custom_openai_endpoint.as_deref(),
@@ -332,13 +489,12 @@ impl SummaryService {
                     }
                 }
 
-                let final_markdown_stripped = strip_title_if_present(&final_markdown);
-                let english_markdown_stripped = strip_title_if_present(&english_markdown);
-
-                let result_json = serde_json::json!({
-                    "markdown": final_markdown_stripped,
-                    (ENGLISH_MARKDOWN_FIELD): english_markdown_stripped,
-                });
+                let result_json = build_summary_result_json(
+                    &final_markdown,
+                    &english_markdown,
+                    cache_source,
+                    summary_language.as_deref(),
+                );
 
                 // Update database with completed status
                 if let Err(e) = SummaryProcessesRepository::update_process_completed(
@@ -481,40 +637,278 @@ mod tests {
         );
     }
 
+    fn sample_cache_source() -> SummaryCacheSource {
+        let template_fingerprint = stable_text_fingerprint("standard template prompt");
+        build_summary_cache_source(
+            "transcript body",
+            "custom prompt",
+            "standard_meeting",
+            &template_fingerprint,
+            3700,
+            "ollama",
+            "gemma3:1b",
+            Some("http://localhost:11434"),
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn test_template(section_title: &str) -> Template {
+        Template {
+            name: "Test".to_string(),
+            description: "Test template".to_string(),
+            sections: vec![crate::summary::templates::TemplateSection {
+                title: section_title.to_string(),
+                instruction: "Summarize this section".to_string(),
+                format: "paragraph".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
+        }
+    }
+
     #[test]
-    fn test_extract_english_from_result_json_happy_path() {
-        let raw = r#"{"markdown": "translated", "english_markdown": "English content"}"#;
-        assert_eq!(
-            extract_english_from_result_json(raw).unwrap(),
-            Some("English content".to_string())
+    fn test_template_cache_fingerprint_changes_with_rendered_template() {
+        assert_ne!(
+            template_cache_fingerprint(&test_template("Summary")),
+            template_cache_fingerprint(&test_template("Decisions"))
         );
     }
 
     #[test]
-    fn test_extract_english_from_result_json_missing_field() {
-        let raw = r#"{"markdown": "translated"}"#;
-        assert_eq!(extract_english_from_result_json(raw).unwrap(), None);
-    }
+    fn test_legacy_english_markdown_field_is_cache_miss() {
+        let raw = serde_json::json!({
+            "markdown": "translated",
+            "english_markdown": "# Old English\nBody"
+        })
+        .to_string();
 
-    #[test]
-    fn test_extract_english_from_result_json_empty_field() {
-        // Whitespace filtering is the caller's responsibility (resolve_cached_english).
-        let raw = r#"{"english_markdown": ""}"#;
         assert_eq!(
-            extract_english_from_result_json(raw).unwrap(),
-            Some(String::new())
+            extract_cached_english_markdown(&raw, &sample_cache_source(), Some("de")).unwrap(),
+            None
         );
     }
 
     #[test]
-    fn test_extract_english_from_result_json_non_string_field() {
-        let raw = r#"{"english_markdown": 123}"#;
-        assert_eq!(extract_english_from_result_json(raw).unwrap(), None);
+    fn test_matching_source_changed_translation_target_reuses_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &source, Some("de")).unwrap(),
+            Some("# Meeting\n## Points\nHello".to_string())
+        );
     }
 
     #[test]
-    fn test_extract_english_from_result_json_malformed() {
+    fn test_same_language_regeneration_rejects_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &source, Some("fr")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_changed_summary_inputs_reject_cache() {
+        let source = sample_cache_source();
+        let template_fingerprint = source.template_fingerprint.clone();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source,
+            Some("fr"),
+        )
+        .to_string();
+
+        let changed_sources = [
+            build_summary_cache_source(
+                "changed transcript",
+                "custom prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "changed prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "daily_standup",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "openai",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "qwen2.5:3b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11500"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                Some("https://custom.example/v1"),
+                Some(2048),
+                Some(0.2),
+                Some(0.9),
+            ),
+        ];
+
+        for changed_source in changed_sources {
+            assert_eq!(
+                extract_cached_english_markdown(&raw, &changed_source, Some("de")).unwrap(),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn test_changed_template_content_rejects_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        let changed_template = SummaryCacheSource {
+            template_fingerprint: stable_text_fingerprint("changed template prompt"),
+            ..source
+        };
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &changed_template, Some("de")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_changed_token_threshold_rejects_cache() {
+        let source = sample_cache_source();
+        let raw = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+        )
+        .to_string();
+
+        let changed_threshold = SummaryCacheSource {
+            token_threshold: 8192,
+            ..source
+        };
+
+        assert_eq!(
+            extract_cached_english_markdown(&raw, &changed_threshold, Some("de")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_result_json_strips_display_markdown_but_keeps_cache_title() {
+        let result = build_summary_result_json(
+            "# Translated Title\n## Decisions\nDone",
+            "# English Title\n## Decisions\nDone",
+            sample_cache_source(),
+            Some("fr"),
+        );
+
+        assert_eq!(result["markdown"], "## Decisions\nDone");
+        assert_eq!(
+            result["english_cache"]["markdown"],
+            "# English Title\n## Decisions\nDone"
+        );
+    }
+
+    #[test]
+    fn test_extract_cached_english_from_malformed_json_errors() {
         let raw = r#"{ not valid json"#;
-        assert!(extract_english_from_result_json(raw).is_err());
+        assert!(extract_cached_english_markdown(raw, &sample_cache_source(), Some("de")).is_err());
     }
 }
