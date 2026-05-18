@@ -1861,10 +1861,10 @@ async fn identify_user(user_id: String, properties: Option<std::collections::Has
 }
 
 #[tauri::command]
-async fn track_meeting_started(meeting_id: String, meeting_title: String) -> Result<(), String> {
+async fn track_meeting_started(meeting_id: String) -> Result<(), String> {
     unsafe {
         if let Some(client) = &ANALYTICS_CLIENT {
-            client.track_meeting_started(&meeting_id, &meeting_title).await
+            client.track_meeting_started(&meeting_id).await
         } else {
             Err("Analytics client not initialized".to_string())
         }

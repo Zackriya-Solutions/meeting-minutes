@@ -8,6 +8,10 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
+import {
+  applyPinnedSummaryLanguageToMeeting,
+  detectAndCacheSummaryLanguage,
+} from '@/lib/summary-language-preferences';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -259,6 +263,30 @@ export function useRecordingStop(
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
             throw new Error('No meeting ID received from save operation');
+          }
+
+          let shouldDetectSummaryLanguage = false;
+          try {
+            shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
+          } catch (error) {
+            console.warn('Failed to apply pinned summary language preference for new meeting:', error);
+            toast.warning('Could not apply default summary language', {
+              description: 'The meeting was saved, but the default summary language was not applied.',
+            });
+          }
+
+          if (shouldDetectSummaryLanguage) {
+            try {
+              await detectAndCacheSummaryLanguage(
+                meetingId,
+                freshTranscripts.map(t => t.text)
+              );
+            } catch (error) {
+              console.warn('Failed to detect summary language for new meeting:', error);
+              toast.warning('Could not detect summary language', {
+                description: 'The meeting was saved, but Auto could not detect the summary language.',
+              });
+            }
           }
 
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);

@@ -1,5 +1,5 @@
 use crate::summary::llm_client::{generate_summary, LLMProvider};
-use crate::summary::templates;
+use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
@@ -29,7 +29,7 @@ fn resolve_cached_english<'a>(
 /// tags (`pt-BR`, `en_GB`) are normalised to their base language; Chinese
 /// variants are disambiguated. Unknown codes return None so the caller falls
 /// back to English rather than injecting a literal ISO code into the prompt.
-fn language_name_from_code(code: &str) -> Option<&'static str> {
+pub(crate) fn language_name_from_code(code: &str) -> Option<&'static str> {
     let normalised = code.to_ascii_lowercase().replace('_', "-");
     let lookup: &str = match normalised.as_str() {
         "zh-cn" => "zh",
@@ -239,6 +239,7 @@ pub async fn generate_meeting_summary(
     text: &str,
     custom_prompt: &str,
     template_id: &str,
+    template: &Template,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
     custom_openai_endpoint: Option<&str>,
@@ -386,10 +387,6 @@ pub async fn generate_meeting_summary(
         }
 
         info!("Generating final markdown report with template: {}", template_id);
-
-        // Load the template using the provided template_id
-        let template = templates::get_template(template_id)
-            .map_err(|e| format!("Failed to load template '{}': {}", template_id, e))?;
 
         // Generate markdown structure and section instructions using template methods
         let clean_template_markdown = template.to_markdown_structure();

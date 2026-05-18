@@ -9,7 +9,7 @@ static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::s
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
     let config = AnalyticsConfig {
-        api_key: "phc_cohhHPgfQfnNWl33THRRpCftuRtWx2k5svtKrkpFb04".to_string(),
+        api_key: "phc_Aa9PqeCkDkVbtbRsYjtmHANBfcscjCVupxZwrtL5vZ77".to_string(),
         host: Some("https://us.i.posthog.com".to_string()),
         enabled: true,
     };
@@ -58,14 +58,14 @@ pub async fn identify_user(user_id: String, properties: Option<HashMap<String, S
 }
 
 #[command]
-pub async fn track_meeting_started(meeting_id: String, meeting_title: String) -> Result<(), String> {
+pub async fn track_meeting_started(meeting_id: String) -> Result<(), String> {
     let client = {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
         guard.as_ref().cloned()
     };
     
     if let Some(client) = client {
-        client.track_meeting_started(&meeting_id, &meeting_title).await
+        client.track_meeting_started(&meeting_id).await
     } else {
         Err("Analytics client not initialized".to_string())
     }

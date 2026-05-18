@@ -7,24 +7,43 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
-import { AUTO_VALUE, normaliseLanguageCode } from '@/lib/summary-languages';
+import {
+  detectAndCacheSummaryLanguage,
+  readMeetingSummaryLanguage,
+  readCachedDetectedSummaryLanguage,
+} from '@/lib/summary-language-preferences';
 
-function resolveSummaryLanguage(meetingId: string): string | null {
-  if (typeof window === 'undefined') return null;
+async function resolveSummaryLanguage(
+  meetingId: string,
+  transcriptTexts: string[]
+): Promise<string | null> {
   try {
-    const perMeeting = window.localStorage.getItem(`summaryLanguage:${meetingId}`);
-    // Legacy AUTO_VALUE rows are treated as untouched.
-    if (perMeeting && perMeeting !== AUTO_VALUE) return normaliseLanguageCode(perMeeting);
+    const perMeeting = await readMeetingSummaryLanguage(meetingId);
+    if (perMeeting.language) return perMeeting.language;
+  } catch (err) {
+    console.warn('Failed to load meeting summary language:', err);
+    toast.warning('Could not load saved summary language', {
+      description: 'Using Auto for this generation.',
+    });
+  }
 
-    const defaultLang = window.localStorage.getItem('summaryLanguageDefault');
-    if (defaultLang) return normaliseLanguageCode(defaultLang);
+  try {
+    const cachedDetected = await readCachedDetectedSummaryLanguage(meetingId);
+    if (cachedDetected) return cachedDetected;
+  } catch (err) {
+    console.warn('Failed to load cached detected summary language:', err);
+  }
 
-    const transcription = window.localStorage.getItem('primaryLanguage');
-    if (transcription && transcription !== 'auto' && transcription !== 'auto-translate') {
-      return normaliseLanguageCode(transcription);
+  try {
+    const detection = await detectAndCacheSummaryLanguage(meetingId, transcriptTexts);
+    if (detection.reason === 'tie') {
+      toast.warning('Bilingual transcript detected', {
+        description: 'Pick a summary language manually if Auto chooses the wrong fallback.',
+      });
     }
-    return null;
-  } catch {
+    return detection.language;
+  } catch (err) {
+    console.warn('Failed to detect transcript summary language:', err);
     return null;
   }
 }
@@ -56,7 +75,6 @@ export function useSummaryGeneration({
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [originalTranscript, setOriginalTranscript] = useState<string>('');
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
@@ -81,10 +99,12 @@ export function useSummaryGeneration({
   // Unified summary processing logic
   const processSummary = useCallback(async ({
     transcriptText,
+    transcriptTexts,
     customPrompt = '',
     isRegeneration = false,
   }: {
     transcriptText: string;
+    transcriptTexts?: string[];
     customPrompt?: string;
     isRegeneration?: boolean;
   }) => {
@@ -94,10 +114,6 @@ export function useSummaryGeneration({
     try {
       if (!transcriptText.trim()) {
         throw new Error('No transcript text available. Please add some text first.');
-      }
-
-      if (!isRegeneration) {
-        setOriginalTranscript(transcriptText);
       }
 
       console.log('Processing transcript with template:', selectedTemplate);
@@ -124,24 +140,11 @@ export function useSummaryGeneration({
         duration: 3000,
       });
 
-      // Resolve summary output language from localStorage (per-meeting -> default -> transcription -> null)
-      const summaryLanguage = resolveSummaryLanguage(meeting.id);
-
-      // Warn when transcription language is set but not in the supported translation list
-      if (!summaryLanguage && typeof window !== 'undefined') {
-        const transcription = window.localStorage.getItem('primaryLanguage');
-        if (
-          transcription &&
-          transcription !== 'auto' &&
-          transcription !== 'auto-translate' &&
-          normaliseLanguageCode(transcription) === null
-        ) {
-          toast.warning(
-            `Transcription language "${transcription}" is not supported for summary translation — summary will be in English.`,
-            { duration: 6000 }
-          );
-        }
-      }
+      // Resolve explicit metadata override first; Auto detects the transcript language.
+      const summaryLanguage = await resolveSummaryLanguage(
+        meeting.id,
+        transcriptTexts?.length ? transcriptTexts : [transcriptText]
+      );
 
       // Process transcript and get process_id
       const result = await invokeTauri('api_process_transcript', {
@@ -430,6 +433,25 @@ export function useSummaryGeneration({
     }
   }, []);
 
+  const buildSummaryTranscriptPayload = useCallback((allTranscripts: Transcript[]) => {
+    const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
+      if (seconds === undefined) {
+        return fallbackTimestamp;
+      }
+      const totalSecs = Math.floor(seconds);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
+    };
+
+    return {
+      transcriptText: allTranscripts
+        .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
+        .join('\n'),
+      transcriptTexts: allTranscripts.map(t => t.text),
+    };
+  }, []);
+
   // Public API: Generate summary from transcripts
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
     // Check if model config is still loading
@@ -586,37 +608,29 @@ export function useSummaryGeneration({
       }
     }
 
-    // Format timestamps as recording-relative [MM:SS] instead of wall-clock time
-    const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
-      if (seconds === undefined) {
-        // For old transcripts without audio_start_time, use wall-clock time
-        return fallbackTimestamp;
-      }
-      const totalSecs = Math.floor(seconds);
-      const mins = Math.floor(totalSecs / 60);
-      const secs = totalSecs % 60;
-      return `[${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
-    };
+    const summaryPayload = buildSummaryTranscriptPayload(allTranscripts);
 
-    const fullTranscript = allTranscripts
-      .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
-      .join('\n');
+    await processSummary({
+      ...summaryPayload,
+      customPrompt,
+    });
+  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
-    await processSummary({ transcriptText: fullTranscript, customPrompt });
-  }, [meeting.id, fetchAllTranscripts, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
-
-  // Public API: Regenerate summary from original transcript
+  // Public API: Regenerate summary from the current saved transcript
   const handleRegenerateSummary = useCallback(async () => {
-    if (!originalTranscript.trim()) {
-      console.error('No original transcript available for regeneration');
+    const allTranscripts = await fetchAllTranscripts(meeting.id);
+
+    if (!allTranscripts.length) {
+      console.error('No transcripts available for regeneration');
+      toast.error('No transcripts available for summary regeneration');
       return;
     }
 
     await processSummary({
-      transcriptText: originalTranscript,
+      ...buildSummaryTranscriptPayload(allTranscripts),
       isRegeneration: true
     });
-  }, [originalTranscript, processSummary]);
+  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {
