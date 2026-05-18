@@ -116,7 +116,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             gguf_file: "Qwen3.5-2B-Q4_K_M.gguf".to_string(),
             template: "qwen3.5_nonthinking".to_string(),
             download_url: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf".to_string(),
-            size_mb: 1270,
+            size_mb: 1221,
             context_size: 32768,
             layer_count: 24,
             sampling: SamplingParams::greedy_strict(vec!["<|im_end|>".to_string()]),
@@ -275,7 +275,7 @@ mod tests {
             qwen_2b.download_url,
             "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf"
         );
-        assert_eq!(qwen_2b.size_mb, 1270);
+        assert_eq!(qwen_2b.size_mb, 1221);
         assert_eq!(qwen_2b.context_size, 32768);
         assert_eq!(qwen_2b.layer_count, 24);
         assert_eq!(qwen_2b.sampling, SamplingParams::greedy_strict(vec!["<|im_end|>".to_string()]));

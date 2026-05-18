@@ -55,7 +55,8 @@ export function DownloadProgressStep() {
   });
 
   const [isCompleting, setIsCompleting] = useState(false);
-  const downloadStartedRef = useRef(false);
+  const parakeetDownloadStartedRef = useRef(false);
+  const summaryDownloadStartedRef = useRef(false);
   const retryingRef = useRef(false);
   const retryingSummaryRef = useRef(false);
 
@@ -155,13 +156,18 @@ export function DownloadProgressStep() {
     const fetchRecommendation = async () => {
       try {
         const model = await invoke<string>('builtin_ai_get_recommended_model');
+        setRecommendedModel(model);
+        setSelectedSummaryModel(model);
+        setSummaryState((prev) => ({
+          ...prev,
+          totalMb: getSummaryModelSizeMb(model),
+        }));
+
         const modelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
           modelName: model,
           refresh: true,
         });
-        setRecommendedModel(model);
         setSummaryModelDownloaded(modelReady);
-        setSelectedSummaryModel(model);
         setSummaryState((prev) => ({
           ...prev,
           status: modelReady ? 'completed' : 'waiting',
@@ -186,13 +192,33 @@ export function DownloadProgressStep() {
     checkPlatform();
   }, []);
 
-  // Start downloads after the summary recommendation is available
+  // Start the required transcription model immediately; summary readiness must not block it.
   useEffect(() => {
-    if (downloadStartedRef.current) return;
-    if (!selectedSummaryModel) return;
-    downloadStartedRef.current = true;
+    if (parakeetDownloadStartedRef.current) return;
+    parakeetDownloadStartedRef.current = true;
 
-    startDownloads();
+    if (!parakeetDownloaded) {
+      setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
+    }
+
+    startBackgroundDownloads({
+      includeParakeet: true,
+      includeSummary: false,
+    }).catch((error) => {
+      console.error('Failed to start Parakeet download:', error);
+      if (!parakeetDownloaded) {
+        setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
+      }
+    });
+  }, []);
+
+  // Start the selected summary model only after the backend recommendation is known.
+  useEffect(() => {
+    if (summaryDownloadStartedRef.current) return;
+    if (!selectedSummaryModel) return;
+    summaryDownloadStartedRef.current = true;
+
+    startSummaryDownload();
   }, [selectedSummaryModel]);
 
   // Listen to Parakeet download progress
@@ -309,26 +335,22 @@ export function DownloadProgressStep() {
     }));
   }, [selectedSummaryModel, summaryModelDownloaded]);
 
-  const startDownloads = async () => {
-    // Always download both Parakeet and Summary Model (system-recommended)
-    if (!parakeetDownloaded || !summaryModelDownloaded) {
+  const startSummaryDownload = async () => {
+    if (!summaryModelDownloaded && selectedSummaryModel) {
       try {
-        if (!parakeetDownloaded) {
-          setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
-        }
-        if (!summaryModelDownloaded && selectedSummaryModel) {
-          setSummaryState((prev) => ({
-            ...prev,
-            status: 'downloading',
-            totalMb: getSummaryModelSizeMb(selectedSummaryModel),
-          }));
-        }
-        await startBackgroundDownloads(true);  // Always download both
+        setSummaryState((prev) => ({
+          ...prev,
+          status: 'downloading',
+          totalMb: getSummaryModelSizeMb(selectedSummaryModel),
+        }));
+        await startBackgroundDownloads({
+          includeParakeet: false,
+          includeSummary: true,
+          summaryModel: selectedSummaryModel,
+        });
       } catch (error) {
-        console.error('Failed to start downloads:', error);
-        if (!parakeetDownloaded) {
-          setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
-        }
+        console.error('Failed to start summary model download:', error);
+        setSummaryState((prev) => ({ ...prev, status: 'error', error: String(error) }));
       }
     }
   };

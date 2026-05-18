@@ -59,8 +59,14 @@ interface OnboardingContextType {
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
   completeOnboarding: () => Promise<void>;
-  startBackgroundDownloads: (includeSummary: boolean) => Promise<void>;
+  startBackgroundDownloads: (options: StartBackgroundDownloadsOptions) => Promise<void>;
   retryParakeetDownload: () => Promise<void>;
+}
+
+interface StartBackgroundDownloadsOptions {
+  includeParakeet: boolean;
+  includeSummary: boolean;
+  summaryModel?: string;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -102,6 +108,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     try {
       const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
       const modelToCheck = preferredModel || recommendedModel;
+      setSelectedSummaryModel(modelToCheck);
+
       const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
         modelName: modelToCheck,
         refresh: true,
@@ -475,23 +483,40 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   };
 
   // Start background downloads for models.
-  const startBackgroundDownloads = async (includeSummary: boolean) => {
-    console.log('[OnboardingContext] Starting background downloads, includeSummary:', includeSummary);
-    setIsBackgroundDownloading(true);
+  const startBackgroundDownloads = async ({
+    includeParakeet,
+    includeSummary,
+    summaryModel,
+  }: StartBackgroundDownloadsOptions) => {
+    console.log('[OnboardingContext] Starting background downloads:', {
+      includeParakeet,
+      includeSummary,
+      summaryModel,
+    });
 
     try {
+      const shouldStartParakeet = includeParakeet && !parakeetDownloaded;
+      const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
+
+      if (!shouldStartParakeet && !shouldStartSummary) {
+        if (includeSummary && !summaryModelDownloaded && !summaryModel) {
+          console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
+        }
+        return;
+      }
+
+      setIsBackgroundDownloading(true);
+
       // Start Parakeet download first (speech recognition - always required)
-      if (!parakeetDownloaded) {
+      if (shouldStartParakeet) {
         console.log('[OnboardingContext] Starting Parakeet download');
         invoke('parakeet_download_model', { modelName: PARAKEET_MODEL })
           .catch(err => console.error('[OnboardingContext] Parakeet download failed:', err));
       }
 
       // Start selected Summary Model download immediately so completion cannot race the request.
-      if (includeSummary && !summaryModelDownloaded && selectedSummaryModel) {
-        requestSummaryModelDownload(selectedSummaryModel);
-      } else if (includeSummary && !summaryModelDownloaded) {
-        console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
+      if (shouldStartSummary && summaryModel) {
+        requestSummaryModelDownload(summaryModel);
       }
     } catch (error) {
       console.error('[OnboardingContext] Failed to start background downloads:', error);

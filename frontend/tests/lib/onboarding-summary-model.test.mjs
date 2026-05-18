@@ -66,7 +66,7 @@ assert.equal(
   'recommended Qwen should become the selected model when no model is selected yet'
 );
 
-assert.equal(getSummaryModelSizeMb('qwen3.5:2b'), 1270);
+assert.equal(getSummaryModelSizeMb('qwen3.5:2b'), 1221);
 assert.equal(getSummaryModelSizeMb('qwen3.5:4b'), 2614);
 assert.equal(getSummaryModelSizeMb('gemma3:1b'), 1019);
 assert.equal(getSummaryModelSizeMb('unknown:model'), 0);
