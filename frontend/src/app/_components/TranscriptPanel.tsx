@@ -2,7 +2,7 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, GlobeIcon } from 'lucide-react';
+import { Copy, GlobeIcon, Tag } from 'lucide-react';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
@@ -80,6 +80,19 @@ export function TranscriptPanel({
                     <GlobeIcon />
                     <span className='hidden md:inline'>
                       Language
+                    </span>
+                  </Button>
+                }
+                {transcriptModelConfig.provider === "localWhisper" &&
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => showModal('meetingDomainSettings')}
+                    title="Meeting Domain — vocabulary hint for Whisper"
+                  >
+                    <Tag />
+                    <span className='hidden md:inline'>
+                      Domain
                     </span>
                   </Button>
                 }

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode, useRef } from 'react';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
-import { SelectedDevices } from '@/components/DeviceSelection';
+import type { TranscriptModelProps } from '@/components/TranscriptSettings';
+import type { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
@@ -58,6 +58,10 @@ interface ConfigContextType {
   // Language preference
   selectedLanguage: string;
   setSelectedLanguage: (lang: string) => void;
+
+  // Meeting domain (whisper initial_prompt) preference
+  selectedDomain: string;
+  setSelectedDomain: (domain: string) => void;
 
   // UI preferences
   showConfidenceIndicator: boolean;
@@ -145,6 +149,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return 'auto';
   });
 
+  // Meeting domain preference state (empty string = none selected)
+  const [selectedDomain, setSelectedDomain] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('meetingDomain') || '';
+    }
+    return '';
+  });
+
   // UI preferences state
   const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -222,7 +234,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           console.error('[ConfigContext] Failed to sync language preference to Rust on startup:', err);
         });
     }
-  }, []); 
+  }, []);
+
+  // Sync meeting domain to Rust on mount so live transcription picks up the
+  // selection saved in a prior session.
+  useEffect(() => {
+    invoke('set_meeting_domain', { domain: selectedDomain })
+      .catch(err => {
+        console.error('[ConfigContext] Failed to sync meeting domain to Rust on startup:', err);
+      });
+  }, []);
 
   // Load model configuration on mount
   useEffect(() => {
@@ -482,6 +503,17 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  // Wrapper for setSelectedDomain that persists to localStorage and syncs to Rust
+  const handleSetSelectedDomain = useCallback((domain: string) => {
+    setSelectedDomain(domain);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('meetingDomain', domain);
+    }
+    invoke('set_meeting_domain', { domain }).catch(err =>
+      console.error('Failed to sync meeting domain to Rust:', err)
+    );
+  }, []);
+
   const value: ConfigContextType = useMemo(() => ({
     modelConfig,
     setModelConfig,
@@ -495,6 +527,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedDevices,
     selectedLanguage,
     setSelectedLanguage: handleSetSelectedLanguage,
+    selectedDomain,
+    setSelectedDomain: handleSetSelectedDomain,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
     betaFeatures,
@@ -517,6 +551,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     selectedDevices,
     selectedLanguage,
     handleSetSelectedLanguage,
+    selectedDomain,
+    handleSetSelectedDomain,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
     betaFeatures,
