@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu } from 'lucide-react';
+import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu, Tag } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -58,11 +58,13 @@ export function RetranscribeDialog({
   meetingFolderPath,
   onComplete,
 }: RetranscribeDialogProps) {
-  const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { selectedLanguage, selectedDomain, transcriptModelConfig } = useConfig();
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const [dialogDomain, setDialogDomain] = useState<string>(selectedDomain || '');
+  const [availableDomains, setAvailableDomains] = useState<string[]>([]);
 
   // Use centralized model fetching hook
   const {
@@ -112,11 +114,17 @@ export function RetranscribeDialog({
       setProgress(null);
       setError(null);
       setSelectedLang(selectedLanguage || 'auto');
+      setDialogDomain(selectedDomain || '');
 
       // Fetch available models using centralized hook
       fetchModels();
+
+      // Fetch available domain names so user can pick or change for this run.
+      invoke<string[]>('list_meeting_domains')
+        .then(setAvailableDomains)
+        .catch(err => console.error('Failed to list meeting domains:', err));
     }
-  }, [open, selectedLanguage, transcriptModelConfig, fetchModels]);
+  }, [open, selectedLanguage, selectedDomain, transcriptModelConfig, fetchModels]);
 
   // Listen for retranscription events
   useEffect(() => {
@@ -214,12 +222,16 @@ export function RetranscribeDialog({
         model_name: selectedModelDetails?.name || ''
       });
 
+      // Domain only applies to Whisper; Parakeet ignores initial_prompt.
+      const domainToSend = isParakeetModel ? null : (dialogDomain || null);
+
       await invoke('start_retranscription_command', {
         meetingId,
         meetingFolderPath,
         language: languageToSend,
         model: selectedModelDetails?.name || null,
         provider: selectedModelDetails?.provider || null,
+        meetingDomain: domainToSend,
       });
     } catch (err: any) {
       setIsProcessing(false);
@@ -356,6 +368,33 @@ export function RetranscribeDialog({
               </Select>
               <p className="text-xs text-muted-foreground">
                 Choose a transcription model
+              </p>
+            </div>
+          )}
+
+          {!isProcessing && !error && !isParakeetModel && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Tag className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Meeting Domain</span>
+              </div>
+              <Select
+                value={dialogDomain || '__none__'}
+                onValueChange={(v) => setDialogDomain(v === '__none__' ? '' : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None (no vocabulary hint)</SelectItem>
+                  {availableDomains.map((d) => (
+                    <SelectItem key={d} value={d}>{d}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Biases Whisper toward custom vocabulary (proper nouns, jargon).
+                Defaults to your current setting.
               </p>
             </div>
           )}

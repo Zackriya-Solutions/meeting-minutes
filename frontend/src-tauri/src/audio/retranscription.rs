@@ -94,6 +94,7 @@ pub async fn start_retranscription<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    meeting_domain: Option<String>,
 ) -> Result<RetranscriptionResult> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = RetranscriptionGuard::acquire().map_err(|e| anyhow!(e))?;
@@ -102,7 +103,7 @@ pub async fn start_retranscription<R: Runtime>(
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
-    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
+    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider, meeting_domain).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
     super::common::unload_engine_after_batch(use_parakeet).await;
@@ -176,6 +177,7 @@ async fn run_retranscription<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    meeting_domain: Option<String>,
 ) -> Result<RetranscriptionResult> {
     let folder_path = PathBuf::from(&meeting_folder_path);
     let audio_path = find_audio_file(&folder_path)?;
@@ -336,7 +338,13 @@ async fn run_retranscription<R: Runtime>(
     info!("Processing {} segments (after splitting)", processable_count);
 
     // Resolve meeting-domain prompt once for the whole batch.
-    let initial_prompt = crate::current_meeting_domain_prompt();
+    // The dialog passes an explicit choice (None / empty = no prompt for this run),
+    // overriding the global selectedDomain so users can opt out per enhance.
+    let initial_prompt = meeting_domain
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .and_then(|d| crate::meeting_domain::load_prompt(d).ok().flatten());
 
     // Process each speech segment with progress updates
     let mut all_transcripts: Vec<(String, f64, f64)> = Vec::new(); // (text, start_ms, end_ms)
@@ -786,6 +794,7 @@ pub async fn start_retranscription_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    meeting_domain: Option<String>,
 ) -> Result<RetranscriptionStarted, String> {
 
     // Check if retranscription is already in progress (guard will be acquired in start_retranscription)
@@ -805,6 +814,7 @@ pub async fn start_retranscription_command<R: Runtime>(
             language,
             model,
             provider,
+            meeting_domain,
         )
         .await;
 
