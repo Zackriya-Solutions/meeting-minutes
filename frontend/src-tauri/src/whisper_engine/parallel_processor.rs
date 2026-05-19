@@ -342,9 +342,10 @@ impl ParallelProcessor {
 
         // Get language preference
         let language = crate::get_language_preference_internal();
+        let initial_prompt = crate::current_meeting_domain_prompt();
 
         // Transcribe with timeout to prevent hanging
-        let transcription_future = engine.transcribe_audio(chunk.data.clone(), language);
+        let transcription_future = engine.transcribe_audio(chunk.data.clone(), language, initial_prompt);
         let timeout_duration = tokio::time::Duration::from_secs(120); // 2 minute timeout per chunk
 
         let text = tokio::time::timeout(timeout_duration, transcription_future)

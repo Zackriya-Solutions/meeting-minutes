@@ -544,6 +544,9 @@ async fn run_import<R: Runtime>(
     let processable_count = processable_segments.len();
     info!("Processing {} segments (after splitting)", processable_count);
 
+    // Resolve meeting-domain prompt once for the whole batch.
+    let initial_prompt = crate::current_meeting_domain_prompt();
+
     // Process each speech segment
     let mut all_transcripts: Vec<(String, f64, f64)> = Vec::new();
     let mut total_confidence = 0.0f32;
@@ -589,7 +592,7 @@ async fn run_import<R: Runtime>(
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine
-                .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
+                .transcribe_audio_with_confidence(segment.samples.clone(), language.clone(), initial_prompt.clone())
                 .await
                 .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
             (text, conf)

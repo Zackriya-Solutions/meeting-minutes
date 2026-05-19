@@ -54,6 +54,7 @@ pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
+pub mod meeting_domain;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
@@ -67,6 +68,13 @@ static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+
+// Global meeting domain preference storage. Empty string = no domain selected.
+// The selected domain name maps to a `.txt` file in the meeting domain
+// directory, whose content is sent to Whisper as `initial_prompt` to bias
+// transcription toward domain-specific vocabulary.
+static MEETING_DOMAIN: std::sync::LazyLock<StdMutex<String>> =
+    std::sync::LazyLock::new(|| StdMutex::new(String::new()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -387,6 +395,99 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[tauri::command]
+async fn set_meeting_domain(domain: String) -> Result<(), String> {
+    let mut guard = MEETING_DOMAIN
+        .lock()
+        .map_err(|e| format!("Failed to set meeting domain: {}", e))?;
+    log_info!("Setting meeting domain to: '{}'", domain);
+    *guard = domain;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_meeting_domain() -> Result<String, String> {
+    MEETING_DOMAIN
+        .lock()
+        .map(|g| g.clone())
+        .map_err(|e| format!("Failed to read meeting domain: {}", e))
+}
+
+/// Internal helper used by transcription providers to look up the currently
+/// selected meeting domain. Returns an empty string when none is selected.
+pub fn get_meeting_domain_internal() -> String {
+    MEETING_DOMAIN
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+/// Load the prompt text for the currently selected meeting domain, if any.
+/// Returns `None` when no domain is selected or the file is missing/empty.
+/// Use this at whisper call sites to populate `initial_prompt`.
+pub fn current_meeting_domain_prompt() -> Option<String> {
+    let domain = get_meeting_domain_internal();
+    if domain.is_empty() {
+        return None;
+    }
+    meeting_domain::load_prompt(&domain).ok().flatten()
+}
+
+#[tauri::command]
+async fn list_meeting_domains() -> Result<Vec<String>, String> {
+    meeting_domain::list_domains().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_meeting_domain_content(name: String) -> Result<Option<String>, String> {
+    meeting_domain::get_domain_content(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_meeting_domain(name: String, content: String) -> Result<(), String> {
+    meeting_domain::save_domain(&name, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_meeting_domain(name: String) -> Result<(), String> {
+    meeting_domain::delete_domain(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn open_meeting_domains_folder() -> Result<(), String> {
+    let dir = meeting_domain::primary_dir()
+        .ok_or_else(|| "meeting domain directory not initialized".to_string())?;
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    let folder_path = dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    log_info!("Opened meeting domains folder: {}", folder_path);
+    Ok(())
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -438,6 +539,9 @@ pub fn run() {
 
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
+
+            // Set meeting-domain prompt directory under app_data_dir/domains/
+            meeting_domain::set_domain_directory(&_app.handle());
 
             // Initialize Whisper engine on startup
             tauri::async_runtime::spawn(async {
@@ -665,6 +769,14 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            // Meeting domain prompt commands
+            set_meeting_domain,
+            get_meeting_domain,
+            list_meeting_domains,
+            get_meeting_domain_content,
+            save_meeting_domain,
+            delete_meeting_domain,
+            open_meeting_domains_folder,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,
