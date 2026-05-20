@@ -391,12 +391,23 @@ fn build_menu<R: Runtime>(
         .build()
 }
 
-fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
+pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        let _ = window.eval("window.focus()");
+        if let Err(e) = window.unminimize() {
+            log::error!("Failed to unminimize main window: {}", e);
+        }
+
+        if let Err(e) = window.show() {
+            log::error!("Failed to show main window: {}", e);
+        }
+
+        if let Err(e) = window.set_focus() {
+            log::error!("Failed to focus main window: {}", e);
+        }
+
+        if let Err(e) = window.eval("window.focus()") {
+            log::error!("Failed to focus main webview: {}", e);
+        }
     } else {
         log::warn!("Could not find main window");
     }

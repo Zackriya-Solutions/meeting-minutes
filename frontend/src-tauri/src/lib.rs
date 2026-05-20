@@ -390,7 +390,22 @@ pub fn get_language_preference_internal() -> Option<String> {
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            log_info!(
+                "Second app instance requested with args: {:?}, cwd: {:?}",
+                args,
+                cwd
+            );
+
+            tray::focus_main_window(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
