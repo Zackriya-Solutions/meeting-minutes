@@ -86,6 +86,15 @@
         "tailwindcss-animate": "^1.0.7",
         "zod": "^3.25.71"
     },
+    "pnpm": {
+        "overrides": {
+            "prosemirror-model": "1.25.3",
+            "prosemirror-state": "1.4.3",
+            "prosemirror-view": "1.41.3",
+            "prosemirror-transform": "1.10.4",
+            "prosemirror-tables": "1.8.1"
+        }
+    },
     "devDependencies": {
         "@tailwindcss/typography": "^0.5.15",
         "@tauri-apps/cli": "^2.1.0",
