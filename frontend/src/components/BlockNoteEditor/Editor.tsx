@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { PartialBlock, Block } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
@@ -25,22 +25,6 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
   });
 
   console.log('📝 EDITOR: BlockNote editor created successfully');
-
-  // Expose blocksToMarkdown method with error handling, wrapping only once.
-  const originalBlocksToMarkdownRef = useRef<typeof editor.blocksToMarkdownLossy | null>(null);
-  useEffect(() => {
-    if (originalBlocksToMarkdownRef.current) return;
-
-    originalBlocksToMarkdownRef.current = editor.blocksToMarkdownLossy.bind(editor);
-    (editor as any).blocksToMarkdownLossy = async (blocks: Block[]) => {
-      try {
-        return await originalBlocksToMarkdownRef.current!(blocks);
-      } catch (error) {
-        console.error('❌ EDITOR: Failed to convert blocks to markdown:', error);
-        return '';
-      }
-    };
-  }, [editor]);
 
   // Handle content changes
   useEffect(() => {
