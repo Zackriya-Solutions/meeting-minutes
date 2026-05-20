@@ -401,17 +401,7 @@ pub fn run() {
                 cwd
             );
 
-            if let Some(window) = app.get_webview_window("main") {
-                if let Err(e) = window.show() {
-                    log_error!("Failed to show main window for second instance: {}", e);
-                }
-
-                if let Err(e) = window.set_focus() {
-                    log_error!("Failed to focus main window for second instance: {}", e);
-                }
-            } else {
-                log_error!("Main window not found while handling second instance");
-            }
+            tray::focus_main_window(app);
         }));
     }
 
