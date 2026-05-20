@@ -155,6 +155,10 @@ tauri-plugin-notification = "2.3.1"
 tauri-plugin-updater = "2.3.0"
 tauri-plugin-process = "2.3.0"
 
+# Desktop-only single instance guard
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "=2.3.7"
+
 # macOS-specific dependencies with Metal GPU acceleration
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2.6.2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
