@@ -21,27 +21,61 @@ pub struct SamplingParams {
     /// Top-P (nucleus) sampling - cumulative probability threshold.
     pub top_p: f32,
 
+    /// Presence penalty - discourages reusing tokens that already appeared in the generated output.
+    pub presence_penalty: f32,
+
+    /// Frequency penalty - discourages repeated token frequency in the generated output.
+    pub frequency_penalty: f32,
+
+    /// Repeat penalty - llama.cpp repeat penalty, 1.0 disables it.
+    pub repeat_penalty: f32,
+
+    /// Number of recent generated tokens to apply penalties over, 0 disables penalties.
+    pub penalty_last_n: i32,
+
     /// Stop tokens - generation stops when any of these appear in output
     pub stop_tokens: Vec<String>,
 }
 
 impl SamplingParams {
-    /// Safest extraction preset. llama-helper treats temperature <= 0.0 as greedy decoding.
-    pub fn greedy_strict(stop_tokens: Vec<String>) -> Self {
-        Self {
-            temperature: 0.0,
-            top_k: 1,
-            top_p: 1.0,
-            stop_tokens,
-        }
-    }
-
     /// Restrained near-greedy preset for fuller but still conservative output.
     pub fn tight_structured(stop_tokens: Vec<String>) -> Self {
         Self {
             temperature: 0.1,
             top_k: 20,
             top_p: 0.88,
+            presence_penalty: 0.0,
+            frequency_penalty: 0.0,
+            repeat_penalty: 1.0,
+            penalty_last_n: 0,
+            stop_tokens,
+        }
+    }
+
+    /// Summary-tuned Qwen 3.5 preset: non-greedy with mild repetition controls.
+    pub fn qwen35_summary(stop_tokens: Vec<String>) -> Self {
+        Self {
+            temperature: 0.5,
+            top_k: 20,
+            top_p: 0.8,
+            presence_penalty: 0.3,
+            frequency_penalty: 0.0,
+            repeat_penalty: 1.05,
+            penalty_last_n: 256,
+            stop_tokens,
+        }
+    }
+
+    /// Gemma 3 instruct preset, matching the prior Gemma sampling behavior.
+    pub fn gemma3_instruct(stop_tokens: Vec<String>) -> Self {
+        Self {
+            temperature: 1.0,
+            top_k: 64,
+            top_p: 0.95,
+            presence_penalty: 0.0,
+            frequency_penalty: 0.0,
+            repeat_penalty: 1.0,
+            penalty_last_n: 0,
             stop_tokens,
         }
     }
@@ -59,11 +93,31 @@ impl SamplingParams {
         } else {
             1.0
         };
+        let presence_penalty = if self.presence_penalty.is_finite() {
+            self.presence_penalty.max(0.0)
+        } else {
+            0.0
+        };
+        let frequency_penalty = if self.frequency_penalty.is_finite() {
+            self.frequency_penalty.max(0.0)
+        } else {
+            0.0
+        };
+        let repeat_penalty = if self.repeat_penalty.is_finite() && self.repeat_penalty > 0.0 {
+            self.repeat_penalty
+        } else {
+            1.0
+        };
+        let penalty_last_n = self.penalty_last_n.max(0);
 
         Self {
             temperature,
             top_k,
             top_p,
+            presence_penalty,
+            frequency_penalty,
+            repeat_penalty,
+            penalty_last_n,
             stop_tokens: self.stop_tokens.clone(),
         }
     }
@@ -119,7 +173,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             size_mb: 1221,
             context_size: 32768,
             layer_count: 24,
-            sampling: SamplingParams::greedy_strict(vec!["<|im_end|>".to_string()]),
+            sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "Balanced Qwen 3.5 model for built-in summaries. Higher quality with modest local requirements.".to_string(),
         },
         // Qwen 3.5 4B - High quality tier
@@ -132,7 +186,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             size_mb: 2614,
             context_size: 32768,
             layer_count: 32,
-            sampling: SamplingParams::greedy_strict(vec!["<|im_end|>".to_string()]),
+            sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
         },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
@@ -145,7 +199,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             size_mb: 2374,
             context_size: 32768,
             layer_count: 35,
-            sampling: SamplingParams::tight_structured(vec!["<end_of_turn>".to_string()]),
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Balanced model. Great quality/speed trade-off. Requires ~3.5GB RAM.".to_string(),
         },
         // Gemma 3 1B - Visible legacy tier retained for already-shipped users.
@@ -158,7 +212,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             size_mb: 1019,
             context_size: 32768,
             layer_count: 26,
-            sampling: SamplingParams::tight_structured(vec!["<end_of_turn>".to_string()]),
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Fastest model. Runs on any hardware with ~1GB RAM. Good for quick summaries.".to_string(),
         },
     ]
@@ -278,7 +332,7 @@ mod tests {
         assert_eq!(qwen_2b.size_mb, 1221);
         assert_eq!(qwen_2b.context_size, 32768);
         assert_eq!(qwen_2b.layer_count, 24);
-        assert_eq!(qwen_2b.sampling, SamplingParams::greedy_strict(vec!["<|im_end|>".to_string()]));
+        assert_eq!(qwen_2b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
 
         let qwen_4b = get_model_by_name("qwen3.5:4b").expect("qwen 4b model should exist");
         assert_eq!(qwen_4b.display_name, "Qwen 3.5 4B (High Quality)");
@@ -291,25 +345,39 @@ mod tests {
         assert_eq!(qwen_4b.size_mb, 2614);
         assert_eq!(qwen_4b.context_size, 32768);
         assert_eq!(qwen_4b.layer_count, 32);
-        assert_eq!(qwen_4b.sampling, SamplingParams::greedy_strict(vec!["<|im_end|>".to_string()]));
+        assert_eq!(qwen_4b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
     }
 
     #[test]
-    fn gemma_models_use_huggingface_urls_and_tight_structured_sampling() {
+    fn gemma_models_use_huggingface_urls_and_gemma3_instruct_sampling() {
         let gemma_1b = get_model_by_name("gemma3:1b").expect("gemma 1b model should exist");
         assert_eq!(gemma_1b.gguf_file, "gemma-3-1b-it-Q8_0.gguf");
         assert_eq!(
             gemma_1b.download_url,
             "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q8_0.gguf"
         );
-        assert_eq!(gemma_1b.sampling, SamplingParams::tight_structured(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(gemma_1b.sampling, SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(gemma_1b.sampling.temperature, 1.0);
+        assert_eq!(gemma_1b.sampling.top_k, 64);
+        assert_eq!(gemma_1b.sampling.top_p, 0.95);
+        assert_eq!(gemma_1b.sampling.presence_penalty, 0.0);
+        assert_eq!(gemma_1b.sampling.frequency_penalty, 0.0);
+        assert_eq!(gemma_1b.sampling.repeat_penalty, 1.0);
+        assert_eq!(gemma_1b.sampling.penalty_last_n, 0);
 
         let gemma_4b = get_model_by_name("gemma3:4b").expect("gemma 4b model should exist");
         assert_eq!(
             gemma_4b.download_url,
             "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf"
         );
-        assert_eq!(gemma_4b.sampling, SamplingParams::tight_structured(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(gemma_4b.sampling, SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(gemma_4b.sampling.temperature, 1.0);
+        assert_eq!(gemma_4b.sampling.top_k, 64);
+        assert_eq!(gemma_4b.sampling.top_p, 0.95);
+        assert_eq!(gemma_4b.sampling.presence_penalty, 0.0);
+        assert_eq!(gemma_4b.sampling.frequency_penalty, 0.0);
+        assert_eq!(gemma_4b.sampling.repeat_penalty, 1.0);
+        assert_eq!(gemma_4b.sampling.penalty_last_n, 0);
     }
 
     #[test]
@@ -327,6 +395,10 @@ mod tests {
             temperature: f32::NAN,
             top_k: 0,
             top_p: 2.0,
+            presence_penalty: -0.5,
+            frequency_penalty: f32::NAN,
+            repeat_penalty: 0.0,
+            penalty_last_n: -1,
             stop_tokens: vec!["stop".to_string()],
         };
 
@@ -335,6 +407,10 @@ mod tests {
         assert_eq!(sanitized.temperature, 0.0);
         assert_eq!(sanitized.top_k, 1);
         assert_eq!(sanitized.top_p, 1.0);
+        assert_eq!(sanitized.presence_penalty, 0.0);
+        assert_eq!(sanitized.frequency_penalty, 0.0);
+        assert_eq!(sanitized.repeat_penalty, 1.0);
+        assert_eq!(sanitized.penalty_last_n, 0);
         assert_eq!(sanitized.stop_tokens, vec!["stop".to_string()]);
     }
 }
