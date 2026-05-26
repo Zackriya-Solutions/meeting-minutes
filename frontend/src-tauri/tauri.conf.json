@@ -52,6 +52,7 @@
                         "fs:allow-download-write",
                         "fs:allow-download-read",
                         "fs:scope-download",
+                        "dialog:allow-save",
                         "core:path:default",
                         "core:event:default",
                         "core:window:default",
