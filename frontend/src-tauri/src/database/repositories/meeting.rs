@@ -165,6 +165,31 @@ impl MeetingsRepository {
         Ok((transcripts, total.0))
     }
 
+    /// Returns every transcript row for a meeting in `audio_start_time`
+    /// ascending order, with rows lacking a start time sorted last.
+    /// Used by the export command; do not call from hot paths.
+    pub async fn get_all_transcripts_for_meeting(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Vec<Transcript>, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        let transcripts = sqlx::query_as::<_, Transcript>(
+            "SELECT * FROM transcripts
+             WHERE meeting_id = ?
+             ORDER BY (audio_start_time IS NULL), audio_start_time ASC",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(transcripts)
+    }
+
     pub async fn update_meeting_title(
         pool: &SqlitePool,
         meeting_id: &str,
