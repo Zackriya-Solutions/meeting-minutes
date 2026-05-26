@@ -1354,7 +1354,7 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
             let engine = WHISPER_ENGINE.as_ref().ok_or("Whisper engine not initialized")?;
             if !engine.is_model_loaded().await {
                 log_info!("Loading {} model for transcription...", whisper_model);
-                // TODO:Calling discover_models as workaround for updating the available_models, whihch is used in
+                // TODO:Calling discover_models as workaround for updating the available_models, which is used in
                 // load_model;
                 engine.discover_models().await;
 
