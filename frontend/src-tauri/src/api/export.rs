@@ -100,6 +100,46 @@ fn escape_vtt(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Build a safe filename stem from a meeting title.
+///
+/// Strips path separators and other characters that are problematic on
+/// Windows or macOS, collapses internal whitespace, trims surrounding
+/// whitespace and dots, truncates to 80 characters, and falls back to
+/// `meeting-<first 8 chars of id>` if the result is empty.
+pub fn sanitize_filename_stem(title: &str, meeting_id: &str) -> String {
+    const BANNED: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+    let cleaned: String = title
+        .chars()
+        .filter(|c| !BANNED.contains(c) && !c.is_control())
+        .collect();
+
+    let mut collapsed = String::with_capacity(cleaned.len());
+    let mut prev_ws = false;
+    for c in cleaned.chars() {
+        if c.is_whitespace() {
+            if !prev_ws {
+                collapsed.push(' ');
+            }
+            prev_ws = true;
+        } else {
+            collapsed.push(c);
+            prev_ws = false;
+        }
+    }
+    let trimmed = collapsed.trim_matches(|c: char| c.is_whitespace() || c == '.');
+
+    let truncated: String = trimmed.chars().take(80).collect();
+
+    if truncated.is_empty() {
+        let id = meeting_id.strip_prefix("meeting-").unwrap_or(meeting_id);
+        let prefix: String = id.chars().take(8).collect();
+        format!("meeting-{}", prefix)
+    } else {
+        truncated
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +307,39 @@ mod tests {
         let (out, skipped) = format_vtt(&[]);
         assert_eq!(out, "WEBVTT\n\n");
         assert_eq!(skipped, 0);
+    }
+
+    // ----- sanitize_filename_stem -----
+
+    #[test]
+    fn sanitize_strips_path_separators_and_control_chars() {
+        let out = sanitize_filename_stem("Q3/Strategy: layoffs\\plan?", "m-abc12345");
+        assert_eq!(out, "Q3Strategy layoffsplan");
+    }
+
+    #[test]
+    fn sanitize_collapses_whitespace_and_trims() {
+        let out = sanitize_filename_stem("   hello   world   ", "m-abc12345");
+        assert_eq!(out, "hello world");
+    }
+
+    #[test]
+    fn sanitize_empty_title_falls_back_to_meeting_id_prefix() {
+        let out = sanitize_filename_stem("", "meeting-abc12345xyz");
+        assert_eq!(out, "meeting-abc12345");
+    }
+
+    #[test]
+    fn sanitize_whitespace_only_title_falls_back() {
+        let out = sanitize_filename_stem("   ", "meeting-abc12345xyz");
+        assert_eq!(out, "meeting-abc12345");
+    }
+
+    #[test]
+    fn sanitize_truncates_to_80_chars() {
+        let long = "a".repeat(200);
+        let out = sanitize_filename_stem(&long, "m-abc12345");
+        assert_eq!(out.len(), 80);
+        assert!(out.chars().all(|c| c == 'a'));
     }
 }
