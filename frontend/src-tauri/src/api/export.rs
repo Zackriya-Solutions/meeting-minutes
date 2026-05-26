@@ -5,6 +5,11 @@
 //! `String`, so they're trivially unit-testable with no DB.
 
 use crate::database::models::Transcript;
+use crate::database::repositories::meeting::MeetingsRepository;
+use crate::state::AppState;
+use serde::Serialize;
+use std::path::PathBuf;
+use tauri::{AppHandle, Runtime};
 
 /// Format transcripts as plain text, one segment per line.
 ///
@@ -138,6 +143,56 @@ pub fn sanitize_filename_stem(title: &str, meeting_id: &str) -> String {
     } else {
         truncated
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportResult {
+    pub bytes_written: u64,
+    pub segments_written: usize,
+    pub segments_skipped: usize,
+    pub output_path: String,
+}
+
+/// Read all transcripts for a meeting, format them according to `format`
+/// ("txt" or "vtt"), and write them to `output_path`. Returns counts so
+/// the frontend can surface a useful toast (especially the skipped-segment
+/// count for VTT when some rows had no timing).
+#[tauri::command]
+pub async fn api_export_transcript<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    format: String,
+    output_path: String,
+) -> Result<ExportResult, String> {
+    let pool = state.db_manager.pool();
+    let segments = MeetingsRepository::get_all_transcripts_for_meeting(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to read transcripts: {}", e))?;
+
+    if segments.is_empty() {
+        return Err(format!("No transcripts for meeting {}", meeting_id));
+    }
+
+    let (content, skipped) = match format.as_str() {
+        "txt" => (format_txt(&segments), 0usize),
+        "vtt" => format_vtt(&segments),
+        other => return Err(format!("Unsupported format: {}", other)),
+    };
+
+    let path = PathBuf::from(&output_path);
+    std::fs::write(&path, &content)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+
+    let bytes_written = content.as_bytes().len() as u64;
+    let segments_written = segments.len() - skipped;
+
+    Ok(ExportResult {
+        bytes_written,
+        segments_written,
+        segments_skipped: skipped,
+        output_path,
+    })
 }
 
 #[cfg(test)]
