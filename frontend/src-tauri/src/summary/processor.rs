@@ -484,3 +484,86 @@ pub async fn generate_meeting_summary(
     info!("Summary generation completed successfully");
     Ok((final_markdown, successful_chunk_count))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_summary_system_prompt_injects_template_parts() {
+        let prompt = render_summary_system_prompt(
+            None,
+            "Use action items section.",
+            "## Summary\n- Action Items",
+        );
+
+        assert!(prompt.contains("Use action items section."));
+        assert!(prompt.contains("## Summary\n- Action Items"));
+        assert!(!prompt.contains(SUMMARY_SYSTEM_PROMPT_SECTION_INSTRUCTIONS_PLACEHOLDER));
+        assert!(!prompt.contains(SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER));
+    }
+
+    #[test]
+    fn render_summary_chunk_prompt_replaces_chunk_placeholder() {
+        let prompt = render_summary_chunk_prompt(
+            Some("Summarize this in Italian:\n{{TRANSCRIPT_CHUNK}}"),
+            "Discussed release timeline.",
+        );
+
+        assert_eq!(
+            prompt,
+            "Summarize this in Italian:\nDiscussed release timeline."
+        );
+    }
+
+    #[test]
+    fn render_summary_chunk_prompt_appends_chunk_when_placeholder_is_missing() {
+        let prompt = render_summary_chunk_prompt(
+            Some("Summarize this transcript chunk in Italian."),
+            "Discussed release timeline.",
+        );
+
+        assert!(prompt.starts_with("Summarize this transcript chunk in Italian."));
+        assert!(prompt.contains("<transcript_chunk>\nDiscussed release timeline.\n</transcript_chunk>"));
+    }
+
+    #[test]
+    fn render_summary_combine_prompt_replaces_summaries_placeholder() {
+        let prompt = render_summary_combine_prompt(
+            Some("Merge these summaries in Italian:\n{{CHUNK_SUMMARIES}}"),
+            "Chunk 1\n---\nChunk 2",
+        );
+
+        assert_eq!(
+            prompt,
+            "Merge these summaries in Italian:\nChunk 1\n---\nChunk 2"
+        );
+    }
+
+    #[test]
+    fn render_summary_combine_prompt_appends_summaries_when_placeholder_is_missing() {
+        let prompt = render_summary_combine_prompt(
+            Some("Merge these summaries in Italian."),
+            "Chunk 1\n---\nChunk 2",
+        );
+
+        assert!(prompt.starts_with("Merge these summaries in Italian."));
+        assert!(prompt.contains("<summaries>\nChunk 1\n---\nChunk 2\n</summaries>"));
+    }
+
+    #[test]
+    fn render_plain_summary_prompt_uses_trimmed_custom_prompt_or_default() {
+        assert_eq!(
+            render_plain_summary_prompt(Some("  Custom system prompt.  "), "Default system prompt."),
+            "Custom system prompt."
+        );
+        assert_eq!(
+            render_plain_summary_prompt(Some("   "), "Default system prompt."),
+            "Default system prompt."
+        );
+        assert_eq!(
+            render_plain_summary_prompt(None, "Default system prompt."),
+            "Default system prompt."
+        );
+    }
+}
