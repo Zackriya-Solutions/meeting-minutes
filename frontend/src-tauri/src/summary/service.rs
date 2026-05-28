@@ -72,6 +72,7 @@ impl SummaryService {
     /// * `model_name` - Specific model (e.g., "gpt-4", "llama3.2:latest")
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
+    /// * `summary_system_prompt` - System prompt used for final report generation
     pub async fn process_transcript_background<R: tauri::Runtime>(
         _app: AppHandle<R>,
         pool: SqlitePool,
@@ -81,6 +82,7 @@ impl SummaryService {
         model_name: String,
         custom_prompt: String,
         template_id: String,
+        summary_system_prompt: String,
     ) {
         let start_time = Instant::now();
         info!(
@@ -237,6 +239,7 @@ impl SummaryService {
             custom_openai_top_p,
             app_data_dir.as_ref(),
             Some(&cancellation_token),
+            Some(&summary_system_prompt),
         )
         .await;
 

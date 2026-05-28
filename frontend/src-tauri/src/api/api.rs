@@ -76,6 +76,8 @@ pub struct ModelConfig {
     pub api_key: Option<String>,
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(rename = "summarySystemPrompt")]
+    pub summary_system_prompt: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,6 +90,8 @@ pub struct SaveModelConfigRequest {
     pub api_key: Option<String>,
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(rename = "summarySystemPrompt")]
+    pub summary_system_prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -484,12 +488,16 @@ pub async fn api_get_model_config<R: Runtime>(
             match SettingsRepository::get_api_key(pool, &config.provider).await {
                 Ok(api_key) => {
                     log_info!("Successfully retrieved model config and API key.");
+                    let summary_system_prompt = config
+                        .summary_system_prompt
+                        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string());
                     Ok(Some(ModelConfig {
                         provider: config.provider,
                         model: config.model,
                         whisper_model: config.whisper_model,
                         api_key,
                         ollama_endpoint: config.ollama_endpoint,
+                        summary_system_prompt,
                     }))
                 }
                 Err(e) => {
@@ -514,6 +522,11 @@ pub async fn api_get_model_config<R: Runtime>(
 }
 
 #[tauri::command]
+pub fn api_get_default_summary_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
 pub async fn api_save_model_config<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
@@ -522,6 +535,7 @@ pub async fn api_save_model_config<R: Runtime>(
     whisper_model: String,
     api_key: Option<String>,
     ollama_endpoint: Option<String>,
+    summary_system_prompt: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -532,6 +546,23 @@ pub async fn api_save_model_config<R: Runtime>(
         &ollama_endpoint
     );
     let pool = state.db_manager.pool();
+    let summary_system_prompt_to_save = match summary_system_prompt {
+        Some(prompt) if !prompt.trim().is_empty() => prompt,
+        Some(_) => crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string(),
+        None => match SettingsRepository::get_model_config(pool).await {
+            Ok(Some(config)) => config
+                .summary_system_prompt
+                .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()),
+            Ok(None) => crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string(),
+            Err(e) => {
+                log_warn!(
+                    "Failed to read existing summary system prompt, using default: {}",
+                    e
+                );
+                crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()
+            }
+        },
+    };
 
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
@@ -539,6 +570,7 @@ pub async fn api_save_model_config<R: Runtime>(
         &model,
         &whisper_model,
         ollama_endpoint.as_deref(),
+        Some(&summary_system_prompt_to_save),
     )
     .await
     {
