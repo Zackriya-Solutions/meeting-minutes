@@ -78,8 +78,12 @@ pub struct ModelConfig {
     pub ollama_endpoint: Option<String>,
     #[serde(rename = "summarySystemPrompt")]
     pub summary_system_prompt: String,
+    #[serde(rename = "summaryChunkSystemPrompt")]
+    pub summary_chunk_system_prompt: String,
     #[serde(rename = "summaryChunkPrompt")]
     pub summary_chunk_prompt: String,
+    #[serde(rename = "summaryCombineSystemPrompt")]
+    pub summary_combine_system_prompt: String,
     #[serde(rename = "summaryCombinePrompt")]
     pub summary_combine_prompt: String,
 }
@@ -96,8 +100,12 @@ pub struct SaveModelConfigRequest {
     pub ollama_endpoint: Option<String>,
     #[serde(rename = "summarySystemPrompt")]
     pub summary_system_prompt: Option<String>,
+    #[serde(rename = "summaryChunkSystemPrompt")]
+    pub summary_chunk_system_prompt: Option<String>,
     #[serde(rename = "summaryChunkPrompt")]
     pub summary_chunk_prompt: Option<String>,
+    #[serde(rename = "summaryCombineSystemPrompt")]
+    pub summary_combine_system_prompt: Option<String>,
     #[serde(rename = "summaryCombinePrompt")]
     pub summary_combine_prompt: Option<String>,
 }
@@ -496,15 +504,24 @@ pub async fn api_get_model_config<R: Runtime>(
             match SettingsRepository::get_api_key(pool, &config.provider).await {
                 Ok(api_key) => {
                     log_info!("Successfully retrieved model config and API key.");
-                    let summary_system_prompt = config
-                        .summary_system_prompt
-                        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string());
-                    let summary_chunk_prompt = config
-                        .summary_chunk_prompt
-                        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string());
-                    let summary_combine_prompt = config
-                        .summary_combine_prompt
-                        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string());
+                    let summary_system_prompt = config.summary_system_prompt.unwrap_or_else(|| {
+                        crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()
+                    });
+                    let summary_chunk_system_prompt =
+                        config.summary_chunk_system_prompt.unwrap_or_else(|| {
+                            crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string()
+                        });
+                    let summary_chunk_prompt = config.summary_chunk_prompt.unwrap_or_else(|| {
+                        crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string()
+                    });
+                    let summary_combine_system_prompt =
+                        config.summary_combine_system_prompt.unwrap_or_else(|| {
+                            crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string()
+                        });
+                    let summary_combine_prompt =
+                        config.summary_combine_prompt.unwrap_or_else(|| {
+                            crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string()
+                        });
                     Ok(Some(ModelConfig {
                         provider: config.provider,
                         model: config.model,
@@ -512,7 +529,9 @@ pub async fn api_get_model_config<R: Runtime>(
                         api_key,
                         ollama_endpoint: config.ollama_endpoint,
                         summary_system_prompt,
+                        summary_chunk_system_prompt,
                         summary_chunk_prompt,
+                        summary_combine_system_prompt,
                         summary_combine_prompt,
                     }))
                 }
@@ -543,8 +562,18 @@ pub fn api_get_default_summary_system_prompt() -> String {
 }
 
 #[tauri::command]
+pub fn api_get_default_summary_chunk_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
 pub fn api_get_default_summary_chunk_prompt() -> String {
     crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_combine_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string()
 }
 
 #[tauri::command]
@@ -562,7 +591,9 @@ pub async fn api_save_model_config<R: Runtime>(
     api_key: Option<String>,
     ollama_endpoint: Option<String>,
     summary_system_prompt: Option<String>,
+    summary_chunk_system_prompt: Option<String>,
     summary_chunk_prompt: Option<String>,
+    summary_combine_system_prompt: Option<String>,
     summary_combine_prompt: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -587,15 +618,43 @@ pub async fn api_save_model_config<R: Runtime>(
 
     let summary_system_prompt_to_save = summary_system_prompt
         .filter(|prompt| !prompt.trim().is_empty())
-        .or_else(|| existing_config.as_ref().and_then(|config| config.summary_system_prompt.clone()))
+        .or_else(|| {
+            existing_config
+                .as_ref()
+                .and_then(|config| config.summary_system_prompt.clone())
+        })
         .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string());
+    let summary_chunk_system_prompt_to_save = summary_chunk_system_prompt
+        .filter(|prompt| !prompt.trim().is_empty())
+        .or_else(|| {
+            existing_config
+                .as_ref()
+                .and_then(|config| config.summary_chunk_system_prompt.clone())
+        })
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string());
     let summary_chunk_prompt_to_save = summary_chunk_prompt
         .filter(|prompt| !prompt.trim().is_empty())
-        .or_else(|| existing_config.as_ref().and_then(|config| config.summary_chunk_prompt.clone()))
+        .or_else(|| {
+            existing_config
+                .as_ref()
+                .and_then(|config| config.summary_chunk_prompt.clone())
+        })
         .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string());
+    let summary_combine_system_prompt_to_save = summary_combine_system_prompt
+        .filter(|prompt| !prompt.trim().is_empty())
+        .or_else(|| {
+            existing_config
+                .as_ref()
+                .and_then(|config| config.summary_combine_system_prompt.clone())
+        })
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string());
     let summary_combine_prompt_to_save = summary_combine_prompt
         .filter(|prompt| !prompt.trim().is_empty())
-        .or_else(|| existing_config.as_ref().and_then(|config| config.summary_combine_prompt.clone()))
+        .or_else(|| {
+            existing_config
+                .as_ref()
+                .and_then(|config| config.summary_combine_prompt.clone())
+        })
         .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string());
 
     if let Err(e) = SettingsRepository::save_model_config(
@@ -605,7 +664,9 @@ pub async fn api_save_model_config<R: Runtime>(
         &whisper_model,
         ollama_endpoint.as_deref(),
         Some(&summary_system_prompt_to_save),
+        Some(&summary_chunk_system_prompt_to_save),
         Some(&summary_chunk_prompt_to_save),
+        Some(&summary_combine_system_prompt_to_save),
         Some(&summary_combine_prompt_to_save),
     )
     .await
@@ -883,7 +944,10 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
     meeting_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<MeetingMetadata, String> {
-    log_info!("api_get_meeting_metadata called for meeting_id: {}", meeting_id);
+    log_info!(
+        "api_get_meeting_metadata called for meeting_id: {}",
+        meeting_id
+    );
 
     let pool = state.db_manager.pool();
 
@@ -927,7 +991,9 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset).await {
+    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset)
+        .await
+    {
         Ok((transcripts, total_count)) => {
             log_info!(
                 "Successfully retrieved {} transcripts for meeting {} (total: {})",
@@ -958,7 +1024,11 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
             })
         }
         Err(e) => {
-            log_error!("Error retrieving transcripts for meeting {}: {}", meeting_id, e);
+            log_error!(
+                "Error retrieving transcripts for meeting {}: {}",
+                meeting_id,
+                e
+            );
             Err(format!("Failed to retrieve transcripts: {}", e))
         }
     }
@@ -1026,7 +1096,10 @@ pub async fn api_save_transcript<R: Runtime>(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             log_error!("Failed to parse transcript segments: {}", e);
-            format!("Invalid transcript data format: {}. Please check the data structure.", e)
+            format!(
+                "Invalid transcript data format: {}. Please check the data structure.",
+                e
+            )
         })?;
 
     // Log parsed segments count and first segment details
@@ -1296,7 +1369,10 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
-            log_info!("✅ Successfully saved custom OpenAI config for endpoint: {}", config.endpoint);
+            log_info!(
+                "✅ Successfully saved custom OpenAI config for endpoint: {}",
+                config.endpoint
+            );
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Custom OpenAI configuration saved successfully"
@@ -1322,8 +1398,11 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
     match SettingsRepository::get_custom_openai_config(pool).await {
         Ok(config) => {
             if let Some(ref c) = config {
-                log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint, c.model);
+                log_info!(
+                    "✅ Found custom OpenAI config: endpoint='{}', model='{}'",
+                    c.endpoint,
+                    c.model
+                );
             } else {
                 log_info!("No custom OpenAI config found");
             }
@@ -1406,7 +1485,7 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                                             .get("message")
                                             .and_then(|m| {
                                                 m.get("content")
-                                                .or_else(|| m.get("reasoning_content"))
+                                                    .or_else(|| m.get("reasoning_content"))
                                             })
                                             .is_some();
 
@@ -1424,17 +1503,33 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                         }
 
                         // Response was 200 but doesn't match OpenAI format
-                        log_warn!("⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}", response_text);
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}",
+                            response_text
+                        );
                         Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
                     }
                     Err(e) => {
-                        log_warn!("⚠️ Endpoint returned 200 but response is not valid JSON: {}", e);
-                        Err(format!("Endpoint is reachable but returned invalid JSON: {}. Response: {}", e, response_text))
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response is not valid JSON: {}",
+                            e
+                        );
+                        Err(format!(
+                            "Endpoint is reachable but returned invalid JSON: {}. Response: {}",
+                            e, response_text
+                        ))
                     }
                 }
             } else {
-                log_warn!("⚠️ Custom OpenAI connection test failed with status {}: {}", status, response_text);
-                Err(format!("Connection failed with status {}: {}", status, response_text))
+                log_warn!(
+                    "⚠️ Custom OpenAI connection test failed with status {}: {}",
+                    status,
+                    response_text
+                );
+                Err(format!(
+                    "Connection failed with status {}: {}",
+                    status, response_text
+                ))
             }
         }
         Err(e) => {

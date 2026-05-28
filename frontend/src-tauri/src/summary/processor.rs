@@ -7,11 +7,14 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-pub const SUMMARY_SYSTEM_PROMPT_SECTION_INSTRUCTIONS_PLACEHOLDER: &str =
-    "{{SECTION_INSTRUCTIONS}}";
+pub const SUMMARY_SYSTEM_PROMPT_SECTION_INSTRUCTIONS_PLACEHOLDER: &str = "{{SECTION_INSTRUCTIONS}}";
 pub const SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER: &str = "{{TEMPLATE}}";
 pub const SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER: &str = "{{TRANSCRIPT_CHUNK}}";
 pub const SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER: &str = "{{CHUNK_SUMMARIES}}";
+
+pub const DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT: &str = "You are an expert meeting summarizer.";
+pub const DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT: &str =
+    "You are an expert at synthesizing meeting summaries.";
 
 pub const DEFAULT_SUMMARY_SYSTEM_PROMPT: &str = r#"You are an expert meeting summarizer. Generate a final meeting report by filling in the provided Markdown template based on the source text.
 
@@ -80,6 +83,13 @@ pub fn render_summary_chunk_prompt(summary_chunk_prompt: Option<&str>, chunk: &s
     }
 }
 
+pub fn render_plain_summary_prompt<'a>(prompt: Option<&'a str>, default_prompt: &'a str) -> &'a str {
+    prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or(default_prompt)
+}
+
 pub fn render_summary_combine_prompt(
     summary_combine_prompt: Option<&str>,
     combined_text: &str,
@@ -100,9 +110,8 @@ pub fn render_summary_combine_prompt(
 }
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
-static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap()
-});
+static THINKING_TAG_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap());
 
 /// Rough token count estimation using character count
 pub fn rough_token_count(s: &str) -> usize {
@@ -265,7 +274,9 @@ pub async fn generate_meeting_summary(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     summary_system_prompt: Option<&str>,
+    summary_chunk_system_prompt: Option<&str>,
     summary_chunk_prompt: Option<&str>,
+    summary_combine_system_prompt: Option<&str>,
     summary_combine_prompt: Option<&str>,
 ) -> Result<(String, i64), String> {
     // Check cancellation at the start
@@ -288,7 +299,9 @@ pub async fn generate_meeting_summary(
     // Strategy: Use single-pass for cloud providers or short transcripts
     // Use multi-level chunking for Ollama/BuiltInAI with long transcripts
     // Note: CustomOpenAI is treated like cloud providers (unlimited context)
-    if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI) || total_tokens < token_threshold {
+    if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI)
+        || total_tokens < token_threshold
+    {
         info!(
             "Using single-pass summarization (tokens: {}, threshold: {})",
             total_tokens, token_threshold
@@ -307,13 +320,20 @@ pub async fn generate_meeting_summary(
         info!("Split transcript into {} chunks", num_chunks);
 
         let mut chunk_summaries = Vec::new();
-        let system_prompt_chunk = "You are an expert meeting summarizer.";
+        let system_prompt_chunk = render_plain_summary_prompt(
+            summary_chunk_system_prompt,
+            DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT,
+        );
 
         for (i, chunk) in chunks.iter().enumerate() {
             // Check for cancellation before processing each chunk
             if let Some(token) = cancellation_token {
                 if token.is_cancelled() {
-                    info!("Summary generation cancelled during chunk {}/{}", i + 1, num_chunks);
+                    info!(
+                        "Summary generation cancelled during chunk {}/{}",
+                        i + 1,
+                        num_chunks
+                    );
                     return Err("Summary generation was cancelled".to_string());
                 }
             }
@@ -372,7 +392,10 @@ pub async fn generate_meeting_summary(
                 chunk_summaries.len()
             );
             let combined_text = chunk_summaries.join("\n---\n");
-            let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
+            let system_prompt_combine = render_plain_summary_prompt(
+                summary_combine_system_prompt,
+                DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT,
+            );
             let user_prompt_combine =
                 render_summary_combine_prompt(summary_combine_prompt, &combined_text);
             generate_summary(
@@ -396,7 +419,10 @@ pub async fn generate_meeting_summary(
         };
     }
 
-    info!("Generating final markdown report with template: {}", template_id);
+    info!(
+        "Generating final markdown report with template: {}",
+        template_id
+    );
 
     // Load the template using the provided template_id
     let template = templates::get_template(template_id)
