@@ -12,7 +12,7 @@ pub const SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER: &str = "{{TEMPLATE}}";
 pub const SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER: &str = "{{TRANSCRIPT_CHUNK}}";
 pub const SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER: &str = "{{CHUNK_SUMMARIES}}";
 pub const SUMMARY_LANGUAGE_INSTRUCTION: &str = r#"**LANGUAGE REQUIREMENT:**
-Write all generated prose in the same language as the transcript. If the transcript contains multiple languages, use the predominant language unless the user-provided context explicitly requests another language. Do not switch to English just because template section names or instructions are written in English."#;
+Write the meeting title, section headings, tables, bullets, and all generated prose in the same language as the transcript. If the transcript contains multiple languages, use the predominant language unless the user-provided context explicitly requests another language. Do not switch to English just because template section names or instructions are written in English."#;
 
 pub const DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT: &str = "You are an expert meeting summarizer.";
 pub const DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT: &str =
@@ -608,11 +608,15 @@ mod tests {
 
     #[test]
     fn rendered_final_user_prompt_enforces_transcript_language() {
-        let prompt =
-            render_summary_final_user_prompt("The team discussed the roadmap.", "");
+        let prompt = render_summary_final_user_prompt("The team discussed the roadmap.", "");
 
         assert!(prompt.contains("<transcript_chunks>"));
         assert!(prompt.contains("The team discussed the roadmap."));
         assert!(prompt.contains(SUMMARY_LANGUAGE_INSTRUCTION));
+    }
+
+    #[test]
+    fn language_instruction_applies_to_meeting_title() {
+        assert!(SUMMARY_LANGUAGE_INSTRUCTION.contains("meeting title"));
     }
 }
