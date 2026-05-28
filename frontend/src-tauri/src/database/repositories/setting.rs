@@ -12,6 +12,16 @@ pub struct SaveModelConfigRequest {
     pub api_key: Option<String>,
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(rename = "summarySystemPrompt")]
+    pub summary_system_prompt: Option<String>,
+    #[serde(rename = "summaryChunkSystemPrompt")]
+    pub summary_chunk_system_prompt: Option<String>,
+    #[serde(rename = "summaryChunkPrompt")]
+    pub summary_chunk_prompt: Option<String>,
+    #[serde(rename = "summaryCombineSystemPrompt")]
+    pub summary_combine_system_prompt: Option<String>,
+    #[serde(rename = "summaryCombinePrompt")]
+    pub summary_combine_prompt: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -44,23 +54,38 @@ impl SettingsRepository {
         model: &str,
         whisper_model: &str,
         ollama_endpoint: Option<&str>,
+        summary_system_prompt: Option<&str>,
+        summary_chunk_system_prompt: Option<&str>,
+        summary_chunk_prompt: Option<&str>,
+        summary_combine_system_prompt: Option<&str>,
+        summary_combine_prompt: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
         // Using id '1' for backward compatibility
         sqlx::query(
             r#"
-            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint)
-            VALUES ('1', $1, $2, $3, $4)
+            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint, summarySystemPrompt, summaryChunkSystemPrompt, summaryChunkPrompt, summaryCombineSystemPrompt, summaryCombinePrompt)
+            VALUES ('1', $1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
                 model = excluded.model,
                 whisperModel = excluded.whisperModel,
-                ollamaEndpoint = excluded.ollamaEndpoint
+                ollamaEndpoint = excluded.ollamaEndpoint,
+                summarySystemPrompt = excluded.summarySystemPrompt,
+                summaryChunkSystemPrompt = excluded.summaryChunkSystemPrompt,
+                summaryChunkPrompt = excluded.summaryChunkPrompt,
+                summaryCombineSystemPrompt = excluded.summaryCombineSystemPrompt,
+                summaryCombinePrompt = excluded.summaryCombinePrompt
             "#,
         )
         .bind(provider)
         .bind(model)
         .bind(whisper_model)
         .bind(ollama_endpoint)
+        .bind(summary_system_prompt)
+        .bind(summary_chunk_system_prompt)
+        .bind(summary_chunk_prompt)
+        .bind(summary_combine_system_prompt)
+        .bind(summary_combine_prompt)
         .execute(pool)
         .await?;
 
@@ -147,7 +172,6 @@ impl SettingsRepository {
                 .fetch_optional(pool)
                 .await?;
         Ok(setting)
-
     }
 
     pub async fn save_transcript_config(
@@ -198,7 +222,9 @@ impl SettingsRepository {
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,
-            api_key_column, crate::config::DEFAULT_PARAKEET_MODEL, api_key_column
+            api_key_column,
+            crate::config::DEFAULT_PARAKEET_MODEL,
+            api_key_column
         );
         sqlx::query(&query).bind(api_key).execute(pool).await?;
 
@@ -285,7 +311,7 @@ impl SettingsRepository {
             FROM settings
             WHERE id = '1'
             LIMIT 1
-            "#
+            "#,
         )
         .fetch_optional(pool)
         .await?;
@@ -296,10 +322,11 @@ impl SettingsRepository {
 
                 if let Some(json) = config_json {
                     // Parse JSON into CustomOpenAIConfig
-                    let config: CustomOpenAIConfig = serde_json::from_str(&json)
-                        .map_err(|e| sqlx::Error::Protocol(
-                            format!("Invalid JSON in customOpenAIConfig: {}", e).into()
-                        ))?;
+                    let config: CustomOpenAIConfig = serde_json::from_str(&json).map_err(|e| {
+                        sqlx::Error::Protocol(
+                            format!("Invalid JSON in customOpenAIConfig: {}", e).into(),
+                        )
+                    })?;
 
                     Ok(Some(config))
                 } else {
@@ -324,10 +351,9 @@ impl SettingsRepository {
         config: &CustomOpenAIConfig,
     ) -> std::result::Result<(), sqlx::Error> {
         // Serialize config to JSON
-        let config_json = serde_json::to_string(config)
-            .map_err(|e| sqlx::Error::Protocol(
-                format!("Failed to serialize config to JSON: {}", e).into()
-            ))?;
+        let config_json = serde_json::to_string(config).map_err(|e| {
+            sqlx::Error::Protocol(format!("Failed to serialize config to JSON: {}", e).into())
+        })?;
 
         // Upsert into settings table
         sqlx::query(

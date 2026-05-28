@@ -1,7 +1,7 @@
+use log::{Level, Record};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use log::{Level, Record};
 
 /// Async logger for performance-critical audio processing
 /// Buffers log messages and writes them asynchronously to avoid blocking audio threads
@@ -33,8 +33,8 @@ impl AsyncLogger {
                 buffered_messages.push(message);
 
                 // Flush buffer when full or after timeout (100ms)
-                if buffered_messages.len() >= buffer_size ||
-                   last_flush.elapsed().as_millis() >= 100 {
+                if buffered_messages.len() >= buffer_size || last_flush.elapsed().as_millis() >= 100
+                {
                     Self::flush_messages(&mut buffered_messages);
                     last_flush = std::time::Instant::now();
                 }
@@ -69,11 +69,13 @@ impl AsyncLogger {
     fn flush_messages(messages: &mut Vec<LogMessage>) {
         for msg in messages.drain(..) {
             // Use the standard log crate to actually write the message
-            log::logger().log(&Record::builder()
-                .args(format_args!("{}", msg.message))
-                .level(msg.level)
-                .target(&msg.target)
-                .build());
+            log::logger().log(
+                &Record::builder()
+                    .args(format_args!("{}", msg.message))
+                    .level(msg.level)
+                    .target(&msg.target)
+                    .build(),
+            );
         }
     }
 }

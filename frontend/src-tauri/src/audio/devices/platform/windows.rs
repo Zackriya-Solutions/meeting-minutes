@@ -42,7 +42,9 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
 
     // If WASAPI failed or returned no devices, try default host as fallback
     if devices.is_empty() {
-        debug!("WASAPI device enumeration failed or returned no devices, falling back to default host");
+        debug!(
+            "WASAPI device enumeration failed or returned no devices, falling back to default host"
+        );
         // Add regular input devices
         if let Ok(input_devices) = host.input_devices() {
             for device in input_devices {
@@ -94,7 +96,9 @@ pub fn configure_windows_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
 }
 
 /// Get Windows device and configuration using WASAPI
-pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, cpal::SupportedStreamConfig)> {
+pub fn get_windows_device(
+    audio_device: &AudioDevice,
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig)> {
     let wasapi_host = cpal::host_from_id(cpal::HostId::Wasapi)
         .map_err(|e| anyhow!("Failed to create WASAPI host: {}", e))?;
 
@@ -123,7 +127,7 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                             Ok(default_config) => {
                                 // info!("Using default input config: {:?}", default_config);
                                 return Ok((device, default_config));
-                            },
+                            }
                             Err(e) => {
                                 warn!("Failed to get default input config: {}. Trying supported configs...", e);
 
@@ -137,7 +141,9 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
 
                                         // First try to find F32 format with 2 channels (stereo)
                                         for config in &configs {
-                                            if config.sample_format() == cpal::SampleFormat::F32 && config.channels() == 2 {
+                                            if config.sample_format() == cpal::SampleFormat::F32
+                                                && config.channels() == 2
+                                            {
                                                 let config = config.with_max_sample_rate();
                                                 // info!("Using stereo F32 input config: {:?}", config);
                                                 return Ok((device, config));
@@ -162,7 +168,10 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                                     warn!("Could not enumerate supported configurations for device: {}", name);
                                 }
 
-                                return Err(anyhow!("No compatible input configuration found for device: {}", name));
+                                return Err(anyhow!(
+                                    "No compatible input configuration found for device: {}",
+                                    name
+                                ));
                             }
                         }
                     }
@@ -196,13 +205,18 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                         if let Ok(supported_configs) = device.supported_output_configs() {
                             let configs: Vec<_> = supported_configs.collect();
                             if configs.is_empty() {
-                                warn!("No supported output configurations found for device: {}", name);
+                                warn!(
+                                    "No supported output configurations found for device: {}",
+                                    name
+                                );
                             } else {
                                 // info!("Found {} supported output configurations", configs.len());
 
                                 // Try to find a config that supports f32 format with 2 channels (stereo)
                                 for config in &configs {
-                                    if config.sample_format() == cpal::SampleFormat::F32 && config.channels() == 2 {
+                                    if config.sample_format() == cpal::SampleFormat::F32
+                                        && config.channels() == 2
+                                    {
                                         let config = config.with_max_sample_rate();
                                         info!("Using stereo F32 output config: {:?}", config);
                                         return Ok((device, config));
@@ -224,7 +238,10 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                                 return Ok((device, config));
                             }
                         } else {
-                            warn!("Could not enumerate supported configurations for device: {}", name);
+                            warn!(
+                                "Could not enumerate supported configurations for device: {}",
+                                name
+                            );
                         }
 
                         // If we couldn't get supported configs, try default
@@ -243,7 +260,8 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
                     info!("Using default output device: {}", name);
                     if let Ok(config) = default_device.default_output_config() {
                         return Ok((default_device, config));
-                    } else if let Ok(supported_configs) = default_device.supported_output_configs() {
+                    } else if let Ok(supported_configs) = default_device.supported_output_configs()
+                    {
                         if let Some(config) = supported_configs.into_iter().next() {
                             return Ok((default_device, config.with_max_sample_rate()));
                         }
@@ -253,5 +271,8 @@ pub fn get_windows_device(audio_device: &AudioDevice) -> Result<(cpal::Device, c
         }
     }
 
-    Err(anyhow!("Device not found or no compatible configuration available: {}", audio_device.name))
+    Err(anyhow!(
+        "Device not found or no compatible configuration available: {}",
+        audio_device.name
+    ))
 }

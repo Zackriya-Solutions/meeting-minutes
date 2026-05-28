@@ -1,6 +1,6 @@
 // Audio playback device monitoring for Bluetooth detection
-use serde::Serialize;
 use anyhow::Result;
+use serde::Serialize;
 
 #[cfg(target_os = "macos")]
 use log::debug;
@@ -37,13 +37,15 @@ async fn get_macos_output() -> Result<AudioOutputInfo> {
 
     // Get default output device using cpal
     let host = cpal::default_host();
-    let device = host.default_output_device()
+    let device = host
+        .default_output_device()
         .ok_or_else(|| anyhow::anyhow!("No default output device found"))?;
 
     let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
 
     // Get sample rate
-    let sample_rate = device.default_output_config()
+    let sample_rate = device
+        .default_output_config()
         .ok()
         .map(|config| config.sample_rate().0);
 
@@ -61,14 +63,19 @@ async fn get_macos_output() -> Result<AudioOutputInfo> {
 
     let device_type = if name_lower.contains("speaker") || name_lower.contains("display") {
         "Speaker".to_string()
-    } else if name_lower.contains("headphone") || name_lower.contains("airpod") || name_lower.contains("earbud") {
+    } else if name_lower.contains("headphone")
+        || name_lower.contains("airpod")
+        || name_lower.contains("earbud")
+    {
         "Headphones".to_string()
     } else {
         "Unknown".to_string()
     };
 
-    debug!("Active output device: {} (Bluetooth: {}, Type: {}, Rate: {:?} Hz)",
-           device_name, is_bluetooth, device_type, sample_rate);
+    debug!(
+        "Active output device: {} (Bluetooth: {}, Type: {}, Rate: {:?} Hz)",
+        device_name, is_bluetooth, device_type, sample_rate
+    );
 
     Ok(AudioOutputInfo {
         device_name,
@@ -83,12 +90,14 @@ async fn get_windows_output() -> Result<AudioOutputInfo> {
     use cpal::traits::{DeviceTrait, HostTrait};
 
     let host = cpal::default_host();
-    let device = host.default_output_device()
+    let device = host
+        .default_output_device()
         .ok_or_else(|| anyhow::anyhow!("No default output device found"))?;
 
     let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
 
-    let sample_rate = device.default_output_config()
+    let sample_rate = device
+        .default_output_config()
         .ok()
         .map(|config| config.sample_rate().0);
 
@@ -122,12 +131,14 @@ async fn get_linux_output() -> Result<AudioOutputInfo> {
     use cpal::traits::{DeviceTrait, HostTrait};
 
     let host = cpal::default_host();
-    let device = host.default_output_device()
+    let device = host
+        .default_output_device()
         .ok_or_else(|| anyhow::anyhow!("No default output device found"))?;
 
     let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
 
-    let sample_rate = device.default_output_config()
+    let sample_rate = device
+        .default_output_config()
         .ok()
         .map(|config| config.sample_rate().0);
 

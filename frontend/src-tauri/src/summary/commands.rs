@@ -175,6 +175,11 @@ pub async fn api_process_transcript<R: Runtime>(
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
     template_id: Option<String>,
+    summary_system_prompt: Option<String>,
+    summary_chunk_system_prompt: Option<String>,
+    summary_chunk_prompt: Option<String>,
+    summary_combine_system_prompt: Option<String>,
+    summary_combine_prompt: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<ProcessTranscriptResponse, String> {
     use uuid::Uuid;
@@ -189,6 +194,16 @@ pub async fn api_process_transcript<R: Runtime>(
     let pool = state.db_manager.pool().clone();
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
+    let final_summary_system_prompt = summary_system_prompt
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string());
+    let final_summary_chunk_system_prompt = summary_chunk_system_prompt
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string());
+    let final_summary_chunk_prompt = summary_chunk_prompt
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string());
+    let final_summary_combine_system_prompt = summary_combine_system_prompt
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string());
+    let final_summary_combine_prompt = summary_combine_prompt
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string());
 
     // Create or reset the process entry in the database
     SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
@@ -227,6 +242,11 @@ pub async fn api_process_transcript<R: Runtime>(
             model_name,
             final_prompt,
             final_template_id,
+            final_summary_system_prompt,
+            final_summary_chunk_system_prompt,
+            final_summary_chunk_prompt,
+            final_summary_combine_system_prompt,
+            final_summary_combine_prompt,
         )
         .await;
     });
@@ -257,18 +277,30 @@ pub async fn api_cancel_summary<R: Runtime>(
     if cancelled {
         // Update database status to cancelled
         let pool = state.db_manager.pool();
-        if let Err(e) = SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await {
-            log_error!("Failed to update DB status to cancelled for {}: {}", meeting_id, e);
+        if let Err(e) =
+            SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await
+        {
+            log_error!(
+                "Failed to update DB status to cancelled for {}: {}",
+                meeting_id,
+                e
+            );
             return Err(format!("Failed to update cancellation status: {}", e));
         }
 
-        log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id);
+        log_info!(
+            "Successfully cancelled summary generation for meeting_id: {}",
+            meeting_id
+        );
         Ok(serde_json::json!({
             "message": "Summary generation cancelled successfully",
             "meeting_id": meeting_id,
         }))
     } else {
-        log_warn!("No active summary generation found for meeting_id: {}", meeting_id);
+        log_warn!(
+            "No active summary generation found for meeting_id: {}",
+            meeting_id
+        );
         Ok(serde_json::json!({
             "message": "No active summary generation to cancel",
             "meeting_id": meeting_id,

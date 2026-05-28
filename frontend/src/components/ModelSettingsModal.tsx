@@ -34,6 +34,11 @@ export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
+  summarySystemPrompt: string;
+  summaryChunkSystemPrompt: string;
+  summaryChunkPrompt: string;
+  summaryCombineSystemPrompt: string;
+  summaryCombinePrompt: string;
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
   // Custom OpenAI fields

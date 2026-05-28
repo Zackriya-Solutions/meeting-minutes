@@ -6,7 +6,6 @@
 /// - Service layer for orchestrating summary generation
 /// - Templates for structured meeting summary generation
 /// - Tauri commands for frontend integration
-
 use serde::{Deserialize, Serialize};
 
 /// Custom OpenAI-compatible endpoint configuration
@@ -41,20 +40,26 @@ pub mod templates;
 // Re-export Tauri commands (with their generated __cmd__ variants)
 pub use commands::{
     __cmd__api_cancel_summary, __cmd__api_get_summary, __cmd__api_process_transcript,
-    __cmd__api_save_meeting_summary, api_cancel_summary, api_get_summary,
-    api_process_transcript, api_save_meeting_summary,
+    __cmd__api_save_meeting_summary, api_cancel_summary, api_get_summary, api_process_transcript,
+    api_save_meeting_summary,
 };
 
 // Re-export template commands
 pub use template_commands::{
-    __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
-    api_get_template_details, api_list_templates, api_validate_template,
+    __cmd__api_get_default_template_json, __cmd__api_get_template_details,
+    __cmd__api_get_template_json, __cmd__api_list_templates, __cmd__api_reset_template,
+    __cmd__api_save_template, __cmd__api_validate_template, api_get_default_template_json,
+    api_get_template_details, api_get_template_json, api_list_templates, api_reset_template,
+    api_save_template, api_validate_template,
 };
 
 // Re-export commonly used items
 pub use llm_client::LLMProvider;
 pub use processor::{
     chunk_text, clean_llm_markdown_output, extract_meeting_name_from_markdown,
-    generate_meeting_summary, rough_token_count,
+    generate_meeting_summary, render_summary_chunk_prompt, render_summary_combine_prompt,
+    render_summary_system_prompt, rough_token_count, DEFAULT_SUMMARY_CHUNK_PROMPT,
+    DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT, DEFAULT_SUMMARY_COMBINE_PROMPT,
+    DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT, DEFAULT_SUMMARY_SYSTEM_PROMPT,
 };
 pub use service::SummaryService;

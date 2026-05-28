@@ -1,9 +1,9 @@
 use crate::notifications::types::{Notification, NotificationPriority, NotificationTimeout};
-use anyhow::{Result, anyhow};
-use log::{info as log_info, error as log_error};
+use anyhow::{anyhow, Result};
+use log::{error as log_error, info as log_info};
+use std::time::Duration;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
-use std::time::Duration;
 
 /// Cross-platform system notification handler
 pub struct SystemNotificationHandler<R: Runtime> {
@@ -12,9 +12,7 @@ pub struct SystemNotificationHandler<R: Runtime> {
 
 impl<R: Runtime> SystemNotificationHandler<R> {
     pub fn new(app_handle: AppHandle<R>) -> Self {
-        Self {
-            app_handle,
-        }
+        Self { app_handle }
     }
 
     /// Show a notification using Tauri's notification plugin
@@ -23,20 +21,29 @@ impl<R: Runtime> SystemNotificationHandler<R> {
 
         // Check if DND is active and respect user settings
         if self.is_dnd_active().await && self.should_respect_dnd(&notification) {
-            log_info!("DND is active, skipping notification: {}", notification.title);
+            log_info!(
+                "DND is active, skipping notification: {}",
+                notification.title
+            );
             return Ok(());
         }
 
         // Use Tauri notification for all platforms
         log_info!("Showing Tauri notification: {}", notification.title);
 
-        let builder = self.app_handle.notification().builder()
+        let builder = self
+            .app_handle
+            .notification()
+            .builder()
             .title(&notification.title)
             .body(&notification.body);
 
         match builder.show() {
             Ok(_) => {
-                log_info!("Successfully showed Tauri notification: {}", notification.title);
+                log_info!(
+                    "Successfully showed Tauri notification: {}",
+                    notification.title
+                );
                 Ok(())
             }
             Err(e) => {
@@ -83,7 +90,7 @@ impl<R: Runtime> SystemNotificationHandler<R> {
     fn should_respect_dnd(&self, notification: &Notification) -> bool {
         match notification.priority {
             NotificationPriority::Critical => false, // Always show critical notifications
-            _ => true, // Respect DND for all other priorities
+            _ => true,                               // Respect DND for all other priorities
         }
     }
 

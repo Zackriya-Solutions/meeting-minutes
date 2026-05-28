@@ -8,8 +8,8 @@
 // 2. Cross-platform name heuristics
 // 3. Buffer size analysis (fallback)
 
-use std::time::Duration;
 use log::{debug, info, warn};
+use std::time::Duration;
 
 /// Audio input device kind with different latency characteristics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,68 +118,71 @@ impl InputDeviceKind {
 
         // Tier 1: High confidence Bluetooth patterns (99% accuracy)
         const TIER1_BLUETOOTH_PATTERNS: &[&str] = &[
-            "airpods",          // Apple AirPods (all variants)
-            "airpods pro",      // Apple AirPods Pro
-            "airpods max",      // Apple AirPods Max
+            "airpods",     // Apple AirPods (all variants)
+            "airpods pro", // Apple AirPods Pro
+            "airpods max", // Apple AirPods Max
         ];
 
         for pattern in TIER1_BLUETOOTH_PATTERNS {
             if name_lower.contains(pattern) {
-                info!("🎧 Tier 1 Bluetooth pattern matched: '{}' (pattern: '{}')",
-                      device_name, pattern);
+                info!(
+                    "🎧 Tier 1 Bluetooth pattern matched: '{}' (pattern: '{}')",
+                    device_name, pattern
+                );
                 return Some(InputDeviceKind::Bluetooth);
             }
         }
 
         // Tier 2: Very likely Bluetooth patterns (95% accuracy)
         const TIER2_BLUETOOTH_PATTERNS: &[&str] = &[
-            "bluetooth",        // Generic Bluetooth
-            "wh-1000xm",        // Sony WH-1000XM series (1/2/3/4/5)
-            "quietcomfort",     // Bose QuietComfort series
-            "freebuds",         // Huawei FreeBuds
-            "galaxy buds",      // Samsung Galaxy Buds
+            "bluetooth",          // Generic Bluetooth
+            "wh-1000xm",          // Sony WH-1000XM series (1/2/3/4/5)
+            "quietcomfort",       // Bose QuietComfort series
+            "freebuds",           // Huawei FreeBuds
+            "galaxy buds",        // Samsung Galaxy Buds
             "surface headphones", // Microsoft Surface Headphones
-            "beats",            // Beats headphones (mostly Bluetooth)
-            "jabra",            // Jabra Bluetooth headsets
-            "plantronics",      // Plantronics Bluetooth headsets
+            "beats",              // Beats headphones (mostly Bluetooth)
+            "jabra",              // Jabra Bluetooth headsets
+            "plantronics",        // Plantronics Bluetooth headsets
         ];
 
         for pattern in TIER2_BLUETOOTH_PATTERNS {
             if name_lower.contains(pattern) {
-                info!("🎧 Tier 2 Bluetooth pattern matched: '{}' (pattern: '{}')",
-                      device_name, pattern);
+                info!(
+                    "🎧 Tier 2 Bluetooth pattern matched: '{}' (pattern: '{}')",
+                    device_name, pattern
+                );
                 return Some(InputDeviceKind::Bluetooth);
             }
         }
 
         // Tier 3: Likely Bluetooth patterns (85% accuracy) - more cautious
         const TIER3_BLUETOOTH_PATTERNS: &[&str] = &[
-            "bt ",              // BT prefix
-            " bt",              // BT suffix
-            "wireless",         // Wireless devices
+            "bt ",      // BT prefix
+            " bt",      // BT suffix
+            "wireless", // Wireless devices
         ];
 
         for pattern in TIER3_BLUETOOTH_PATTERNS {
             if name_lower.contains(pattern) {
-                warn!("⚠️ Tier 3 Bluetooth pattern matched: '{}' (pattern: '{}') - lower confidence",
-                      device_name, pattern);
+                warn!(
+                    "⚠️ Tier 3 Bluetooth pattern matched: '{}' (pattern: '{}') - lower confidence",
+                    device_name, pattern
+                );
                 return Some(InputDeviceKind::Bluetooth);
             }
         }
 
         // Check for virtual audio devices (treat as wired)
-        const VIRTUAL_DEVICE_PATTERNS: &[&str] = &[
-            "blackhole",
-            "vb-audio",
-            "virtual",
-            "loopback",
-            "monitor",
-        ];
+        const VIRTUAL_DEVICE_PATTERNS: &[&str] =
+            &["blackhole", "vb-audio", "virtual", "loopback", "monitor"];
 
         for pattern in VIRTUAL_DEVICE_PATTERNS {
             if name_lower.contains(pattern) {
-                info!("🔌 Virtual audio device detected: '{}' (pattern: '{}') - treating as Wired",
-                      device_name, pattern);
+                info!(
+                    "🔌 Virtual audio device detected: '{}' (pattern: '{}') - treating as Wired",
+                    device_name, pattern
+                );
                 return Some(InputDeviceKind::Wired);
             }
         }
@@ -208,18 +211,25 @@ impl InputDeviceKind {
         // Bluetooth devices typically report > 50ms buffer latency
         // Wired devices typically < 20ms
         if base_latency_ms > 50.0 {
-            warn!("⚠️ High buffer latency detected: {:.2}ms (buffer_size={}, sample_rate={})",
-                  base_latency_ms, buffer_size, sample_rate);
+            warn!(
+                "⚠️ High buffer latency detected: {:.2}ms (buffer_size={}, sample_rate={})",
+                base_latency_ms, buffer_size, sample_rate
+            );
             warn!("   Treating as Bluetooth device (buffer size heuristic)");
             return Some(InputDeviceKind::Bluetooth);
         } else if base_latency_ms < 20.0 {
-            debug!("✓ Low buffer latency: {:.2}ms - likely wired device", base_latency_ms);
+            debug!(
+                "✓ Low buffer latency: {:.2}ms - likely wired device",
+                base_latency_ms
+            );
             return Some(InputDeviceKind::Wired);
         }
 
         // Ambiguous range (20-50ms) - cannot determine
-        debug!("⚠️ Ambiguous buffer latency: {:.2}ms - cannot determine device type from buffer size",
-               base_latency_ms);
+        debug!(
+            "⚠️ Ambiguous buffer latency: {:.2}ms - cannot determine device type from buffer size",
+            base_latency_ms
+        );
         None
     }
 }
@@ -241,9 +251,9 @@ impl InputDeviceKind {
         // Query Core Audio device list and find device by name
         // System::devices() returns Result<Vec<Device>, Error>
         let devices = System::devices().ok()?;
-        let device = devices.iter().find(|d| {
-            d.name().ok().map(|n| n.to_string()).as_deref() == Some(device_name)
-        })?;
+        let device = devices
+            .iter()
+            .find(|d| d.name().ok().map(|n| n.to_string()).as_deref() == Some(device_name))?;
 
         // Query transport type
         if let Ok(transport) = device.transport_type() {
@@ -251,11 +261,17 @@ impl InputDeviceKind {
 
             match transport {
                 DeviceTransportType::BLUETOOTH => {
-                    info!("✅ macOS Core Audio: Bluetooth detected for '{}'", device_name);
+                    info!(
+                        "✅ macOS Core Audio: Bluetooth detected for '{}'",
+                        device_name
+                    );
                     return Some(InputDeviceKind::Bluetooth);
                 }
                 DeviceTransportType::BLUETOOTH_LE => {
-                    info!("✅ macOS Core Audio: Bluetooth LE detected for '{}'", device_name);
+                    info!(
+                        "✅ macOS Core Audio: Bluetooth LE detected for '{}'",
+                        device_name
+                    );
                     return Some(InputDeviceKind::Bluetooth);
                 }
                 DeviceTransportType::USB => {
@@ -263,17 +279,22 @@ impl InputDeviceKind {
                     return Some(InputDeviceKind::Wired);
                 }
                 DeviceTransportType::BUILT_IN => {
-                    info!("✅ macOS Core Audio: Built-in detected for '{}'", device_name);
+                    info!(
+                        "✅ macOS Core Audio: Built-in detected for '{}'",
+                        device_name
+                    );
                     return Some(InputDeviceKind::Wired);
                 }
                 _ => {
-                    debug!("macOS Core Audio: Unknown transport type for '{}': {:?}",
-                           device_name, transport);
+                    debug!(
+                        "macOS Core Audio: Unknown transport type for '{}': {:?}",
+                        device_name, transport
+                    );
                 }
             }
         }
 
-        None  // Fall through to heuristic detection
+        None // Fall through to heuristic detection
     }
 }
 
@@ -292,35 +313,50 @@ impl InputDeviceKind {
 
         // Pattern 1: "Bluetooth Audio (Device Name)"
         if name_lower.starts_with("bluetooth audio") {
-            info!("✅ Windows WASAPI: Bluetooth Audio prefix detected for '{}'", device_name);
+            info!(
+                "✅ Windows WASAPI: Bluetooth Audio prefix detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Bluetooth);
         }
 
         // Pattern 2: "Bluetooth Hands-Free Audio"
         if name_lower.contains("bluetooth hands-free") {
-            info!("✅ Windows WASAPI: Bluetooth Hands-Free detected for '{}'", device_name);
+            info!(
+                "✅ Windows WASAPI: Bluetooth Hands-Free detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Bluetooth);
         }
 
         // Pattern 3: "Bluetooth Stereo Audio"
         if name_lower.contains("bluetooth stereo") {
-            info!("✅ Windows WASAPI: Bluetooth Stereo detected for '{}'", device_name);
+            info!(
+                "✅ Windows WASAPI: Bluetooth Stereo detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Bluetooth);
         }
 
         // Pattern 4: USB Audio devices
         if name_lower.contains("usb audio") {
-            info!("✅ Windows WASAPI: USB Audio detected for '{}'", device_name);
+            info!(
+                "✅ Windows WASAPI: USB Audio detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Wired);
         }
 
         // Pattern 5: Realtek, Conexant, etc. (built-in audio chips)
         if name_lower.contains("realtek") || name_lower.contains("conexant") {
-            info!("✅ Windows WASAPI: Built-in audio detected for '{}'", device_name);
+            info!(
+                "✅ Windows WASAPI: Built-in audio detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Wired);
         }
 
-        None  // Fall through to heuristic detection
+        None // Fall through to heuristic detection
     }
 }
 
@@ -343,7 +379,10 @@ impl InputDeviceKind {
 
         // Pattern 2: Explicit "bluetooth" in name
         if name_lower.contains("bluetooth") {
-            info!("✅ Linux: 'bluetooth' keyword detected for '{}'", device_name);
+            info!(
+                "✅ Linux: 'bluetooth' keyword detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Bluetooth);
         }
 
@@ -367,11 +406,14 @@ impl InputDeviceKind {
 
         // Pattern 6: HDA Intel (built-in)
         if name_lower.contains("hda intel") {
-            info!("✅ Linux: HDA Intel (built-in) detected for '{}'", device_name);
+            info!(
+                "✅ Linux: HDA Intel (built-in) detected for '{}'",
+                device_name
+            );
             return Some(InputDeviceKind::Wired);
         }
 
-        None  // Fall through to heuristic detection
+        None // Fall through to heuristic detection
     }
 }
 
@@ -478,11 +520,7 @@ mod tests {
         // AirPods: 3840 frames at 48kHz = 80ms base
         // With 2x headroom = 160ms
         // Should clamp to 80-200ms range
-        let timeout = calculate_buffer_timeout(
-            InputDeviceKind::Bluetooth,
-            3840,
-            48000,
-        );
+        let timeout = calculate_buffer_timeout(InputDeviceKind::Bluetooth, 3840, 48000);
         assert_eq!(timeout, Duration::from_millis(160));
     }
 
@@ -491,11 +529,7 @@ mod tests {
         // Built-in: 512 frames at 48kHz = 10.67ms base
         // With 2x headroom = 21.3ms
         // Should clamp to 20-50ms range
-        let timeout = calculate_buffer_timeout(
-            InputDeviceKind::Wired,
-            512,
-            48000,
-        );
+        let timeout = calculate_buffer_timeout(InputDeviceKind::Wired, 512, 48000);
         // 21.33ms rounds to 21ms
         assert!(timeout >= Duration::from_millis(20));
         assert!(timeout <= Duration::from_millis(50));

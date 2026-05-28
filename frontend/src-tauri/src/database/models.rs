@@ -49,7 +49,7 @@ pub struct SummaryProcess {
     pub end_time: Option<chrono::DateTime<chrono::Utc>>,
     pub chunk_count: i64,
     pub processing_time: f64,
-    pub metadata: Option<String>, // JSON
+    pub metadata: Option<String>,      // JSON
     pub result_backup: Option<String>, // Backup of result before regeneration
     pub result_backup_timestamp: Option<chrono::DateTime<chrono::Utc>>, // When backup was created
 }
@@ -96,14 +96,29 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    #[sqlx(rename = "summarySystemPrompt")]
+    #[serde(rename = "summarySystemPrompt")]
+    pub summary_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryChunkSystemPrompt")]
+    #[serde(rename = "summaryChunkSystemPrompt")]
+    pub summary_chunk_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryChunkPrompt")]
+    #[serde(rename = "summaryChunkPrompt")]
+    pub summary_chunk_prompt: Option<String>,
+    #[sqlx(rename = "summaryCombineSystemPrompt")]
+    #[serde(rename = "summaryCombineSystemPrompt")]
+    pub summary_combine_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryCombinePrompt")]
+    #[serde(rename = "summaryCombinePrompt")]
+    pub summary_combine_prompt: Option<String>,
 }
 
 impl Setting {
     /// Parse the custom OpenAI config from JSON string
     pub fn get_custom_openai_config(&self) -> Option<crate::summary::CustomOpenAIConfig> {
-        self.custom_openai_config.as_ref().and_then(|json| {
-            serde_json::from_str(json).ok()
-        })
+        self.custom_openai_config
+            .as_ref()
+            .and_then(|json| serde_json::from_str(json).ok())
     }
 }
 

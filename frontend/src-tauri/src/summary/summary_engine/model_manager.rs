@@ -69,7 +69,10 @@ pub enum ModelStatus {
     Available,
 
     /// Model file is corrupted and needs redownload
-    Corrupted { file_size: u64, expected_min_size: u64 },
+    Corrupted {
+        file_size: u64,
+        expected_min_size: u64,
+    },
 
     /// Error occurred with the model
     Error(String),
@@ -256,11 +259,7 @@ impl ModelManager {
                         }
                     }
                     Err(e) => {
-                        log::error!(
-                            "Model '{}': Failed to read metadata: {}",
-                            model_def.name,
-                            e
-                        );
+                        log::error!("Model '{}': Failed to read metadata: {}", model_def.name, e);
                         ModelStatus::Error(format!("Failed to read metadata: {}", e))
                     }
                 }
@@ -309,11 +308,7 @@ impl ModelManager {
 
     /// Get info for a specific model
     pub async fn get_model_info(&self, model_name: &str) -> Option<ModelInfo> {
-        self.available_models
-            .read()
-            .await
-            .get(model_name)
-            .cloned()
+        self.available_models.read().await.get(model_name).cloned()
     }
 
     /// Check if a model is ready to use
@@ -340,11 +335,13 @@ impl ModelManager {
         progress_callback: Option<Box<dyn Fn(u8) + Send>>,
     ) -> Result<()> {
         // Wrap the simple callback to use detailed progress internally
-        let detailed_callback: Option<Box<dyn Fn(DownloadProgress) + Send>> =
-            progress_callback.map(|cb| {
-                Box::new(move |p: DownloadProgress| cb(p.percent)) as Box<dyn Fn(DownloadProgress) + Send>
+        let detailed_callback: Option<Box<dyn Fn(DownloadProgress) + Send>> = progress_callback
+            .map(|cb| {
+                Box::new(move |p: DownloadProgress| cb(p.percent))
+                    as Box<dyn Fn(DownloadProgress) + Send>
             });
-        self.download_model_detailed(model_name, detailed_callback).await
+        self.download_model_detailed(model_name, detailed_callback)
+            .await
     }
 
     /// Download a model with detailed progress (MB, speed, etc.)
@@ -461,10 +458,7 @@ impl ModelManager {
 
         // Check for existing partial download to resume
         let existing_size: u64 = if file_path.exists() {
-            fs::metadata(&file_path)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0)
+            fs::metadata(&file_path).await.map(|m| m.len()).unwrap_or(0)
         } else {
             0
         };
@@ -498,7 +492,10 @@ impl ModelManager {
         let (total_size, resuming) = if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
             // Server supports resume - total size = existing + remaining
             let remaining = response.content_length().unwrap_or(0);
-            log::info!("Server supports resume, {} MB remaining", remaining / (1024 * 1024));
+            log::info!(
+                "Server supports resume, {} MB remaining",
+                remaining / (1024 * 1024)
+            );
             (existing_size + remaining, true)
         } else if response.status().is_success() {
             // Server doesn't support resume or fresh download
@@ -509,7 +506,10 @@ impl ModelManager {
         } else {
             let mut active = self.active_downloads.write().await;
             active.remove(model_name);
-            return Err(anyhow!("Download failed with status: {}", response.status()));
+            return Err(anyhow!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         };
 
         log::info!("Total size: {} MB", total_size / (1024 * 1024));
@@ -590,7 +590,10 @@ impl ModelManager {
             let chunk = match next_result {
                 // Timeout - no data received for 30 seconds
                 Err(_) => {
-                    log::warn!("Download timeout for {}: no data received for 30 seconds", model_name);
+                    log::warn!(
+                        "Download timeout for {}: no data received for 30 seconds",
+                        model_name
+                    );
                     let _ = writer.flush().await;
 
                     // Cleanup: Remove from active downloads
@@ -601,12 +604,16 @@ impl ModelManager {
                     {
                         let mut models = self.available_models.write().await;
                         if let Some(model_info) = models.get_mut(model_name) {
-                            model_info.status = ModelStatus::Error("Download timeout - No data received for 30 seconds".to_string());
+                            model_info.status = ModelStatus::Error(
+                                "Download timeout - No data received for 30 seconds".to_string(),
+                            );
                         }
                     }
 
-                    return Err(anyhow!("Download timeout - No data received for 30 seconds"));
-                },
+                    return Err(anyhow!(
+                        "Download timeout - No data received for 30 seconds"
+                    ));
+                }
                 // Stream ended
                 Ok(None) => break,
                 // Got chunk result
@@ -672,7 +679,8 @@ impl ModelManager {
             if should_report {
                 // Calculate speed based on bytes downloaded since last report
                 let speed_mbps = if elapsed_since_report.as_secs_f64() > 0.0 {
-                    (bytes_since_last_report as f64 / (1024.0 * 1024.0)) / elapsed_since_report.as_secs_f64()
+                    (bytes_since_last_report as f64 / (1024.0 * 1024.0))
+                        / elapsed_since_report.as_secs_f64()
                 } else {
                     // Fallback to overall average speed
                     let total_elapsed = download_start_time.elapsed().as_secs_f64();
@@ -695,7 +703,11 @@ impl ModelManager {
                     let mut models = self.available_models.write().await;
                     if let Some(model_info) = models.get_mut(model_name) {
                         model_info.status = ModelStatus::Downloading {
-                            progress: if is_download_complete { 100 } else { progress_percent }
+                            progress: if is_download_complete {
+                                100
+                            } else {
+                                progress_percent
+                            },
                         };
                     }
                 }

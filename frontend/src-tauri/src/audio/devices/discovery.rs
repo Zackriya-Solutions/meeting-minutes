@@ -81,7 +81,10 @@ pub fn trigger_audio_permission() -> Result<bool> {
 
     // Start the stream to actually trigger the permission dialog
     if let Err(e) = stream.play() {
-        info!("[trigger_audio_permission] Failed to play stream: {} - permission likely denied", e);
+        info!(
+            "[trigger_audio_permission] Failed to play stream: {} - permission likely denied",
+            e
+        );
         return Ok(false);
     }
 

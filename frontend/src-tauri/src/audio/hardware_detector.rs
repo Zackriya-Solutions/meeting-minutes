@@ -1,5 +1,5 @@
-use std::sync::OnceLock;
 use log::info;
+use std::sync::OnceLock;
 
 /// Hardware capabilities for audio processing optimization
 #[derive(Debug, Clone, PartialEq)]
@@ -14,18 +14,18 @@ pub struct HardwareProfile {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GpuType {
     None,
-    Metal,      // Apple Silicon
-    Cuda,       // NVIDIA
-    Vulkan,     // AMD/Intel
-    OpenCL,     // Generic GPU compute
+    Metal,  // Apple Silicon
+    Cuda,   // NVIDIA
+    Vulkan, // AMD/Intel
+    OpenCL, // Generic GPU compute
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PerformanceTier {
-    Low,      // CPU-only, limited resources
-    Medium,   // CPU-only but powerful, or basic GPU
-    High,     // Dedicated GPU with good compute
-    Ultra,    // High-end hardware with fast GPU
+    Low,    // CPU-only, limited resources
+    Medium, // CPU-only but powerful, or basic GPU
+    High,   // Dedicated GPU with good compute
+    Ultra,  // High-end hardware with fast GPU
 }
 
 /// Adaptive Whisper configuration based on hardware
@@ -40,9 +40,9 @@ pub struct AdaptiveWhisperConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChunkSizePreference {
-    Fast,       // Smaller chunks for responsiveness
-    Balanced,   // Medium chunks for balance
-    Quality,    // Larger chunks for accuracy
+    Fast,     // Smaller chunks for responsiveness
+    Balanced, // Medium chunks for balance
+    Quality,  // Larger chunks for accuracy
 }
 
 static HARDWARE_PROFILE: OnceLock<HardwareProfile> = OnceLock::new();
@@ -117,7 +117,11 @@ impl HardwareProfile {
     }
 
     /// Calculate performance tier based on hardware
-    fn calculate_performance_tier(cpu_cores: u8, gpu_type: &GpuType, memory_gb: u8) -> PerformanceTier {
+    fn calculate_performance_tier(
+        cpu_cores: u8,
+        gpu_type: &GpuType,
+        memory_gb: u8,
+    ) -> PerformanceTier {
         match gpu_type {
             GpuType::Metal => {
                 if memory_gb >= 16 && cpu_cores >= 8 {
@@ -158,16 +162,16 @@ impl HardwareProfile {
 
     fn has_cuda_support() -> bool {
         // Check for CUDA environment or libraries
-        std::env::var("CUDA_PATH").is_ok() ||
-        std::env::var("CUDA_HOME").is_ok() ||
-        std::path::Path::new("/usr/local/cuda").exists()
+        std::env::var("CUDA_PATH").is_ok()
+            || std::env::var("CUDA_HOME").is_ok()
+            || std::path::Path::new("/usr/local/cuda").exists()
     }
 
     fn has_vulkan_support() -> bool {
         // Basic Vulkan detection - could be enhanced
-        std::env::var("VULKAN_SDK").is_ok() ||
-        std::path::Path::new("/usr/lib/x86_64-linux-gnu/libvulkan.so").exists() ||
-        std::path::Path::new("/usr/lib/libvulkan.so").exists()
+        std::env::var("VULKAN_SDK").is_ok()
+            || std::path::Path::new("/usr/lib/x86_64-linux-gnu/libvulkan.so").exists()
+            || std::path::Path::new("/usr/lib/libvulkan.so").exists()
     }
 
     /// Generate adaptive Whisper configuration based on hardware
@@ -189,28 +193,28 @@ impl HardwareProfile {
         {
             match self.performance_tier {
                 PerformanceTier::Ultra => AdaptiveWhisperConfig {
-                    beam_size: 5,  // Maximum quality
+                    beam_size: 5, // Maximum quality
                     temperature: 0.1,
                     use_gpu: self.has_gpu_acceleration,
                     max_threads: Some(self.cpu_cores.min(8) as usize),
                     chunk_size_preference: ChunkSizePreference::Quality,
                 },
                 PerformanceTier::High => AdaptiveWhisperConfig {
-                    beam_size: 3,  // High quality
+                    beam_size: 3, // High quality
                     temperature: 0.2,
                     use_gpu: self.has_gpu_acceleration,
                     max_threads: Some(self.cpu_cores.min(6) as usize),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 },
                 PerformanceTier::Medium => AdaptiveWhisperConfig {
-                    beam_size: 2,  // Balanced
+                    beam_size: 2, // Balanced
                     temperature: 0.3,
                     use_gpu: self.has_gpu_acceleration,
                     max_threads: Some(self.cpu_cores.min(4) as usize),
                     chunk_size_preference: ChunkSizePreference::Balanced,
                 },
                 PerformanceTier::Low => AdaptiveWhisperConfig {
-                    beam_size: 1,  // Fast processing
+                    beam_size: 1, // Fast processing
                     temperature: 0.4,
                     use_gpu: false, // Force CPU to avoid GPU overhead on weak hardware
                     max_threads: Some(2),
@@ -223,10 +227,10 @@ impl HardwareProfile {
     /// Get recommended chunk duration in milliseconds based on performance tier
     pub fn get_recommended_chunk_duration_ms(&self) -> u32 {
         match self.performance_tier {
-            PerformanceTier::Ultra => 25000,   // 25 seconds for maximum accuracy
-            PerformanceTier::High => 20000,    // 20 seconds for high quality
-            PerformanceTier::Medium => 15000,  // 15 seconds for balance
-            PerformanceTier::Low => 10000,     // 10 seconds for responsiveness
+            PerformanceTier::Ultra => 25000,  // 25 seconds for maximum accuracy
+            PerformanceTier::High => 20000,   // 20 seconds for high quality
+            PerformanceTier::Medium => 15000, // 15 seconds for balance
+            PerformanceTier::Low => 10000,    // 10 seconds for responsiveness
         }
     }
 

@@ -84,7 +84,7 @@ impl Template {
     /// Generates section-specific instructions for the LLM
     pub fn to_section_instructions(&self) -> String {
         let mut instructions = String::from(
-            "- **For the main title (`# [AI-Generated Title]`):** Analyze the entire transcript and create a concise, descriptive title for the meeting.\n"
+            "- **For the main title:** Analyze the entire transcript and create a concise, descriptive meeting title after the `#` marker. Do not include placeholder text in the output.\n"
         );
 
         for section in &self.sections {
@@ -94,7 +94,9 @@ impl Template {
             ));
 
             // Add item format instructions if present
-            let item_format = section.item_format.as_ref()
+            let item_format = section
+                .item_format
+                .as_ref()
                 .or(section.example_item_format.as_ref());
 
             if let Some(format) = item_format {
@@ -118,15 +120,13 @@ mod tests {
         let template = Template {
             name: "Test Template".to_string(),
             description: "A test template".to_string(),
-            sections: vec![
-                TemplateSection {
-                    title: "Summary".to_string(),
-                    instruction: "Provide a summary".to_string(),
-                    format: "paragraph".to_string(),
-                    item_format: None,
-                    example_item_format: None,
-                },
-            ],
+            sections: vec![TemplateSection {
+                title: "Summary".to_string(),
+                instruction: "Provide a summary".to_string(),
+                format: "paragraph".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
         };
 
         assert!(template.validate().is_ok());
@@ -148,17 +148,35 @@ mod tests {
         let template = Template {
             name: "Test".to_string(),
             description: "Test".to_string(),
-            sections: vec![
-                TemplateSection {
-                    title: "Test".to_string(),
-                    instruction: "Test".to_string(),
-                    format: "invalid".to_string(),
-                    item_format: None,
-                    example_item_format: None,
-                },
-            ],
+            sections: vec![TemplateSection {
+                title: "Test".to_string(),
+                instruction: "Test".to_string(),
+                format: "invalid".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
         };
 
         assert!(template.validate().is_err());
+    }
+
+    #[test]
+    fn section_instructions_do_not_expose_title_placeholder_as_literal_output() {
+        let template = Template {
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            sections: vec![TemplateSection {
+                title: "Summary".to_string(),
+                instruction: "Provide a summary".to_string(),
+                format: "paragraph".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
+        };
+
+        let instructions = template.to_section_instructions();
+
+        assert!(!instructions.contains("AI-Generated Title"));
+        assert!(instructions.contains("main title"));
     }
 }

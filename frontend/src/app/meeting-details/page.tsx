@@ -103,6 +103,11 @@ function MeetingDetailsContent() {
           whisperModel: 'large-v3',
           apiKey: null,
           ollamaEndpoint: null,
+          summarySystemPrompt: '',
+          summaryChunkSystemPrompt: '',
+          summaryChunkPrompt: '',
+          summaryCombineSystemPrompt: '',
+          summaryCombinePrompt: '',
         });
 
         setShouldAutoGenerate(true);
