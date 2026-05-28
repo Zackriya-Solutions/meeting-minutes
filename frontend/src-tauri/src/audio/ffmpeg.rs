@@ -37,7 +37,6 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
         }
     }
 
-
     // ============================================================
     // PRIORITY 2: Fallback to Existing Logic
     // ============================================================
@@ -57,7 +56,10 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
             debug!("Checking $HOME/.local/bin: {:?}", local_bin);
             let ffmpeg_in_local_bin = local_bin.join(EXECUTABLE_NAME);
             if ffmpeg_in_local_bin.exists() {
-                debug!("Found ffmpeg in $HOME/.local/bin: {:?}", ffmpeg_in_local_bin);
+                debug!(
+                    "Found ffmpeg in $HOME/.local/bin: {:?}",
+                    ffmpeg_in_local_bin
+                );
                 return Some(ffmpeg_in_local_bin);
             }
             debug!("ffmpeg not found in $HOME/.local/bin");

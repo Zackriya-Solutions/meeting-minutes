@@ -2,7 +2,7 @@
 //
 // Parakeet transcription provider implementation.
 
-use super::provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};
+use super::provider::{TranscriptResult, TranscriptionError, TranscriptionProvider};
 use async_trait::async_trait;
 use log::warn;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ impl TranscriptionProvider for ParakeetProvider {
         match self.engine.transcribe_audio(audio).await {
             Ok(text) => Ok(TranscriptResult {
                 text: text.trim().to_string(),
-                confidence: None, // Parakeet doesn't provide confidence scores
+                confidence: None,  // Parakeet doesn't provide confidence scores
                 is_partial: false, // Parakeet doesn't provide partial results
             }),
             Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),

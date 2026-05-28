@@ -20,7 +20,10 @@ static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
-    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+    info!(
+        "🔍 SPEECH_DETECTED_EMITTED reset to: {}",
+        SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst)
+    );
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -35,7 +38,7 @@ pub struct TranscriptUpdate {
     // NEW: Recording-relative timestamps for playback sync
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
-    pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+    pub duration: f64,         // Segment duration in seconds (e.g., 3.3)
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
@@ -50,7 +53,8 @@ pub fn start_transcription_task<R: Runtime>(
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
 
         // Initialize transcription engine (Whisper or Parakeet based on config)
-        let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await {
+        let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await
+        {
             Ok(engine) => engine,
             Err(e) => {
                 error!("Failed to initialize transcription engine: {}", e);
@@ -73,7 +77,11 @@ pub fn start_transcription_task<R: Runtime>(
         let chunks_completed = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
 
-        info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
+        info!(
+            "📊 Starting {} transcription worker{} (serial mode for ordered emission)",
+            NUM_WORKERS,
+            if NUM_WORKERS == 1 { "" } else { "s" }
+        );
 
         // Spawn worker tasks
         let mut worker_handles = Vec::new();
@@ -107,7 +115,10 @@ pub fn start_transcription_task<R: Runtime>(
                         worker_id, engine_name, current_model
                     );
                 } else {
-                    warn!("⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped", worker_id, engine_name);
+                    warn!(
+                        "⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped",
+                        worker_id, engine_name
+                    );
                 }
 
                 loop {
@@ -144,17 +155,14 @@ pub fn start_transcription_task<R: Runtime>(
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
                             // Transcribe with provider-agnostic approach
-                            match transcribe_chunk_with_provider(
-                                &engine_clone,
-                                chunk,
-                                &app_clone,
-                            )
-                            .await
+                            match transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
+                                .await
                             {
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold
                                     let confidence_threshold = match &engine_clone {
-                                        TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
+                                        TranscriptionEngine::Whisper(_)
+                                        | TranscriptionEngine::Provider(_) => 0.3,
                                         TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
                                     };
 
@@ -167,7 +175,8 @@ pub fn start_transcription_task<R: Runtime>(
                                           worker_id, transcript, confidence_str, is_partial, confidence_threshold);
 
                                     // Check confidence threshold (or accept if no confidence provided)
-                                    let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
+                                    let meets_threshold =
+                                        confidence_opt.map_or(true, |c| c >= confidence_threshold);
 
                                     if !transcript.trim().is_empty() && meets_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step
@@ -176,7 +185,8 @@ pub fn start_transcription_task<R: Runtime>(
 
                                         // Emit speech-detected event for frontend UX (only on first detection per session)
                                         // This is lightweight and provides better user feedback
-                                        let current_flag = SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
+                                        let current_flag =
+                                            SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
                                         info!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
 
                                         if !current_flag {
@@ -192,7 +202,8 @@ pub fn start_transcription_task<R: Runtime>(
                                         }
 
                                         // Generate sequence ID and calculate timestamps FIRST
-                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        let sequence_id =
+                                            SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
                                         let audio_start_time = chunk_timestamp; // Already in seconds from recording start
                                         let audio_end_time = chunk_timestamp + chunk_duration;
 
@@ -245,13 +256,20 @@ pub fn start_transcription_task<R: Runtime>(
                                             continue;
                                         }
                                         TranscriptionError::ModelNotLoaded => {
-                                            warn!("Worker {}: Model unloaded during transcription", worker_id);
+                                            warn!(
+                                                "Worker {}: Model unloaded during transcription",
+                                                worker_id
+                                            );
                                             chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
                                             continue;
                                         }
                                         _ => {
-                                            warn!("Worker {}: Transcription failed: {}", worker_id, e);
-                                            let _ = app_clone.emit("transcription-warning", e.to_string());
+                                            warn!(
+                                                "Worker {}: Transcription failed: {}",
+                                                worker_id, e
+                                            );
+                                            let _ = app_clone
+                                                .emit("transcription-warning", e.to_string());
                                         }
                                     }
                                 }

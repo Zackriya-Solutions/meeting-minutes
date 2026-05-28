@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use cpal::traits::{HostTrait, DeviceTrait};
+use cpal::traits::{DeviceTrait, HostTrait};
 use log::{info, warn};
 
 use super::configuration::{AudioDevice, DeviceType};
@@ -88,18 +88,20 @@ pub fn find_builtin_output_device() -> Result<Option<AudioDevice>> {
             for pattern in &builtin_patterns {
                 if name_lower.contains(pattern) {
                     // Additional filter: exclude Bluetooth/wireless devices
-                    if name_lower.contains("bluetooth") ||
-                       name_lower.contains("airpods") ||
-                       name_lower.contains("wireless") {
+                    if name_lower.contains("bluetooth")
+                        || name_lower.contains("airpods")
+                        || name_lower.contains("wireless")
+                    {
                         continue; // Skip Bluetooth devices
                     }
 
                     // Additional filter: exclude virtual audio devices
                     // (we want real hardware speakers for ScreenCaptureKit)
-                    if name_lower.contains("blackhole") ||
-                       name_lower.contains("vb-audio") ||
-                       name_lower.contains("virtual") ||
-                       name_lower.contains("loopback") {
+                    if name_lower.contains("blackhole")
+                        || name_lower.contains("vb-audio")
+                        || name_lower.contains("virtual")
+                        || name_lower.contains("loopback")
+                    {
                         continue; // Skip virtual devices
                     }
 
@@ -110,6 +112,9 @@ pub fn find_builtin_output_device() -> Result<Option<AudioDevice>> {
         }
     }
 
-    warn!("⚠️ No built-in speaker found (searched {} patterns)", builtin_patterns.len());
+    warn!(
+        "⚠️ No built-in speaker found (searched {} patterns)",
+        builtin_patterns.len()
+    );
     Ok(None)
 }

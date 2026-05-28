@@ -154,7 +154,7 @@ pub async fn builtin_ai_download_model<R: Runtime>(
                 }),
             );
             Ok(())
-        },
+        }
         Err(e) => {
             let error_msg = e.to_string();
 
@@ -238,7 +238,7 @@ pub async fn builtin_ai_is_model_ready<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, ModelManagerState>,
     model_name: String,
-    refresh: Option<bool>,  // NEW: Optional refresh parameter
+    refresh: Option<bool>, // NEW: Optional refresh parameter
 ) -> Result<bool, String> {
     let manager = {
         // Ensure manager is initialized
@@ -310,13 +310,16 @@ pub async fn builtin_ai_get_available_summary_model<R: Runtime>(
     // Find first available summary model
     let available = all_models
         .iter()
-        .filter(|m| matches!(m.status, crate::summary::summary_engine::model_manager::ModelStatus::Available))
-        .max_by_key(|m| {
-            match m.name.as_str() {
-                "gemma3:4b" => 2,
-                "gemma3:1b" => 1,
-                _ => 0,
-            }
+        .filter(|m| {
+            matches!(
+                m.status,
+                crate::summary::summary_engine::model_manager::ModelStatus::Available
+            )
+        })
+        .max_by_key(|m| match m.name.as_str() {
+            "gemma3:4b" => 2,
+            "gemma3:1b" => 1,
+            _ => 0,
         })
         .map(|m| m.name.clone());
 
@@ -328,9 +331,7 @@ pub async fn builtin_ai_get_available_summary_model<R: Runtime>(
 // Startup Initialization & Utility Commands
 // ============================================================================
 
-pub async fn init_model_manager_at_startup<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<(), String> {
+pub async fn init_model_manager_at_startup<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let models_dir = app
         .path()
         .app_data_dir()
@@ -354,7 +355,6 @@ pub async fn init_model_manager_at_startup<R: Runtime>(
     Ok(())
 }
 
-
 /// Get recommended summary model based on platform and system RAM
 /// macOS + >16GB RAM → gemma3:4b (2.5 GB, balanced)
 /// Otherwise → gemma3:1b (1019 MB, fast)
@@ -366,16 +366,25 @@ pub async fn builtin_ai_get_recommended_model() -> Result<String, String> {
     // Check if running on macOS
     let is_macos = cfg!(target_os = "macos");
 
-    log::info!("System RAM detected: {} GB, Platform: {}", system_ram_gb, if is_macos { "macOS" } else { "other" });
+    log::info!(
+        "System RAM detected: {} GB, Platform: {}",
+        system_ram_gb,
+        if is_macos { "macOS" } else { "other" }
+    );
 
     // Recommend model: gemma3:4b only on macOS with >16GB RAM
     let recommended = if is_macos && system_ram_gb > 16 {
-        "gemma3:4b"       // macOS + >16GB RAM: gemma3:4b (2.5 GB, balanced)
+        "gemma3:4b" // macOS + >16GB RAM: gemma3:4b (2.5 GB, balanced)
     } else {
-        "gemma3:1b"       // All other cases: gemma3:1b (806 MB, fast)
+        "gemma3:1b" // All other cases: gemma3:1b (806 MB, fast)
     };
 
-    log::info!("Recommended summary model: {} (macOS={}, {}GB RAM)", recommended, is_macos, system_ram_gb);
+    log::info!(
+        "Recommended summary model: {} (macOS={}, {}GB RAM)",
+        recommended,
+        is_macos,
+        system_ram_gb
+    );
     Ok(recommended.to_string())
 }
 

@@ -1,14 +1,13 @@
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use futures_util::{Stream, StreamExt};
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
+use futures_util::{Stream, StreamExt};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-
-#[cfg(target_os = "macos")]
-use futures_channel::mpsc;
 #[cfg(target_os = "macos")]
 use super::core_audio::CoreAudioCapture;
+#[cfg(target_os = "macos")]
+use futures_channel::mpsc;
 #[cfg(target_os = "macos")]
 use log::info;
 
@@ -25,7 +24,8 @@ impl SystemAudioCapture {
 
     pub fn list_system_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();
-        let devices = host.output_devices()
+        let devices = host
+            .output_devices()
             .map_err(|e| anyhow::anyhow!("Failed to enumerate output devices: {}", e))?;
 
         let mut device_names = Vec::new();

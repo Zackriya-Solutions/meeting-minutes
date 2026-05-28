@@ -1,17 +1,26 @@
 use super::defaults;
 use super::types::Template;
-use std::path::PathBuf;
-use tracing::{debug, info, warn};
 use once_cell::sync::Lazy;
+use std::path::PathBuf;
 use std::sync::RwLock;
+use tracing::{debug, info, warn};
 
 // Global storage for the bundled templates directory path
 static BUNDLED_TEMPLATES_DIR: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
+static CUSTOM_TEMPLATES_DIR: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
 
 /// Set the bundled templates directory path (called once at app startup)
 pub fn set_bundled_templates_dir(path: PathBuf) {
     info!("Bundled templates directory set to: {:?}", path);
     if let Ok(mut dir) = BUNDLED_TEMPLATES_DIR.write() {
+        *dir = Some(path);
+    }
+}
+
+/// Set the user's custom templates directory path (called once at app startup).
+pub fn set_custom_templates_dir(path: PathBuf) {
+    info!("Custom templates directory set to: {:?}", path);
+    if let Ok(mut dir) = CUSTOM_TEMPLATES_DIR.write() {
         *dir = Some(path);
     }
 }
@@ -23,6 +32,12 @@ pub fn set_bundled_templates_dir(path: PathBuf) {
 /// - Windows: %APPDATA%\Meetily\templates\
 /// - Linux: ~/.config/Meetily/templates/
 fn get_custom_templates_dir() -> Option<PathBuf> {
+    if let Ok(dir) = CUSTOM_TEMPLATES_DIR.read() {
+        if let Some(path) = dir.as_ref() {
+            return Some(path.clone());
+        }
+    }
+
     let mut path = dirs::data_dir()?;
     path.push("Meetily");
     path.push("templates");
@@ -44,7 +59,10 @@ fn load_bundled_template(template_id: &str) -> Option<String> {
 
     match std::fs::read_to_string(&template_path) {
         Ok(content) => {
-            info!("Loaded bundled template '{}' from {:?}", template_id, template_path);
+            info!(
+                "Loaded bundled template '{}' from {:?}",
+                template_id, template_path
+            );
             Some(content)
         }
         Err(e) => {
@@ -69,7 +87,10 @@ fn load_custom_template(template_id: &str) -> Option<String> {
 
     match std::fs::read_to_string(&template_path) {
         Ok(content) => {
-            info!("Loaded custom template '{}' from {:?}", template_id, template_path);
+            info!(
+                "Loaded custom template '{}' from {:?}",
+                template_id, template_path
+            );
             Some(content)
         }
         Err(e) => {
@@ -248,5 +269,36 @@ mod tests {
     fn test_validate_invalid_json() {
         let result = validate_and_parse_template("invalid json");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn custom_template_override_wins_and_falls_back_after_delete() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let templates_dir = temp_dir.path().join("templates");
+        std::fs::create_dir_all(&templates_dir).unwrap();
+        set_custom_templates_dir(templates_dir.clone());
+
+        let custom_template = r#"
+        {
+            "name": "Italian Meeting Notes",
+            "description": "Custom localized meeting template",
+            "sections": [
+                {
+                    "title": "Sintesi",
+                    "instruction": "Scrivi una sintesi della riunione",
+                    "format": "paragraph"
+                }
+            ]
+        }"#;
+        let template_path = templates_dir.join("standard_meeting.json");
+        std::fs::write(&template_path, custom_template).unwrap();
+
+        let template = get_template("standard_meeting").unwrap();
+        assert_eq!(template.name, "Italian Meeting Notes");
+        assert_eq!(template.sections[0].title, "Sintesi");
+
+        std::fs::remove_file(template_path).unwrap();
+        let template = get_template("standard_meeting").unwrap();
+        assert_eq!(template.name, "Standard Meeting Notes");
     }
 }

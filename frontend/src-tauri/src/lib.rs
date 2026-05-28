@@ -498,6 +498,17 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
+            if let Ok(app_data_dir) = _app.handle().path().app_data_dir() {
+                let custom_templates_dir = app_data_dir.join("templates");
+                log::info!(
+                    "Setting custom templates directory to: {:?}",
+                    custom_templates_dir
+                );
+                summary::templates::set_custom_templates_dir(custom_templates_dir);
+            } else {
+                log::warn!("Failed to resolve app data directory for custom templates");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

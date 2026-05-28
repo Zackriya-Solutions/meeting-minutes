@@ -10,14 +10,14 @@
 // 4. Timestamp-aware mixing to maintain sync
 // 5. Professional audio mixing with RMS-based ducking
 
+use log::{debug, info, warn};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-use log::{debug, warn, info};
 
 use super::device_detection::InputDeviceKind;
 
 /// Configuration flags for audio processing features
-pub const RNNOISE_APPLY_ENABLED: bool = false;  // Default: disabled (Whisper handles noise well)
+pub const RNNOISE_APPLY_ENABLED: bool = false; // Default: disabled (Whisper handles noise well)
 
 /// Timestamp for audio samples (reserved for future use)
 #[allow(dead_code)]
@@ -110,12 +110,17 @@ impl SourceBuffer {
         // Use max timeout for initial conservative approach
         let buffer_timeout = max_timeout;
 
-        info!("📦 SourceBuffer created for '{}' ({:?})", device_name, device_kind);
+        info!(
+            "📦 SourceBuffer created for '{}' ({:?})",
+            device_name, device_kind
+        );
         info!("   Sample rate: {} Hz", sample_rate);
-        info!("   Buffer timeout: {:.0}ms (range: {:.0}ms - {:.0}ms)",
-              buffer_timeout.as_secs_f64() * 1000.0,
-              min_timeout.as_secs_f64() * 1000.0,
-              max_timeout.as_secs_f64() * 1000.0);
+        info!(
+            "   Buffer timeout: {:.0}ms (range: {:.0}ms - {:.0}ms)",
+            buffer_timeout.as_secs_f64() * 1000.0,
+            min_timeout.as_secs_f64() * 1000.0,
+            max_timeout.as_secs_f64() * 1000.0
+        );
 
         Self {
             device_name,
@@ -138,23 +143,26 @@ impl SourceBuffer {
         // Detect gaps (significant delay between chunks)
         if let Some(last_time) = self.last_chunk_time {
             let gap_duration = last_time.elapsed();
-            let expected_duration = Duration::from_secs_f64(
-                chunk.samples.len() as f64 / self.sample_rate as f64
-            );
+            let expected_duration =
+                Duration::from_secs_f64(chunk.samples.len() as f64 / self.sample_rate as f64);
 
             // Gap threshold: 2x expected chunk duration
             if gap_duration > expected_duration.mul_f32(2.0) {
                 self.gaps_detected += 1;
 
                 if self.device_kind.is_bluetooth() {
-                    debug!("⚠️ Gap detected in '{}': {:.1}ms (expected ~{:.1}ms)",
-                           self.device_name,
-                           gap_duration.as_secs_f64() * 1000.0,
-                           expected_duration.as_secs_f64() * 1000.0);
+                    debug!(
+                        "⚠️ Gap detected in '{}': {:.1}ms (expected ~{:.1}ms)",
+                        self.device_name,
+                        gap_duration.as_secs_f64() * 1000.0,
+                        expected_duration.as_secs_f64() * 1000.0
+                    );
                 } else {
-                    warn!("⚠️ Unexpected gap in wired device '{}': {:.1}ms",
-                          self.device_name,
-                          gap_duration.as_secs_f64() * 1000.0);
+                    warn!(
+                        "⚠️ Unexpected gap in wired device '{}': {:.1}ms",
+                        self.device_name,
+                        gap_duration.as_secs_f64() * 1000.0
+                    );
                 }
             }
         }
@@ -206,9 +214,11 @@ impl SourceBuffer {
                 result.resize(sample_count, 0.0);
                 self.silence_inserted_samples += silence_count as u64;
 
-                debug!("🔇 Inserted {:.1}ms silence for '{}' (buffer underrun)",
-                       (silence_count as f64 / self.sample_rate as f64) * 1000.0,
-                       self.device_name);
+                debug!(
+                    "🔇 Inserted {:.1}ms silence for '{}' (buffer underrun)",
+                    (silence_count as f64 / self.sample_rate as f64) * 1000.0,
+                    self.device_name
+                );
                 break;
             }
         }
@@ -235,7 +245,8 @@ impl SourceBuffer {
             buffer_latency_ms: self.buffer_latency_ms(),
             chunks_received: self.chunks_received,
             gaps_detected: self.gaps_detected,
-            silence_inserted_ms: (self.silence_inserted_samples as f64 / self.sample_rate as f64) * 1000.0,
+            silence_inserted_ms: (self.silence_inserted_samples as f64 / self.sample_rate as f64)
+                * 1000.0,
         }
     }
 }
@@ -267,8 +278,8 @@ struct AudioMixer {
 impl AudioMixer {
     fn new(adaptive_ducking: bool) -> Self {
         Self {
-            mic_ducking: 1.0,      // Full volume by default
-            system_ducking: 0.60,   // System audio at 40% when mic is active
+            mic_ducking: 1.0,     // Full volume by default
+            system_ducking: 0.60, // System audio at 40% when mic is active
             adaptive_ducking,
         }
     }
@@ -280,7 +291,11 @@ impl AudioMixer {
     /// - When mic is silent, allow full system audio
     /// - Use RMS to detect speech activity
     fn mix(&mut self, mic: &[f32], system: &[f32]) -> Vec<f32> {
-        assert_eq!(mic.len(), system.len(), "Mic and system audio must have same length");
+        assert_eq!(
+            mic.len(),
+            system.len(),
+            "Mic and system audio must have same length"
+        );
 
         let mut result = Vec::with_capacity(mic.len());
 
@@ -295,9 +310,9 @@ impl AudioMixer {
 
             // Adjust ducking based on speech detection
             let system_gain = if is_speech {
-                self.system_ducking  // Duck system audio when mic has speech
+                self.system_ducking // Duck system audio when mic has speech
             } else {
-                1.0  // Full system audio when mic is silent
+                1.0 // Full system audio when mic is silent
             };
 
             // Mix with ducking
@@ -354,20 +369,28 @@ impl FFmpegAudioMixer {
         sample_rate: u32,
     ) -> Self {
         info!("🎛️ Creating FFmpeg Adaptive Audio Mixer");
-        info!("   Microphone: '{}' ({:?})", mic_device_name, mic_device_kind);
-        info!("   System Audio: '{}' ({:?})", system_device_name, system_device_kind);
+        info!(
+            "   Microphone: '{}' ({:?})",
+            mic_device_name, mic_device_kind
+        );
+        info!(
+            "   System Audio: '{}' ({:?})",
+            system_device_name, system_device_kind
+        );
         info!("   Sample Rate: {} Hz", sample_rate);
 
         // 50ms mixing window (same as Cap)
         let mixing_window_samples = ((sample_rate as f64 * 0.050) as usize).max(1);
-        info!("   Mixing Window: {:.1}ms ({} samples)",
-              (mixing_window_samples as f64 / sample_rate as f64) * 1000.0,
-              mixing_window_samples);
+        info!(
+            "   Mixing Window: {:.1}ms ({} samples)",
+            (mixing_window_samples as f64 / sample_rate as f64) * 1000.0,
+            mixing_window_samples
+        );
 
         Self {
             mic_buffer: SourceBuffer::new(mic_device_name, mic_device_kind, sample_rate),
             system_buffer: SourceBuffer::new(system_device_name, system_device_kind, sample_rate),
-            mixer: AudioMixer::new(true),  // Enable adaptive ducking
+            mixer: AudioMixer::new(true), // Enable adaptive ducking
             sample_rate,
             mixing_window_samples,
             windows_mixed: 0,
@@ -407,7 +430,8 @@ impl FFmpegAudioMixer {
         self.windows_mixed += 1;
 
         // Log statistics periodically
-        if self.windows_mixed % 200 == 0 {  // Every ~10 seconds at 50ms windows
+        if self.windows_mixed % 200 == 0 {
+            // Every ~10 seconds at 50ms windows
             self.log_stats();
         }
 
@@ -423,15 +447,18 @@ impl FFmpegAudioMixer {
     fn log_stats(&self) {
         let (mic_stats, sys_stats) = self.get_stats();
 
-        info!("🎛️ Mixer Statistics (after {} windows):", self.windows_mixed);
-        info!("   Mic: {:.0}ms buffer, {} gaps, {:.1}ms silence inserted",
-              mic_stats.buffer_latency_ms,
-              mic_stats.gaps_detected,
-              mic_stats.silence_inserted_ms);
-        info!("   System: {:.0}ms buffer, {} gaps, {:.1}ms silence inserted",
-              sys_stats.buffer_latency_ms,
-              sys_stats.gaps_detected,
-              sys_stats.silence_inserted_ms);
+        info!(
+            "🎛️ Mixer Statistics (after {} windows):",
+            self.windows_mixed
+        );
+        info!(
+            "   Mic: {:.0}ms buffer, {} gaps, {:.1}ms silence inserted",
+            mic_stats.buffer_latency_ms, mic_stats.gaps_detected, mic_stats.silence_inserted_ms
+        );
+        info!(
+            "   System: {:.0}ms buffer, {} gaps, {:.1}ms silence inserted",
+            sys_stats.buffer_latency_ms, sys_stats.gaps_detected, sys_stats.silence_inserted_ms
+        );
     }
 
     /// Get microphone buffer size
@@ -461,11 +488,7 @@ mod tests {
 
     #[test]
     fn test_source_buffer_basic() {
-        let mut buffer = SourceBuffer::new(
-            "Test Mic".to_string(),
-            InputDeviceKind::Wired,
-            48000,
-        );
+        let mut buffer = SourceBuffer::new("Test Mic".to_string(), InputDeviceKind::Wired, 48000);
 
         // Push some samples
         buffer.push(vec![0.1, 0.2, 0.3, 0.4]);
@@ -485,7 +508,7 @@ mod tests {
         );
 
         assert_eq!(mixer.sample_rate, 48000);
-        assert_eq!(mixer.mixing_window_samples, 2400);  // 50ms at 48kHz
+        assert_eq!(mixer.mixing_window_samples, 2400); // 50ms at 48kHz
     }
 
     #[test]

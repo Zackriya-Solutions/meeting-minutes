@@ -1,12 +1,12 @@
 use crate::notifications::{
-    types::{Notification, NotificationType},
-    settings::{NotificationSettings, ConsentManager},
+    settings::{ConsentManager, NotificationSettings},
     system::SystemNotificationHandler,
+    types::{Notification, NotificationType},
 };
 use anyhow::Result;
-use log::{info as log_info, error as log_error, warn as log_warn};
-use tauri::{AppHandle, Runtime};
+use log::{error as log_error, info as log_info, warn as log_warn};
 use std::sync::Arc;
+use tauri::{AppHandle, Runtime};
 use tokio::sync::RwLock;
 
 /// Central notification manager that coordinates all notification functionality
@@ -26,7 +26,9 @@ impl<R: Runtime> NotificationManager<R> {
         let consent_manager = Arc::new(ConsentManager::new(app_handle.clone())?);
 
         // Load initial settings
-        let settings = consent_manager.get_settings_with_migration().await
+        let settings = consent_manager
+            .get_settings_with_migration()
+            .await
             .unwrap_or_else(|_| NotificationSettings::default());
 
         let manager = Self {
@@ -86,12 +88,19 @@ impl<R: Runtime> NotificationManager<R> {
 
         // Check if we should show notifications
         if !self.should_show_notification(&notification).await {
-            log_info!("Skipping notification due to settings: {}", notification.title);
+            log_info!(
+                "Skipping notification due to settings: {}",
+                notification.title
+            );
             return Ok(());
         }
 
         // Log the notification attempt
-        log_info!("Showing notification: {} - {}", notification.title, notification.body);
+        log_info!(
+            "Showing notification: {} - {}",
+            notification.title,
+            notification.body
+        );
 
         // Show the notification
         self.system_handler.show_notification(notification).await
@@ -100,7 +109,10 @@ impl<R: Runtime> NotificationManager<R> {
     /// Show a recording started notification
     pub async fn show_recording_started(&self, meeting_name: Option<String>) -> Result<()> {
         let settings = self.settings.read().await;
-        log_info!("🔔 Checking notification settings - show_recording_started: {}", settings.notification_preferences.show_recording_started);
+        log_info!(
+            "🔔 Checking notification settings - show_recording_started: {}",
+            settings.notification_preferences.show_recording_started
+        );
 
         if !settings.notification_preferences.show_recording_started {
             log_info!("🚫 Recording started notification is disabled, skipping");
@@ -148,7 +160,10 @@ impl<R: Runtime> NotificationManager<R> {
     /// Show a transcription complete notification
     pub async fn show_transcription_complete(&self, file_path: Option<String>) -> Result<()> {
         let settings = self.settings.read().await;
-        if !settings.notification_preferences.show_transcription_complete {
+        if !settings
+            .notification_preferences
+            .show_transcription_complete
+        {
             return Ok(());
         }
 
@@ -157,14 +172,22 @@ impl<R: Runtime> NotificationManager<R> {
     }
 
     /// Show a meeting reminder notification
-    pub async fn show_meeting_reminder(&self, minutes_until: u64, meeting_title: Option<String>) -> Result<()> {
+    pub async fn show_meeting_reminder(
+        &self,
+        minutes_until: u64,
+        meeting_title: Option<String>,
+    ) -> Result<()> {
         let settings = self.settings.read().await;
         if !settings.notification_preferences.show_meeting_reminders {
             return Ok(());
         }
 
         // Check if this reminder time is enabled
-        if !settings.notification_preferences.meeting_reminder_minutes.contains(&minutes_until) {
+        if !settings
+            .notification_preferences
+            .meeting_reminder_minutes
+            .contains(&minutes_until)
+        {
             return Ok(());
         }
 
@@ -197,8 +220,14 @@ impl<R: Runtime> NotificationManager<R> {
     /// Update notification settings
     pub async fn update_settings(&self, new_settings: NotificationSettings) -> Result<()> {
         log_info!("📝 Updating notification settings:");
-        log_info!("   show_recording_started: {}", new_settings.notification_preferences.show_recording_started);
-        log_info!("   show_recording_stopped: {}", new_settings.notification_preferences.show_recording_stopped);
+        log_info!(
+            "   show_recording_started: {}",
+            new_settings.notification_preferences.show_recording_started
+        );
+        log_info!(
+            "   show_recording_stopped: {}",
+            new_settings.notification_preferences.show_recording_stopped
+        );
 
         // Validate settings
         crate::notifications::settings::validate_settings(&new_settings)?;
@@ -286,20 +315,36 @@ impl<R: Runtime> NotificationManager<R> {
         if self.is_dnd_active().await {
             // Only show critical notifications when DND is active
             match notification.priority {
-                crate::notifications::types::NotificationPriority::Critical => {},
+                crate::notifications::types::NotificationPriority::Critical => {}
                 _ => return false,
             }
         }
 
         // Check notification type specific settings
         match &notification.notification_type {
-            NotificationType::RecordingStarted => settings.notification_preferences.show_recording_started,
-            NotificationType::RecordingStopped => settings.notification_preferences.show_recording_stopped,
-            NotificationType::RecordingPaused => settings.notification_preferences.show_recording_paused,
-            NotificationType::RecordingResumed => settings.notification_preferences.show_recording_resumed,
-            NotificationType::TranscriptionComplete => settings.notification_preferences.show_transcription_complete,
-            NotificationType::MeetingReminder(_) => settings.notification_preferences.show_meeting_reminders,
-            NotificationType::SystemError(_) => settings.notification_preferences.show_system_errors,
+            NotificationType::RecordingStarted => {
+                settings.notification_preferences.show_recording_started
+            }
+            NotificationType::RecordingStopped => {
+                settings.notification_preferences.show_recording_stopped
+            }
+            NotificationType::RecordingPaused => {
+                settings.notification_preferences.show_recording_paused
+            }
+            NotificationType::RecordingResumed => {
+                settings.notification_preferences.show_recording_resumed
+            }
+            NotificationType::TranscriptionComplete => {
+                settings
+                    .notification_preferences
+                    .show_transcription_complete
+            }
+            NotificationType::MeetingReminder(_) => {
+                settings.notification_preferences.show_meeting_reminders
+            }
+            NotificationType::SystemError(_) => {
+                settings.notification_preferences.show_system_errors
+            }
             NotificationType::Test => true, // Always show test notifications
         }
     }
@@ -323,7 +368,9 @@ impl<R: Runtime> NotificationManager<R> {
             system_permission_granted: settings.system_permission_granted,
             manual_dnd_active: settings.manual_dnd_mode,
             system_dnd_active: self.get_system_dnd_status().await,
-            recording_notifications_enabled: settings.notification_preferences.show_recording_started,
+            recording_notifications_enabled: settings
+                .notification_preferences
+                .show_recording_started,
             meeting_reminders_enabled: settings.notification_preferences.show_meeting_reminders,
         }
     }

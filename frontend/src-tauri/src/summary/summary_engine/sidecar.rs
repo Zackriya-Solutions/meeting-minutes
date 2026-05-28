@@ -111,7 +111,10 @@ impl SidecarManager {
             if !env_path.is_empty() {
                 let path = PathBuf::from(env_path);
                 if path.exists() {
-                    log::info!("Using llama-helper from MEETILY_LLAMA_HELPER: {}", path.display());
+                    log::info!(
+                        "Using llama-helper from MEETILY_LLAMA_HELPER: {}",
+                        path.display()
+                    );
                     return Ok(path);
                 }
             }
@@ -121,30 +124,55 @@ impl SidecarManager {
         // 2. Check relative to current executable (most reliable for AppImage/bundled apps)
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                log::info!("Searching for llama-helper relative to executable: {}", exe_dir.display());
-                
+                log::info!(
+                    "Searching for llama-helper relative to executable: {}",
+                    exe_dir.display()
+                );
+
                 // Get the target triple (same logic as before)
-                let target_triple = std::env::var("TARGET")
-                    .unwrap_or_else(|_| {
-                        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                        { "x86_64-unknown-linux-gnu".to_string() }
-                        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-                        { "aarch64-unknown-linux-gnu".to_string() }
-                        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-                        { "x86_64-apple-darwin".to_string() }
-                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                        { "aarch64-apple-darwin".to_string() }
-                        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-                        { "x86_64-pc-windows-msvc".to_string() }
-                        #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-                        { "aarch64-pc-windows-msvc".to_string() }
-                        #[cfg(not(any(
-                            all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
-                            all(target_os = "macos", any(target_arch = "x86_64", target_arch = "aarch64")),
-                            all(target_os = "windows", any(target_arch = "x86_64", target_arch = "aarch64"))
-                        )))]
-                        { "unknown".to_string() }
-                    });
+                let target_triple = std::env::var("TARGET").unwrap_or_else(|_| {
+                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                    {
+                        "x86_64-unknown-linux-gnu".to_string()
+                    }
+                    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+                    {
+                        "aarch64-unknown-linux-gnu".to_string()
+                    }
+                    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+                    {
+                        "x86_64-apple-darwin".to_string()
+                    }
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    {
+                        "aarch64-apple-darwin".to_string()
+                    }
+                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                    {
+                        "x86_64-pc-windows-msvc".to_string()
+                    }
+                    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+                    {
+                        "aarch64-pc-windows-msvc".to_string()
+                    }
+                    #[cfg(not(any(
+                        all(
+                            target_os = "linux",
+                            any(target_arch = "x86_64", target_arch = "aarch64")
+                        ),
+                        all(
+                            target_os = "macos",
+                            any(target_arch = "x86_64", target_arch = "aarch64")
+                        ),
+                        all(
+                            target_os = "windows",
+                            any(target_arch = "x86_64", target_arch = "aarch64")
+                        )
+                    )))]
+                    {
+                        "unknown".to_string()
+                    }
+                });
 
                 let binary_name = if cfg!(windows) {
                     format!("llama-helper-{}.exe", target_triple)
@@ -155,7 +183,10 @@ impl SidecarManager {
                 // Try exact match in exe dir
                 let bundled = exe_dir.join(&binary_name);
                 if bundled.exists() {
-                    log::info!("Found exact match next to executable: {}", bundled.display());
+                    log::info!(
+                        "Found exact match next to executable: {}",
+                        bundled.display()
+                    );
                     return Ok(bundled);
                 }
 
@@ -166,7 +197,10 @@ impl SidecarManager {
                         let path = entry.path();
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                             if name.starts_with("llama-helper") && !name.ends_with(".d") {
-                                log::info!("Found fuzzy match next to executable: {}", path.display());
+                                log::info!(
+                                    "Found fuzzy match next to executable: {}",
+                                    path.display()
+                                );
                                 return Ok(path);
                             }
                         }
@@ -177,31 +211,56 @@ impl SidecarManager {
 
         // 3. Check bundled resources (RESOURCE_DIR) - Fallback
         if let Ok(resource_dir) = std::env::var("RESOURCE_DIR") {
-            log::info!("Searching for llama-helper in RESOURCE_DIR: {}", resource_dir);
+            log::info!(
+                "Searching for llama-helper in RESOURCE_DIR: {}",
+                resource_dir
+            );
             let resource_path = PathBuf::from(&resource_dir);
-             // Get the target triple again (or we could have shared it, but code duplication is safer for this tool usage)
-            let target_triple = std::env::var("TARGET")
-                .unwrap_or_else(|_| {
-                     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    { "x86_64-unknown-linux-gnu".to_string() }
-                    // ... (abbreviated for brevity in thought, but must be full in tool)
-                     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-                    { "aarch64-unknown-linux-gnu".to_string() }
-                    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-                    { "x86_64-apple-darwin".to_string() }
-                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                    { "aarch64-apple-darwin".to_string() }
-                    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-                    { "x86_64-pc-windows-msvc".to_string() }
-                    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-                    { "aarch64-pc-windows-msvc".to_string() }
-                    #[cfg(not(any(
-                        all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
-                        all(target_os = "macos", any(target_arch = "x86_64", target_arch = "aarch64")),
-                        all(target_os = "windows", any(target_arch = "x86_64", target_arch = "aarch64"))
-                    )))]
-                    { "unknown".to_string() }
-                });
+            // Get the target triple again (or we could have shared it, but code duplication is safer for this tool usage)
+            let target_triple = std::env::var("TARGET").unwrap_or_else(|_| {
+                #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                {
+                    "x86_64-unknown-linux-gnu".to_string()
+                }
+                // ... (abbreviated for brevity in thought, but must be full in tool)
+                #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+                {
+                    "aarch64-unknown-linux-gnu".to_string()
+                }
+                #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+                {
+                    "x86_64-apple-darwin".to_string()
+                }
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                {
+                    "aarch64-apple-darwin".to_string()
+                }
+                #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+                {
+                    "x86_64-pc-windows-msvc".to_string()
+                }
+                #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+                {
+                    "aarch64-pc-windows-msvc".to_string()
+                }
+                #[cfg(not(any(
+                    all(
+                        target_os = "linux",
+                        any(target_arch = "x86_64", target_arch = "aarch64")
+                    ),
+                    all(
+                        target_os = "macos",
+                        any(target_arch = "x86_64", target_arch = "aarch64")
+                    ),
+                    all(
+                        target_os = "windows",
+                        any(target_arch = "x86_64", target_arch = "aarch64")
+                    )
+                )))]
+                {
+                    "unknown".to_string()
+                }
+            });
 
             let binary_name = if cfg!(windows) {
                 format!("llama-helper-{}.exe", target_triple)
@@ -285,7 +344,7 @@ impl SidecarManager {
 
         #[cfg(unix)]
         let mut command = tokio::process::Command::new("nice");
-        
+
         #[cfg(not(unix))]
         let mut command = tokio::process::Command::new(&self.helper_binary_path);
 
@@ -306,12 +365,21 @@ impl SidecarManager {
             command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
         }
 
-        let mut child = command
-            .spawn()
-            .with_context(|| format!("Failed to spawn llama-helper at {:?}", self.helper_binary_path))?;
+        let mut child = command.spawn().with_context(|| {
+            format!(
+                "Failed to spawn llama-helper at {:?}",
+                self.helper_binary_path
+            )
+        })?;
 
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to get stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("Failed to get stdout"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to get stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to get stdout"))?;
 
         // Store handles
         {
@@ -416,7 +484,7 @@ impl SidecarManager {
 
         // Note: We don't use send_request here to avoid incrementing active_request_count
         // for internal health checks, as that would prevent graceful shutdown
-        
+
         // Write request
         {
             let mut stdin_lock = self.stdin_writer.lock().await;
@@ -444,31 +512,34 @@ impl SidecarManager {
     /// Waits for active requests to complete before killing the process
     pub async fn shutdown_gracefully(&self) -> Result<()> {
         log::info!("Initiating graceful shutdown of sidecar");
-        
+
         // Set shutdown flag to prevent new internal tasks
         self.should_shutdown.store(true, Ordering::SeqCst);
-        
+
         // Wait for active requests to complete
         // We poll every 500ms
         let start = Instant::now();
         let max_wait = Duration::from_secs(600); // Wait up to 10 minutes for long generations
-        
+
         loop {
             let count = self.active_request_count.load(Ordering::SeqCst);
             if count == 0 {
                 log::info!("No active requests, proceeding with shutdown");
                 break;
             }
-            
+
             if start.elapsed() > max_wait {
-                log::warn!("Timed out waiting for active requests ({} active), forcing shutdown", count);
+                log::warn!(
+                    "Timed out waiting for active requests ({} active), forcing shutdown",
+                    count
+                );
                 break;
             }
-            
+
             log::debug!("Waiting for {} active requests to complete...", count);
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        
+
         self.shutdown().await
     }
 
@@ -492,7 +563,8 @@ impl SidecarManager {
                     stdin.flush().await?;
                 }
                 Ok::<(), anyhow::Error>(())
-            }.await;
+            }
+            .await;
         }
 
         // Kill process if still running

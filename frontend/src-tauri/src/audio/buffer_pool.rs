@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 /// Audio buffer pool for reducing memory allocations during recording
 pub struct AudioBufferPool {
@@ -88,17 +88,23 @@ impl PooledBuffer {
 
     /// Get mutable access to the underlying buffer
     pub fn as_mut(&mut self) -> &mut Vec<f32> {
-        self.buffer.as_mut().expect("Buffer should always be available")
+        self.buffer
+            .as_mut()
+            .expect("Buffer should always be available")
     }
 
     /// Get immutable access to the underlying buffer
     pub fn as_ref(&self) -> &Vec<f32> {
-        self.buffer.as_ref().expect("Buffer should always be available")
+        self.buffer
+            .as_ref()
+            .expect("Buffer should always be available")
     }
 
     /// Consume the wrapper and return the buffer (will not be returned to pool)
     pub fn into_inner(mut self) -> Vec<f32> {
-        self.buffer.take().expect("Buffer should always be available")
+        self.buffer
+            .take()
+            .expect("Buffer should always be available")
     }
 }
 

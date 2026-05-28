@@ -1,24 +1,29 @@
 // Commit name to recover the serial whisper engine processing for smaller meetings [Slower processing but dooes not fail] - "before parallel processing implementation"
 
-use std::path::{PathBuf};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
-use serde::{Serialize, Deserialize};
-use anyhow::{Result, anyhow};
+use crate::config::WHISPER_MODEL_CATALOG;
+use anyhow::{anyhow, Result};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use crate::config::WHISPER_MODEL_CATALOG;
+use tokio::sync::RwLock;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelStatus {
     Available,
     Missing,
-    Downloading { progress: u8 },
+    Downloading {
+        progress: u8,
+    },
     Error(String),
-    Corrupted { file_size: u64, expected_min_size: u64 },
+    Corrupted {
+        file_size: u64,
+        expected_min_size: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +90,7 @@ impl WhisperEngine {
         // These C library logs bypass Rust logging and clutter output
         // Set environment variables to reduce C library verbosity
         std::env::set_var("GGML_METAL_LOG_LEVEL", "1"); // 0=off, 1=error, 2=warn, 3=info
-        std::env::set_var("WHISPER_LOG_LEVEL", "1");    // Reduce whisper.cpp verbosity
+        std::env::set_var("WHISPER_LOG_LEVEL", "1"); // Reduce whisper.cpp verbosity
 
         let models_dir = if let Some(dir) = models_dir {
             // Use provided directory (for production with app_data_dir)
@@ -103,9 +108,15 @@ impl WhisperEngine {
                     current_dir.join("models")
                 } else if current_dir.join("../models").exists() {
                     current_dir.join("../models")
-                } else if current_dir.join("backend/whisper-server-package/models").exists() {
+                } else if current_dir
+                    .join("backend/whisper-server-package/models")
+                    .exists()
+                {
                     current_dir.join("backend/whisper-server-package/models")
-                } else if current_dir.join("../backend/whisper-server-package/models").exists() {
+                } else if current_dir
+                    .join("../backend/whisper-server-package/models")
+                    .exists()
+                {
                     current_dir.join("../backend/whisper-server-package/models")
                 } else {
                     // Create models directory in current directory for development
@@ -121,13 +132,19 @@ impl WhisperEngine {
                     .join("models")
             }
         };
-        
-        log::info!("WhisperEngine using models directory: {}", models_dir.display());
+
+        log::info!(
+            "WhisperEngine using models directory: {}",
+            models_dir.display()
+        );
         log::info!("Debug mode: {}", cfg!(debug_assertions));
 
         // Log acceleration capabilities
         let gpu_support = Self::detect_gpu_acceleration();
-        log::info!("Hardware acceleration support: {}", if gpu_support { "enabled" } else { "disabled" });
+        log::info!(
+            "Hardware acceleration support: {}",
+            if gpu_support { "enabled" } else { "disabled" }
+        );
 
         #[cfg(feature = "metal")]
         log::info!("Apple Metal GPU support: enabled");
@@ -146,7 +163,7 @@ impl WhisperEngine {
 
         #[cfg(feature = "openmp")]
         log::info!("OpenMP parallel processing: enabled");
-        
+
         let engine = Self {
             models_dir,
             current_context: Arc::new(RwLock::new(None)),
@@ -162,10 +179,10 @@ impl WhisperEngine {
             // Initialize active downloads tracking
             active_downloads: Arc::new(RwLock::new(HashSet::new())),
         };
-        
+
         Ok(engine)
     }
-    
+
     pub async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let models_dir = &self.models_dir;
         let mut models = Vec::new();
@@ -191,7 +208,8 @@ impl WhisperEngine {
                                              filename);
                                     ModelStatus::Corrupted {
                                         file_size: file_size_bytes,
-                                        expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                        expected_min_size: (expected_min_size_mb * 1024 * 1024)
+                                            as u64,
                                     }
                                 }
                             }
@@ -204,14 +222,17 @@ impl WhisperEngine {
                                     ModelStatus::Downloading { progress } => {
                                         log::debug!("Model {} appears to be downloading ({} MB so far, {}% complete)",
                                                   filename, file_size_mb, progress);
-                                        ModelStatus::Downloading { progress: *progress }
+                                        ModelStatus::Downloading {
+                                            progress: *progress,
+                                        }
                                     }
                                     _ => {
                                         log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
                                                  filename, file_size_mb, size_mb);
                                         ModelStatus::Corrupted {
                                             file_size: file_size_bytes,
-                                            expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                            expected_min_size: (expected_min_size_mb * 1024 * 1024)
+                                                as u64,
                                         }
                                     }
                                 }
@@ -220,19 +241,19 @@ impl WhisperEngine {
                                          filename, file_size_mb, size_mb);
                                 ModelStatus::Corrupted {
                                     file_size: file_size_bytes,
-                                    expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                    expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64,
                                 }
                             }
                         } else {
                             ModelStatus::Missing
                         }
                     }
-                    Err(_) => ModelStatus::Missing
+                    Err(_) => ModelStatus::Missing,
                 }
             } else {
                 ModelStatus::Missing
             };
-            
+
             let model_info = ModelInfo {
                 name: name.to_string(),
                 path: model_path,
@@ -242,23 +263,24 @@ impl WhisperEngine {
                 status,
                 description: description.to_string(),
             };
-            
+
             models.push(model_info);
         }
-        
+
         // Update internal cache
         let mut available_models = self.available_models.write().await;
         available_models.clear();
         for model in &models {
             available_models.insert(model.name.clone(), model.clone());
         }
-        
+
         Ok(models)
     }
-    
+
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
         let models = self.available_models.read().await;
-        let model_info = models.get(model_name)
+        let model_info = models
+            .get(model_name)
             .ok_or_else(|| anyhow!("Model {} not found", model_name))?;
 
         match model_info.status {
@@ -271,7 +293,11 @@ impl WhisperEngine {
                     }
 
                     // FIX 5: Unload current model before loading new one
-                    log::info!("Unloading current model '{}' before loading '{}'", current_model, model_name);
+                    log::info!(
+                        "Unloading current model '{}' before loading '{}'",
+                        current_model,
+                        model_name
+                    );
                     self.unload_model().await;
                 }
 
@@ -283,9 +309,18 @@ impl WhisperEngine {
 
                 // Enable flash attention for high-end GPUs (Metal on Apple Silicon, CUDA on NVIDIA)
                 // Flash attention provides 20-40% speedup but requires stable GPU drivers
-                let flash_attn_enabled = match (&hardware_profile.gpu_type, &hardware_profile.performance_tier) {
-                    (crate::audio::GpuType::Metal, crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High) => true,
-                    (crate::audio::GpuType::Cuda, crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High) => true,
+                let flash_attn_enabled = match (
+                    &hardware_profile.gpu_type,
+                    &hardware_profile.performance_tier,
+                ) {
+                    (
+                        crate::audio::GpuType::Metal,
+                        crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High,
+                    ) => true,
+                    (
+                        crate::audio::GpuType::Cuda,
+                        crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High,
+                    ) => true,
                     _ => false, // Conservative: disable for other GPU types and lower tiers
                 };
 
@@ -302,8 +337,11 @@ impl WhisperEngine {
                     // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
 
                     // Load whisper context with hardware-optimized parameters
-                    WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
-                        .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?
+                    WhisperContext::new_with_params(
+                        &model_info.path.to_string_lossy(),
+                        context_param,
+                    )
+                    .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?
                     // Suppressor dropped here, stderr restored
                 };
 
@@ -313,9 +351,13 @@ impl WhisperEngine {
 
                 // Enhanced acceleration status reporting
                 let acceleration_status = match (&hardware_profile.gpu_type, flash_attn_enabled) {
-                    (crate::audio::GpuType::Metal, true) => "Metal GPU with Flash Attention (Ultra-Fast)",
+                    (crate::audio::GpuType::Metal, true) => {
+                        "Metal GPU with Flash Attention (Ultra-Fast)"
+                    }
                     (crate::audio::GpuType::Metal, false) => "Metal GPU acceleration",
-                    (crate::audio::GpuType::Cuda, true) => "CUDA GPU with Flash Attention (Ultra-Fast)",
+                    (crate::audio::GpuType::Cuda, true) => {
+                        "CUDA GPU with Flash Attention (Ultra-Fast)"
+                    }
                     (crate::audio::GpuType::Cuda, false) => "CUDA GPU acceleration",
                     (crate::audio::GpuType::Vulkan, _) => "Vulkan GPU acceleration",
                     (crate::audio::GpuType::OpenCL, _) => "OpenCL GPU acceleration",
@@ -326,23 +368,20 @@ impl WhisperEngine {
                           model_name, acceleration_status, hardware_profile.performance_tier,
                           adaptive_config.beam_size, adaptive_config.max_threads);
                 Ok(())
-            },
-            ModelStatus::Missing => {
-                Err(anyhow!("Model {} is not downloaded", model_name))
-            },
+            }
+            ModelStatus::Missing => Err(anyhow!("Model {} is not downloaded", model_name)),
             ModelStatus::Downloading { .. } => {
                 Err(anyhow!("Model {} is currently downloading", model_name))
-            },
-            ModelStatus::Error(ref err) => {
-                Err(anyhow!("Model {} has error: {}", model_name, err))
-            },
-            ModelStatus::Corrupted { .. } => {
-                Err(anyhow!("Model {} is corrupted and cannot be loaded", model_name))
             }
+            ModelStatus::Error(ref err) => Err(anyhow!("Model {} has error: {}", model_name, err)),
+            ModelStatus::Corrupted { .. } => Err(anyhow!(
+                "Model {} is corrupted and cannot be loaded",
+                model_name
+            )),
         }
     }
 
-    pub async fn unload_model(&self) -> bool  {
+    pub async fn unload_model(&self) -> bool {
         let mut ctx_guard = self.current_context.write().await;
         let unloaded = ctx_guard.take().is_some();
         if unloaded {
@@ -358,11 +397,11 @@ impl WhisperEngine {
     pub async fn get_current_model(&self) -> Option<String> {
         self.current_model.read().await.clone()
     }
-    
+
     pub async fn is_model_loaded(&self) -> bool {
         self.current_context.read().await.is_some()
     }
-    
+
     // Enhanced function to clean repetitive text patterns and meaningless outputs
     fn clean_repetitive_text(text: &str) -> String {
         if text.is_empty() {
@@ -391,7 +430,10 @@ impl WhisperEngine {
         let final_text = cleaned_words.join(" ");
         if Self::calculate_repetition_ratio(&final_text) > 0.7 {
             // Performance optimization: reduce repetition ratio logging to debug level
-            perf_debug!("High repetition ratio detected, filtering out: '{}'", final_text);
+            perf_debug!(
+                "High repetition ratio detected, filtering out: '{}'",
+                final_text
+            );
             return String::new();
         }
 
@@ -507,15 +549,23 @@ impl WhisperEngine {
         }
 
         let total_words = words.len() as f32;
-        let repeated_words: usize = word_counts.values().map(|&count| if count > 1 { count - 1 } else { 0 }).sum();
+        let repeated_words: usize = word_counts
+            .values()
+            .map(|&count| if count > 1 { count - 1 } else { 0 })
+            .sum();
 
         repeated_words as f32 / total_words
     }
-    
+
     /// Transcribe audio with streaming support for partial results and adaptive quality
-    pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
+    pub async fn transcribe_audio_with_confidence(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+    ) -> Result<(String, f32, bool)> {
         let ctx_lock = self.current_context.read().await;
-        let ctx = ctx_lock.as_ref()
+        let ctx = ctx_lock
+            .as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
 
         // Get adaptive configuration based on hardware
@@ -525,7 +575,7 @@ impl WhisperEngine {
         // ADAPTIVE parameters - optimized for current hardware
         let mut params = FullParams::new(SamplingStrategy::BeamSearch {
             beam_size: adaptive_config.beam_size as i32,
-            patience: 1.0
+            patience: 1.0,
         });
 
         // Configure with adaptive settings
@@ -543,15 +593,15 @@ impl WhisperEngine {
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
         // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
-        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
-        params.set_token_timestamps(true);  // Keep for any timestamp-aware features
+        params.set_no_timestamps(true); // Prevent timestamp-based segment skipping
+        params.set_token_timestamps(true); // Keep for any timestamp-aware features
 
         // PERFORMANCE: Disable ALL whisper.cpp internal printing
         // This reduces C library log spam significantly
-        params.set_print_special(false);      // Don't print special tokens
-        params.set_print_progress(false);     // Don't print progress
-        params.set_print_realtime(false);     // Don't print realtime info
-        params.set_print_timestamps(false);   // Don't print timestamps
+        params.set_print_special(false); // Don't print special tokens
+        params.set_print_progress(false); // Don't print progress
+        params.set_print_realtime(false); // Don't print realtime info
+        params.set_print_timestamps(false); // Don't print timestamps
 
         // Additional suppression to reduce C library verbosity
         params.set_suppress_blank(true);
@@ -630,9 +680,14 @@ impl WhisperEngine {
         Ok((cleaned_result, avg_confidence, is_partial))
     }
 
-    pub async fn transcribe_audio(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<String> {
+    pub async fn transcribe_audio(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+    ) -> Result<String> {
         let ctx_lock = self.current_context.read().await;
-        let ctx = ctx_lock.as_ref()
+        let ctx = ctx_lock
+            .as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
 
         // Get adaptive configuration based on hardware
@@ -642,7 +697,7 @@ impl WhisperEngine {
         // ADAPTIVE parameters - optimized for current hardware
         let mut params = FullParams::new(SamplingStrategy::BeamSearch {
             beam_size: adaptive_config.beam_size as i32,
-            patience: 1.0
+            patience: 1.0,
         });
 
         // Configure for good quality
@@ -660,8 +715,8 @@ impl WhisperEngine {
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
         // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
-        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
-        params.set_token_timestamps(true);  // Keep for any timestamp-aware features
+        params.set_no_timestamps(true); // Prevent timestamp-based segment skipping
+        params.set_token_timestamps(true); // Keep for any timestamp-aware features
 
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -671,7 +726,7 @@ impl WhisperEngine {
         // BALANCED settings - good quality with reasonable speed
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
-        params.set_temperature(0.3);             // Lower than 0.4 for consistency, higher than 0.0 for quality
+        params.set_temperature(0.3); // Lower than 0.4 for consistency, higher than 0.0 for quality
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
@@ -681,8 +736,8 @@ impl WhisperEngine {
         params.set_no_speech_thold(0.55);
 
         // Reasonable length limits
-        params.set_max_len(200);                 // Reasonable length
-        params.set_single_segment(false);        // Allow multiple segments for better accuracy
+        params.set_max_len(200); // Reasonable length
+        params.set_single_segment(false); // Allow multiple segments for better accuracy
 
         // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
         // This would help detect repetitive outputs: params.set_compression_ratio_threshold(2.4);
@@ -733,8 +788,12 @@ impl WhisperEngine {
 
         // Only log every 10th transcription or significant audio (>10s) to reduce I/O overhead
         if should_log_transcription && (transcription_count % 10 == 0 || duration_seconds > 10.0) {
-            log::info!("Starting transcription #{} of {} samples ({:.1}s duration)",
-                      transcription_count, audio_data.len(), duration_seconds);
+            log::info!(
+                "Starting transcription #{} of {} samples ({:.1}s duration)",
+                transcription_count,
+                audio_data.len(),
+                duration_seconds
+            );
         }
         let mut state = ctx.create_state()?;
         state.full(params, &audio_data)?;
@@ -744,8 +803,15 @@ impl WhisperEngine {
 
         // Performance optimization: reduce segment completion logging
         // Only log for significant transcriptions to avoid I/O overhead
-        if (should_log_transcription || num_segments > 0) && (num_segments > 3 || duration_seconds > 5.0) {
-            perf_debug!("Transcription #{} completed with {} segments ({:.1}s)", transcription_count, num_segments, duration_seconds);
+        if (should_log_transcription || num_segments > 0)
+            && (num_segments > 3 || duration_seconds > 5.0)
+        {
+            perf_debug!(
+                "Transcription #{} completed with {} segments ({:.1}s)",
+                transcription_count,
+                num_segments,
+                duration_seconds
+            );
         }
         let mut result = String::new();
 
@@ -762,8 +828,13 @@ impl WhisperEngine {
             // This was causing significant I/O overhead during transcription
             // Only log segments for very long audio (>30s) or when explicitly debugging
             if duration_seconds > 30.0 {
-                perf_trace!("Segment {} ({:.2}s-{:.2}s): '{}'",
-                           i, _start_time as f64 / 100.0, _end_time as f64 / 100.0, segment_text);
+                perf_trace!(
+                    "Segment {} ({:.2}s-{:.2}s): '{}'",
+                    i,
+                    _start_time as f64 / 100.0,
+                    _end_time as f64 / 100.0,
+                    segment_text
+                );
             }
 
             // Clean and append segment text
@@ -785,24 +856,41 @@ impl WhisperEngine {
         if cleaned_result.is_empty() {
             // Only log empty results occasionally to reduce spam
             if should_log_transcription && transcription_count % 20 == 0 {
-                perf_debug!("Transcription #{} result is empty - no speech detected", transcription_count);
+                perf_debug!(
+                    "Transcription #{} result is empty - no speech detected",
+                    transcription_count
+                );
             }
         } else {
             if cleaned_result != final_result {
-                log::info!("Cleaned repetitive transcription #{}: '{}' -> '{}'", transcription_count, final_result, cleaned_result);
+                log::info!(
+                    "Cleaned repetitive transcription #{}: '{}' -> '{}'",
+                    transcription_count,
+                    final_result,
+                    cleaned_result
+                );
             }
             // Reduce successful transcription logging frequency
             // Only log every 5th result or significant results (>50 chars) to reduce I/O overhead
-            if transcription_count % 5 == 0 || cleaned_result.len() > 50 || duration_seconds > 10.0 {
-                log::info!("Transcription #{} result: '{}'", transcription_count, cleaned_result);
+            if transcription_count % 5 == 0 || cleaned_result.len() > 50 || duration_seconds > 10.0
+            {
+                log::info!(
+                    "Transcription #{} result: '{}'",
+                    transcription_count,
+                    cleaned_result
+                );
             } else {
-                perf_debug!("Transcription #{} result: '{}'", transcription_count, cleaned_result);
+                perf_debug!(
+                    "Transcription #{} result: '{}'",
+                    transcription_count,
+                    cleaned_result
+                );
             }
         }
 
         Ok(cleaned_result)
     }
-    
+
     pub async fn get_models_directory(&self) -> PathBuf {
         self.models_dir.clone()
     }
@@ -811,21 +899,30 @@ impl WhisperEngine {
     async fn validate_model_file(&self, model_path: &PathBuf) -> Result<()> {
         use tokio::io::AsyncReadExt;
 
-        let mut file = fs::File::open(model_path).await
+        let mut file = fs::File::open(model_path)
+            .await
             .map_err(|e| anyhow!("Failed to open model file: {}", e))?;
 
         // Read the first 8 bytes to check for GGML magic number
         let mut buffer = [0u8; 8];
-        file.read_exact(&mut buffer).await
+        file.read_exact(&mut buffer)
+            .await
             .map_err(|e| anyhow!("Failed to read model file header: {}", e))?;
 
         // Check for GGML magic number (various versions and endianness)
-        if buffer.starts_with(b"ggml") || buffer.starts_with(b"GGUF") || buffer.starts_with(b"ggmf") ||
-           buffer.starts_with(b"lmgg") || buffer.starts_with(b"FUGU") || buffer.starts_with(b"fmgg") {
+        if buffer.starts_with(b"ggml")
+            || buffer.starts_with(b"GGUF")
+            || buffer.starts_with(b"ggmf")
+            || buffer.starts_with(b"lmgg")
+            || buffer.starts_with(b"FUGU")
+            || buffer.starts_with(b"fmgg")
+        {
             Ok(())
         } else {
-            Err(anyhow!("Invalid model file: missing GGML/GGUF magic number. Found: {:?}",
-                       String::from_utf8_lossy(&buffer[..4])))
+            Err(anyhow!(
+                "Invalid model file: missing GGML/GGUF magic number. Found: {:?}",
+                String::from_utf8_lossy(&buffer[..4])
+            ))
         }
     }
 
@@ -843,17 +940,35 @@ impl WhisperEngine {
         // Check if model is corrupted before allowing deletion
         log::info!("Model '{}' has status: {:?}", model_name, model_info.status);
         match &model_info.status {
-            ModelStatus::Corrupted { file_size, expected_min_size } => {
-                log::info!("Deleting corrupted model '{}' (file size: {} bytes, expected min: {} bytes)",
-                          model_name, file_size, expected_min_size);
+            ModelStatus::Corrupted {
+                file_size,
+                expected_min_size,
+            } => {
+                log::info!(
+                    "Deleting corrupted model '{}' (file size: {} bytes, expected min: {} bytes)",
+                    model_name,
+                    file_size,
+                    expected_min_size
+                );
 
                 // Delete the file
                 if model_info.path.exists() {
-                    fs::remove_file(&model_info.path).await
-                        .map_err(|e| anyhow!("Failed to delete file '{}': {}", model_info.path.display(), e))?;
-                    log::info!("Successfully deleted corrupted file: {}", model_info.path.display());
+                    fs::remove_file(&model_info.path).await.map_err(|e| {
+                        anyhow!(
+                            "Failed to delete file '{}': {}",
+                            model_info.path.display(),
+                            e
+                        )
+                    })?;
+                    log::info!(
+                        "Successfully deleted corrupted file: {}",
+                        model_info.path.display()
+                    );
                 } else {
-                    log::warn!("File '{}' does not exist, nothing to delete", model_info.path.display());
+                    log::warn!(
+                        "File '{}' does not exist, nothing to delete",
+                        model_info.path.display()
+                    );
                 }
 
                 // Update model status to Missing
@@ -864,18 +979,32 @@ impl WhisperEngine {
                     }
                 }
 
-                Ok(format!("Successfully deleted corrupted model '{}'", model_name))
+                Ok(format!(
+                    "Successfully deleted corrupted model '{}'",
+                    model_name
+                ))
             }
             ModelStatus::Available => {
                 // Allow deletion of available models for testing/cleanup
                 log::info!("Deleting available model '{}' (for cleanup)", model_name);
 
                 if model_info.path.exists() {
-                    fs::remove_file(&model_info.path).await
-                        .map_err(|e| anyhow!("Failed to delete file '{}': {}", model_info.path.display(), e))?;
-                    log::info!("Successfully deleted available model file: {}", model_info.path.display());
+                    fs::remove_file(&model_info.path).await.map_err(|e| {
+                        anyhow!(
+                            "Failed to delete file '{}': {}",
+                            model_info.path.display(),
+                            e
+                        )
+                    })?;
+                    log::info!(
+                        "Successfully deleted available model file: {}",
+                        model_info.path.display()
+                    );
                 } else {
-                    log::warn!("File '{}' does not exist, nothing to delete", model_info.path.display());
+                    log::warn!(
+                        "File '{}' does not exist, nothing to delete",
+                        model_info.path.display()
+                    );
                 }
 
                 // Update model status to Missing
@@ -888,13 +1017,19 @@ impl WhisperEngine {
 
                 Ok(format!("Successfully deleted model '{}'", model_name))
             }
-            _ => {
-                Err(anyhow!("Can only delete corrupted or available models. Model '{}' has status: {:?}", model_name, model_info.status))
-            }
+            _ => Err(anyhow!(
+                "Can only delete corrupted or available models. Model '{}' has status: {:?}",
+                model_name,
+                model_info.status
+            )),
         }
     }
-    
-    pub async fn download_model(&self, model_name: &str, progress_callback: Option<Box<dyn Fn(u8) + Send>>) -> Result<()> {
+
+    pub async fn download_model(
+        &self,
+        model_name: &str,
+        progress_callback: Option<Box<dyn Fn(u8) + Send>>,
+    ) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
 
         // Check if download is already in progress for this model
@@ -902,7 +1037,10 @@ impl WhisperEngine {
             let active = self.active_downloads.read().await;
             if active.contains(model_name) {
                 log::warn!("Download already in progress for model: {}", model_name);
-                return Err(anyhow!("Download already in progress for model: {}", model_name));
+                return Err(anyhow!(
+                    "Download already in progress for model: {}",
+                    model_name
+                ));
             }
         }
 
@@ -940,21 +1078,22 @@ impl WhisperEngine {
 
             _ => return Err(anyhow!("Unsupported model: {}", model_name))
         };
-        
+
         log::info!("Model URL for {}: {}", model_name, model_url);
-        
+
         // Generate correct filename - all models follow ggml-{model_name}.bin pattern
         let filename = format!("ggml-{}.bin", model_name);
         let file_path = self.models_dir.join(&filename);
-        
+
         log::info!("Downloading to file path: {}", file_path.display());
-        
+
         // Create models directory if it doesn't exist
         if !self.models_dir.exists() {
-            fs::create_dir_all(&self.models_dir).await
+            fs::create_dir_all(&self.models_dir)
+                .await
                 .map_err(|e| anyhow!("Failed to create models directory: {}", e))?;
         }
-        
+
         // Update model status to downloading
         {
             let mut models = self.available_models.write().await;
@@ -962,37 +1101,51 @@ impl WhisperEngine {
                 model_info.status = ModelStatus::Downloading { progress: 0 };
             }
         }
-        
+
         log::info!("Creating HTTP client and starting request...");
         let client = Client::new();
-        
+
         log::info!("Sending GET request to: {}", model_url);
-        let response = client.get(model_url).send().await
+        let response = client
+            .get(model_url)
+            .send()
+            .await
             .map_err(|e| anyhow!("Failed to start download: {}", e))?;
-        
+
         log::info!("Received response with status: {}", response.status());
         if !response.status().is_success() {
             // Remove from active downloads on error
             let mut active = self.active_downloads.write().await;
             active.remove(model_name);
-            return Err(anyhow!("Download failed with status: {}", response.status()));
+            return Err(anyhow!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         }
-        
+
         let total_size = response.content_length().unwrap_or(0);
-        log::info!("Response successful, content length: {} bytes ({:.1} MB)", total_size, total_size as f64 / (1024.0 * 1024.0));
-        
+        log::info!(
+            "Response successful, content length: {} bytes ({:.1} MB)",
+            total_size,
+            total_size as f64 / (1024.0 * 1024.0)
+        );
+
         if total_size == 0 {
             log::warn!("Content length is 0 or unknown - download may not show accurate progress");
         }
-        
-        let mut file = fs::File::create(&file_path).await
+
+        let mut file = fs::File::create(&file_path)
+            .await
             .map_err(|e| anyhow!("Failed to create file: {}", e))?;
-        
+
         log::info!("File created successfully at: {}", file_path.display());
-        
+
         // Stream download with real progress reporting
         log::info!("Starting streaming download...");
-        log::info!("Expected size: {:.1} MB", total_size as f64 / (1024.0 * 1024.0));
+        log::info!(
+            "Expected size: {:.1} MB",
+            total_size as f64 / (1024.0 * 1024.0)
+        );
 
         use futures_util::StreamExt;
         let mut stream = response.bytes_stream();
@@ -1018,10 +1171,10 @@ impl WhisperEngine {
                 }
             }
 
-            let chunk = chunk_result
-                .map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
+            let chunk = chunk_result.map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
 
-            file.write_all(&chunk).await
+            file.write_all(&chunk)
+                .await
                 .map_err(|e| anyhow!("Failed to write chunk to file: {}", e))?;
 
             downloaded += chunk.len() as u64;
@@ -1035,11 +1188,16 @@ impl WhisperEngine {
 
             // Report progress every 1% or every 2 seconds for better UI responsiveness
             let time_since_last_report = last_report_time.elapsed().as_secs();
-            if progress >= last_progress_report + 1 || progress == 100 || time_since_last_report >= 2 {
-                log::info!("Download progress: {}% ({:.1} MB / {:.1} MB)",
-                         progress,
-                         downloaded as f64 / (1024.0 * 1024.0),
-                         total_size as f64 / (1024.0 * 1024.0));
+            if progress >= last_progress_report + 1
+                || progress == 100
+                || time_since_last_report >= 2
+            {
+                log::info!(
+                    "Download progress: {}% ({:.1} MB / {:.1} MB)",
+                    progress,
+                    downloaded as f64 / (1024.0 * 1024.0),
+                    total_size as f64 / (1024.0 * 1024.0)
+                );
 
                 // Update progress in model info
                 {
@@ -1060,7 +1218,7 @@ impl WhisperEngine {
         }
 
         log::info!("Streaming download completed: {} bytes", downloaded);
-        
+
         // Ensure 100% progress is always reported
         {
             let mut models = self.available_models.write().await;
@@ -1068,16 +1226,17 @@ impl WhisperEngine {
                 model_info.status = ModelStatus::Downloading { progress: 100 };
             }
         }
-        
+
         if let Some(ref callback) = progress_callback {
             callback(100);
         }
-        
-        file.flush().await
+
+        file.flush()
+            .await
             .map_err(|e| anyhow!("Failed to flush file: {}", e))?;
-        
+
         log::info!("Download completed for model: {}", model_name);
-        
+
         // Update model status to available
         {
             let mut models = self.available_models.write().await;
@@ -1095,7 +1254,7 @@ impl WhisperEngine {
 
         Ok(())
     }
-    
+
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
         log::info!("Cancelling download for model: {}", model_name);
 
@@ -1128,7 +1287,10 @@ impl WhisperEngine {
             if let Err(e) = fs::remove_file(&file_path).await {
                 log::warn!("Failed to clean up cancelled download file: {}", e);
             } else {
-                log::info!("Cleaned up cancelled download file: {}", file_path.display());
+                log::info!(
+                    "Cleaned up cancelled download file: {}",
+                    file_path.display()
+                );
             }
         }
 

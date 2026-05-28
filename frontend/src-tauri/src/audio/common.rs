@@ -36,7 +36,9 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
 
 /// Create transcript segments from transcription results.
 /// Each tuple is (text, start_ms, end_ms) from VAD timestamps.
-pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> Vec<TranscriptSegment> {
+pub(crate) fn create_transcript_segments(
+    transcripts: &[(String, f64, f64)],
+) -> Vec<TranscriptSegment> {
     transcripts
         .iter()
         .map(|(text, start_ms, end_ms)| {
@@ -114,8 +116,8 @@ pub(crate) fn split_segment_at_silence(
         return vec![segment.clone()];
     }
 
-    let ms_per_sample = (segment.end_timestamp_ms - segment.start_timestamp_ms)
-        / segment.samples.len() as f64;
+    let ms_per_sample =
+        (segment.end_timestamp_ms - segment.start_timestamp_ms) / segment.samples.len() as f64;
     let mut result = Vec::new();
     let mut pos = 0usize;
 

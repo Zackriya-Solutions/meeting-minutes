@@ -21,7 +21,10 @@ pub fn encode_single_audio(
     channels: u16,
     output_path: &PathBuf,
 ) -> anyhow::Result<()> {
-    debug!("Starting FFmpeg process for {} bytes of audio data", data.len());
+    debug!(
+        "Starting FFmpeg process for {} bytes of audio data",
+        data.len()
+    );
 
     if data.is_empty() {
         return Err(anyhow::anyhow!("No audio data provided for encoding"));

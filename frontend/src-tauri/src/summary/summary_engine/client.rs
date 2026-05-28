@@ -52,9 +52,8 @@ lazy_static::lazy_static! {
 }
 
 // Model path cache to avoid repeated filesystem I/O and model lookups
-static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> = Lazy::new(|| {
-    RwLock::new(HashMap::new())
-});
+static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Initialize the global sidecar manager
 pub async fn init_sidecar_manager(app_data_dir: PathBuf) -> Result<()> {
@@ -151,8 +150,7 @@ pub async fn generate_with_builtin(
     let model_path = get_cached_model_path(app_data_dir, model_name)?;
 
     // Apply model-specific chat template
-    let formatted_prompt =
-        models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+    let formatted_prompt = models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
     // Get or initialize sidecar manager
     let manager = {
         let mut global_manager = SIDECAR_MANAGER.lock().await;
