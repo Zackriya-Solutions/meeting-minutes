@@ -89,7 +89,10 @@ pub fn render_summary_chunk_prompt(summary_chunk_prompt: Option<&str>, chunk: &s
     format!("{}\n\n{}", prompt, SUMMARY_LANGUAGE_INSTRUCTION)
 }
 
-pub fn render_plain_summary_prompt<'a>(prompt: Option<&'a str>, default_prompt: &'a str) -> &'a str {
+pub fn render_plain_summary_prompt<'a>(
+    prompt: Option<&'a str>,
+    default_prompt: &'a str,
+) -> &'a str {
     prompt
         .map(str::trim)
         .filter(|prompt| !prompt.is_empty())
@@ -115,6 +118,26 @@ pub fn render_summary_combine_prompt(
     };
 
     format!("{}\n\n{}", prompt, SUMMARY_LANGUAGE_INSTRUCTION)
+}
+
+pub fn render_summary_final_user_prompt(content_to_summarize: &str, custom_prompt: &str) -> String {
+    let mut prompt = format!(
+        r#"
+<transcript_chunks>
+{}
+</transcript_chunks>
+
+{}"#,
+        content_to_summarize, SUMMARY_LANGUAGE_INSTRUCTION
+    );
+
+    if !custom_prompt.is_empty() {
+        prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
+        prompt.push_str(custom_prompt);
+        prompt.push_str("\n</user_context>");
+    }
+
+    prompt
 }
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
@@ -446,20 +469,7 @@ pub async fn generate_meeting_summary(
         &clean_template_markdown,
     );
 
-    let mut final_user_prompt = format!(
-        r#"
-<transcript_chunks>
-{}
-</transcript_chunks>
-"#,
-        content_to_summarize
-    );
-
-    if !custom_prompt.is_empty() {
-        final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
-        final_user_prompt.push_str(custom_prompt);
-        final_user_prompt.push_str("\n</user_context>");
-    }
+    let final_user_prompt = render_summary_final_user_prompt(&content_to_summarize, custom_prompt);
 
     // Check cancellation before final summary generation
     if let Some(token) = cancellation_token {
@@ -530,7 +540,9 @@ mod tests {
         );
 
         assert!(prompt.starts_with("Summarize this transcript chunk in Italian."));
-        assert!(prompt.contains("<transcript_chunk>\nDiscussed release timeline.\n</transcript_chunk>"));
+        assert!(
+            prompt.contains("<transcript_chunk>\nDiscussed release timeline.\n</transcript_chunk>")
+        );
     }
 
     #[test]
@@ -558,7 +570,10 @@ mod tests {
     #[test]
     fn render_plain_summary_prompt_uses_trimmed_custom_prompt_or_default() {
         assert_eq!(
-            render_plain_summary_prompt(Some("  Custom system prompt.  "), "Default system prompt."),
+            render_plain_summary_prompt(
+                Some("  Custom system prompt.  "),
+                "Default system prompt."
+            ),
             "Custom system prompt."
         );
         assert_eq!(
@@ -589,5 +604,15 @@ mod tests {
         );
 
         assert!(prompt.contains("same language as the transcript"));
+    }
+
+    #[test]
+    fn rendered_final_user_prompt_enforces_transcript_language() {
+        let prompt =
+            render_summary_final_user_prompt("The team discussed the roadmap.", "");
+
+        assert!(prompt.contains("<transcript_chunks>"));
+        assert!(prompt.contains("The team discussed the roadmap."));
+        assert!(prompt.contains(SUMMARY_LANGUAGE_INSTRUCTION));
     }
 }
