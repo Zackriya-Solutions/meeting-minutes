@@ -99,6 +99,12 @@ pub struct Setting {
     #[sqlx(rename = "summarySystemPrompt")]
     #[serde(rename = "summarySystemPrompt")]
     pub summary_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryChunkPrompt")]
+    #[serde(rename = "summaryChunkPrompt")]
+    pub summary_chunk_prompt: Option<String>,
+    #[sqlx(rename = "summaryCombinePrompt")]
+    #[serde(rename = "summaryCombinePrompt")]
+    pub summary_combine_prompt: Option<String>,
 }
 
 impl Setting {

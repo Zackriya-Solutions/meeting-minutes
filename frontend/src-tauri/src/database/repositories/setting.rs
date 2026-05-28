@@ -14,6 +14,10 @@ pub struct SaveModelConfigRequest {
     pub ollama_endpoint: Option<String>,
     #[serde(rename = "summarySystemPrompt")]
     pub summary_system_prompt: Option<String>,
+    #[serde(rename = "summaryChunkPrompt")]
+    pub summary_chunk_prompt: Option<String>,
+    #[serde(rename = "summaryCombinePrompt")]
+    pub summary_combine_prompt: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -47,18 +51,22 @@ impl SettingsRepository {
         whisper_model: &str,
         ollama_endpoint: Option<&str>,
         summary_system_prompt: Option<&str>,
+        summary_chunk_prompt: Option<&str>,
+        summary_combine_prompt: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
         // Using id '1' for backward compatibility
         sqlx::query(
             r#"
-            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint, summarySystemPrompt)
-            VALUES ('1', $1, $2, $3, $4, $5)
+            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint, summarySystemPrompt, summaryChunkPrompt, summaryCombinePrompt)
+            VALUES ('1', $1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
                 model = excluded.model,
                 whisperModel = excluded.whisperModel,
                 ollamaEndpoint = excluded.ollamaEndpoint,
-                summarySystemPrompt = excluded.summarySystemPrompt
+                summarySystemPrompt = excluded.summarySystemPrompt,
+                summaryChunkPrompt = excluded.summaryChunkPrompt,
+                summaryCombinePrompt = excluded.summaryCombinePrompt
             "#,
         )
         .bind(provider)
@@ -66,6 +74,8 @@ impl SettingsRepository {
         .bind(whisper_model)
         .bind(ollama_endpoint)
         .bind(summary_system_prompt)
+        .bind(summary_chunk_prompt)
+        .bind(summary_combine_prompt)
         .execute(pool)
         .await?;
 

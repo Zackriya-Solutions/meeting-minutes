@@ -73,6 +73,8 @@ impl SummaryService {
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     /// * `summary_system_prompt` - System prompt used for final report generation
+    /// * `summary_chunk_prompt` - User prompt used to summarize each transcript chunk
+    /// * `summary_combine_prompt` - User prompt used to combine chunk summaries
     pub async fn process_transcript_background<R: tauri::Runtime>(
         _app: AppHandle<R>,
         pool: SqlitePool,
@@ -83,6 +85,8 @@ impl SummaryService {
         custom_prompt: String,
         template_id: String,
         summary_system_prompt: String,
+        summary_chunk_prompt: String,
+        summary_combine_prompt: String,
     ) {
         let start_time = Instant::now();
         info!(
@@ -240,6 +244,8 @@ impl SummaryService {
             app_data_dir.as_ref(),
             Some(&cancellation_token),
             Some(&summary_system_prompt),
+            Some(&summary_chunk_prompt),
+            Some(&summary_combine_prompt),
         )
         .await;
 

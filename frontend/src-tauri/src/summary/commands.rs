@@ -176,6 +176,8 @@ pub async fn api_process_transcript<R: Runtime>(
     custom_prompt: Option<String>,
     template_id: Option<String>,
     summary_system_prompt: Option<String>,
+    summary_chunk_prompt: Option<String>,
+    summary_combine_prompt: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<ProcessTranscriptResponse, String> {
     use uuid::Uuid;
@@ -193,6 +195,10 @@ pub async fn api_process_transcript<R: Runtime>(
     let final_summary_system_prompt = summary_system_prompt.unwrap_or_else(|| {
         crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()
     });
+    let final_summary_chunk_prompt =
+        summary_chunk_prompt.unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string());
+    let final_summary_combine_prompt = summary_combine_prompt
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string());
 
     // Create or reset the process entry in the database
     SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
@@ -232,6 +238,8 @@ pub async fn api_process_transcript<R: Runtime>(
             final_prompt,
             final_template_id,
             final_summary_system_prompt,
+            final_summary_chunk_prompt,
+            final_summary_combine_prompt,
         )
         .await;
     });

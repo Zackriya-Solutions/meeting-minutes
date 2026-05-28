@@ -10,6 +10,8 @@ use tracing::{error, info};
 pub const SUMMARY_SYSTEM_PROMPT_SECTION_INSTRUCTIONS_PLACEHOLDER: &str =
     "{{SECTION_INSTRUCTIONS}}";
 pub const SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER: &str = "{{TEMPLATE}}";
+pub const SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER: &str = "{{TRANSCRIPT_CHUNK}}";
+pub const SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER: &str = "{{CHUNK_SUMMARIES}}";
 
 pub const DEFAULT_SUMMARY_SYSTEM_PROMPT: &str = r#"You are an expert meeting summarizer. Generate a final meeting report by filling in the provided Markdown template based on the source text.
 
@@ -28,6 +30,18 @@ pub const DEFAULT_SUMMARY_SYSTEM_PROMPT: &str = r#"You are an expert meeting sum
 {{TEMPLATE}}
 </template>
 "#;
+
+pub const DEFAULT_SUMMARY_CHUNK_PROMPT: &str = r#"Provide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.
+
+<transcript_chunk>
+{{TRANSCRIPT_CHUNK}}
+</transcript_chunk>"#;
+
+pub const DEFAULT_SUMMARY_COMBINE_PROMPT: &str = r#"The following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.
+
+<summaries>
+{{CHUNK_SUMMARIES}}
+</summaries>"#;
 
 pub fn render_summary_system_prompt(
     summary_system_prompt: Option<&str>,
@@ -48,6 +62,41 @@ pub fn render_summary_system_prompt(
             SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER,
             clean_template_markdown,
         )
+}
+
+pub fn render_summary_chunk_prompt(summary_chunk_prompt: Option<&str>, chunk: &str) -> String {
+    let prompt_template = summary_chunk_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or(DEFAULT_SUMMARY_CHUNK_PROMPT);
+
+    if prompt_template.contains(SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER) {
+        prompt_template.replace(SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER, chunk)
+    } else {
+        format!(
+            "{}\n\n<transcript_chunk>\n{}\n</transcript_chunk>",
+            prompt_template, chunk
+        )
+    }
+}
+
+pub fn render_summary_combine_prompt(
+    summary_combine_prompt: Option<&str>,
+    combined_text: &str,
+) -> String {
+    let prompt_template = summary_combine_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or(DEFAULT_SUMMARY_COMBINE_PROMPT);
+
+    if prompt_template.contains(SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER) {
+        prompt_template.replace(SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER, combined_text)
+    } else {
+        format!(
+            "{}\n\n<summaries>\n{}\n</summaries>",
+            prompt_template, combined_text
+        )
+    }
 }
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
@@ -216,6 +265,8 @@ pub async fn generate_meeting_summary(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     summary_system_prompt: Option<&str>,
+    summary_chunk_prompt: Option<&str>,
+    summary_combine_prompt: Option<&str>,
 ) -> Result<(String, i64), String> {
     // Check cancellation at the start
     if let Some(token) = cancellation_token {
@@ -257,7 +308,6 @@ pub async fn generate_meeting_summary(
 
         let mut chunk_summaries = Vec::new();
         let system_prompt_chunk = "You are an expert meeting summarizer.";
-        let user_prompt_template_chunk = "Provide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{}\n</transcript_chunk>";
 
         for (i, chunk) in chunks.iter().enumerate() {
             // Check for cancellation before processing each chunk
@@ -269,7 +319,7 @@ pub async fn generate_meeting_summary(
             }
 
             info!("Processing chunk {}/{}", i + 1, num_chunks);
-            let user_prompt_chunk = user_prompt_template_chunk.replace("{}", chunk.as_str());
+            let user_prompt_chunk = render_summary_chunk_prompt(summary_chunk_prompt, chunk);
 
             match generate_summary(
                 client,
@@ -323,9 +373,8 @@ pub async fn generate_meeting_summary(
             );
             let combined_text = chunk_summaries.join("\n---\n");
             let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
-            let user_prompt_combine_template = "The following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.\n\n<summaries>\n{}\n</summaries>";
-
-            let user_prompt_combine = user_prompt_combine_template.replace("{}", &combined_text);
+            let user_prompt_combine =
+                render_summary_combine_prompt(summary_combine_prompt, &combined_text);
             generate_summary(
                 client,
                 provider,

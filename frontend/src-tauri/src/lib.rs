@@ -610,6 +610,8 @@ pub fn run() {
             api::api_update_profile,
             api::api_get_model_config,
             api::api_get_default_summary_system_prompt,
+            api::api_get_default_summary_chunk_prompt,
+            api::api_get_default_summary_combine_prompt,
             api::api_save_model_config,
             api::api_get_api_key,
             // api::api_get_auto_generate_setting,
