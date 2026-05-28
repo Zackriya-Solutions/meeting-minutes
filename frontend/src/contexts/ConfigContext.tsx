@@ -104,6 +104,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     whisperModel: 'large-v3',
     ollamaEndpoint: null,
     summarySystemPrompt: '',
+    summaryChunkSystemPrompt: '',
+    summaryChunkPrompt: '',
+    summaryCombineSystemPrompt: '',
+    summaryCombinePrompt: '',
   });
 
   // Transcript model configuration state
@@ -248,6 +252,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                   model: resolvedModel || prev.model,
                   whisperModel: data.whisperModel || prev.whisperModel,
                   summarySystemPrompt: data.summarySystemPrompt || prev.summarySystemPrompt,
+                  summaryChunkSystemPrompt: data.summaryChunkSystemPrompt || prev.summaryChunkSystemPrompt,
+                  summaryChunkPrompt: data.summaryChunkPrompt || prev.summaryChunkPrompt,
+                  summaryCombineSystemPrompt: data.summaryCombineSystemPrompt || prev.summaryCombineSystemPrompt,
+                  summaryCombinePrompt: data.summaryCombinePrompt || prev.summaryCombinePrompt,
                   customOpenAIEndpoint: customConfig.endpoint,
                   customOpenAIModel: customConfig.model,
                   customOpenAIApiKey: customConfig.apiKey,
@@ -278,6 +286,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             whisperModel: data.whisperModel || prev.whisperModel,
             ollamaEndpoint: data.ollamaEndpoint,
             summarySystemPrompt: data.summarySystemPrompt || prev.summarySystemPrompt,
+            summaryChunkSystemPrompt: data.summaryChunkSystemPrompt || prev.summaryChunkSystemPrompt,
+            summaryChunkPrompt: data.summaryChunkPrompt || prev.summaryChunkPrompt,
+            summaryCombineSystemPrompt: data.summaryCombineSystemPrompt || prev.summaryCombineSystemPrompt,
+            summaryCombinePrompt: data.summaryCombinePrompt || prev.summaryCombinePrompt,
           }));
 
           // Seed per-provider model cache from DB

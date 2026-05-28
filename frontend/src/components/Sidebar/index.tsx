@@ -71,6 +71,10 @@ const Sidebar: React.FC = () => {
     apiKey: null,
     ollamaEndpoint: null,
     summarySystemPrompt: '',
+    summaryChunkSystemPrompt: '',
+    summaryChunkPrompt: '',
+    summaryCombineSystemPrompt: '',
+    summaryCombinePrompt: '',
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'parakeet',
@@ -193,6 +197,10 @@ const Sidebar: React.FC = () => {
         apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
         summarySystemPrompt: config.summarySystemPrompt,
+        summaryChunkSystemPrompt: config.summaryChunkSystemPrompt,
+        summaryChunkPrompt: config.summaryChunkPrompt,
+        summaryCombineSystemPrompt: config.summaryCombineSystemPrompt,
+        summaryCombinePrompt: config.summaryCombinePrompt,
       });
 
       setModelConfig(config);

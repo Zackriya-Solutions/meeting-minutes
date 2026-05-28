@@ -19,10 +19,20 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
     summarySystemPrompt: '',
+    summaryChunkSystemPrompt: '',
+    summaryChunkPrompt: '',
+    summaryCombineSystemPrompt: '',
+    summaryCombinePrompt: '',
     apiKey: null,
     ollamaEndpoint: null
   });
-  const [defaultSummarySystemPrompt, setDefaultSummarySystemPrompt] = useState('');
+  const [defaultSummaryPrompts, setDefaultSummaryPrompts] = useState({
+    system: '',
+    chunkSystem: '',
+    chunk: '',
+    combineSystem: '',
+    combine: '',
+  });
   const [isSavingSummaryPrompt, setIsSavingSummaryPrompt] = useState(false);
 
   const { isAutoSummary, toggleIsAutoSummary } = useConfig();
@@ -30,8 +40,27 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
     try {
-      const defaultPrompt = await invoke<string>('api_get_default_summary_system_prompt');
-      setDefaultSummarySystemPrompt(defaultPrompt);
+      const [
+        defaultSystemPrompt,
+        defaultChunkSystemPrompt,
+        defaultChunkPrompt,
+        defaultCombineSystemPrompt,
+        defaultCombinePrompt,
+      ] = await Promise.all([
+        invoke<string>('api_get_default_summary_system_prompt'),
+        invoke<string>('api_get_default_summary_chunk_system_prompt'),
+        invoke<string>('api_get_default_summary_chunk_prompt'),
+        invoke<string>('api_get_default_summary_combine_system_prompt'),
+        invoke<string>('api_get_default_summary_combine_prompt'),
+      ]);
+      const defaults = {
+        system: defaultSystemPrompt,
+        chunkSystem: defaultChunkSystemPrompt,
+        chunk: defaultChunkPrompt,
+        combineSystem: defaultCombineSystemPrompt,
+        combine: defaultCombinePrompt,
+      };
+      setDefaultSummaryPrompts(defaults);
 
       const data = await invoke('api_get_model_config') as any;
       if (data && data.provider !== null) {
@@ -67,12 +96,20 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         }
         setModelConfig({
           ...data,
-          summarySystemPrompt: data.summarySystemPrompt || defaultPrompt,
+          summarySystemPrompt: data.summarySystemPrompt || defaults.system,
+          summaryChunkSystemPrompt: data.summaryChunkSystemPrompt || defaults.chunkSystem,
+          summaryChunkPrompt: data.summaryChunkPrompt || defaults.chunk,
+          summaryCombineSystemPrompt: data.summaryCombineSystemPrompt || defaults.combineSystem,
+          summaryCombinePrompt: data.summaryCombinePrompt || defaults.combine,
         });
       } else {
         setModelConfig((prev) => ({
           ...prev,
-          summarySystemPrompt: prev.summarySystemPrompt || defaultPrompt,
+          summarySystemPrompt: prev.summarySystemPrompt || defaults.system,
+          summaryChunkSystemPrompt: prev.summaryChunkSystemPrompt || defaults.chunkSystem,
+          summaryChunkPrompt: prev.summaryChunkPrompt || defaults.chunk,
+          summaryCombineSystemPrompt: prev.summaryCombineSystemPrompt || defaults.combineSystem,
+          summaryCombinePrompt: prev.summaryCombinePrompt || defaults.combine,
         }));
       }
     } catch (error) {
@@ -101,7 +138,11 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         console.log('SummaryModelSettings received model-config-updated event:', event.payload);
         setModelConfig({
           ...event.payload,
-          summarySystemPrompt: event.payload.summarySystemPrompt || defaultSummarySystemPrompt,
+          summarySystemPrompt: event.payload.summarySystemPrompt || defaultSummaryPrompts.system,
+          summaryChunkSystemPrompt: event.payload.summaryChunkSystemPrompt || defaultSummaryPrompts.chunkSystem,
+          summaryChunkPrompt: event.payload.summaryChunkPrompt || defaultSummaryPrompts.chunk,
+          summaryCombineSystemPrompt: event.payload.summaryCombineSystemPrompt || defaultSummaryPrompts.combineSystem,
+          summaryCombinePrompt: event.payload.summaryCombinePrompt || defaultSummaryPrompts.combine,
         });
       });
 
@@ -114,14 +155,18 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     return () => {
       cleanup?.();
     };
-  }, [defaultSummarySystemPrompt]);
+  }, [defaultSummaryPrompts]);
 
   // Save handler
   const handleSaveModelConfig = async (config: ModelConfig, successMessage = 'Model settings saved successfully') => {
     try {
       const configToSave = {
         ...config,
-        summarySystemPrompt: config.summarySystemPrompt?.trim() || defaultSummarySystemPrompt,
+        summarySystemPrompt: config.summarySystemPrompt?.trim() || defaultSummaryPrompts.system,
+        summaryChunkSystemPrompt: config.summaryChunkSystemPrompt?.trim() || defaultSummaryPrompts.chunkSystem,
+        summaryChunkPrompt: config.summaryChunkPrompt?.trim() || defaultSummaryPrompts.chunk,
+        summaryCombineSystemPrompt: config.summaryCombineSystemPrompt?.trim() || defaultSummaryPrompts.combineSystem,
+        summaryCombinePrompt: config.summaryCombinePrompt?.trim() || defaultSummaryPrompts.combine,
       };
 
       await invoke('api_save_model_config', {
@@ -131,6 +176,10 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         apiKey: configToSave.apiKey,
         ollamaEndpoint: configToSave.ollamaEndpoint,
         summarySystemPrompt: configToSave.summarySystemPrompt,
+        summaryChunkSystemPrompt: configToSave.summaryChunkSystemPrompt,
+        summaryChunkPrompt: configToSave.summaryChunkPrompt,
+        summaryCombineSystemPrompt: configToSave.summaryCombineSystemPrompt,
+        summaryCombinePrompt: configToSave.summaryCombinePrompt,
       });
 
       setModelConfig(configToSave);
@@ -146,23 +195,36 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     }
   };
 
-  const handleSaveSummarySystemPrompt = async () => {
+  const handleSaveSummaryPrompts = async () => {
     setIsSavingSummaryPrompt(true);
     try {
-      await handleSaveModelConfig(modelConfig, 'Summary system prompt saved successfully');
+      await handleSaveModelConfig(modelConfig, 'Summary prompts saved successfully');
     } finally {
       setIsSavingSummaryPrompt(false);
     }
   };
 
-  const handleResetSummarySystemPrompt = async () => {
-    if (!defaultSummarySystemPrompt) return;
+  const handleResetSummaryPrompts = async () => {
+    if (
+      !defaultSummaryPrompts.system ||
+      !defaultSummaryPrompts.chunkSystem ||
+      !defaultSummaryPrompts.chunk ||
+      !defaultSummaryPrompts.combineSystem ||
+      !defaultSummaryPrompts.combine
+    ) return;
 
     setIsSavingSummaryPrompt(true);
     try {
       await handleSaveModelConfig(
-        { ...modelConfig, summarySystemPrompt: defaultSummarySystemPrompt },
-        'Summary system prompt reset to default'
+        {
+          ...modelConfig,
+          summarySystemPrompt: defaultSummaryPrompts.system,
+          summaryChunkSystemPrompt: defaultSummaryPrompts.chunkSystem,
+          summaryChunkPrompt: defaultSummaryPrompts.chunk,
+          summaryCombineSystemPrompt: defaultSummaryPrompts.combineSystem,
+          summaryCombinePrompt: defaultSummaryPrompts.combine,
+        },
+        'Summary prompts reset to default'
       );
     } finally {
       setIsSavingSummaryPrompt(false);
@@ -196,38 +258,124 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold mb-4">Summary System Prompt</h3>
+        <h3 className="text-lg font-semibold mb-4">Summary Prompts</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Customize the system prompt used by Generate Summary. Keep the placeholders
-          <code className="mx-1 rounded bg-gray-100 px-1 py-0.5 text-xs">{'{{SECTION_INSTRUCTIONS}}'}</code>
-          and
-          <code className="mx-1 rounded bg-gray-100 px-1 py-0.5 text-xs">{'{{TEMPLATE}}'}</code>
-          if you want the selected summary template to remain active.
+          Customize the prompts used by Generate Summary. The chunk and combine prompts are used only for
+          long transcripts that need multi-step summarization.
         </p>
-        <Textarea
-          value={modelConfig.summarySystemPrompt}
-          onChange={(event) => setModelConfig((prev) => ({
-            ...prev,
-            summarySystemPrompt: event.target.value,
-          }))}
-          className="min-h-[280px] font-mono text-xs leading-relaxed"
-          placeholder={defaultSummarySystemPrompt || 'Loading default summary system prompt...'}
-        />
+
+        <div className="space-y-6">
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Final system prompt</h4>
+            <p className="text-xs text-gray-600 mb-2">
+              Keep
+              <code className="mx-1 rounded bg-gray-100 px-1 py-0.5">{'{{SECTION_INSTRUCTIONS}}'}</code>
+              and
+              <code className="mx-1 rounded bg-gray-100 px-1 py-0.5">{'{{TEMPLATE}}'}</code>
+              to preserve the selected summary template.
+            </p>
+            <Textarea
+              value={modelConfig.summarySystemPrompt}
+              onChange={(event) => setModelConfig((prev) => ({
+                ...prev,
+                summarySystemPrompt: event.target.value,
+              }))}
+              className="min-h-[260px] font-mono text-xs leading-relaxed"
+              placeholder={defaultSummaryPrompts.system || 'Loading default final system prompt...'}
+            />
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Chunk system prompt</h4>
+            <p className="text-xs text-gray-600 mb-2">
+              System role used when summarizing each transcript chunk.
+            </p>
+            <Textarea
+              value={modelConfig.summaryChunkSystemPrompt}
+              onChange={(event) => setModelConfig((prev) => ({
+                ...prev,
+                summaryChunkSystemPrompt: event.target.value,
+              }))}
+              className="min-h-[80px] font-mono text-xs leading-relaxed"
+              placeholder={defaultSummaryPrompts.chunkSystem || 'Loading default chunk system prompt...'}
+            />
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Chunk user prompt</h4>
+            <p className="text-xs text-gray-600 mb-2">
+              Used to summarize each transcript chunk. Keep
+              <code className="mx-1 rounded bg-gray-100 px-1 py-0.5">{'{{TRANSCRIPT_CHUNK}}'}</code>
+              where the chunk text should be inserted.
+            </p>
+            <Textarea
+              value={modelConfig.summaryChunkPrompt}
+              onChange={(event) => setModelConfig((prev) => ({
+                ...prev,
+                summaryChunkPrompt: event.target.value,
+              }))}
+              className="min-h-[180px] font-mono text-xs leading-relaxed"
+              placeholder={defaultSummaryPrompts.chunk || 'Loading default chunk prompt...'}
+            />
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Combine system prompt</h4>
+            <p className="text-xs text-gray-600 mb-2">
+              System role used when merging intermediate chunk summaries.
+            </p>
+            <Textarea
+              value={modelConfig.summaryCombineSystemPrompt}
+              onChange={(event) => setModelConfig((prev) => ({
+                ...prev,
+                summaryCombineSystemPrompt: event.target.value,
+              }))}
+              className="min-h-[80px] font-mono text-xs leading-relaxed"
+              placeholder={defaultSummaryPrompts.combineSystem || 'Loading default combine system prompt...'}
+            />
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Combine user prompt</h4>
+            <p className="text-xs text-gray-600 mb-2">
+              Used to merge chunk summaries before the final report. Keep
+              <code className="mx-1 rounded bg-gray-100 px-1 py-0.5">{'{{CHUNK_SUMMARIES}}'}</code>
+              where the intermediate summaries should be inserted.
+            </p>
+            <Textarea
+              value={modelConfig.summaryCombinePrompt}
+              onChange={(event) => setModelConfig((prev) => ({
+                ...prev,
+                summaryCombinePrompt: event.target.value,
+              }))}
+              className="min-h-[180px] font-mono text-xs leading-relaxed"
+              placeholder={defaultSummaryPrompts.combine || 'Loading default combine prompt...'}
+            />
+          </div>
+        </div>
+
         <div className="mt-4 flex justify-end gap-2">
           <Button
             type="button"
             variant="outline"
-            onClick={handleResetSummarySystemPrompt}
-            disabled={isSavingSummaryPrompt || !defaultSummarySystemPrompt}
+            onClick={handleResetSummaryPrompts}
+            disabled={
+              isSavingSummaryPrompt ||
+              !defaultSummaryPrompts.system ||
+              !defaultSummaryPrompts.chunkSystem ||
+              !defaultSummaryPrompts.chunk ||
+              !defaultSummaryPrompts.combineSystem ||
+              !defaultSummaryPrompts.combine
+            }
           >
-            Reset to default
+            Reset prompts to default
           </Button>
           <Button
             type="button"
-            onClick={handleSaveSummarySystemPrompt}
+            onClick={handleSaveSummaryPrompts}
             disabled={isSavingSummaryPrompt}
           >
-            {isSavingSummaryPrompt ? 'Saving...' : 'Save prompt'}
+            {isSavingSummaryPrompt ? 'Saving...' : 'Save prompts'}
           </Button>
         </div>
       </div>

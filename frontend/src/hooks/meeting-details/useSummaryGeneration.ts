@@ -114,6 +114,10 @@ export function useSummaryGeneration({
         customPrompt: customPrompt,
         templateId: selectedTemplate,
         summarySystemPrompt: modelConfig.summarySystemPrompt,
+        summaryChunkSystemPrompt: modelConfig.summaryChunkSystemPrompt,
+        summaryChunkPrompt: modelConfig.summaryChunkPrompt,
+        summaryCombineSystemPrompt: modelConfig.summaryCombineSystemPrompt,
+        summaryCombinePrompt: modelConfig.summaryCombinePrompt,
       }) as any;
 
       const process_id = result.process_id;

@@ -13,6 +13,10 @@ export interface ModelConfig {
   model: string;
   whisperModel: string;
   summarySystemPrompt: string;
+  summaryChunkSystemPrompt: string;
+  summaryChunkPrompt: string;
+  summaryCombineSystemPrompt: string;
+  summaryCombinePrompt: string;
   /**
    * @deprecated Use providerApiKeys from ConfigContext instead.
    * This field may contain stale data when provider changes without saving.

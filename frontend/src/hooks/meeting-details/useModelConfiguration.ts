@@ -15,6 +15,10 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
     model: '', // Empty until loaded from DB
     whisperModel: 'large-v3',
     summarySystemPrompt: '',
+    summaryChunkSystemPrompt: '',
+    summaryChunkPrompt: '',
+    summaryCombineSystemPrompt: '',
+    summaryCombinePrompt: '',
   });
   const [isLoading, setIsLoading] = useState(true);
   const [, setError] = useState<string>('');
@@ -117,6 +121,10 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
         apiKey: configToSave.apiKey ?? null,
         ollamaEndpoint: configToSave.ollamaEndpoint ?? null,
         summarySystemPrompt: configToSave.summarySystemPrompt,
+        summaryChunkSystemPrompt: configToSave.summaryChunkSystemPrompt,
+        summaryChunkPrompt: configToSave.summaryChunkPrompt,
+        summaryCombineSystemPrompt: configToSave.summaryCombineSystemPrompt,
+        summaryCombinePrompt: configToSave.summaryCombinePrompt,
       };
       console.log('Saving model config with payload:', payload);
 
@@ -140,6 +148,10 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
         apiKey: payload.apiKey,
         ollamaEndpoint: payload.ollamaEndpoint,
         summarySystemPrompt: payload.summarySystemPrompt,
+        summaryChunkSystemPrompt: payload.summaryChunkSystemPrompt,
+        summaryChunkPrompt: payload.summaryChunkPrompt,
+        summaryCombineSystemPrompt: payload.summaryCombineSystemPrompt,
+        summaryCombinePrompt: payload.summaryCombinePrompt,
       });
 
       console.log('Save model config success');

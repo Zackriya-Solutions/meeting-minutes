@@ -104,6 +104,10 @@ function MeetingDetailsContent() {
           apiKey: null,
           ollamaEndpoint: null,
           summarySystemPrompt: '',
+          summaryChunkSystemPrompt: '',
+          summaryChunkPrompt: '',
+          summaryCombineSystemPrompt: '',
+          summaryCombinePrompt: '',
         });
 
         setShouldAutoGenerate(true);
