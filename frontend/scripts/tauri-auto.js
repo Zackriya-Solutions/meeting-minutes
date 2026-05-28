@@ -46,24 +46,27 @@ console.log(''); // Empty line for spacing
 // Platform-specific environment variables
 const platform = os.platform();
 const env = { ...process.env };
+let localConfigArg = '';
 
 if (isLocalBuild) {
   let tauriConfig = {};
-  if (env.TAURI_CONFIG) {
+  if (process.env.TAURI_CONFIG) {
     try {
-      tauriConfig = JSON.parse(env.TAURI_CONFIG);
+      tauriConfig = JSON.parse(process.env.TAURI_CONFIG);
     } catch (err) {
-      console.warn('⚠️  Existing TAURI_CONFIG is not valid JSON; replacing it for local build.');
+      console.warn('⚠️  Existing TAURI_CONFIG is not valid JSON; replacing it for local build config.');
     }
   }
 
-  env.TAURI_CONFIG = JSON.stringify({
+  const localConfig = {
     ...tauriConfig,
     bundle: {
       ...(tauriConfig.bundle || {}),
       createUpdaterArtifacts: false,
     },
-  });
+  };
+  const escapedConfig = JSON.stringify(localConfig).replace(/'/g, `'\\''`);
+  localConfigArg = ` --config '${escapedConfig}'`;
   console.log('🔓 Local build: updater signing artifacts disabled');
 }
 
@@ -75,7 +78,7 @@ if (platform === 'linux' && feature === 'cuda') {
 }
 
 // Build the tauri command
-let tauriCmd = `tauri ${command}`;
+let tauriCmd = `tauri ${command}${localConfigArg}`;
 if (feature && feature !== 'none') {
   tauriCmd += ` -- --features ${feature}`;
   console.log(`🚀 Running: tauri ${command} with features: ${feature}`);
