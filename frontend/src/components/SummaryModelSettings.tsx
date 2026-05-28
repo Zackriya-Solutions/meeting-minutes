@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
+import { Textarea } from './ui/textarea';
+import { Button } from './ui/button';
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
@@ -16,15 +18,21 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
+    summarySystemPrompt: '',
     apiKey: null,
     ollamaEndpoint: null
   });
+  const [defaultSummarySystemPrompt, setDefaultSummarySystemPrompt] = useState('');
+  const [isSavingSummaryPrompt, setIsSavingSummaryPrompt] = useState(false);
 
   const { isAutoSummary, toggleIsAutoSummary } = useConfig();
 
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
     try {
+      const defaultPrompt = await invoke<string>('api_get_default_summary_system_prompt');
+      setDefaultSummarySystemPrompt(defaultPrompt);
+
       const data = await invoke('api_get_model_config') as any;
       if (data && data.provider !== null) {
         // Fetch API key if not included and provider requires it
@@ -57,7 +65,15 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
             console.error('Failed to fetch custom OpenAI config:', err);
           }
         }
-        setModelConfig(data);
+        setModelConfig({
+          ...data,
+          summarySystemPrompt: data.summarySystemPrompt || defaultPrompt,
+        });
+      } else {
+        setModelConfig((prev) => ({
+          ...prev,
+          summarySystemPrompt: prev.summarySystemPrompt || defaultPrompt,
+        }));
       }
     } catch (error) {
       console.error('Failed to fetch model config:', error);
@@ -83,7 +99,10 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       const { listen } = await import('@tauri-apps/api/event');
       const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
         console.log('SummaryModelSettings received model-config-updated event:', event.payload);
-        setModelConfig(event.payload);
+        setModelConfig({
+          ...event.payload,
+          summarySystemPrompt: event.payload.summarySystemPrompt || defaultSummarySystemPrompt,
+        });
       });
 
       return unlisten;
@@ -95,29 +114,58 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     return () => {
       cleanup?.();
     };
-  }, []);
+  }, [defaultSummarySystemPrompt]);
 
   // Save handler
-  const handleSaveModelConfig = async (config: ModelConfig) => {
+  const handleSaveModelConfig = async (config: ModelConfig, successMessage = 'Model settings saved successfully') => {
     try {
+      const configToSave = {
+        ...config,
+        summarySystemPrompt: config.summarySystemPrompt?.trim() || defaultSummarySystemPrompt,
+      };
+
       await invoke('api_save_model_config', {
-        provider: config.provider,
-        model: config.model,
-        whisperModel: config.whisperModel,
-        apiKey: config.apiKey,
-        ollamaEndpoint: config.ollamaEndpoint,
+        provider: configToSave.provider,
+        model: configToSave.model,
+        whisperModel: configToSave.whisperModel,
+        apiKey: configToSave.apiKey,
+        ollamaEndpoint: configToSave.ollamaEndpoint,
+        summarySystemPrompt: configToSave.summarySystemPrompt,
       });
 
-      setModelConfig(config);
+      setModelConfig(configToSave);
 
       // Emit event to sync other components
       const { emit } = await import('@tauri-apps/api/event');
-      await emit('model-config-updated', config);
+      await emit('model-config-updated', configToSave);
 
-      toast.success('Model settings saved successfully');
+      toast.success(successMessage);
     } catch (error) {
       console.error('Error saving model config:', error);
       toast.error('Failed to save model settings');
+    }
+  };
+
+  const handleSaveSummarySystemPrompt = async () => {
+    setIsSavingSummaryPrompt(true);
+    try {
+      await handleSaveModelConfig(modelConfig, 'Summary system prompt saved successfully');
+    } finally {
+      setIsSavingSummaryPrompt(false);
+    }
+  };
+
+  const handleResetSummarySystemPrompt = async () => {
+    if (!defaultSummarySystemPrompt) return;
+
+    setIsSavingSummaryPrompt(true);
+    try {
+      await handleSaveModelConfig(
+        { ...modelConfig, summarySystemPrompt: defaultSummarySystemPrompt },
+        'Summary system prompt reset to default'
+      );
+    } finally {
+      setIsSavingSummaryPrompt(false);
     }
   };
 
@@ -145,6 +193,43 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
           onSave={handleSaveModelConfig}
           skipInitialFetch={true}
         />
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-4">Summary System Prompt</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Customize the system prompt used by Generate Summary. Keep the placeholders
+          <code className="mx-1 rounded bg-gray-100 px-1 py-0.5 text-xs">{'{{SECTION_INSTRUCTIONS}}'}</code>
+          and
+          <code className="mx-1 rounded bg-gray-100 px-1 py-0.5 text-xs">{'{{TEMPLATE}}'}</code>
+          if you want the selected summary template to remain active.
+        </p>
+        <Textarea
+          value={modelConfig.summarySystemPrompt}
+          onChange={(event) => setModelConfig((prev) => ({
+            ...prev,
+            summarySystemPrompt: event.target.value,
+          }))}
+          className="min-h-[280px] font-mono text-xs leading-relaxed"
+          placeholder={defaultSummarySystemPrompt || 'Loading default summary system prompt...'}
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleResetSummarySystemPrompt}
+            disabled={isSavingSummaryPrompt || !defaultSummarySystemPrompt}
+          >
+            Reset to default
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSaveSummarySystemPrompt}
+            disabled={isSavingSummaryPrompt}
+          >
+            {isSavingSummaryPrompt ? 'Saving...' : 'Save prompt'}
+          </Button>
+        </div>
       </div>
     </div>
   );

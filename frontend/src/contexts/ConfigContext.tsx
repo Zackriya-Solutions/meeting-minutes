@@ -102,7 +102,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
+    summarySystemPrompt: '',
   });
 
   // Transcript model configuration state
@@ -246,6 +247,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                   provider: data.provider,
                   model: resolvedModel || prev.model,
                   whisperModel: data.whisperModel || prev.whisperModel,
+                  summarySystemPrompt: data.summarySystemPrompt || prev.summarySystemPrompt,
                   customOpenAIEndpoint: customConfig.endpoint,
                   customOpenAIModel: customConfig.model,
                   customOpenAIApiKey: customConfig.apiKey,
@@ -275,6 +277,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             model: data.model || prev.model,
             whisperModel: data.whisperModel || prev.whisperModel,
             ollamaEndpoint: data.ollamaEndpoint,
+            summarySystemPrompt: data.summarySystemPrompt || prev.summarySystemPrompt,
           }));
 
           // Seed per-provider model cache from DB

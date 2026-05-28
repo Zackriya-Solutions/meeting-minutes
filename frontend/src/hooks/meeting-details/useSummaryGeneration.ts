@@ -113,6 +113,7 @@ export function useSummaryGeneration({
         overlap: 1000,
         customPrompt: customPrompt,
         templateId: selectedTemplate,
+        summarySystemPrompt: modelConfig.summarySystemPrompt,
       }) as any;
 
       const process_id = result.process_id;

@@ -13,7 +13,8 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
     model: '', // Empty until loaded from DB
-    whisperModel: 'large-v3'
+    whisperModel: 'large-v3',
+    summarySystemPrompt: '',
   });
   const [isLoading, setIsLoading] = useState(true);
   const [, setError] = useState<string>('');
@@ -114,7 +115,8 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
         model: configToSave.model,
         whisperModel: configToSave.whisperModel,
         apiKey: configToSave.apiKey ?? null,
-        ollamaEndpoint: configToSave.ollamaEndpoint ?? null
+        ollamaEndpoint: configToSave.ollamaEndpoint ?? null,
+        summarySystemPrompt: configToSave.summarySystemPrompt,
       };
       console.log('Saving model config with payload:', payload);
 
@@ -137,6 +139,7 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
         whisperModel: payload.whisperModel,
         apiKey: payload.apiKey,
         ollamaEndpoint: payload.ollamaEndpoint,
+        summarySystemPrompt: payload.summarySystemPrompt,
       });
 
       console.log('Save model config success');

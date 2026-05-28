@@ -12,6 +12,7 @@ export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
+  summarySystemPrompt: string;
   /**
    * @deprecated Use providerApiKeys from ConfigContext instead.
    * This field may contain stale data when provider changes without saving.

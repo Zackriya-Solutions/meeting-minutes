@@ -69,7 +69,8 @@ const Sidebar: React.FC = () => {
     model: '',
     whisperModel: '',
     apiKey: null,
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
+    summarySystemPrompt: '',
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'parakeet',
@@ -191,6 +192,7 @@ const Sidebar: React.FC = () => {
         whisperModel: config.whisperModel,
         apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
+        summarySystemPrompt: config.summarySystemPrompt,
       });
 
       setModelConfig(config);
