@@ -658,6 +658,10 @@ pub fn run() {
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
+            summary::template_commands::api_get_template_json,
+            summary::template_commands::api_get_default_template_json,
+            summary::template_commands::api_save_template,
+            summary::template_commands::api_reset_template,
             summary::template_commands::api_validate_template,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,

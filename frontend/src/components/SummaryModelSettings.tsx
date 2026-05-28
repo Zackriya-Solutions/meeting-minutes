@@ -8,6 +8,7 @@ import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
+import { SummaryTemplateManager } from './SummaryTemplateManager';
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
@@ -379,6 +380,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
           </Button>
         </div>
       </div>
+
+      <SummaryTemplateManager />
     </div>
   );
 }

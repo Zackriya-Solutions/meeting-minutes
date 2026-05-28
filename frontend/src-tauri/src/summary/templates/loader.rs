@@ -5,6 +5,20 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use tracing::{debug, info, warn};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TemplateSource {
+    Custom,
+    Bundled,
+    BuiltIn,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TemplateJson {
+    pub json: String,
+    pub source: TemplateSource,
+}
+
 // Global storage for the bundled templates directory path
 static BUNDLED_TEMPLATES_DIR: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
 static CUSTOM_TEMPLATES_DIR: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
@@ -98,6 +112,96 @@ fn load_custom_template(template_id: &str) -> Option<String> {
             None
         }
     }
+}
+
+fn validate_template_id(template_id: &str) -> Result<(), String> {
+    if template_id.is_empty()
+        || !template_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(format!("Invalid template id: {}", template_id));
+    }
+
+    Ok(())
+}
+
+fn custom_template_path(template_id: &str) -> Result<PathBuf, String> {
+    validate_template_id(template_id)?;
+    let custom_dir = get_custom_templates_dir()
+        .ok_or_else(|| "Custom templates directory is not available".to_string())?;
+    Ok(custom_dir.join(format!("{}.json", template_id)))
+}
+
+pub fn get_template_json_with_source(template_id: &str) -> Result<TemplateJson, String> {
+    validate_template_id(template_id)?;
+
+    if let Some(custom_content) = load_custom_template(template_id) {
+        validate_and_parse_template(&custom_content)?;
+        return Ok(TemplateJson {
+            json: custom_content,
+            source: TemplateSource::Custom,
+        });
+    }
+
+    get_default_template_json_with_source(template_id)
+}
+
+pub fn get_default_template_json_with_source(template_id: &str) -> Result<TemplateJson, String> {
+    validate_template_id(template_id)?;
+
+    if let Some(bundled_content) = load_bundled_template(template_id) {
+        validate_and_parse_template(&bundled_content)?;
+        return Ok(TemplateJson {
+            json: bundled_content,
+            source: TemplateSource::Bundled,
+        });
+    }
+
+    if let Some(builtin_content) = defaults::get_builtin_template(template_id) {
+        validate_and_parse_template(builtin_content)?;
+        return Ok(TemplateJson {
+            json: builtin_content.to_string(),
+            source: TemplateSource::BuiltIn,
+        });
+    }
+
+    Err(format!(
+        "Template '{}' not found. Available templates: {}",
+        template_id,
+        list_template_ids().join(", ")
+    ))
+}
+
+pub fn save_custom_template_json(
+    template_id: &str,
+    template_json: &str,
+) -> Result<Template, String> {
+    let template = validate_and_parse_template(template_json)?;
+    let template_path = custom_template_path(template_id)?;
+
+    if let Some(parent) = template_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create custom templates directory: {}", e))?;
+    }
+
+    std::fs::write(&template_path, template_json)
+        .map_err(|e| format!("Failed to save custom template '{}': {}", template_id, e))?;
+
+    Ok(template)
+}
+
+pub fn reset_custom_template(template_id: &str) -> Result<bool, String> {
+    let template_path = custom_template_path(template_id)?;
+
+    if !template_path.exists() {
+        return Ok(false);
+    }
+
+    std::fs::remove_file(&template_path)
+        .map_err(|e| format!("Failed to reset custom template '{}': {}", template_id, e))?;
+
+    Ok(true)
 }
 
 /// Load and parse a template by identifier
@@ -241,6 +345,9 @@ pub fn list_templates() -> Vec<(String, String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static TEMPLATE_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
     fn test_get_builtin_template() {
@@ -273,6 +380,7 @@ mod tests {
 
     #[test]
     fn custom_template_override_wins_and_falls_back_after_delete() {
+        let _guard = TEMPLATE_TEST_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let templates_dir = temp_dir.path().join("templates");
         std::fs::create_dir_all(&templates_dir).unwrap();
@@ -300,5 +408,36 @@ mod tests {
         std::fs::remove_file(template_path).unwrap();
         let template = get_template("standard_meeting").unwrap();
         assert_eq!(template.name, "Standard Meeting Notes");
+    }
+
+    #[test]
+    fn save_and_reset_custom_template_json() {
+        let _guard = TEMPLATE_TEST_LOCK.lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let templates_dir = temp_dir.path().join("templates");
+        set_custom_templates_dir(templates_dir);
+
+        let custom_template = r#"
+        {
+            "name": "Italian Standard Meeting",
+            "description": "Localized standard meeting template",
+            "sections": [
+                {
+                    "title": "Decisioni chiave",
+                    "instruction": "Elenca le decisioni principali",
+                    "format": "list"
+                }
+            ]
+        }"#;
+
+        save_custom_template_json("standard_meeting", custom_template).unwrap();
+        let loaded = get_template_json_with_source("standard_meeting").unwrap();
+        assert_eq!(loaded.source, TemplateSource::Custom);
+        assert!(loaded.json.contains("Italian Standard Meeting"));
+
+        assert!(reset_custom_template("standard_meeting").unwrap());
+        let loaded = get_template_json_with_source("standard_meeting").unwrap();
+        assert_ne!(loaded.source, TemplateSource::Custom);
+        assert!(loaded.json.contains("Standard Meeting Notes"));
     }
 }
