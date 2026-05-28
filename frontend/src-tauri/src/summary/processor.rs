@@ -11,6 +11,8 @@ pub const SUMMARY_SYSTEM_PROMPT_SECTION_INSTRUCTIONS_PLACEHOLDER: &str = "{{SECT
 pub const SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER: &str = "{{TEMPLATE}}";
 pub const SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER: &str = "{{TRANSCRIPT_CHUNK}}";
 pub const SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER: &str = "{{CHUNK_SUMMARIES}}";
+pub const SUMMARY_LANGUAGE_INSTRUCTION: &str = r#"**LANGUAGE REQUIREMENT:**
+Write all generated prose in the same language as the transcript. If the transcript contains multiple languages, use the predominant language unless the user-provided context explicitly requests another language. Do not switch to English just because template section names or instructions are written in English."#;
 
 pub const DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT: &str = "You are an expert meeting summarizer.";
 pub const DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT: &str =
@@ -65,6 +67,8 @@ pub fn render_summary_system_prompt(
             SUMMARY_SYSTEM_PROMPT_TEMPLATE_PLACEHOLDER,
             clean_template_markdown,
         )
+        + "\n\n"
+        + SUMMARY_LANGUAGE_INSTRUCTION
 }
 
 pub fn render_summary_chunk_prompt(summary_chunk_prompt: Option<&str>, chunk: &str) -> String {
@@ -73,14 +77,16 @@ pub fn render_summary_chunk_prompt(summary_chunk_prompt: Option<&str>, chunk: &s
         .filter(|prompt| !prompt.is_empty())
         .unwrap_or(DEFAULT_SUMMARY_CHUNK_PROMPT);
 
-    if prompt_template.contains(SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER) {
+    let prompt = if prompt_template.contains(SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER) {
         prompt_template.replace(SUMMARY_CHUNK_PROMPT_TRANSCRIPT_PLACEHOLDER, chunk)
     } else {
         format!(
             "{}\n\n<transcript_chunk>\n{}\n</transcript_chunk>",
             prompt_template, chunk
         )
-    }
+    };
+
+    format!("{}\n\n{}", prompt, SUMMARY_LANGUAGE_INSTRUCTION)
 }
 
 pub fn render_plain_summary_prompt<'a>(prompt: Option<&'a str>, default_prompt: &'a str) -> &'a str {
@@ -99,14 +105,16 @@ pub fn render_summary_combine_prompt(
         .filter(|prompt| !prompt.is_empty())
         .unwrap_or(DEFAULT_SUMMARY_COMBINE_PROMPT);
 
-    if prompt_template.contains(SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER) {
+    let prompt = if prompt_template.contains(SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER) {
         prompt_template.replace(SUMMARY_COMBINE_PROMPT_SUMMARIES_PLACEHOLDER, combined_text)
     } else {
         format!(
             "{}\n\n<summaries>\n{}\n</summaries>",
             prompt_template, combined_text
         )
-    }
+    };
+
+    format!("{}\n\n{}", prompt, SUMMARY_LANGUAGE_INSTRUCTION)
 }
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
@@ -510,10 +518,8 @@ mod tests {
             "Discussed release timeline.",
         );
 
-        assert_eq!(
-            prompt,
-            "Summarize this in Italian:\nDiscussed release timeline."
-        );
+        assert!(prompt.starts_with("Summarize this in Italian:\nDiscussed release timeline."));
+        assert!(prompt.contains(SUMMARY_LANGUAGE_INSTRUCTION));
     }
 
     #[test]
@@ -534,10 +540,8 @@ mod tests {
             "Chunk 1\n---\nChunk 2",
         );
 
-        assert_eq!(
-            prompt,
-            "Merge these summaries in Italian:\nChunk 1\n---\nChunk 2"
-        );
+        assert!(prompt.starts_with("Merge these summaries in Italian:\nChunk 1\n---\nChunk 2"));
+        assert!(prompt.contains(SUMMARY_LANGUAGE_INSTRUCTION));
     }
 
     #[test]
@@ -565,5 +569,25 @@ mod tests {
             render_plain_summary_prompt(None, "Default system prompt."),
             "Default system prompt."
         );
+    }
+
+    #[test]
+    fn rendered_chunk_prompt_enforces_transcript_language() {
+        let prompt = render_summary_chunk_prompt(
+            Some("Summarize this chunk:\n{{TRANSCRIPT_CHUNK}}"),
+            "The team discussed the roadmap.",
+        );
+
+        assert!(prompt.contains("same language as the transcript"));
+    }
+
+    #[test]
+    fn rendered_combine_prompt_enforces_transcript_language() {
+        let prompt = render_summary_combine_prompt(
+            Some("Merge these summaries:\n{{CHUNK_SUMMARIES}}"),
+            "Chunk 1\n---\nChunk 2",
+        );
+
+        assert!(prompt.contains("same language as the transcript"));
     }
 }
