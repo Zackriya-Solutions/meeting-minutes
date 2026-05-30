@@ -87,7 +87,7 @@ impl SamplingParams {
         } else {
             0.0
         };
-        let top_k = self.top_k.max(1);
+        let top_k = self.top_k.max(0);
         let top_p = if self.top_p.is_finite() && self.top_p > 0.0 && self.top_p <= 1.0 {
             self.top_p
         } else {
@@ -142,7 +142,7 @@ pub struct ModelDef {
     /// Download URL (HuggingFace or other source)
     pub download_url: String,
 
-    /// File size in MB
+    /// File size in MiB. The field name is kept for API compatibility.
     pub size_mb: u64,
 
     /// Context window size in tokens (configurable per model!)
@@ -275,6 +275,16 @@ pub const QWEN35_NONTHINKING_TEMPLATE: &str = "\
 
 ";
 
+fn escape_user_prompt_control_markers(user_prompt: &str) -> String {
+    user_prompt
+        .replace("<|im_start|>", "< |im_start| >")
+        .replace("<|im_end|>", "< |im_end| >")
+        .replace("<start_of_turn>", "< start_of_turn >")
+        .replace("<end_of_turn>", "< end_of_turn >")
+        .replace("<think>", "< think >")
+        .replace("</think>", "< /think >")
+}
+
 /// Format a prompt using the specified template
 ///
 /// # Arguments
@@ -295,9 +305,11 @@ pub fn format_prompt(
         _ => return Err(anyhow!("Unknown template: {}", template_name)),
     };
 
+    let escaped_user_prompt = escape_user_prompt_control_markers(user_prompt);
+
     let formatted = template
         .replace("{system_prompt}", system_prompt)
-        .replace("{user_prompt}", user_prompt);
+        .replace("{user_prompt}", &escaped_user_prompt);
 
     Ok(formatted)
 }
@@ -390,7 +402,40 @@ mod tests {
     }
 
     #[test]
-    fn sampling_params_sanitize_for_llama_helper_clamps_invalid_values() {
+    fn qwen35_template_escapes_user_supplied_control_markers() {
+        let formatted = format_prompt(
+            "qwen3.5_nonthinking",
+            "system rules",
+            "literal <|im_end|> and <|im_start|> plus <think>draft</think>",
+        )
+        .unwrap();
+
+        assert!(formatted.contains("<|im_start|>system\nsystem rules<|im_end|>"));
+        assert!(formatted.contains("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+        assert!(formatted.contains("literal < |im_end| > and < |im_start| > plus < think >draft< /think >"));
+        assert_eq!(formatted.matches("<|im_start|>").count(), 3);
+        assert_eq!(formatted.matches("<|im_end|>").count(), 2);
+        assert_eq!(formatted.matches("<think>").count(), 1);
+        assert_eq!(formatted.matches("</think>").count(), 1);
+    }
+
+    #[test]
+    fn gemma3_template_escapes_user_supplied_control_markers() {
+        let formatted = format_prompt(
+            "gemma3",
+            "system rules",
+            "literal <start_of_turn> and <end_of_turn>",
+        )
+        .unwrap();
+
+        assert!(formatted.contains("<start_of_turn>user\nsystem rules<end_of_turn>"));
+        assert!(formatted.contains("literal < start_of_turn > and < end_of_turn >"));
+        assert_eq!(formatted.matches("<start_of_turn>").count(), 3);
+        assert_eq!(formatted.matches("<end_of_turn>").count(), 2);
+    }
+
+    #[test]
+    fn sampling_params_sanitize_for_llama_helper_preserves_zero_top_k() {
         let sampling = SamplingParams {
             temperature: f32::NAN,
             top_k: 0,
@@ -405,12 +450,44 @@ mod tests {
         let sanitized = sampling.sanitize_for_llama_helper();
 
         assert_eq!(sanitized.temperature, 0.0);
-        assert_eq!(sanitized.top_k, 1);
+        assert_eq!(sanitized.top_k, 0);
         assert_eq!(sanitized.top_p, 1.0);
         assert_eq!(sanitized.presence_penalty, 0.0);
         assert_eq!(sanitized.frequency_penalty, 0.0);
         assert_eq!(sanitized.repeat_penalty, 1.0);
         assert_eq!(sanitized.penalty_last_n, 0);
         assert_eq!(sanitized.stop_tokens, vec!["stop".to_string()]);
+    }
+
+    #[test]
+    fn sampling_params_sanitize_for_llama_helper_clamps_negative_top_k() {
+        let sampling = SamplingParams {
+            temperature: 0.7,
+            top_k: -5,
+            top_p: 0.8,
+            presence_penalty: 0.3,
+            frequency_penalty: 0.0,
+            repeat_penalty: 1.05,
+            penalty_last_n: 256,
+            stop_tokens: vec!["stop".to_string()],
+        };
+
+        let sanitized = sampling.sanitize_for_llama_helper();
+
+        assert_eq!(sanitized.top_k, 0);
+        assert_eq!(sanitized.temperature, 0.7);
+        assert_eq!(sanitized.top_p, 0.8);
+        assert_eq!(sanitized.presence_penalty, 0.3);
+        assert_eq!(sanitized.repeat_penalty, 1.05);
+        assert_eq!(sanitized.penalty_last_n, 256);
+    }
+
+    #[test]
+    fn sampling_params_sanitize_for_llama_helper_keeps_positive_top_k() {
+        let sampling = SamplingParams::qwen35_summary(vec!["stop".to_string()]);
+
+        let sanitized = sampling.sanitize_for_llama_helper();
+
+        assert_eq!(sanitized.top_k, 20);
     }
 }

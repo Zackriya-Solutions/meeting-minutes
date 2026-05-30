@@ -391,7 +391,8 @@ export function DownloadProgressStep() {
     title: string,
     icon: React.ReactNode,
     state: DownloadState,
-    modelSize: string
+    modelSize: string,
+    sizeUnit = 'MB'
   ) => (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -433,12 +434,12 @@ export function DownloadProgressStep() {
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-600">
-              {state.downloadedMb.toFixed(1)} MB / {state.totalMb.toFixed(1)} MB
+              {state.downloadedMb.toFixed(1)} {sizeUnit} / {state.totalMb.toFixed(1)} {sizeUnit}
             </span>
             <div className="flex items-center gap-2">
               {state.speedMbps > 0 && (
                 <span className="text-gray-500">
-                  {state.speedMbps.toFixed(1)} MB/s
+                  {state.speedMbps.toFixed(1)} {sizeUnit}/s
                 </span>
               )}
               <span className="font-semibold text-gray-900">
@@ -491,7 +492,8 @@ export function DownloadProgressStep() {
             'Summary Engine',
             <Sparkles className="w-5 h-5 text-gray-600" />,
             summaryState,
-            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel)
+            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
+            'MiB'
           )}
         </div>
 

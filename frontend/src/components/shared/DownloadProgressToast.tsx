@@ -14,6 +14,7 @@ interface DownloadProgress {
   totalMb: number;
   speedMbps: number;
   status: 'downloading' | 'completed' | 'error' | 'cancelled';
+  unitLabel?: string;
   error?: string;
 }
 
@@ -57,6 +58,7 @@ function DownloadToastContent({
   const isComplete = download.status === 'completed';
   const hasError = download.status === 'error';
   const isCancelled = download.status === 'cancelled';
+  const unitLabel = download.unitLabel ?? 'MB';
 
   return (
     <div className="flex items-center gap-3 w-full max-w-sm bg-white rounded-lg shadow-lg border border-gray-200 p-3 relative">
@@ -102,11 +104,11 @@ function DownloadToastContent({
             {/* Progress text */}
             <div className="flex items-center justify-between text-xs text-gray-500">
               <span>
-                {download.downloadedMb.toFixed(1)} / {download.totalMb.toFixed(1)} MB
+                {download.downloadedMb.toFixed(1)} / {download.totalMb.toFixed(1)} {unitLabel}
               </span>
               <span className="flex items-center gap-1">
                 {download.speedMbps > 0 && (
-                  <span>{download.speedMbps.toFixed(1)} MB/s</span>
+                  <span>{download.speedMbps.toFixed(1)} {unitLabel}/s</span>
                 )}
                 <span className="text-gray-900 font-medium">
                   {Math.round(download.progress)}%
@@ -318,6 +320,7 @@ export function useDownloadProgressToast() {
         downloadedMb: downloaded_mb ?? 0,
         totalMb: getDownloadTotalMb(total_mb, model),
         speedMbps: speed_mbps ?? 0,
+        unitLabel: 'MiB',
         status: status === 'completed' || progress >= 100
           ? 'completed'
           : status === 'cancelled'

@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { Download, RefreshCw, BadgeAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
 
 interface ModelInfo {
   name: string;
@@ -362,7 +363,7 @@ export function BuiltInModelManager({
                       </p>
                     )}
                     <div className="text-xs text-gray-500">
-                      <span>{model.size_mb}MB • {model.context_size} tokens</span>
+                      <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
                     </div>
                   </div>
                 </div>
@@ -471,15 +472,15 @@ export function BuiltInModelManager({
                   <div className="text-sm text-gray-600 mb-2">
                     {progressInfo?.totalMb > 0 ? (
                       <>
-                        {progressInfo.downloadedMb.toFixed(1)} MB / {progressInfo.totalMb.toFixed(1)} MB
+                        {progressInfo.downloadedMb.toFixed(1)} MiB / {progressInfo.totalMb.toFixed(1)} MiB
                         {progressInfo.speedMbps > 0 && (
                           <span className="ml-2 text-gray-500">
-                            ({progressInfo.speedMbps.toFixed(1)} MB/s)
+                            ({progressInfo.speedMbps.toFixed(1)} MiB/s)
                           </span>
                         )}
                       </>
                     ) : (
-                      <span>{model.size_mb} MB</span>
+                      <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)}</span>
                     )}
                   </div>
                   <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">

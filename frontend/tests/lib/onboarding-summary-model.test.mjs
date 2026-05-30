@@ -85,8 +85,8 @@ assert.equal(getSummaryModelSizeMb('qwen3.5:4b'), 2614);
 assert.equal(getSummaryModelSizeMb('gemma3:1b'), 1019);
 assert.equal(getSummaryModelSizeMb('unknown:model'), 0);
 
-assert.equal(getSummaryModelSizeLabel('qwen3.5:2b'), '~1.2 GB');
-assert.equal(getSummaryModelSizeLabel('qwen3.5:4b'), '~2.6 GB');
+assert.equal(getSummaryModelSizeLabel('qwen3.5:2b'), '~1.2 GiB');
+assert.equal(getSummaryModelSizeLabel('qwen3.5:4b'), '~2.6 GiB');
 assert.equal(getSummaryModelSizeLabel('unknown:model'), '');
 
 assert.equal(getDownloadTotalMb(0, 'qwen3.5:4b'), 2614);

@@ -37,16 +37,18 @@ export function getDownloadTotalMb(totalMb: number | null | undefined, model: st
   return totalMb || getSummaryModelSizeMb(model);
 }
 
-export function getSummaryModelSizeLabel(model: string): string {
-  const sizeMb = getSummaryModelSizeMb(model);
-
+export function formatSummaryModelSizeLabelFromMb(sizeMb: number): string {
   if (sizeMb === 0) {
     return '';
   }
 
   if (sizeMb >= 1024) {
-    return `~${(sizeMb / 1024).toFixed(1)} GB`;
+    return `~${(sizeMb / 1024).toFixed(1)} GiB`;
   }
 
-  return `~${sizeMb} MB`;
+  return `~${sizeMb} MiB`;
+}
+
+export function getSummaryModelSizeLabel(model: string): string {
+  return formatSummaryModelSizeLabelFromMb(getSummaryModelSizeMb(model));
 }
