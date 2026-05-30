@@ -21,6 +21,8 @@ pub struct OnboardingStatus {
 pub struct ModelStatus {
     pub parakeet: String,  // "downloaded" | "not_downloaded" | "downloading"
     pub summary: String,   // Generic field for summary model (Qwen 3.5 or legacy Gemma variants)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_summary_model: Option<String>,
 }
 
 impl Default for OnboardingStatus {
@@ -32,6 +34,7 @@ impl Default for OnboardingStatus {
             model_status: ModelStatus {
                 parakeet: "not_downloaded".to_string(),
                 summary: "not_downloaded".to_string(),  // Changed from gemma
+                selected_summary_model: None,
             },
             last_updated: chrono::Utc::now().to_rfc3339(),
         }
@@ -208,6 +211,7 @@ pub async fn complete_onboarding<R: Runtime>(
     status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
     status.model_status.parakeet = "downloaded".to_string();
     status.model_status.summary = "downloaded".to_string();
+    status.model_status.selected_summary_model = Some(model.clone());
 
     save_onboarding_status(&app, &status)
         .await
@@ -215,4 +219,28 @@ pub async fn complete_onboarding<R: Runtime>(
 
     info!("Onboarding completed successfully with model: {}", model);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_status_deserializes_without_selected_summary_model() {
+        let status: OnboardingStatus = serde_json::from_str(
+            r#"{
+                "version": "1.0",
+                "completed": true,
+                "current_step": 4,
+                "model_status": {
+                    "parakeet": "downloaded",
+                    "summary": "downloaded"
+                },
+                "last_updated": "2026-05-30T00:00:00Z"
+            }"#,
+        )
+        .expect("old onboarding status should remain compatible");
+
+        assert_eq!(status.model_status.selected_summary_model, None);
+    }
 }

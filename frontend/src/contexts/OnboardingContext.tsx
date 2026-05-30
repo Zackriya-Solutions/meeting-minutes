@@ -15,6 +15,7 @@ interface OnboardingStatus {
   model_status: {
     parakeet: string;
     summary: string;
+    selected_summary_model?: string;
   };
   last_updated: string;
 }
@@ -147,7 +148,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     loadOnboardingStatus();
     checkDatabaseStatus();
     initializeDatabaseInBackground();
-    initializeSummaryModelSelection();
   }, []);
 
   // Initialize database silently in background (moved from SetupOverviewStep)
@@ -335,6 +335,18 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       if (status) {
         console.log('[OnboardingContext] Loaded saved status:', status);
 
+        if (status.completed) {
+          setCurrentStep(status.current_step);
+          setCompleted(true);
+          setParakeetDownloaded(status.model_status.parakeet === 'downloaded');
+          setSummaryModelDownloaded(status.model_status.summary === 'downloaded');
+          if (status.model_status.selected_summary_model) {
+            setSelectedSummaryModel(status.model_status.selected_summary_model);
+          }
+          console.log('[OnboardingContext] Restored completed onboarding status without model verification');
+          return;
+        }
+
         // Don't trust saved status - verify actual model status on disk
         const verifiedStatus = await verifyModelStatus(status);
 
@@ -350,6 +362,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
         // Check if any downloads are active to restore isBackgroundDownloading state
         await checkActiveDownloads();
+      } else {
+        await initializeSummaryModelSelection();
       }
     } catch (error) {
       console.error('[OnboardingContext] Failed to load onboarding status:', error);
@@ -375,12 +389,14 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     // Verify the selected/recommended Summary model exists on disk.
     try {
       const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
+      const savedSelectedModel = savedStatus.model_status.selected_summary_model || '';
+      const modelToCheck = savedSelectedModel || recommendedModel;
       const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: recommendedModel,
+        modelName: modelToCheck,
         refresh: true,
       });
       const resolved = resolveOnboardingSummaryModelStatus({
-        selectedModel: '',
+        selectedModel: savedSelectedModel,
         recommendedModel,
         selectedModelReady,
       });
@@ -431,6 +447,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           model_status: {
             parakeet: parakeetDownloaded ? 'downloaded' : 'not_downloaded',
             summary: summaryModelDownloaded ? 'downloaded' : 'not_downloaded',
+            selected_summary_model: selectedSummaryModel || undefined,
           },
           last_updated: new Date().toISOString(),
         },

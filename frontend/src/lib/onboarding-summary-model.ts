@@ -33,6 +33,10 @@ export function getSummaryModelSizeMb(model: string): number {
   return SUMMARY_MODEL_SIZES_MB[model] ?? 0;
 }
 
+export function getDownloadTotalMb(totalMb: number | null | undefined, model: string): number {
+  return totalMb || getSummaryModelSizeMb(model);
+}
+
 export function getSummaryModelSizeLabel(model: string): string {
   const sizeMb = getSummaryModelSizeMb(model);
 

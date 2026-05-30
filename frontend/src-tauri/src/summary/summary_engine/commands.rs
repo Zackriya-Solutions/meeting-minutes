@@ -8,6 +8,8 @@ use tokio::sync::Mutex;
 
 use super::model_manager::{DownloadProgress, ModelInfo, ModelManager};
 
+const QWEN35_4B_RECOMMENDED_RAM_GB: u64 = 14;
+
 pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     match model_name {
         "qwen3.5:4b" => 4,
@@ -18,8 +20,8 @@ pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     }
 }
 
-pub(crate) fn recommend_summary_model(is_macos: bool, system_ram_gb: u64) -> &'static str {
-    if is_macos || system_ram_gb >= 8 {
+pub(crate) fn recommend_summary_model(_is_macos: bool, system_ram_gb: u64) -> &'static str {
+    if system_ram_gb >= QWEN35_4B_RECOMMENDED_RAM_GB {
         "qwen3.5:4b"
     } else {
         "qwen3.5:2b"
@@ -410,19 +412,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recommended_summary_model_uses_qwen4b_for_macos() {
-        assert_eq!(recommend_summary_model(true, 4), "qwen3.5:4b");
+    fn recommended_summary_model_uses_qwen2b_below_effective_16gb_floor() {
+        assert_eq!(recommend_summary_model(true, 13), "qwen3.5:2b");
+        assert_eq!(recommend_summary_model(false, 13), "qwen3.5:2b");
     }
 
     #[test]
-    fn recommended_summary_model_uses_qwen2b_for_low_ram_non_macos() {
-        assert_eq!(recommend_summary_model(false, 7), "qwen3.5:2b");
-    }
-
-    #[test]
-    fn recommended_summary_model_uses_qwen4b_for_enough_ram_non_macos() {
-        assert_eq!(recommend_summary_model(false, 8), "qwen3.5:4b");
-        assert_eq!(recommend_summary_model(false, 16), "qwen3.5:4b");
+    fn recommended_summary_model_uses_qwen4b_at_effective_16gb_floor() {
+        assert_eq!(recommend_summary_model(true, 14), "qwen3.5:4b");
+        assert_eq!(recommend_summary_model(false, 14), "qwen3.5:4b");
     }
 
     #[test]
