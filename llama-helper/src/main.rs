@@ -12,7 +12,7 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel, Special};
+use llama_cpp_2::model::{AddBos, LlamaModel};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -465,9 +465,18 @@ impl ModelState {
                 break;
             }
 
-            let output_bytes = model
-                .token_to_bytes(token, Special::Tokenize)
-                .context("Failed to convert token to bytes")?;
+            let output_bytes = match model.token_to_piece_bytes(token, 32, true, None) {
+                Err(llama_cpp_2::TokenToStringError::InsufficientBufferSpace(size)) => {
+                    let required_size: usize = size
+                        .checked_neg()
+                        .context("Invalid token piece buffer size")?
+                        .try_into()
+                        .context("Invalid token piece buffer size")?;
+                    model.token_to_piece_bytes(token, required_size, true, None)
+                }
+                result => result,
+            }
+            .context("Failed to convert token to bytes")?;
 
             let mut token_text = String::with_capacity(32);
             let _ = decoder.decode_to_string(&output_bytes, &mut token_text, false);
