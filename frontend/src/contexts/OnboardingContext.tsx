@@ -43,6 +43,7 @@ interface OnboardingContextType {
   summaryModelProgress: number;
   summaryModelProgressInfo: SummaryModelProgressInfo;
   selectedSummaryModel: string;
+  recommendedSummaryModel: string;
   databaseExists: boolean;
   isBackgroundDownloading: boolean;
   // Permissions
@@ -92,6 +93,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     speedMbps: 0,
   });
   const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('');
+  const [recommendedSummaryModel, setRecommendedSummaryModel] = useState<string>('');
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
 
@@ -108,6 +110,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const initializeSummaryModelSelection = async (preferredModel = selectedSummaryModel) => {
     try {
       const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
+      setRecommendedSummaryModel(recommendedModel);
       const modelToCheck = preferredModel || recommendedModel;
       setSelectedSummaryModel(modelToCheck);
 
@@ -283,7 +286,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       unlistenComplete.then(fn => fn());
       unlistenError.then(fn => fn());
     };
-  }, [selectedSummaryModel]);
+  }, []);
 
   // Listen to summary model (Built-in AI) download progress
   useEffect(() => {
@@ -389,6 +392,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     // Verify the selected/recommended Summary model exists on disk.
     try {
       const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
+      setRecommendedSummaryModel(recommendedModel);
       const savedSelectedModel = savedStatus.model_status.selected_summary_model || '';
       const modelToCheck = savedSelectedModel || recommendedModel;
       const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
@@ -608,6 +612,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         summaryModelProgress,
         summaryModelProgressInfo,
         selectedSummaryModel,
+        recommendedSummaryModel,
         databaseExists,
         isBackgroundDownloading,
         permissions,

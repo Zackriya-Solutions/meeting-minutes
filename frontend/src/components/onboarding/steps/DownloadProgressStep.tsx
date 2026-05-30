@@ -26,7 +26,7 @@ export function DownloadProgressStep() {
   const {
     goNext,
     selectedSummaryModel,
-    setSelectedSummaryModel,
+    recommendedSummaryModel,
     parakeetDownloaded,
     setParakeetDownloaded,
     summaryModelDownloaded,
@@ -35,7 +35,6 @@ export function DownloadProgressStep() {
     completeOnboarding,
   } = useOnboarding();
 
-  const [recommendedModel, setRecommendedModel] = useState<string>('');
   const [isMac, setIsMac] = useState(false);
 
   const [parakeetState, setParakeetState] = useState<DownloadState>({
@@ -121,13 +120,13 @@ export function DownloadProgressStep() {
       error: undefined,
       progress: 0,
       downloadedMb: 0,
-      totalMb: getSummaryModelSizeMb(selectedSummaryModel || recommendedModel),
+      totalMb: getSummaryModelSizeMb(selectedSummaryModel || recommendedSummaryModel),
       speedMbps: 0,
     }));
 
     try {
       // Call download command directly (no retry command exists for built-in AI)
-      const modelName = selectedSummaryModel || recommendedModel;
+      const modelName = selectedSummaryModel;
       if (!modelName) {
         throw new Error('Summary model recommendation is not ready yet');
       }
@@ -151,34 +150,8 @@ export function DownloadProgressStep() {
     }
   };
 
-  // Fetch recommended model and detect platform on mount
+  // Detect platform on mount
   useEffect(() => {
-    const fetchRecommendation = async () => {
-      try {
-        const model = await invoke<string>('builtin_ai_get_recommended_model');
-        setRecommendedModel(model);
-        setSelectedSummaryModel(model);
-        setSummaryState((prev) => ({
-          ...prev,
-          totalMb: getSummaryModelSizeMb(model),
-        }));
-
-        const modelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-          modelName: model,
-          refresh: true,
-        });
-        setSummaryModelDownloaded(modelReady);
-        setSummaryState((prev) => ({
-          ...prev,
-          status: modelReady ? 'completed' : 'waiting',
-          progress: modelReady ? 100 : 0,
-          totalMb: getSummaryModelSizeMb(model),
-        }));
-      } catch (error) {
-        console.error('Failed to get recommended model:', error);
-      }
-    };
-
     const checkPlatform = async () => {
       try {
         const { platform } = await import('@tauri-apps/plugin-os');
@@ -188,7 +161,6 @@ export function DownloadProgressStep() {
       }
     };
 
-    fetchRecommendation();
     checkPlatform();
   }, []);
 
@@ -317,7 +289,8 @@ export function DownloadProgressStep() {
   }, [selectedSummaryModel]);
 
   useEffect(() => {
-    if (!selectedSummaryModel) return;
+    const modelForSize = selectedSummaryModel || recommendedSummaryModel;
+    if (!modelForSize) return;
 
     setSummaryState((prev) => ({
       ...prev,
@@ -331,9 +304,9 @@ export function DownloadProgressStep() {
         : prev.status === 'completed'
         ? 0
         : prev.progress,
-      totalMb: prev.totalMb || getSummaryModelSizeMb(selectedSummaryModel),
+      totalMb: prev.totalMb || getSummaryModelSizeMb(modelForSize),
     }));
-  }, [selectedSummaryModel, summaryModelDownloaded]);
+  }, [selectedSummaryModel, recommendedSummaryModel, summaryModelDownloaded]);
 
   const startSummaryDownload = async () => {
     if (!summaryModelDownloaded && selectedSummaryModel) {
@@ -518,7 +491,7 @@ export function DownloadProgressStep() {
             'Summary Engine',
             <Sparkles className="w-5 h-5 text-gray-600" />,
             summaryState,
-            getSummaryModelSizeLabel(recommendedModel || selectedSummaryModel)
+            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel)
           )}
         </div>
 
