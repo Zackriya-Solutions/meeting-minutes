@@ -38,16 +38,25 @@ pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;
 
-// Re-export Tauri commands (with their generated __cmd__ variants)
+// Re-export Tauri commands (with their generated __cmd__ AND __tauri_command_name_* variants).
+// The __cmd__ form is the legacy Tauri 1.x macro output; __tauri_command_name_* is what
+// Tauri 2.6+ generate_handler! looks up at the path used in the handler list. Both names
+// are emitted by #[tauri::command] in Tauri 2.x; re-export both so handler resolution works
+// regardless of which form the call site uses.
 pub use commands::{
     __cmd__api_cancel_summary, __cmd__api_get_summary, __cmd__api_process_transcript,
-    __cmd__api_save_meeting_summary, api_cancel_summary, api_get_summary,
+    __cmd__api_save_meeting_summary,
+    __tauri_command_name_api_cancel_summary, __tauri_command_name_api_get_summary,
+    __tauri_command_name_api_process_transcript, __tauri_command_name_api_save_meeting_summary,
+    api_cancel_summary, api_get_summary,
     api_process_transcript, api_save_meeting_summary,
 };
 
 // Re-export template commands
 pub use template_commands::{
     __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
+    __tauri_command_name_api_get_template_details, __tauri_command_name_api_list_templates,
+    __tauri_command_name_api_validate_template,
     api_get_template_details, api_list_templates, api_validate_template,
 };
 
