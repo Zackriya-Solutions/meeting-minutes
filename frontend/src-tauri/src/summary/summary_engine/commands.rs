@@ -8,6 +8,39 @@ use tokio::sync::Mutex;
 
 use super::model_manager::{DownloadProgress, ModelInfo, ModelManager};
 
+const QWEN35_4B_RECOMMENDED_RAM_GB: u64 = 14;
+
+pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
+    match model_name {
+        "qwen3.5:4b" => 4,
+        "qwen3.5:2b" => 3,
+        "gemma3:4b" => 2,
+        "gemma3:1b" => 1,
+        _ => 0,
+    }
+}
+
+pub(crate) fn recommend_summary_model(_is_macos: bool, system_ram_gb: u64) -> &'static str {
+    if system_ram_gb >= QWEN35_4B_RECOMMENDED_RAM_GB {
+        "qwen3.5:4b"
+    } else {
+        "qwen3.5:2b"
+    }
+}
+
+pub(crate) fn get_recommended_summary_model_for_current_system() -> Result<&'static str, String> {
+    let system_ram_gb = get_system_ram_gb()?;
+    let is_macos = cfg!(target_os = "macos");
+
+    log::info!(
+        "System RAM detected: {} GB, Platform: {}",
+        system_ram_gb,
+        if is_macos { "macOS" } else { "other" }
+    );
+
+    Ok(recommend_summary_model(is_macos, system_ram_gb))
+}
+
 // ============================================================================
 // Global State
 // ============================================================================
@@ -311,13 +344,7 @@ pub async fn builtin_ai_get_available_summary_model<R: Runtime>(
     let available = all_models
         .iter()
         .filter(|m| matches!(m.status, crate::summary::summary_engine::model_manager::ModelStatus::Available))
-        .max_by_key(|m| {
-            match m.name.as_str() {
-                "gemma3:4b" => 2,
-                "gemma3:1b" => 1,
-                _ => 0,
-            }
-        })
+        .max_by_key(|m| summary_model_priority(&m.name))
         .map(|m| m.name.clone());
 
     log::info!("Available summary model check: {:?}", available);
@@ -355,27 +382,15 @@ pub async fn init_model_manager_at_startup<R: Runtime>(
 }
 
 
-/// Get recommended summary model based on platform and system RAM
-/// macOS + >16GB RAM → gemma3:4b (2.5 GB, balanced)
-/// Otherwise → gemma3:1b (1019 MB, fast)
+/// Get recommended summary model based on platform and system RAM.
+/// macOS → qwen3.5:4b
+/// non-macOS + <8GB RAM → qwen3.5:2b
+/// non-macOS + >=8GB RAM → qwen3.5:4b
 #[tauri::command]
 pub async fn builtin_ai_get_recommended_model() -> Result<String, String> {
-    // Get system RAM in GB
-    let system_ram_gb = get_system_ram_gb()?;
+    let recommended = get_recommended_summary_model_for_current_system()?;
 
-    // Check if running on macOS
-    let is_macos = cfg!(target_os = "macos");
-
-    log::info!("System RAM detected: {} GB, Platform: {}", system_ram_gb, if is_macos { "macOS" } else { "other" });
-
-    // Recommend model: gemma3:4b only on macOS with >16GB RAM
-    let recommended = if is_macos && system_ram_gb > 16 {
-        "gemma3:4b"       // macOS + >16GB RAM: gemma3:4b (2.5 GB, balanced)
-    } else {
-        "gemma3:1b"       // All other cases: gemma3:1b (806 MB, fast)
-    };
-
-    log::info!("Recommended summary model: {} (macOS={}, {}GB RAM)", recommended, is_macos, system_ram_gb);
+    log::info!("Recommended summary model: {}", recommended);
     Ok(recommended.to_string())
 }
 
@@ -390,4 +405,28 @@ fn get_system_ram_gb() -> Result<u64, String> {
     let total_memory_gb = total_memory_bytes / (1024 * 1024 * 1024);
 
     Ok(total_memory_gb)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recommended_summary_model_uses_qwen2b_below_effective_16gb_floor() {
+        assert_eq!(recommend_summary_model(true, 13), "qwen3.5:2b");
+        assert_eq!(recommend_summary_model(false, 13), "qwen3.5:2b");
+    }
+
+    #[test]
+    fn recommended_summary_model_uses_qwen4b_at_effective_16gb_floor() {
+        assert_eq!(recommend_summary_model(true, 14), "qwen3.5:4b");
+        assert_eq!(recommend_summary_model(false, 14), "qwen3.5:4b");
+    }
+
+    #[test]
+    fn available_summary_model_priority_prefers_qwen_over_gemma() {
+        assert!(summary_model_priority("qwen3.5:4b") > summary_model_priority("qwen3.5:2b"));
+        assert!(summary_model_priority("qwen3.5:2b") > summary_model_priority("gemma3:4b"));
+        assert!(summary_model_priority("gemma3:4b") > summary_model_priority("gemma3:1b"));
+    }
 }

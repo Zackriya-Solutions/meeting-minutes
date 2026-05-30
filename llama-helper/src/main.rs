@@ -12,7 +12,7 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel, Special};
+use llama_cpp_2::model::{AddBos, LlamaModel};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -31,6 +31,10 @@ enum Request {
         temperature: Option<f32>,
         top_k: Option<i32>,
         top_p: Option<f32>,
+        presence_penalty: Option<f32>,
+        frequency_penalty: Option<f32>,
+        repeat_penalty: Option<f32>,
+        penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
     },
     Ping,
@@ -44,6 +48,79 @@ enum Response {
     Pong,
     Goodbye,
     Error { message: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SamplingConfig {
+    temperature: f32,
+    top_k: i32,
+    top_p: f32,
+    presence_penalty: f32,
+    frequency_penalty: f32,
+    repeat_penalty: f32,
+    penalty_last_n: i32,
+}
+
+impl SamplingConfig {
+    fn from_request(
+        temperature: Option<f32>,
+        top_k: Option<i32>,
+        top_p: Option<f32>,
+        presence_penalty: Option<f32>,
+        frequency_penalty: Option<f32>,
+        repeat_penalty: Option<f32>,
+        penalty_last_n: Option<i32>,
+    ) -> Self {
+        let temperature = temperature.unwrap_or(1.0);
+        let temperature = if temperature.is_finite() {
+            temperature.max(0.0)
+        } else {
+            0.0
+        };
+        let top_k = top_k.unwrap_or(64).max(1);
+        let top_p = top_p.unwrap_or(0.95);
+        let top_p = if top_p.is_finite() && top_p > 0.0 && top_p <= 1.0 {
+            top_p
+        } else {
+            1.0
+        };
+        let presence_penalty = presence_penalty.unwrap_or(0.0);
+        let presence_penalty = if presence_penalty.is_finite() {
+            presence_penalty.max(0.0)
+        } else {
+            0.0
+        };
+        let frequency_penalty = frequency_penalty.unwrap_or(0.0);
+        let frequency_penalty = if frequency_penalty.is_finite() {
+            frequency_penalty.max(0.0)
+        } else {
+            0.0
+        };
+        let repeat_penalty = repeat_penalty.unwrap_or(1.0);
+        let repeat_penalty = if repeat_penalty.is_finite() && repeat_penalty > 0.0 {
+            repeat_penalty
+        } else {
+            1.0
+        };
+        let penalty_last_n = penalty_last_n.unwrap_or(0).max(0);
+
+        Self {
+            temperature,
+            top_k,
+            top_p,
+            presence_penalty,
+            frequency_penalty,
+            repeat_penalty,
+            penalty_last_n,
+        }
+    }
+
+    fn uses_penalties(&self) -> bool {
+        self.penalty_last_n > 0
+            && (self.presence_penalty > 0.0
+                || self.frequency_penalty > 0.0
+                || (self.repeat_penalty - 1.0).abs() > f32::EPSILON)
+    }
 }
 
 // ============================================================================
@@ -272,9 +349,7 @@ impl ModelState {
         &mut self,
         prompt: String,
         max_tokens: i32,
-        temperature: f32,
-        top_k: i32,
-        top_p: f32,
+        sampling: SamplingConfig,
         stop_tokens: Vec<String>,
     ) -> Result<String> {
         let start_time = Instant::now();
@@ -329,6 +404,49 @@ impl ModelState {
 
         eprintln!("🔄 Starting generation (max_tokens: {})", max_tokens);
 
+        use llama_cpp_2::sampling::LlamaSampler;
+
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u32;
+        let sampler = if sampling.temperature <= 0.0 {
+            if sampling.uses_penalties() {
+                LlamaSampler::chain_simple([
+                    LlamaSampler::penalties(
+                        sampling.penalty_last_n,
+                        sampling.repeat_penalty,
+                        sampling.frequency_penalty,
+                        sampling.presence_penalty,
+                    ),
+                    LlamaSampler::greedy(),
+                ])
+            } else {
+                LlamaSampler::chain_simple([LlamaSampler::greedy()])
+            }
+        } else if sampling.uses_penalties() {
+            LlamaSampler::chain_simple([
+                LlamaSampler::penalties(
+                    sampling.penalty_last_n,
+                    sampling.repeat_penalty,
+                    sampling.frequency_penalty,
+                    sampling.presence_penalty,
+                ),
+                LlamaSampler::top_k(sampling.top_k),
+                LlamaSampler::top_p(sampling.top_p, 1),
+                LlamaSampler::temp(sampling.temperature),
+                LlamaSampler::dist(seed),
+            ])
+        } else {
+            LlamaSampler::chain_simple([
+                LlamaSampler::top_k(sampling.top_k),
+                LlamaSampler::top_p(sampling.top_p, 1),
+                LlamaSampler::temp(sampling.temperature),
+                LlamaSampler::dist(seed),
+            ])
+        };
+        let mut sampler = pin!(sampler);
+
         loop {
             // Check if we've generated enough tokens
             if (n_cur - n_prompt_tokens) >= max_tokens {
@@ -336,27 +454,6 @@ impl ModelState {
                 break;
             }
 
-            use llama_cpp_2::sampling::LlamaSampler;
-
-            let sampler = if temperature <= 0.0 {
-                // Greedy sampling for temp <= 0
-                LlamaSampler::chain_simple([LlamaSampler::greedy()])
-            } else {
-                // Random sampling with temperature/top_k/top_p
-                let seed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u32;
-
-                LlamaSampler::chain_simple([
-                    LlamaSampler::top_k(top_k),
-                    LlamaSampler::top_p(top_p, 1),
-                    LlamaSampler::temp(temperature),
-                    LlamaSampler::dist(seed),
-                ])
-            };
-
-            let mut sampler = pin!(sampler);
             let token = sampler.as_mut().sample(&ctx, batch.n_tokens() - 1);
             sampler.as_mut().accept(token);
 
@@ -368,9 +465,18 @@ impl ModelState {
                 break;
             }
 
-            let output_bytes = model
-                .token_to_bytes(token, Special::Tokenize)
-                .context("Failed to convert token to bytes")?;
+            let output_bytes = match model.token_to_piece_bytes(token, 32, true, None) {
+                Err(llama_cpp_2::TokenToStringError::InsufficientBufferSpace(size)) => {
+                    let required_size: usize = size
+                        .checked_neg()
+                        .context("Invalid token piece buffer size")?
+                        .try_into()
+                        .context("Invalid token piece buffer size")?;
+                    model.token_to_piece_bytes(token, required_size, true, None)
+                }
+                result => result,
+            }
+            .context("Failed to convert token to bytes")?;
 
             let mut token_text = String::with_capacity(32);
             let _ = decoder.decode_to_string(&output_bytes, &mut token_text, false);
@@ -489,15 +595,24 @@ fn main() -> Result<()> {
                         temperature,
                         top_k,
                         top_p,
+                        presence_penalty,
+                        frequency_penalty,
+                        repeat_penalty,
+                        penalty_last_n,
                         stop_tokens,
                     }) => {
                         let max_tokens = max_tokens.unwrap_or(512);
                         let context_size = context_size.unwrap_or(2048);
 
-                        // Sampling parameters with sensible defaults
-                        let temperature = temperature.unwrap_or(1.0);
-                        let top_k = top_k.unwrap_or(64);
-                        let top_p = top_p.unwrap_or(0.95);
+                        let sampling = SamplingConfig::from_request(
+                            temperature,
+                            top_k,
+                            top_p,
+                            presence_penalty,
+                            frequency_penalty,
+                            repeat_penalty,
+                            penalty_last_n,
+                        );
                         let stop_tokens = stop_tokens.unwrap_or_else(Vec::new);
 
                         // Load model if path provided
@@ -516,9 +631,7 @@ fn main() -> Result<()> {
                         match state.generate(
                             prompt,
                             max_tokens,
-                            temperature,
-                            top_k,
-                            top_p,
+                            sampling,
                             stop_tokens,
                         ) {
                             Ok(text) => {
@@ -558,4 +671,80 @@ fn main() -> Result<()> {
 
     eprintln!("👋 llama-helper exiting");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_request_defaults_penalties_when_omitted() {
+        let json = r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Generate {
+            temperature,
+            top_k,
+            top_p,
+            presence_penalty,
+            frequency_penalty,
+            repeat_penalty,
+            penalty_last_n,
+            ..
+        } = request else {
+            panic!("expected generate request");
+        };
+
+        let sampling = SamplingConfig::from_request(
+            temperature,
+            top_k,
+            top_p,
+            presence_penalty,
+            frequency_penalty,
+            repeat_penalty,
+            penalty_last_n,
+        );
+
+        assert_eq!(sampling.presence_penalty, 0.0);
+        assert_eq!(sampling.frequency_penalty, 0.0);
+        assert_eq!(sampling.repeat_penalty, 1.0);
+        assert_eq!(sampling.penalty_last_n, 0);
+        assert!(!sampling.uses_penalties());
+    }
+
+    #[test]
+    fn generate_request_deserializes_qwen_penalties() {
+        let json = r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8,"presence_penalty":0.3,"frequency_penalty":0.0,"repeat_penalty":1.05,"penalty_last_n":256}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Generate {
+            temperature,
+            top_k,
+            top_p,
+            presence_penalty,
+            frequency_penalty,
+            repeat_penalty,
+            penalty_last_n,
+            ..
+        } = request else {
+            panic!("expected generate request");
+        };
+
+        let sampling = SamplingConfig::from_request(
+            temperature,
+            top_k,
+            top_p,
+            presence_penalty,
+            frequency_penalty,
+            repeat_penalty,
+            penalty_last_n,
+        );
+
+        assert_eq!(sampling.temperature, 0.5);
+        assert_eq!(sampling.top_k, 20);
+        assert_eq!(sampling.top_p, 0.8);
+        assert_eq!(sampling.presence_penalty, 0.3);
+        assert_eq!(sampling.frequency_penalty, 0.0);
+        assert_eq!(sampling.repeat_penalty, 1.05);
+        assert_eq!(sampling.penalty_last_n, 256);
+        assert!(sampling.uses_penalties());
+    }
 }

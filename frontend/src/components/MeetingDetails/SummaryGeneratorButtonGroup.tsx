@@ -319,6 +319,7 @@ export function SummaryGeneratorButtonGroup({
             modelConfig={modelConfig}
             setModelConfig={setModelConfig}
             skipInitialFetch={true}
+            layout="dialog"
           />
         </DialogContent>
       </Dialog>

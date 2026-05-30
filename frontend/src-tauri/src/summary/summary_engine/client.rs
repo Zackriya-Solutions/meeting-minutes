@@ -32,6 +32,10 @@ enum Request {
         temperature: Option<f32>,
         top_k: Option<i32>,
         top_p: Option<f32>,
+        presence_penalty: Option<f32>,
+        frequency_penalty: Option<f32>,
+        repeat_penalty: Option<f32>,
+        penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
     },
 }
@@ -175,15 +179,20 @@ pub async fn generate_with_builtin(
     }
 
     // Prepare generation request with model-specific sampling parameters
+    let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
         max_tokens: Some(models::DEFAULT_MAX_TOKENS),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
-        temperature: Some(model_def.sampling.temperature),
-        top_k: Some(model_def.sampling.top_k),
-        top_p: Some(model_def.sampling.top_p),
-        stop_tokens: Some(model_def.sampling.stop_tokens.clone()),
+        temperature: Some(sampling.temperature),
+        top_k: Some(sampling.top_k),
+        top_p: Some(sampling.top_p),
+        presence_penalty: Some(sampling.presence_penalty),
+        frequency_penalty: Some(sampling.frequency_penalty),
+        repeat_penalty: Some(sampling.repeat_penalty),
+        penalty_last_n: Some(sampling.penalty_last_n),
+        stop_tokens: Some(sampling.stop_tokens),
     };
 
     let request_json = serde_json::to_string(&request)?;
@@ -303,6 +312,10 @@ mod tests {
             temperature: Some(1.0),
             top_k: Some(64),
             top_p: Some(0.95),
+            presence_penalty: Some(0.3),
+            frequency_penalty: Some(0.0),
+            repeat_penalty: Some(1.05),
+            penalty_last_n: Some(256),
             stop_tokens: Some(vec!["<end_of_turn>".to_string()]),
         };
 
@@ -311,6 +324,10 @@ mod tests {
         assert!(json.contains("\"prompt\":\"test prompt\""));
         assert!(json.contains("\"max_tokens\":512"));
         assert!(json.contains("\"temperature\":1.0"));
+        assert!(json.contains("\"presence_penalty\":0.3"));
+        assert!(json.contains("\"frequency_penalty\":0.0"));
+        assert!(json.contains("\"repeat_penalty\":1.05"));
+        assert!(json.contains("\"penalty_last_n\":256"));
     }
 
     #[test]
