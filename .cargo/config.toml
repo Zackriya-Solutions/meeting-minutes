@@ -1,0 +1,7 @@
+[env]
+# Use pre-packaged bindings that match the bundled whisper.cpp source.
+# Without this, bindgen picks up system whisper.cpp headers which have a
+# different API than whisper-rs@0.13.2 expects. whisper-rs-sys does NOT
+# emit rerun-if-env-changed for this var, so cache must be cleared manually
+# when toggling it (see: whisper-rs-sys-0.11.1 build.rs line 238).
+WHISPER_DONT_GENERATE_BINDINGS = "1"

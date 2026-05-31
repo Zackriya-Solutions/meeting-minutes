@@ -13,14 +13,16 @@ If you're new to building on Linux, start here. These simple commands work for m
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git clang
 
 # Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+sudo dnf install gcc-c++ cmake git clang
 
 # Arch Linux
-sudo pacman -S base-devel cmake git
+sudo pacman -S base-devel cmake git clang
 ```
+
+> **Note:** `clang` is required on all distros — it provides `libclang.so` which Rust's `bindgen` uses to generate FFI bindings during the build.
 
 ### 2. Build and Run
 
@@ -129,25 +131,40 @@ Vulkan works on NVIDIA, AMD, and Intel GPUs. Good choice if CUDA/ROCm don't work
 
 ```bash
 # Ubuntu/Debian
-sudo apt install vulkan-sdk libopenblas-dev
+sudo apt install vulkan-sdk libopenblas-dev vulkan-tools
 
 # Fedora
-sudo dnf install vulkan-devel openblas-devel
+sudo dnf install vulkan-devel openblas-devel vulkan-tools
 
-# Arch Linux
-sudo pacman -S vulkan-devel openblas
+# Arch Linux — install specific packages from the vulkan-devel group
+sudo pacman -S spirv-headers spirv-tools vulkan-headers vulkan-icd-loader vulkan-tools openblas
 ```
+
+> **Arch Linux note:** `sudo pacman -S vulkan-devel` prompts you to choose from 12 packages.
+> Install only: `spirv-headers` (1), `spirv-tools` (2), `vulkan-headers` (6), `vulkan-icd-loader` (8), and `vulkan-tools` (10).
+> `vulkan-tools` provides `vulkaninfo`, which the GPU auto-detection script requires to detect Vulkan support.
 
 #### Step 2: Configure Environment
 
 ```bash
-# Add to ~/.bashrc or ~/.zshrc
+# bash/zsh — add to ~/.bashrc or ~/.zshrc
 export VULKAN_SDK=/usr
-export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
+export BLAS_INCLUDE_DIRS=/usr/include/openblas   # Arch Linux
+# export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu  # Ubuntu/Debian
 
 # Apply changes
 source ~/.bashrc
 ```
+
+```fish
+# fish shell — sets variables permanently across sessions
+set -Ux VULKAN_SDK /usr
+set -Ux BLAS_INCLUDE_DIRS /usr/include/openblas   # Arch Linux
+# set -Ux BLAS_INCLUDE_DIRS /usr/include/x86_64-linux-gnu  # Ubuntu/Debian
+```
+
+> **Arch Linux note:** OpenBLAS headers are at `/usr/include/openblas`, not
+> `/usr/include/x86_64-linux-gnu` (that path is Debian/Ubuntu only).
 
 #### Step 3: Build
 
@@ -229,11 +246,37 @@ src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
 ### "Vulkan detected but missing dependencies"
 
 - **Fix:** Set both `VULKAN_SDK` and `BLAS_INCLUDE_DIRS` environment variables
-- **Example:**
+- **Also required:** `vulkaninfo` must be in PATH — install `vulkan-tools` (Arch) or `vulkan-utils` (Debian/Ubuntu)
+- **Example (bash/zsh):**
   ```bash
   export VULKAN_SDK=/usr
-  export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
+  export BLAS_INCLUDE_DIRS=/usr/include/openblas          # Arch Linux
+  # export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu  # Ubuntu/Debian
   ```
+- **Example (fish):**
+  ```fish
+  set -Ux VULKAN_SDK /usr
+  set -Ux BLAS_INCLUDE_DIRS /usr/include/openblas
+  ```
+
+### Rust compile errors: `no field 'greedy' on type whisper_full_params`
+
+This happens on distros that have a system-wide `whisper.cpp` installed (e.g. Arch Linux's
+`whisper.cpp` package). The `whisper-rs-sys` build script runs `bindgen` against the system
+`/usr/include/whisper.h` (version 1.8.5+) instead of the bundled headers, generating
+bindings that are incompatible with `whisper-rs 0.13.2`.
+
+**Fix:** Set `WHISPER_DONT_GENERATE_BINDINGS` to make the build script use its pre-packaged
+bindings (which match the bundled whisper.cpp source) instead of regenerating them.
+
+This is already set in `src-tauri/.cargo/config.toml` for this repo. If you're still seeing
+the error, the build cache from a previous failed attempt may be stale. Clear it and rebuild:
+
+```bash
+# From the project root
+find target -type d -name "whisper-rs-sys-*" -exec rm -rf {} + 2>/dev/null
+./build-gpu.sh
+```
 
 ### "AppImage build stripping symbols"
 
@@ -278,7 +321,7 @@ Both `dev-gpu.sh` and `build-gpu.sh` work the same way:
 | `CUDA_PATH`                       | CUDA installation directory         | `/usr/local/cuda`               |
 | `ROCM_PATH`                       | ROCm installation directory         | `/opt/rocm`                     |
 | `VULKAN_SDK`                      | Vulkan SDK directory                | `/usr`                          |
-| `BLAS_INCLUDE_DIRS`               | BLAS headers location               | `/usr/include/x86_64-linux-gnu` |
+| `BLAS_INCLUDE_DIRS`               | BLAS headers location               | `/usr/include/openblas` (Arch), `/usr/include/x86_64-linux-gnu` (Debian) |
 | `CMAKE_CUDA_ARCHITECTURES`        | GPU compute capability              | `75` (for compute 7.5)          |
 | `CMAKE_CUDA_STANDARD`             | C++ standard for CUDA               | `17`                            |
 | `CMAKE_POSITION_INDEPENDENT_CODE` | Enable PIC for linking              | `ON`                            |
@@ -318,12 +361,20 @@ export ROCM_PATH=/opt/rocm
 ### Any GPU (Vulkan)
 
 ```bash
-# Install
-sudo apt install vulkan-sdk libopenblas-dev
+# Install (Ubuntu/Debian)
+sudo apt install vulkan-sdk libopenblas-dev vulkan-tools
 
-# Configure
+# Install (Arch Linux)
+sudo pacman -S spirv-headers spirv-tools vulkan-headers vulkan-icd-loader vulkan-tools openblas
+
+# Configure (bash/zsh)
 export VULKAN_SDK=/usr
-export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
+export BLAS_INCLUDE_DIRS=/usr/include/openblas          # Arch Linux
+# export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu  # Ubuntu/Debian
+
+# Configure (fish)
+# set -Ux VULKAN_SDK /usr
+# set -Ux BLAS_INCLUDE_DIRS /usr/include/openblas
 
 # Build
 ./build-gpu.sh

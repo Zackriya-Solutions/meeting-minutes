@@ -15,6 +15,21 @@ if (!command || !['dev', 'build'].includes(command)) {
   process.exit(1);
 }
 
+// Load local env overrides (.env.local is gitignored, used for signing keys etc.)
+const envLocalPath = path.join(__dirname, '..', '.env.local');
+if (fs.existsSync(envLocalPath)) {
+  const lines = fs.readFileSync(envLocalPath, 'utf8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (key && !(key in process.env)) process.env[key] = val;
+  }
+}
+
 // Detect GPU feature
 let feature = '';
 

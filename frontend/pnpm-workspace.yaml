@@ -1,0 +1,35 @@
+packages:
+  - "."
+  - "packages/*"
+
+nodeLinker: isolated
+hoist: false
+publicHoistPattern: []
+shamefullyHoist: false
+
+strictPeerDependencies: true
+preferFrozenLockfile: true
+verifyStoreIntegrity: true
+strictStorePkgContentCheck: true
+engineStrict: true
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+
+# trustPolicy disabled: multiple upstream deps (tiptap 2.27.x, tailwind-merge 2.6.1,
+# undici-types 6.19.x/6.21.x) dropped provenance due to CI/CD pipeline changes.
+# These are confirmed non-malicious. Re-enable once upstreams restore provenance.
+trustPolicy: off
+blockExoticSubdeps: true
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  fsevents: false
+
+overrides: {}
+packageExtensions:
+  '@blocknote/core@*':
+    dependencies:
+      prosemirror-history: '>=1.0.0'

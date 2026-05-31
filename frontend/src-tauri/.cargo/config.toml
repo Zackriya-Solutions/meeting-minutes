@@ -11,3 +11,7 @@ rustflags = [
 [env]
 MACOSX_DEPLOYMENT_TARGET = { value = "14.2", force = true }
 CMAKE_OSX_DEPLOYMENT_TARGET = "14.2"
+# Use pre-packaged bindings that match the bundled whisper.cpp source.
+# Without this, bindgen picks up the system whisper.cpp 1.8.5 headers which
+# have a different API than whisper-rs@0.13.2 expects.
+WHISPER_DONT_GENERATE_BINDINGS = "1"
