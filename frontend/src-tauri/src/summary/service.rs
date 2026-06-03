@@ -12,7 +12,7 @@ use crate::ollama::metadata::ModelMetadataCache;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -248,7 +248,7 @@ impl SummaryService {
             return None;
         };
 
-        match read_detected_summary_language_from_metadata(&PathBuf::from(folder_path)) {
+        match read_detected_summary_language_from_metadata(Path::new(&folder_path)) {
             Ok(language) => language,
             Err(e) => {
                 warn!(

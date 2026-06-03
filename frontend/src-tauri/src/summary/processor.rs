@@ -580,6 +580,50 @@ pub async fn generate_meeting_summary(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn run_markdown_transform(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    failure_label: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<String, String> {
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
+
+    let raw = generate_summary(
+        client,
+        provider,
+        model_name,
+        api_key,
+        system_prompt,
+        user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        max_tokens,
+        temperature,
+        top_p,
+        app_data_dir,
+        cancellation_token,
+    )
+    .await
+    .map_err(|e| format!("{failure_label} failed: {e}"))?;
+
+    Ok(clean_llm_markdown_output(&raw))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn translate_markdown(
     client: &Client,
     provider: &LLMProvider,
@@ -595,12 +639,6 @@ async fn translate_markdown(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
-    if let Some(token) = cancellation_token {
-        if token.is_cancelled() {
-            return Err("Summary generation was cancelled".to_string());
-        }
-    }
-
     info!("Translation pass: target language = {}", target_language);
 
     let system_prompt = translation_system_prompt(target_language);
@@ -608,13 +646,14 @@ async fn translate_markdown(
         "Translate the following Markdown document into {target_language}. Return ONLY the translated Markdown, nothing else.\n\n<document>\n{english_markdown}\n</document>"
     );
 
-    let raw = generate_summary(
+    run_markdown_transform(
         client,
         provider,
         model_name,
         api_key,
         &system_prompt,
         &user_prompt,
+        "Translation pass",
         ollama_endpoint,
         custom_openai_endpoint,
         max_tokens,
@@ -624,9 +663,6 @@ async fn translate_markdown(
         cancellation_token,
     )
     .await
-    .map_err(|e| format!("Translation pass failed: {e}"))?;
-
-    Ok(clean_llm_markdown_output(&raw))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -644,26 +680,20 @@ async fn normalize_markdown_to_english(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String, String> {
-    if let Some(token) = cancellation_token {
-        if token.is_cancelled() {
-            return Err("Summary generation was cancelled".to_string());
-        }
-    }
-
     info!("English normalization pass: preserving Markdown structure");
 
-    let system_prompt = english_normalization_system_prompt();
     let user_prompt = format!(
         "Convert the following Markdown document into English. Return ONLY the English Markdown, nothing else.\n\n<document>\n{markdown}\n</document>"
     );
 
-    let raw = generate_summary(
+    run_markdown_transform(
         client,
         provider,
         model_name,
         api_key,
-        system_prompt,
+        english_normalization_system_prompt(),
         &user_prompt,
+        "English normalization pass",
         ollama_endpoint,
         custom_openai_endpoint,
         max_tokens,
@@ -673,9 +703,6 @@ async fn normalize_markdown_to_english(
         cancellation_token,
     )
     .await
-    .map_err(|e| format!("English normalization pass failed: {e}"))?;
-
-    Ok(clean_llm_markdown_output(&raw))
 }
 
 #[cfg(test)]
