@@ -128,3 +128,12 @@ pub struct TranscriptSetting {
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
 }
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct AiChatMessage {
+    pub id: String,
+    pub meeting_id: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: DateTimeUtc,
+}

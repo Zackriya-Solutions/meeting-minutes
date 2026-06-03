@@ -454,6 +454,14 @@ const Sidebar: React.FC = () => {
     return (
       <TooltipProvider>
         <div className="flex flex-col items-center space-y-4 mt-4">
+          <button
+            onClick={toggleCollapse}
+            className="p-2 mb-2 rounded-lg hover:bg-gray-100 transition-colors duration-150"
+            title="Expand sidebar"
+          >
+            <ChevronRightCircle className="w-5 h-5 text-gray-600" />
+          </button>
+          
           <Logo isCollapsed={isCollapsed} />
 
           <Tooltip>
@@ -475,8 +483,7 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={handleRecordingToggle}
-                disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
+                className={`p-2 ${isRecording ? 'bg-red-500 hover:bg-red-600' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm cursor-pointer`}
               >
                 {isRecording ? (
                   <Square className="w-5 h-5 text-white" />
@@ -567,8 +574,8 @@ const Sidebar: React.FC = () => {
       <div key={item.id}>
         <div
           className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
-            ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
+            ? 'p-2 text-sm font-semibold h-8 mx-3 mt-2 rounded-lg'
+            : `px-2 py-1 my-0 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
               hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
             } cursor-pointer`
             }`}
@@ -662,19 +669,6 @@ const Sidebar: React.FC = () => {
 
   return (
     <div className="fixed top-0 left-0 h-screen z-40">
-      {/* Floating collapse button */}
-      <button
-        onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-white hover:bg-gray-100 rounded-full shadow-lg border"
-        style={{ transform: 'translateX(50%)' }}
-      >
-        {isCollapsed ? (
-          <ChevronRightCircle className="w-6 h-6" />
-        ) : (
-          <ChevronLeftCircle className="w-6 h-6" />
-        )}
-      </button>
-
       <div
         className={`h-screen bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'
           }`}
@@ -689,10 +683,12 @@ const Sidebar: React.FC = () => {
           <div className="flex-1">
             {!isCollapsed && (
               <div className="p-3">
-                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
-                  <span>Meetily</span>
-                </span> */}
-                <Logo isCollapsed={isCollapsed} />
+                <div className="flex items-center justify-between mb-3">
+                  <Logo isCollapsed={isCollapsed} />
+                  <button onClick={toggleCollapse} className="p-1 hover:bg-gray-100 rounded-md text-gray-500" title="Collapse sidebar">
+                    <ChevronLeftCircle className="w-5 h-5" />
+                  </button>
+                </div>
 
                 <div className="relative mb-1">
                   <InputGroup >
@@ -723,13 +719,25 @@ const Sidebar: React.FC = () => {
           {/* Fixed navigation items */}
           <div className="flex-shrink-0">
             {!isCollapsed && (
-              <div
-                onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
-              >
-                <Home className="w-4 h-4 mr-2" />
-                <span>Home</span>
-              </div>
+              <>
+                <div
+                  onClick={() => router.push('/')}
+                  className="p-2 text-sm font-semibold items-center hover:bg-gray-100 h-9 flex mx-3 mt-3 rounded-lg cursor-pointer text-gray-700"
+                >
+                  <Home className="w-4 h-4 mr-2" />
+                  <span>Home</span>
+                </div>
+                
+                {isRecording && (
+                  <div
+                    onClick={() => router.push('/')}
+                    className="p-2 text-sm font-semibold items-center hover:bg-red-50 bg-red-50 text-red-600 h-9 flex mx-3 mt-1 rounded-lg cursor-pointer border border-red-100 shadow-sm"
+                  >
+                    <Mic className="w-4 h-4 mr-2 animate-pulse" />
+                    <span>Current Recording</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -742,7 +750,7 @@ const Sidebar: React.FC = () => {
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
                     <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
+                      className="flex items-center transition-all duration-150 p-2 text-sm font-semibold h-8 mx-3 mt-2 rounded-lg"
                     >
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
                       <span className="text-gray-700">{item.title}</span>
@@ -776,13 +784,12 @@ const Sidebar: React.FC = () => {
           <div className="flex-shrink-0 p-2 border-t border-gray-100">
             <button
               onClick={handleRecordingToggle}
-              disabled={isRecording}
-              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm`}
+              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-500 hover:bg-red-600' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm cursor-pointer`}
             >
               {isRecording ? (
                 <>
                   <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
+                  <span>Stop Recording</span>
                 </>
               ) : (
                 <>
