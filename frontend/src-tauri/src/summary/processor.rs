@@ -13,7 +13,7 @@ static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
-    "Write the summary/report in English regardless of transcript language; non-English prose is invalid.";
+    "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
 
 fn resolve_cached_english<'a>(
     cached: Option<&'a str>,
@@ -24,6 +24,54 @@ fn resolve_cached_english<'a>(
         .and_then(language_name_from_code)
         .is_some_and(|n| n != "English");
     if target_is_translation { Some(cached_clean) } else { None }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FinalLanguageAction {
+    ReturnEnglish,
+    NormalizeEnglish,
+    Translate(&'static str),
+}
+
+fn resolve_final_language_action(
+    summary_language: Option<&str>,
+    detected_transcript_language: Option<&str>,
+) -> FinalLanguageAction {
+    match summary_language.and_then(language_name_from_code) {
+        Some(name) if name != "English" => FinalLanguageAction::Translate(name),
+        _ => match detected_transcript_language.and_then(language_name_from_code) {
+            Some("English") => FinalLanguageAction::ReturnEnglish,
+            _ => FinalLanguageAction::NormalizeEnglish,
+        },
+    }
+}
+
+fn english_normalization_system_prompt() -> &'static str {
+    r#"You are a precise English Markdown editor. Convert the provided Markdown document into English while preserving structure exactly.
+
+**CRITICAL RULES:**
+1. Translate any non-English prose into English.
+2. Preserve the Markdown structure EXACTLY: keep every `#`, `**`, `-`, `|`, code fence marker, and table pipe in the same position.
+3. Do NOT translate: proper nouns (names of people, products, companies), code identifiers, file paths, URLs, numeric values, or text inside backticks.
+4. If the document is already English, lightly preserve it without rewriting meaning.
+5. Do not add commentary or explanation. Output ONLY the English Markdown."#
+}
+
+fn english_markdown_after_normalization_result(
+    original_markdown: &str,
+    normalization_result: Result<String, String>,
+) -> Result<String, String> {
+    match normalization_result {
+        Ok(normalized) => Ok(normalized),
+        Err(e) if e.contains("cancelled") => Err(e),
+        Err(e) => {
+            error!(
+                "English normalization pass failed; returning pass-1 markdown without hard fail: {}",
+                e
+            );
+            Ok(original_markdown.to_string())
+        }
+    }
 }
 
 /// Maps a BCP-47 tag to the English language name used inside LLM prompts.
@@ -121,30 +169,6 @@ fn build_final_report_system_prompt(
 {clean_template_markdown}
 </template>"#
     )
-}
-
-fn is_cjk_script(ch: char) -> bool {
-    matches!(
-        ch as u32,
-        0x3040..=0x30ff | // Hiragana + Katakana
-        0x3400..=0x4dbf | // CJK Extension A
-        0x4e00..=0x9fff | // CJK Unified Ideographs
-        0xac00..=0xd7af   // Hangul syllables
-    )
-}
-
-fn should_repair_english_base(markdown: &str) -> bool {
-    let (mut cjk_chars, mut latin_chars) = (0usize, 0usize);
-
-    for ch in markdown.chars() {
-        if ch.is_ascii_alphabetic() {
-            latin_chars += 1;
-        } else if is_cjk_script(ch) {
-            cjk_chars += 1;
-        }
-    }
-
-    cjk_chars >= 20 && cjk_chars > latin_chars
 }
 
 /// Rough token count estimation using character count
@@ -289,6 +313,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `app_data_dir` - Optional app data directory (BuiltInAI provider)
 /// * `cancellation_token` - Optional cancellation token to stop processing
 /// * `summary_language` - Optional BCP-47 tag (e.g. "en-GB") to force summary output language
+/// * `detected_transcript_language` - Optional detected transcript language BCP-47 tag
 /// * `cached_english` - Optional previously-generated English summary to skip pass 1 when translating
 ///
 /// # Returns
@@ -313,6 +338,7 @@ pub async fn generate_meeting_summary(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
     summary_language: Option<&str>,
+    detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
 ) -> Result<(String, String, i64), String> {
     if let Some(token) = cancellation_token {
@@ -328,7 +354,7 @@ pub async fn generate_meeting_summary(
     let total_tokens = rough_token_count(text);
     info!("Transcript length: {} tokens", total_tokens);
 
-    let (english_markdown, successful_chunk_count) = if let Some(cached) =
+    let (mut english_markdown, successful_chunk_count) = if let Some(cached) =
         resolve_cached_english(cached_english, summary_language)
     {
         info!("✓ Using cached English summary ({} chars), skipping pass 1", cached.len());
@@ -497,37 +523,8 @@ pub async fn generate_meeting_summary(
         (english_markdown, successful_chunk_count)
     };
 
-    let english_markdown = if should_repair_english_base(&english_markdown) {
-        info!("English base summary appears non-English; running English repair pass");
-        let repaired = translate_markdown(
-            client,
-            provider,
-            model_name,
-            api_key,
-            &english_markdown,
-            "English",
-            ollama_endpoint,
-            custom_openai_endpoint,
-            max_tokens,
-            temperature,
-            top_p,
-            app_data_dir,
-            cancellation_token,
-        )
-        .await
-        .map_err(|e| format!("English repair pass failed: {e}"))?;
-
-        if should_repair_english_base(&repaired) {
-            return Err("English repair pass produced non-English output".to_string());
-        }
-
-        repaired
-    } else {
-        english_markdown
-    };
-
-    let final_markdown = match summary_language.and_then(language_name_from_code) {
-        Some(name) if name != "English" => {
+    let final_markdown = match resolve_final_language_action(summary_language, detected_transcript_language) {
+        FinalLanguageAction::Translate(name) => {
             match translate_markdown(
                 client,
                 provider,
@@ -549,7 +546,33 @@ pub async fn generate_meeting_summary(
                 Err(e) => return Err(format!("Translation to {} failed: {}", name, e)),
             }
         }
-        _ => english_markdown.clone(),
+        FinalLanguageAction::NormalizeEnglish => {
+            info!(
+                "English target with detected transcript language {:?}; running soft English normalization",
+                detected_transcript_language
+            );
+            let normalized = english_markdown_after_normalization_result(
+                &english_markdown,
+                normalize_markdown_to_english(
+                    client,
+                    provider,
+                    model_name,
+                    api_key,
+                    &english_markdown,
+                    ollama_endpoint,
+                    custom_openai_endpoint,
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    app_data_dir,
+                    cancellation_token,
+                )
+                .await,
+            )?;
+            english_markdown = normalized.clone();
+            normalized
+        }
+        FinalLanguageAction::ReturnEnglish => english_markdown.clone(),
     };
 
     info!("Summary generation completed successfully");
@@ -606,6 +629,55 @@ async fn translate_markdown(
     Ok(clean_llm_markdown_output(&raw))
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn normalize_markdown_to_english(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    markdown: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<String, String> {
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err("Summary generation was cancelled".to_string());
+        }
+    }
+
+    info!("English normalization pass: preserving Markdown structure");
+
+    let system_prompt = english_normalization_system_prompt();
+    let user_prompt = format!(
+        "Convert the following Markdown document into English. Return ONLY the English Markdown, nothing else.\n\n<document>\n{markdown}\n</document>"
+    );
+
+    let raw = generate_summary(
+        client,
+        provider,
+        model_name,
+        api_key,
+        system_prompt,
+        &user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        max_tokens,
+        temperature,
+        top_p,
+        app_data_dir,
+        cancellation_token,
+    )
+    .await
+    .map_err(|e| format!("English normalization pass failed: {e}"))?;
+
+    Ok(clean_llm_markdown_output(&raw))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,37 +713,58 @@ mod tests {
     }
 
     #[test]
-    fn english_repair_detection_flags_cjk_heavy_summary() {
-        let markdown = r#"# Meeting Summary
-
-**Summary**
-
-这是一段由宫崎与鸟山进行的对话。两人讨论了日本文化、食物、电影以及个人经历。
-
-**Action Items**
-
-| Owner | Task |
-| 宫崎和鸟山 | 一起吃饭 |
-"#;
-
-        assert!(should_repair_english_base(markdown));
+    fn english_target_with_english_transcript_skips_normalization() {
+        assert_eq!(
+            resolve_final_language_action(Some("en"), Some("en")),
+            FinalLanguageAction::ReturnEnglish
+        );
     }
 
     #[test]
-    fn english_repair_detection_allows_english_with_japanese_names() {
-        let markdown = r#"# Meeting Summary: 宮崎 and 鳥山
+    fn english_target_with_non_english_transcript_normalizes_to_english() {
+        assert_eq!(
+            resolve_final_language_action(Some("en"), Some("ja")),
+            FinalLanguageAction::NormalizeEnglish
+        );
+    }
 
-**Summary**
+    #[test]
+    fn english_target_with_unknown_transcript_normalizes_to_english() {
+        assert_eq!(
+            resolve_final_language_action(Some("en"), None),
+            FinalLanguageAction::NormalizeEnglish
+        );
+    }
 
-Miyazaki and Toriyama discussed sushi, movies, travel plans, and language learning.
+    #[test]
+    fn non_english_target_uses_translation_flow() {
+        assert_eq!(
+            resolve_final_language_action(Some("fr"), Some("ja")),
+            FinalLanguageAction::Translate("French")
+        );
+    }
 
-**Action Items**
+    #[test]
+    fn failed_english_normalization_falls_back_to_original_markdown() {
+        assert_eq!(
+            english_markdown_after_normalization_result(
+                "# Original",
+                Err("normalization failed".to_string())
+            )
+            .unwrap(),
+            "# Original"
+        );
+    }
 
-| Owner | Task |
-| 宮崎 and 鳥山 | Plan dinner together |
-"#;
-
-        assert!(!should_repair_english_base(markdown));
+    #[test]
+    fn cancelled_english_normalization_is_not_swallowed() {
+        assert!(
+            english_markdown_after_normalization_result(
+                "# Original",
+                Err("Summary generation was cancelled".to_string())
+            )
+            .is_err()
+        );
     }
 
     // resolve_cached_english matrix -------------------------------------------
