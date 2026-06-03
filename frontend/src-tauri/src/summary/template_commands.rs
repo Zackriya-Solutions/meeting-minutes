@@ -123,6 +123,48 @@ pub async fn api_validate_template<R: Runtime>(
     }
 }
 
+/// Retrieves the raw JSON string of a template
+///
+/// # Arguments
+/// * `template_id` - Template identifier
+///
+/// # Returns
+/// Raw JSON string of the template
+#[tauri::command]
+pub async fn api_get_raw_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<String, String> {
+    info!("api_get_raw_template called for template_id: {}", template_id);
+
+    let template = templates::get_template(&template_id)?;
+    serde_json::to_string_pretty(&template)
+        .map_err(|e| format!("Failed to serialize template: {}", e))
+}
+
+/// Saves a custom template
+///
+/// # Arguments
+/// * `template_id` - Template identifier to save as
+/// * `template_json` - Raw JSON string of the template
+///
+/// # Returns
+/// Ok if saved successfully
+#[tauri::command]
+pub async fn api_save_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+    template_json: String,
+) -> Result<(), String> {
+    info!("api_save_template called for template_id: {}", template_id);
+
+    // Validate first
+    templates::validate_and_parse_template(&template_json)?;
+
+    // Save to disk
+    templates::save_custom_template(&template_id, &template_json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

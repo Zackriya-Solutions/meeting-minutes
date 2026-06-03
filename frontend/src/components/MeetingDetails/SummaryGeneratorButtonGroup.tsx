@@ -16,7 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Sparkles, Settings, Loader2, FileText, Check, Square, Pencil } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -57,6 +58,10 @@ export function SummaryGeneratorButtonGroup({
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateJson, setEditingTemplateJson] = useState('');
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
 
   // Expose the function to open the modal via callback registration
   useEffect(() => {
@@ -78,6 +83,32 @@ export function SummaryGeneratorButtonGroup({
   if (!hasTranscripts) {
     return null;
   }
+
+  const handleOpenTemplateEditor = async (templateId: string) => {
+    try {
+      const rawJson = await invoke<string>('api_get_raw_template', { templateId });
+      setEditingTemplateJson(rawJson);
+      setEditingTemplateId(templateId);
+      setTemplateDialogOpen(true);
+    } catch (error) {
+      toast.error('Failed to load template');
+      console.error(error);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!editingTemplateId) return;
+    setIsSavingTemplate(true);
+    try {
+      await invoke('api_save_template', { templateId: editingTemplateId, templateJson: editingTemplateJson });
+      toast.success('Template saved successfully');
+      setTemplateDialogOpen(false);
+    } catch (error) {
+      toast.error('Failed to save template', { description: String(error) });
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
 
   const checkBuiltInAIModelsAndGenerate = async () => {
     setIsCheckingModels(true);
@@ -336,18 +367,55 @@ export function SummaryGeneratorButtonGroup({
                 key={template.id}
                 onClick={() => onTemplateSelect(template.id, template.name)}
                 title={template.description}
-                className="flex items-center justify-between gap-2"
+                className="flex items-center justify-between gap-2 group cursor-pointer"
               >
                 <span>{template.name}</span>
-                {selectedTemplate === template.id && (
-                  <Check className="h-4 w-4 text-green-600" />
-                )}
+                <div className="flex items-center gap-1">
+                  <div
+                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-gray-200 rounded-md transition-opacity cursor-pointer text-gray-500 hover:text-blue-600"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleOpenTemplateEditor(template.id);
+                      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+                    }}
+                    title={`Edit ${template.name}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="w-4 h-4 flex items-center justify-center">
+                    {selectedTemplate === template.id && (
+                      <Check className="h-4 w-4 text-green-600" />
+                    )}
+                  </div>
+                </div>
               </DropdownMenuItem>
             ))}
 
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+
+      {/* Template Editor Dialog */}
+      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogTitle>Edit Template ({editingTemplateId})</DialogTitle>
+          <div className="flex-1 overflow-auto py-4">
+            <Textarea 
+              value={editingTemplateJson}
+              onChange={(e) => setEditingTemplateJson(e.target.value)}
+              className="font-mono text-sm min-h-[400px] w-full"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setTemplateDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveTemplate} disabled={isSavingTemplate}>
+              {isSavingTemplate ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
+              Save Template
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </ButtonGroup>
   );
 }

@@ -8,7 +8,7 @@ use tracing::info;
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
 
 // Generic structure for OpenAI-compatible API chat messages
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
@@ -342,5 +342,223 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+/// Generates a chat completion using the specified LLM provider
+pub async fn chat_completion(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    messages: Vec<ChatMessage>,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+) -> Result<String, String> {
+    // Handle BuiltInAI provider
+    if provider == &LLMProvider::BuiltInAI {
+        let app_data_dir = app_data_dir
+            .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
+
+        // For BuiltInAI we only support single user prompt in the current engine, 
+        // so we'll concatenate the chat history into a single prompt for now.
+        let mut full_prompt = String::new();
+        for msg in &messages {
+            full_prompt.push_str(&format!("{}: {}\n", msg.role, msg.content));
+        }
+
+        return crate::summary::summary_engine::generate_with_builtin(
+            app_data_dir,
+            model_name,
+            system_prompt,
+            &full_prompt,
+            None,
+        )
+        .await
+        .map_err(|e| e.to_string());
+    }
+
+    let (api_url, mut headers) = match provider {
+        LLMProvider::OpenAI => (
+            "https://api.openai.com/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::Groq => (
+            "https://api.groq.com/openai/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::OpenRouter => (
+            "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::Ollama => {
+            let host = ollama_endpoint
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            (
+                format!("{}/v1/chat/completions", host),
+                header::HeaderMap::new(),
+            )
+        }
+        LLMProvider::CustomOpenAI => {
+            let endpoint = custom_openai_endpoint
+                .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
+            (
+                format!("{}/chat/completions", endpoint.trim_end_matches('/')),
+                header::HeaderMap::new(),
+            )
+        }
+        LLMProvider::Claude => {
+            let mut header_map = header::HeaderMap::new();
+            header_map.insert(
+                "x-api-key",
+                api_key
+                    .parse()
+                    .map_err(|_| "Invalid API key format".to_string())?,
+            );
+            header_map.insert(
+                "anthropic-version",
+                "2023-06-01"
+                    .parse()
+                    .map_err(|_| "Invalid anthropic version".to_string())?,
+            );
+            ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+        }
+        LLMProvider::BuiltInAI => unreachable!(),
+    };
+
+    if provider != &LLMProvider::Claude {
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {}", api_key)
+                .parse()
+                .map_err(|_| "Invalid authorization header".to_string())?,
+        );
+    }
+    headers.insert(
+        header::CONTENT_TYPE,
+        "application/json"
+            .parse()
+            .map_err(|_| "Invalid content type".to_string())?,
+    );
+
+    let request_body = if provider != &LLMProvider::Claude {
+        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+            (max_tokens, temperature, top_p)
+        } else {
+            (None, None, None)
+        };
+
+        let mut final_messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        }];
+        final_messages.extend(messages.clone());
+
+        serde_json::json!(ChatRequest {
+            model: model_name.to_string(),
+            messages: final_messages,
+            max_tokens: max_tokens_val,
+            temperature: temperature_val,
+            top_p: top_p_val,
+        })
+    } else {
+        serde_json::json!(ClaudeRequest {
+            system: system_prompt.to_string(),
+            model: model_name.to_string(),
+            max_tokens: 2048,
+            messages: messages.clone(),
+        })
+    };
+
+    info!("🐞 LLM Chat Request to {}: model={}", provider_name(provider), model_name);
+
+    let mut response = client
+        .post(&api_url)
+        .headers(headers.clone())
+        .json(&request_body)
+        .timeout(REQUEST_TIMEOUT_DURATION)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("LLM request timed out after 60 seconds")
+            } else {
+                format!("Failed to send request to LLM: {}", e)
+            }
+        })?;
+
+    // Groq Rate Limit Fallback
+    if provider == &LLMProvider::Groq && response.status().as_u16() == 429 && model_name != "llama-3.3-70b-versatile" {
+        log::info!("Groq rate limit reached for {}. Falling back to llama-3.3-70b-versatile...", model_name);
+        
+        let mut final_messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        }];
+        final_messages.extend(messages.clone());
+
+        let fallback_body = serde_json::json!(ChatRequest {
+            model: "llama-3.3-70b-versatile".to_string(),
+            messages: final_messages,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        });
+
+        response = client
+            .post(&api_url)
+            .headers(headers)
+            .json(&fallback_body)
+            .timeout(REQUEST_TIMEOUT_DURATION)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    format!("LLM request timed out after 60 seconds (fallback)")
+                } else {
+                    format!("Failed to send fallback request to LLM: {}", e)
+                }
+            })?;
+    }
+
+    if !response.status().is_success() {
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("LLM API request failed: {}", error_body));
+    }
+
+    if provider == &LLMProvider::Claude {
+        let chat_response = response
+            .json::<ClaudeChatResponse>()
+            .await
+            .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
+        let content = chat_response
+            .content
+            .get(0)
+            .ok_or("No content in LLM response")?
+            .text
+            .trim();
+        Ok(content.to_string())
+    } else {
+        let chat_response = response
+            .json::<ChatResponse>()
+            .await
+            .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
+        let content = chat_response
+            .choices
+            .get(0)
+            .ok_or("No content in LLM response")?
+            .message
+            .content
+            .trim();
+        Ok(content.to_string())
     }
 }

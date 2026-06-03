@@ -4,10 +4,12 @@ use crate::database::repositories::{
 };
 use crate::state::AppState;
 use crate::summary::service::SummaryService;
+use crate::summary::llm_client::{chat_completion, ChatMessage, LLMProvider};
 use log::{error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime};
-
+use tauri::{AppHandle, Manager, Runtime};
+use reqwest;
+use crate::database::models::AiChatMessage;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SummaryResponse {
     pub status: String,
@@ -274,4 +276,114 @@ pub async fn api_cancel_summary<R: Runtime>(
             "meeting_id": meeting_id,
         }))
     }
+}
+
+/// Initiates a chat conversation using the transcript as context
+#[tauri::command]
+pub async fn api_chat_with_transcript<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _meeting_id: String,
+    system_prompt: String,
+    messages: Vec<ChatMessage>,
+    model_provider: String,
+    model_name: String,
+    _auth_token: Option<String>,
+) -> Result<String, String> {
+    let pool = state.db_manager.pool().clone();
+
+    // Parse provider
+    let provider = LLMProvider::from_str(&model_provider)
+        .map_err(|e| format!("Invalid LLM provider: {}", e))?;
+
+    // Validate and setup api_key
+    let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
+        String::new()
+    } else {
+        match crate::database::repositories::setting::SettingsRepository::get_api_key(&pool, &model_provider).await {
+            Ok(Some(key)) if !key.is_empty() => key,
+            Ok(None) | Ok(Some(_)) => return Err(format!("API key not found for {}", &model_provider)),
+            Err(e) => return Err(format!("Failed to retrieve API key for {}: {}", &model_provider, e)),
+        }
+    };
+
+    // Get Ollama endpoint if provider is Ollama
+    let ollama_endpoint = if provider == LLMProvider::Ollama {
+        match crate::database::repositories::setting::SettingsRepository::get_model_config(&pool).await {
+            Ok(Some(config)) => config.ollama_endpoint,
+            Ok(None) | Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    // Get CustomOpenAI config if provider is CustomOpenAI
+    let (custom_openai_endpoint, custom_openai_api_key, custom_openai_max_tokens, custom_openai_temperature, custom_openai_top_p) =
+        if provider == LLMProvider::CustomOpenAI {
+            match crate::database::repositories::setting::SettingsRepository::get_custom_openai_config(&pool).await {
+                Ok(Some(config)) => (
+                    Some(config.endpoint),
+                    config.api_key,
+                    config.max_tokens.map(|t| t as u32),
+                    config.temperature,
+                    config.top_p,
+                ),
+                Ok(None) => return Err("Custom OpenAI provider selected but no configuration found".to_string()),
+                Err(e) => return Err(format!("Failed to retrieve custom OpenAI config: {}", e)),
+            }
+        } else {
+            (None, None, None, None, None)
+        };
+
+    let final_api_key = if provider == LLMProvider::CustomOpenAI {
+        custom_openai_api_key.unwrap_or_default()
+    } else {
+        api_key
+    };
+
+    let app_data_dir = app.path().app_data_dir().ok();
+
+    let client = reqwest::Client::new();
+    
+    chat_completion(
+        &client,
+        &provider,
+        &model_name,
+        &final_api_key,
+        &system_prompt,
+        messages,
+        ollama_endpoint.as_deref(),
+        custom_openai_endpoint.as_deref(),
+        custom_openai_max_tokens,
+        custom_openai_temperature,
+        custom_openai_top_p,
+        app_data_dir.as_ref()
+    )
+    .await
+    .map_err(|e| format!("Chat error: {}", e))
+}
+
+#[tauri::command]
+pub async fn api_get_chat_messages(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Vec<AiChatMessage>, String> {
+    let pool = state.db_manager.pool();
+    crate::database::repositories::ai_chat::AiChatRepository::get_messages_by_meeting_id(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to get chat messages: {}", e))
+}
+
+#[tauri::command]
+pub async fn api_save_chat_message(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    role: String,
+    content: String,
+) -> Result<AiChatMessage, String> {
+    let pool = state.db_manager.pool();
+    let id = uuid::Uuid::new_v4().to_string();
+    crate::database::repositories::ai_chat::AiChatRepository::insert_message(pool, &id, &meeting_id, &role, &content)
+        .await
+        .map_err(|e| format!("Failed to save chat message: {}", e))
 }

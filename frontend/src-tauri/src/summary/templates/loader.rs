@@ -217,6 +217,39 @@ pub fn list_templates() -> Vec<(String, String, String)> {
     templates
 }
 
+/// Save a template to the user's custom templates directory
+///
+/// # Arguments
+/// * `template_id` - Template identifier (e.g. "daily_standup")
+/// * `json_content` - Raw JSON content of the template
+///
+/// # Returns
+/// Ok(()) if saved successfully, Err with message otherwise
+pub fn save_custom_template(template_id: &str, json_content: &str) -> Result<(), String> {
+    let custom_dir = get_custom_templates_dir()
+        .ok_or_else(|| "Failed to determine custom templates directory".to_string())?;
+
+    // Ensure directory exists
+    if !custom_dir.exists() {
+        std::fs::create_dir_all(&custom_dir)
+            .map_err(|e| format!("Failed to create templates directory: {}", e))?;
+    }
+
+    let template_path = custom_dir.join(format!("{}.json", template_id));
+    
+    // Format JSON with indentation for readability
+    let parsed: serde_json::Value = serde_json::from_str(json_content)
+        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let formatted_json = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| format!("Failed to format JSON: {}", e))?;
+
+    std::fs::write(&template_path, formatted_json)
+        .map_err(|e| format!("Failed to write template to {:?}: {}", template_path, e))?;
+
+    info!("Saved custom template '{}' to {:?}", template_id, template_path);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

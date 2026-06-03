@@ -41,14 +41,18 @@ pub mod templates;
 // Re-export Tauri commands (with their generated __cmd__ variants)
 pub use commands::{
     __cmd__api_cancel_summary, __cmd__api_get_summary, __cmd__api_process_transcript,
-    __cmd__api_save_meeting_summary, api_cancel_summary, api_get_summary,
-    api_process_transcript, api_save_meeting_summary,
+    __cmd__api_save_meeting_summary, __cmd__api_chat_with_transcript,
+    __cmd__api_get_chat_messages, __cmd__api_save_chat_message,
+    api_cancel_summary, api_get_summary,
+    api_process_transcript, api_save_meeting_summary, api_chat_with_transcript,
+    api_get_chat_messages, api_save_chat_message,
 };
 
-// Re-export template commands
+// Re-export specific commands for easy registration
 pub use template_commands::{
-    __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
-    api_get_template_details, api_list_templates, api_validate_template,
+    __cmd__api_get_raw_template, __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_save_template,
+    __cmd__api_validate_template, api_get_raw_template, api_get_template_details, api_list_templates,
+    api_save_template, api_validate_template,
 };
 
 // Re-export commonly used items
