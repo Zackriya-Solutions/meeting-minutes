@@ -385,7 +385,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             duration: segment.duration,
           }));
 
-          setTranscripts(formattedTranscripts);
+          setTranscripts(prev => {
+            // Preserve synthetic segments (negative sequence_id, e.g. external
+            // metadata injected by the local API) - backend history doesn't contain them
+            const synthetic = prev.filter(t => (t.sequence_id ?? 0) < 0);
+            return [...synthetic, ...formattedTranscripts];
+          });
           console.log('[Reload Sync] ✅ Transcript history synced successfully');
 
           // Fetch meeting name from backend

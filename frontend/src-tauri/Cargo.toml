@@ -111,6 +111,9 @@ tokio = { version = "1.32.0", features = ["full", "tracing"] }
 tokio-util = "0.7"  # Utilities for tokio including CancellationToken
 async-trait = "0.1"  # Trait abstraction for async methods
 
+# Local HTTP control API (127.0.0.1 start/stop endpoints)
+axum = "0.8"
+
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
 # crossbeam

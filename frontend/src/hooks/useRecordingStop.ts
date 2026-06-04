@@ -236,6 +236,24 @@ export function useRecordingStop(
         // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];
 
+        // Ensure externally provided metadata (local API start) is the first saved
+        // segment, even if the live injected segment was lost to a state resync
+        const externalMetadata = sessionStorage.getItem('activeMeetingMetadata');
+        if (externalMetadata && freshTranscripts[0]?.sequence_id !== -1) {
+          freshTranscripts.unshift({
+            id: 'external-metadata',
+            text: externalMetadata,
+            timestamp: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+            sequence_id: -1,
+            chunk_start_time: -1,
+            is_partial: false,
+            confidence: 1,
+            audio_start_time: 0,
+            audio_end_time: 0,
+            duration: 0,
+          });
+        }
+
         // Get folder_path and meeting_name from recording-stopped event
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
         const savedMeetingName = sessionStorage.getItem('last_recording_meeting_name');
@@ -271,6 +289,7 @@ export function useRecordingStop(
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
+          sessionStorage.removeItem('activeMeetingMetadata');
           // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
           sessionStorage.removeItem('indexeddb_current_meeting_id');
 
