@@ -47,7 +47,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       // The 15 seconds threshold prevents showing meetings from the current session(jus in case)
       // where recording just stopped but hasn't been fully saved yet
       const cutoffTime = Date.now() - (7 * 24 * 60 * 60 * 1000);
-      const secondsAgo = Date.now() - (15 * 1000);
+      const secondsAgo = Date.now() - (2 * 1000);
 
       const recentMeetings = meetings.filter(m => {
         const isWithinRetention = m.lastUpdated > cutoffTime; // Not older than 7 days
