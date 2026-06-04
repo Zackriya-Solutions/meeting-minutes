@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod local_api;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -409,6 +410,12 @@ pub fn run() {
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
             }
+
+            // Start local HTTP control API (127.0.0.1 only) for external start/stop
+            let app_for_local_api = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                local_api::serve(app_for_local_api).await;
+            });
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
