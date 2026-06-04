@@ -45,6 +45,7 @@ pub mod database;
 pub mod diarization;
 pub mod floating_indicator;
 pub mod groq;
+pub mod local_api;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -424,6 +425,12 @@ pub fn run() {
 
             // Start the floating recording indicator driver
             floating_indicator::init(_app.handle());
+
+            // Start local HTTP control API (127.0.0.1 only) for external start/stop
+            let app_for_local_api = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                local_api::serve(app_for_local_api).await;
+            });
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");

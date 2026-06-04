@@ -952,6 +952,35 @@ pub async fn stop_recording<R: Runtime>(
     Ok(())
 }
 
+/// Stop recording from a Rust-initiated trigger (tray menu, local API) and notify
+/// the frontend to run post-stop processing (transcription wait, SQLite save, navigation).
+pub async fn stop_recording_and_notify<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    // Generate save path (same as RecordingControls.tsx)
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+    let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let save_path = data_dir.join(format!("recording-{}.wav", timestamp));
+
+    stop_recording(
+        app.clone(),
+        RecordingArgs {
+            save_path: save_path.to_string_lossy().to_string(),
+        },
+    )
+    .await?;
+
+    // Trigger frontend post-processing via event (works from any page)
+    // (SQLite save, navigation, analytics)
+    if let Err(e) = app.emit("recording-stop-complete", true) {
+        error!("Failed to emit recording-stop-complete event: {}", e);
+    }
+
+    Ok(())
+}
+
 /// Check if recording is active
 pub async fn is_recording() -> bool {
     IS_RECORDING.load(Ordering::SeqCst)

@@ -32,7 +32,7 @@ export function useRecordingStart(
 ): UseRecordingStartReturn {
   const [isAutoStarting, setIsAutoStarting] = useState(false);
 
-  const { clearTranscripts, setMeetingTitle } = useTranscripts();
+  const { clearTranscripts, setMeetingTitle, addTranscript } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
   const { selectedDevices } = useConfig();
   const { setStatus } = useRecordingState();
@@ -108,6 +108,9 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
+      // Manual start: clear any stale external metadata from a failed API start
+      sessionStorage.removeItem('activeMeetingMetadata');
+
       const randomTitle = generateMeetingTitle();
       setMeetingTitle(randomTitle);
 
@@ -153,6 +156,19 @@ export function useRecordingStart(
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
 
+          // External start parameters staged by the local API (see src-tauri/src/local_api.rs)
+          const externalTitle = sessionStorage.getItem('externalMeetingTitle');
+          const externalMetadata = sessionStorage.getItem('externalMeetingMetadata');
+          sessionStorage.removeItem('externalMeetingTitle');
+          sessionStorage.removeItem('externalMeetingMetadata');
+          // Keep metadata under a stable key until save time so it survives page
+          // reloads mid-recording (useRecordingStop prepends it if it's missing)
+          if (externalMetadata) {
+            sessionStorage.setItem('activeMeetingMetadata', externalMetadata);
+          } else {
+            sessionStorage.removeItem('activeMeetingMetadata');
+          }
+
           // Check if Parakeet transcription model is ready before starting
           const parakeetReady = await checkParakeetReady();
           if (!parakeetReady) {
@@ -178,8 +194,8 @@ export function useRecordingStart(
 
           // Start the actual backend recording
           try {
-            // Generate meeting title
-            const generatedMeetingTitle = generateMeetingTitle();
+            // Use externally provided title (local API) or generate one
+            const generatedMeetingTitle = externalTitle || generateMeetingTitle();
 
             // Set STARTING status before initiating backend recording
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -197,6 +213,27 @@ export function useRecordingStart(
             setMeetingTitle(generatedMeetingTitle);
             setIsRecording(true);
             clearTranscripts();
+
+            // Drop externally provided metadata at the top of the transcript as a
+            // synthetic segment. It renders first, is saved with the meeting, and is
+            // included in summarization.
+            if (externalMetadata) {
+              addTranscript({
+                text: externalMetadata,
+                timestamp: new Date().toLocaleTimeString(),
+                source: 'metadata',
+                // -1 cannot collide with real segments: Rust sequence_ids start at 0
+                // and TranscriptContext dedupes incoming segments by sequence_id
+                sequence_id: -1,
+                chunk_start_time: -1, // sorts before all real segments
+                is_partial: false,
+                confidence: 1,
+                audio_start_time: 0,
+                audio_end_time: 0,
+                duration: 0,
+              });
+            }
+
             setIsMeetingActive(true);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
 
@@ -223,6 +260,7 @@ export function useRecordingStart(
     setMeetingTitle,
     setIsRecording,
     clearTranscripts,
+    addTranscript,
     setIsMeetingActive,
     checkParakeetReady,
     checkIfModelDownloading,
@@ -265,6 +303,9 @@ export function useRecordingStart(
       }
 
       try {
+        // Sidebar start: clear any stale external metadata from a failed API start
+        sessionStorage.removeItem('activeMeetingMetadata');
+
         // Generate meeting title
         const generatedMeetingTitle = generateMeetingTitle();
 

@@ -40,7 +40,7 @@ pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;
 
-// Re-export Tauri commands (with their generated __cmd__ variants)
+// Re-export Tauri commands (with their generated __cmd__ and __tauri_command_name_ variants)
 pub use commands::{
     __cmd__api_cancel_summary, __cmd__api_detect_transcript_summary_language,
     __cmd__api_get_meeting_detected_summary_language, __cmd__api_get_meeting_summary_language,
