@@ -1,11 +1,19 @@
 use crate::database::repositories::{
-    meeting::MeetingsRepository, summary::SummaryProcessesRepository,
-    transcript_chunk::TranscriptChunksRepository,
+    meeting::MeetingsRepository,
+    summary::SummaryProcessesRepository, transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
+use crate::summary::metadata::{
+    read_detected_summary_language_from_metadata, read_summary_language_from_metadata,
+    write_detected_summary_language_to_metadata, write_summary_language_to_metadata,
+};
+use crate::summary::language_detection::{
+    detect_summary_language, SummaryLanguageDetection,
+};
 use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,6 +32,41 @@ pub struct SummaryResponse {
 pub struct ProcessTranscriptResponse {
     pub message: String,
     pub process_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryLanguageStorage {
+    Metadata,
+    LocalFallback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSummaryLanguagePreference {
+    pub language: Option<String>,
+    pub storage: SummaryLanguageStorage,
+}
+
+impl MeetingSummaryLanguagePreference {
+    fn metadata(language: Option<String>) -> Self {
+        Self {
+            language,
+            storage: SummaryLanguageStorage::Metadata,
+        }
+    }
+
+    fn local_fallback() -> Self {
+        Self {
+            language: None,
+            storage: SummaryLanguageStorage::LocalFallback,
+        }
+    }
+}
+
+enum MeetingFolderResolution {
+    Folder(PathBuf),
+    NoFolder,
 }
 
 /// Saves a meeting summary (Native SQLx implementation)
@@ -62,6 +105,122 @@ pub async fn api_save_meeting_summary<R: Runtime>(
             Err(e.to_string())
         }
     }
+}
+
+/// Gets the per-meeting summary language override from metadata.json.
+#[tauri::command]
+pub async fn api_get_meeting_summary_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<MeetingSummaryLanguagePreference, String> {
+    log_info!(
+        "api_get_meeting_summary_language called for meeting_id: {}",
+        meeting_id
+    );
+
+    match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
+        MeetingFolderResolution::Folder(folder) => read_summary_language_from_metadata(&folder)
+            .map(MeetingSummaryLanguagePreference::metadata)
+            .map_err(|e| e.to_string()),
+        MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
+    }
+}
+
+/// Saves or clears the per-meeting summary language override in metadata.json.
+#[tauri::command]
+pub async fn api_save_meeting_summary_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    summary_language: Option<String>,
+) -> Result<MeetingSummaryLanguagePreference, String> {
+    log_info!(
+        "api_save_meeting_summary_language called for meeting_id: {}, language: {:?}",
+        meeting_id,
+        summary_language
+    );
+
+    match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
+        MeetingFolderResolution::Folder(folder) => {
+            write_summary_language_to_metadata(&folder, summary_language.as_deref())
+                .map_err(|e| e.to_string())?;
+            read_summary_language_from_metadata(&folder)
+                .map(MeetingSummaryLanguagePreference::metadata)
+                .map_err(|e| e.to_string())
+        }
+        MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
+    }
+}
+
+/// Gets the cached Auto-detected summary language from metadata.json.
+#[tauri::command]
+pub async fn api_get_meeting_detected_summary_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<MeetingSummaryLanguagePreference, String> {
+    log_info!(
+        "api_get_meeting_detected_summary_language called for meeting_id: {}",
+        meeting_id
+    );
+
+    match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
+        MeetingFolderResolution::Folder(folder) => read_detected_summary_language_from_metadata(&folder)
+            .map(MeetingSummaryLanguagePreference::metadata)
+            .map_err(|e| e.to_string()),
+        MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
+    }
+}
+
+/// Saves or clears the cached Auto-detected summary language in metadata.json.
+#[tauri::command]
+pub async fn api_save_meeting_detected_summary_language<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    detected_summary_language: Option<String>,
+) -> Result<MeetingSummaryLanguagePreference, String> {
+    log_info!(
+        "api_save_meeting_detected_summary_language called for meeting_id: {}, language: {:?}",
+        meeting_id,
+        detected_summary_language
+    );
+
+    match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
+        MeetingFolderResolution::Folder(folder) => {
+            write_detected_summary_language_to_metadata(&folder, detected_summary_language.as_deref())
+                .map_err(|e| e.to_string())?;
+            read_detected_summary_language_from_metadata(&folder)
+                .map(MeetingSummaryLanguagePreference::metadata)
+                .map_err(|e| e.to_string())
+        }
+        MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
+    }
+}
+
+/// Detects the dominant supported summary language from transcript segments.
+#[tauri::command]
+pub async fn api_detect_transcript_summary_language(
+    transcript_texts: Vec<String>,
+) -> Result<SummaryLanguageDetection, String> {
+    Ok(detect_summary_language(&transcript_texts))
+}
+
+async fn resolve_meeting_folder(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<MeetingFolderResolution, String> {
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, meeting_id)
+        .await
+        .map_err(|e| format!("Failed to load meeting metadata: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+
+    let Some(folder_path) = meeting.folder_path.filter(|p| !p.trim().is_empty()) else {
+        return Ok(MeetingFolderResolution::NoFolder);
+    };
+
+    Ok(MeetingFolderResolution::Folder(PathBuf::from(folder_path)))
 }
 
 /// Gets summary status and data (Native SQLx implementation)
@@ -175,6 +334,7 @@ pub async fn api_process_transcript<R: Runtime>(
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
     template_id: Option<String>,
+    summary_language: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<ProcessTranscriptResponse, String> {
     use uuid::Uuid;
@@ -189,6 +349,12 @@ pub async fn api_process_transcript<R: Runtime>(
     let pool = state.db_manager.pool().clone();
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
+
+    // Normalise empty / whitespace-only to None so "" and null behave identically
+    let summary_language = summary_language.and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() { None } else { Some(t.to_string()) }
+    });
 
     // Create or reset the process entry in the database
     SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
@@ -227,6 +393,7 @@ pub async fn api_process_transcript<R: Runtime>(
             model_name,
             final_prompt,
             final_template_id,
+            summary_language,
         )
         .await;
     });

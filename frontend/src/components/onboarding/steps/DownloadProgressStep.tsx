@@ -7,6 +7,7 @@ import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -25,7 +26,7 @@ export function DownloadProgressStep() {
   const {
     goNext,
     selectedSummaryModel,
-    setSelectedSummaryModel,
+    recommendedSummaryModel,
     parakeetDownloaded,
     setParakeetDownloaded,
     summaryModelDownloaded,
@@ -34,7 +35,6 @@ export function DownloadProgressStep() {
     completeOnboarding,
   } = useOnboarding();
 
-  const [recommendedModel, setRecommendedModel] = useState<string>('gemma3:1b');
   const [isMac, setIsMac] = useState(false);
 
   const [parakeetState, setParakeetState] = useState<DownloadState>({
@@ -45,16 +45,17 @@ export function DownloadProgressStep() {
     speedMbps: 0,
   });
 
-  const [gemmaState, setGemmaState] = useState<DownloadState>({
+  const [summaryState, setSummaryState] = useState<DownloadState>({
     status: summaryModelDownloaded ? 'completed' : 'waiting',
     progress: summaryModelDownloaded ? 100 : 0,
     downloadedMb: 0,
-    totalMb: 806, // 1b model size
+    totalMb: 0,
     speedMbps: 0,
   });
 
   const [isCompleting, setIsCompleting] = useState(false);
-  const downloadStartedRef = useRef(false);
+  const parakeetDownloadStartedRef = useRef(false);
+  const summaryDownloadStartedRef = useRef(false);
   const retryingRef = useRef(false);
   const retryingSummaryRef = useRef(false);
 
@@ -113,21 +114,26 @@ export function DownloadProgressStep() {
     retryingSummaryRef.current = true;
 
     // Reset error state
-    setGemmaState((prev) => ({
+    setSummaryState((prev) => ({
       ...prev,
       status: 'downloading',
       error: undefined,
       progress: 0,
       downloadedMb: 0,
+      totalMb: getSummaryModelSizeMb(selectedSummaryModel || recommendedSummaryModel),
       speedMbps: 0,
     }));
 
     try {
       // Call download command directly (no retry command exists for built-in AI)
-      await invoke('builtin_ai_download_model', { modelName: selectedSummaryModel || recommendedModel });
+      const modelName = selectedSummaryModel;
+      if (!modelName) {
+        throw new Error('Summary model recommendation is not ready yet');
+      }
+      await invoke('builtin_ai_download_model', { modelName });
     } catch (error) {
       console.error('[DownloadProgressStep] Summary retry failed:', error);
-      setGemmaState((prev) => ({
+      setSummaryState((prev) => ({
         ...prev,
         status: 'error',
         error: error instanceof Error ? error.message : 'Retry failed',
@@ -144,19 +150,8 @@ export function DownloadProgressStep() {
     }
   };
 
-  // Fetch recommended model and detect platform on mount
+  // Detect platform on mount
   useEffect(() => {
-    const fetchRecommendation = async () => {
-      try {
-        const model = await invoke<string>('builtin_ai_get_recommended_model');
-        setRecommendedModel(model);
-        setSelectedSummaryModel(model);  // Update context
-      } catch (error) {
-        console.error('Failed to get recommended model:', error);
-        // Keep default gemma3:1b
-      }
-    };
-
     const checkPlatform = async () => {
       try {
         const { platform } = await import('@tauri-apps/plugin-os');
@@ -166,17 +161,37 @@ export function DownloadProgressStep() {
       }
     };
 
-    fetchRecommendation();
     checkPlatform();
   }, []);
 
-  // Start downloads on mount
+  // Start the required transcription model immediately; summary readiness must not block it.
   useEffect(() => {
-    if (downloadStartedRef.current) return;
-    downloadStartedRef.current = true;
+    if (parakeetDownloadStartedRef.current) return;
+    parakeetDownloadStartedRef.current = true;
 
-    startDownloads();
+    if (!parakeetDownloaded) {
+      setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
+    }
+
+    startBackgroundDownloads({
+      includeParakeet: true,
+      includeSummary: false,
+    }).catch((error) => {
+      console.error('Failed to start Parakeet download:', error);
+      if (!parakeetDownloaded) {
+        setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
+      }
+    });
   }, []);
+
+  // Start the selected summary model only after the backend recommendation is known.
+  useEffect(() => {
+    if (summaryDownloadStartedRef.current) return;
+    if (!selectedSummaryModel) return;
+    summaryDownloadStartedRef.current = true;
+
+    startSummaryDownload();
+  }, [selectedSummaryModel]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -235,7 +250,7 @@ export function DownloadProgressStep() {
     };
   }, []);
 
-  // Listen to Gemma download progress (always downloading for builtin-ai)
+  // Listen to Summary Model download progress (always downloading for builtin-ai)
   useEffect(() => {
     const unlisten = listen<{
       model: string;
@@ -247,8 +262,8 @@ export function DownloadProgressStep() {
       error?: string;
     }>('builtin-ai-download-progress', (event) => {
       const { model, progress, downloaded_mb, total_mb, speed_mbps, status, error } = event.payload;
-      if (model === selectedSummaryModel || model === 'gemma3:1b' || model === 'gemma3:4b') {
-        setGemmaState((prev) => ({
+      if (selectedSummaryModel && model === selectedSummaryModel) {
+        setSummaryState((prev) => ({
           ...prev,
           status: status === 'completed'
             ? 'completed'
@@ -257,7 +272,7 @@ export function DownloadProgressStep() {
             : 'downloading',
           progress,
           downloadedMb: downloaded_mb ?? prev.downloadedMb,
-          totalMb: total_mb ?? prev.totalMb,
+          totalMb: (total_mb ?? prev.totalMb) || getSummaryModelSizeMb(model),
           speedMbps: speed_mbps ?? prev.speedMbps,
           error: status === 'error' ? error : undefined,
         }));
@@ -273,22 +288,42 @@ export function DownloadProgressStep() {
     };
   }, [selectedSummaryModel]);
 
-  const startDownloads = async () => {
-    // Always download both Parakeet and Gemma (system-recommended)
-    if (!parakeetDownloaded || !summaryModelDownloaded) {
+  useEffect(() => {
+    const modelForSize = selectedSummaryModel || recommendedSummaryModel;
+    if (!modelForSize) return;
+
+    setSummaryState((prev) => ({
+      ...prev,
+      status: summaryModelDownloaded
+        ? 'completed'
+        : prev.status === 'completed'
+        ? 'waiting'
+        : prev.status,
+      progress: summaryModelDownloaded
+        ? 100
+        : prev.status === 'completed'
+        ? 0
+        : prev.progress,
+      totalMb: prev.totalMb || getSummaryModelSizeMb(modelForSize),
+    }));
+  }, [selectedSummaryModel, recommendedSummaryModel, summaryModelDownloaded]);
+
+  const startSummaryDownload = async () => {
+    if (!summaryModelDownloaded && selectedSummaryModel) {
       try {
-        if (!parakeetDownloaded) {
-          setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
-        }
-        if (!summaryModelDownloaded) {
-          setGemmaState((prev) => ({ ...prev, status: 'downloading' }));
-        }
-        await startBackgroundDownloads(true);  // Always download both
+        setSummaryState((prev) => ({
+          ...prev,
+          status: 'downloading',
+          totalMb: getSummaryModelSizeMb(selectedSummaryModel),
+        }));
+        await startBackgroundDownloads({
+          includeParakeet: false,
+          includeSummary: true,
+          summaryModel: selectedSummaryModel,
+        });
       } catch (error) {
-        console.error('Failed to start downloads:', error);
-        if (!parakeetDownloaded) {
-          setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
-        }
+        console.error('Failed to start summary model download:', error);
+        setSummaryState((prev) => ({ ...prev, status: 'error', error: String(error) }));
       }
     }
   };
@@ -319,7 +354,7 @@ export function DownloadProgressStep() {
 
     // Check if downloads are complete for toast notification
     const downloadsComplete = parakeetState.status === 'completed' &&
-      gemmaState.status === 'completed';
+      summaryState.status === 'completed';
 
     // Show toast if downloads still in progress
     if (!downloadsComplete) {
@@ -356,7 +391,8 @@ export function DownloadProgressStep() {
     title: string,
     icon: React.ReactNode,
     state: DownloadState,
-    modelSize: string
+    modelSize: string,
+    sizeUnit = 'MB'
   ) => (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -398,12 +434,12 @@ export function DownloadProgressStep() {
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-600">
-              {state.downloadedMb.toFixed(1)} MB / {state.totalMb.toFixed(1)} MB
+              {state.downloadedMb.toFixed(1)} {sizeUnit} / {state.totalMb.toFixed(1)} {sizeUnit}
             </span>
             <div className="flex items-center gap-2">
               {state.speedMbps > 0 && (
                 <span className="text-gray-500">
-                  {state.speedMbps.toFixed(1)} MB/s
+                  {state.speedMbps.toFixed(1)} {sizeUnit}/s
                 </span>
               )}
               <span className="font-semibold text-gray-900">
@@ -455,8 +491,9 @@ export function DownloadProgressStep() {
           {renderDownloadCard(
             'Summary Engine',
             <Sparkles className="w-5 h-5 text-gray-600" />,
-            gemmaState,
-            recommendedModel === 'gemma3:4b' ? '~2.5 GB' : '~806 MB'
+            summaryState,
+            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
+            'MiB'
           )}
         </div>
 

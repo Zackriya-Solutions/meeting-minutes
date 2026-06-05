@@ -33,10 +33,6 @@ A modern desktop application for recording, transcribing, and analyzing meetings
 /frontend
 ├── src/                   # Next.js frontend code
 ├── src-tauri/             # Rust backend for Tauri
-├── whisper-server-package/ # Local transcription server
-│   ├── models/            # Whisper models
-│   ├── whisper-server     # Pre-built server binary
-│   └── run-server.sh      # Script to start the server
 ├── public/                # Static assets
 └── package.json           # Project dependencies
 ```
@@ -125,22 +121,21 @@ To build a production version:
 clean_build_windows.bat
 ```
 
-## Whisper Transcription Server
-
-The application includes a pre-built Whisper server for real-time speech recognition:
-
-- Located in `whisper-server-package/`
-- Supports speaker diarization
-- Runs locally for privacy
-- Uses Metal acceleration on macOS
-
-To run the Whisper server manually:
+You can also use the package scripts directly:
 ```bash
-cd whisper-server-package
-./run-server.sh
+pnpm run tauri:dev
+pnpm run tauri:build
 ```
 
-The server will be available at http://localhost:8178
+## Local Transcription
+
+Current Meetily does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
+
+For build and acceleration details, see:
+
+- [Building from Source](../docs/BUILDING.md)
+- [GPU Acceleration](../docs/GPU_ACCELERATION.md)
+- [Architecture](../docs/architecture.md)
 
 ## Development
 
@@ -151,18 +146,17 @@ The server will be available at http://localhost:8178
 
 ### Backend (Tauri)
 - The Rust backend is in the `src-tauri/` directory
-- Handles audio capture, file system access, and native integrations
-- To run only the Tauri development server: `pnpm run tauri dev`
+- Handles audio capture, file system access, transcription, storage, and native integrations
+- To run only the Tauri development server: `pnpm run tauri:dev`
 
 ## Troubleshooting
 
 ### Common Issues on macOS
 - If you encounter permission issues with scripts, make them executable:
   ```bash
-  chmod +x clean_run.sh clean_build.sh whisper-server-package/run-server.sh
+  chmod +x clean_run.sh clean_build.sh
   ```
 - For microphone access issues, ensure the app has microphone permissions in System Preferences
-- If the Whisper server fails to start, check if port 8178 is already in use
 
 ### Common Issues on Windows
 - If you encounter build errors, ensure Visual Studio Build Tools are properly installed

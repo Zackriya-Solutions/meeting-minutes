@@ -11,6 +11,7 @@ use reqwest::Client;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use crate::config::WHISPER_MODEL_CATALOG;
+use super::acceleration::{whisper_context_acceleration_for, WhisperCompiledBackend};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelStatus {
@@ -51,27 +52,28 @@ pub struct WhisperEngine {
 impl WhisperEngine {
     /// Detect available GPU acceleration capabilities
     fn detect_gpu_acceleration() -> bool {
-        // On macOS, prefer Metal GPU acceleration
-        if cfg!(target_os = "macos") {
-            log::info!("macOS detected - attempting to enable Metal GPU acceleration");
-            return true; // Enable GPU by default on macOS, whisper-rs will fallback if needed
+        match WhisperCompiledBackend::current() {
+            WhisperCompiledBackend::Metal => {
+                log::info!("macOS detected - attempting to enable Metal GPU acceleration");
+                true
+            }
+            WhisperCompiledBackend::Cuda => {
+                log::info!("CUDA feature enabled - attempting GPU acceleration");
+                true
+            }
+            WhisperCompiledBackend::Vulkan => {
+                log::info!("Vulkan feature enabled - attempting GPU acceleration");
+                true
+            }
+            WhisperCompiledBackend::HipBlas => {
+                log::info!("HIP BLAS feature enabled - attempting GPU acceleration");
+                true
+            }
+            WhisperCompiledBackend::Cpu => {
+                log::info!("No GPU acceleration features detected - using CPU processing");
+                false
+            }
         }
-
-        // Check for CUDA support on other platforms
-        if cfg!(feature = "cuda") {
-            log::info!("CUDA feature enabled - attempting GPU acceleration");
-            return true;
-        }
-
-        // Check for Vulkan support on other platforms
-        if cfg!(feature = "vulkan") {
-            log::info!("Vulkan feature enabled - attempting GPU acceleration");
-            return true;
-        }
-
-        // Fall back to CPU
-        log::info!("No GPU acceleration features detected - using CPU processing");
-        false
     }
 
     pub fn new() -> Result<Self> {
@@ -280,21 +282,27 @@ impl WhisperEngine {
                 // PERFORMANCE OPTIMIZATION: Use comprehensive hardware profile for optimal GPU configuration
                 let hardware_profile = crate::audio::HardwareProfile::detect();
                 let adaptive_config = hardware_profile.get_whisper_config();
-
-                // Enable flash attention for high-end GPUs (Metal on Apple Silicon, CUDA on NVIDIA)
-                // Flash attention provides 20-40% speedup but requires stable GPU drivers
-                let flash_attn_enabled = match (&hardware_profile.gpu_type, &hardware_profile.performance_tier) {
-                    (crate::audio::GpuType::Metal, crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High) => true,
-                    (crate::audio::GpuType::Cuda, crate::audio::PerformanceTier::Ultra | crate::audio::PerformanceTier::High) => true,
-                    _ => false, // Conservative: disable for other GPU types and lower tiers
-                };
+                let acceleration = whisper_context_acceleration_for(
+                    WhisperCompiledBackend::current(),
+                    hardware_profile.gpu_type,
+                    hardware_profile.performance_tier,
+                );
 
                 let context_param = WhisperContextParameters {
-                    use_gpu: adaptive_config.use_gpu,
-                    gpu_device: 0,
-                    flash_attn: flash_attn_enabled,
+                    use_gpu: acceleration.use_gpu,
+                    gpu_device: acceleration.gpu_device,
+                    flash_attn: acceleration.flash_attn,
                     ..Default::default()
                 };
+
+                log::info!(
+                    "Whisper acceleration decision: compiled_backend={} runtime_detected_gpu={:?} use_gpu={} flash_attn={} gpu_device={}",
+                    acceleration.compiled_backend.as_str(),
+                    acceleration.runtime_detected_gpu,
+                    acceleration.use_gpu,
+                    acceleration.flash_attn,
+                    acceleration.gpu_device,
+                );
 
                 // PERFORMANCE: Suppress verbose C library logs during model loading
                 // This hides the excessive Metal/GGML initialization logs in release builds
@@ -312,15 +320,7 @@ impl WhisperEngine {
                 *self.current_model.write().await = Some(model_name.to_string());
 
                 // Enhanced acceleration status reporting
-                let acceleration_status = match (&hardware_profile.gpu_type, flash_attn_enabled) {
-                    (crate::audio::GpuType::Metal, true) => "Metal GPU with Flash Attention (Ultra-Fast)",
-                    (crate::audio::GpuType::Metal, false) => "Metal GPU acceleration",
-                    (crate::audio::GpuType::Cuda, true) => "CUDA GPU with Flash Attention (Ultra-Fast)",
-                    (crate::audio::GpuType::Cuda, false) => "CUDA GPU acceleration",
-                    (crate::audio::GpuType::Vulkan, _) => "Vulkan GPU acceleration",
-                    (crate::audio::GpuType::OpenCL, _) => "OpenCL GPU acceleration",
-                    (crate::audio::GpuType::None, _) => "CPU processing only",
-                };
+                let acceleration_status = acceleration.status_label();
 
                 log::info!("Successfully loaded model: {} with {} (Performance Tier: {:?}, Beam Size: {}, Threads: {:?})",
                           model_name, acceleration_status, hardware_profile.performance_tier,

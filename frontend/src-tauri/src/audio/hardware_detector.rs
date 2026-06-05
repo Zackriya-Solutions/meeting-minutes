@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::OnceLock;
 use log::info;
 
@@ -11,7 +12,7 @@ pub struct HardwareProfile {
     pub performance_tier: PerformanceTier,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GpuType {
     None,
     Metal,      // Apple Silicon
@@ -20,7 +21,7 @@ pub enum GpuType {
     OpenCL,     // Generic GPU compute
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PerformanceTier {
     Low,      // CPU-only, limited resources
     Medium,   // CPU-only but powerful, or basic GPU
@@ -164,10 +165,39 @@ impl HardwareProfile {
     }
 
     fn has_vulkan_support() -> bool {
-        // Basic Vulkan detection - could be enhanced
-        std::env::var("VULKAN_SDK").is_ok() ||
-        std::path::Path::new("/usr/lib/x86_64-linux-gnu/libvulkan.so").exists() ||
-        std::path::Path::new("/usr/lib/libvulkan.so").exists()
+        if std::env::var("VULKAN_SDK").is_ok() ||
+            std::path::Path::new("/usr/lib/x86_64-linux-gnu/libvulkan.so").exists() ||
+            std::path::Path::new("/usr/lib/libvulkan.so").exists()
+        {
+            return true;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            return Self::has_windows_vulkan_runtime();
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn has_windows_vulkan_runtime() -> bool {
+        for env_var in ["SystemRoot", "WINDIR"] {
+            if let Ok(system_root) = std::env::var(env_var) {
+                if Self::has_windows_vulkan_loader(Path::new(&system_root)) {
+                    return true;
+                }
+            }
+        }
+
+        Self::has_windows_vulkan_loader(Path::new(r"C:\Windows"))
+    }
+
+    fn has_windows_vulkan_loader(system_root: &Path) -> bool {
+        system_root.join("System32").join("vulkan-1.dll").is_file()
     }
 
     /// Generate adaptive Whisper configuration based on hardware
@@ -275,5 +305,22 @@ mod tests {
 
         let high_tier = HardwareProfile::calculate_performance_tier(8, &GpuType::Metal, 16);
         assert_eq!(high_tier, PerformanceTier::Ultra);
+    }
+
+    #[test]
+    fn hardware_detector_finds_windows_vulkan_loader_in_system32() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let system32 = temp_dir.path().join("System32");
+        std::fs::create_dir(&system32).unwrap();
+        std::fs::write(system32.join("vulkan-1.dll"), []).unwrap();
+
+        assert!(HardwareProfile::has_windows_vulkan_loader(temp_dir.path()));
+    }
+
+    #[test]
+    fn hardware_detector_rejects_missing_windows_vulkan_loader() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        assert!(!HardwareProfile::has_windows_vulkan_loader(temp_dir.path()));
     }
 }

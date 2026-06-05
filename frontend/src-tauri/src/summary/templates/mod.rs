@@ -13,10 +13,10 @@
 //! # Usage
 //!
 //! ```rust
-//! use crate::summary::templates;
+//! use app_lib::summary::templates;
 //!
 //! // Load a specific template
-//! let template = templates::get_template("daily_standup")?;
+//! let template = templates::get_template("daily_standup").expect("daily standup template exists");
 //!
 //! // Generate markdown structure
 //! let markdown = template.to_markdown_structure();

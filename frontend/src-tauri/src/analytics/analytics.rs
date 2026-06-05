@@ -6,6 +6,34 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
+const SENSITIVE_ANALYTICS_KEYS: &[&str] = &[
+    "meeting_title",
+    "meetingTitle",
+    "meeting_name",
+    "meetingName",
+    "file_name",
+    "filename",
+    "file_path",
+    "folder_path",
+    "path",
+    "source_path",
+    "meeting_folder_path",
+    "device_name",
+    "user_agent",
+];
+
+fn sanitize_analytics_properties(mut properties: HashMap<String, String>) -> HashMap<String, String> {
+    properties.retain(|key, _| !SENSITIVE_ANALYTICS_KEYS.contains(&key.as_str()));
+    properties
+}
+
+fn meeting_started_properties(meeting_id: &str) -> HashMap<String, String> {
+    let mut properties = HashMap::new();
+    properties.insert("meeting_id".to_string(), meeting_id.to_string());
+    properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
+    properties
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsConfig {
     pub api_key: String,
@@ -79,7 +107,7 @@ impl AnalyticsClient {
         // Store user ID for future events
         *self.user_id.lock().await = Some(user_id.clone());
 
-        let properties = properties.unwrap_or_default();
+        let properties = sanitize_analytics_properties(properties.unwrap_or_default());
         
         let mut event = Event::new("$identify", &user_id);
         
@@ -113,7 +141,7 @@ impl AnalyticsClient {
         };
 
         let event_name = event_name.to_string();
-        let mut properties = properties.unwrap_or_default();
+        let mut properties = sanitize_analytics_properties(properties.unwrap_or_default());
 
         // Add app version to all events
         properties.insert("app_version".to_string(), env!("CARGO_PKG_VERSION").to_string());
@@ -207,13 +235,8 @@ impl AnalyticsClient {
     }
 
     // Meeting-specific event tracking methods
-    pub async fn track_meeting_started(&self, meeting_id: &str, meeting_title: &str) -> Result<(), String> {
-        let mut properties = HashMap::new();
-        properties.insert("meeting_id".to_string(), meeting_id.to_string());
-        properties.insert("meeting_title".to_string(), meeting_title.to_string());
-        properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
-        
-        self.track_event("meeting_started", Some(properties)).await
+    pub async fn track_meeting_started(&self, meeting_id: &str) -> Result<(), String> {
+        self.track_event("meeting_started", Some(meeting_started_properties(meeting_id))).await
     }
 
     pub async fn track_recording_started(&self, meeting_id: &str) -> Result<(), String> {
@@ -411,6 +434,7 @@ impl AnalyticsClient {
             }
         };
         
+        let properties = sanitize_analytics_properties(properties);
         let mut event = Event::new("$set", &user_id);
         
         // Add user properties
@@ -431,4 +455,67 @@ impl AnalyticsClient {
 // Helper function to create analytics client from config
 pub async fn create_analytics_client(config: AnalyticsConfig) -> AnalyticsClient {
     AnalyticsClient::new(config).await
-} 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analytics_properties_drop_sensitive_meeting_metadata() {
+        let mut properties = HashMap::new();
+        properties.insert("meeting_title".to_string(), "Board Strategy".to_string());
+        properties.insert("meetingTitle".to_string(), "Board Strategy".to_string());
+        properties.insert("meeting_name".to_string(), "Client Call".to_string());
+        properties.insert("meetingName".to_string(), "Client Call".to_string());
+        properties.insert("file_name".to_string(), "acquisition.wav".to_string());
+        properties.insert("filename".to_string(), "acquisition.wav".to_string());
+        properties.insert("file_path".to_string(), "C:\\meetings\\acquisition.wav".to_string());
+        properties.insert("folder_path".to_string(), "C:\\meetings".to_string());
+        properties.insert("path".to_string(), "C:\\meetings\\acquisition.wav".to_string());
+        properties.insert("source_path".to_string(), "C:\\imports\\source.wav".to_string());
+        properties.insert("meeting_folder_path".to_string(), "C:\\meetings\\private".to_string());
+        properties.insert("device_name".to_string(), "Jane's AirPods".to_string());
+        properties.insert("user_agent".to_string(), "Mozilla/5.0".to_string());
+        properties.insert("meeting_id".to_string(), "meeting-123".to_string());
+        properties.insert("duration_seconds".to_string(), "125".to_string());
+        properties.insert("segments_count".to_string(), "42".to_string());
+        properties.insert("model_name".to_string(), "parakeet".to_string());
+        properties.insert("platform".to_string(), "Windows".to_string());
+
+        let sanitized = sanitize_analytics_properties(properties);
+
+        for key in [
+            "meeting_title",
+            "meetingTitle",
+            "meeting_name",
+            "meetingName",
+            "file_name",
+            "filename",
+            "file_path",
+            "folder_path",
+            "path",
+            "source_path",
+            "meeting_folder_path",
+            "device_name",
+            "user_agent",
+        ] {
+            assert!(!sanitized.contains_key(key), "sensitive key remained: {}", key);
+        }
+
+        assert_eq!(sanitized.get("meeting_id"), Some(&"meeting-123".to_string()));
+        assert_eq!(sanitized.get("duration_seconds"), Some(&"125".to_string()));
+        assert_eq!(sanitized.get("segments_count"), Some(&"42".to_string()));
+        assert_eq!(sanitized.get("model_name"), Some(&"parakeet".to_string()));
+        assert_eq!(sanitized.get("platform"), Some(&"Windows".to_string()));
+    }
+
+    #[test]
+    fn meeting_started_properties_do_not_include_title() {
+        let properties = meeting_started_properties("meeting-123");
+
+        assert_eq!(properties.get("meeting_id"), Some(&"meeting-123".to_string()));
+        assert!(properties.contains_key("timestamp"));
+        assert!(!properties.contains_key("meeting_title"));
+    }
+}

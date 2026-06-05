@@ -6,7 +6,6 @@
 **/models/*.bin
 /.pnp
 .pnp.*
-pnpm-lock.yaml
 package-lock.json
 .yarn/*
 !.yarn/patches

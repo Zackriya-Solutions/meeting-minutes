@@ -147,7 +147,6 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
     // Track device selection analytics with enhanced metadata
     const metadata = getDeviceMetadata(deviceName);
     Analytics.track('microphone_selected', {
-      device_name: deviceName,
       device_category: metadata.category,
       is_bluetooth: metadata.isBluetooth.toString(),
       has_system_audio: (!!selectedDevices.systemDevice).toString()
@@ -165,7 +164,6 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
     // Track device selection analytics with enhanced metadata
     const metadata = getDeviceMetadata(deviceName);
     Analytics.track('system_audio_selected', {
-      device_name: deviceName,
       device_category: metadata.category,
       is_bluetooth: metadata.isBluetooth.toString(),
       has_microphone: (!!selectedDevices.micDevice).toString()

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { PartialBlock, Block } from "@blocknote/core";
+import type { PartialBlock, Block } from "@blocknote/core";
+import { useCreateBlockNote } from "@blocknote/react";
+import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/shadcn/style.css";
 import "@blocknote/core/fonts/inter.css";
 
@@ -18,25 +20,11 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
     editable
   });
 
-  // Lazy import to avoid SSR issues
-  const { useCreateBlockNote } = require("@blocknote/react");
-  const { BlockNoteView } = require("@blocknote/shadcn");
-
   const editor = useCreateBlockNote({
     initialContent: initialContent as PartialBlock[] | undefined,
   });
 
   console.log('📝 EDITOR: BlockNote editor created successfully');
-
-  // Expose blocksToMarkdown method
-  (editor as any).blocksToMarkdownLossy = async (blocks: Block[]) => {
-    try {
-      return await editor.blocksToMarkdownLossy(blocks);
-    } catch (error) {
-      console.error('❌ EDITOR: Failed to convert blocks to markdown:', error);
-      return '';
-    }
-  };
 
   // Handle content changes
   useEffect(() => {
