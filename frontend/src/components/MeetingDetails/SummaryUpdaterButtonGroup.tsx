@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
+import { BookOpen, Copy, Save, Loader2, Search } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 
 interface SummaryUpdaterButtonGroupProps {
@@ -10,6 +10,7 @@ interface SummaryUpdaterButtonGroupProps {
   isDirty: boolean;
   onSave: () => Promise<void>;
   onCopy: () => Promise<void>;
+  onSaveToObsidian: () => Promise<void>;
   onFind?: () => void;
   onOpenFolder: () => Promise<void>;
   hasSummary: boolean;
@@ -20,6 +21,7 @@ export function SummaryUpdaterButtonGroup({
   isDirty,
   onSave,
   onCopy,
+  onSaveToObsidian,
   onFind,
   onOpenFolder,
   hasSummary
@@ -65,6 +67,22 @@ export function SummaryUpdaterButtonGroup({
       >
         <Copy />
         <span className="hidden lg:inline">Copy</span>
+      </Button>
+
+      {/* Save to Obsidian button */}
+      <Button
+        variant="outline"
+        size="sm"
+        title="Save to Obsidian"
+        onClick={() => {
+          Analytics.trackButtonClick('save_to_obsidian', 'meeting_details');
+          onSaveToObsidian();
+        }}
+        disabled={!hasSummary}
+        className="cursor-pointer"
+      >
+        <BookOpen />
+        <span className="hidden lg:inline">Obsidian</span>
       </Button>
 
       {/* Find button */}

@@ -42,6 +42,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod notifications;
+pub mod obsidian;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -681,6 +682,11 @@ pub fn run() {
             summary::summary_engine::commands::builtin_ai_get_available_summary_model,
             summary::summary_engine::commands::builtin_ai_get_recommended_model,
             openrouter::get_openrouter_models,
+            obsidian::get_obsidian_settings,
+            obsidian::set_obsidian_vault_path,
+            obsidian::set_obsidian_settings,
+            obsidian::open_obsidian_meetings_folder,
+            obsidian::export_meeting_to_obsidian,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,

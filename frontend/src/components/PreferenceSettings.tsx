@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
+import { FolderOpen, Save, X } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { toast } from "sonner"
 
 export function PreferenceSettings() {
   const {
@@ -20,6 +21,9 @@ export function PreferenceSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
+  const [obsidianVaultPath, setObsidianVaultPath] = useState("");
+  const [obsidianFilenameTemplate, setObsidianFilenameTemplate] = useState("{date} {title}.md");
+  const [isSavingObsidianPath, setIsSavingObsidianPath] = useState(false);
   const hasTrackedViewRef = useRef(false);
 
   // Lazy load preferences on mount (only loads if not already cached)
@@ -28,6 +32,20 @@ export function PreferenceSettings() {
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
   }, [loadPreferences]);
+
+  useEffect(() => {
+    const loadObsidianSettings = async () => {
+      try {
+        const settings = await invoke<{ vault_path?: string | null; filename_template?: string }>('get_obsidian_settings');
+        setObsidianVaultPath(settings.vault_path || "");
+        setObsidianFilenameTemplate(settings.filename_template || "{date} {title}.md");
+      } catch (error) {
+        console.error('Failed to load Obsidian settings:', error);
+      }
+    };
+
+    loadObsidianSettings();
+  }, []);
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {
@@ -130,6 +148,55 @@ export function PreferenceSettings() {
       });
     } catch (error) {
       console.error(`Failed to open ${folderType} folder:`, error);
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleSaveObsidianPath = async () => {
+    setIsSavingObsidianPath(true);
+
+    try {
+      const settings = await invoke<{ vault_path?: string | null; filename_template?: string }>('set_obsidian_settings', {
+        vaultPath: obsidianVaultPath.trim() || null,
+        filenameTemplate: obsidianFilenameTemplate.trim() || "{date} {title}.md",
+      });
+      setObsidianVaultPath(settings.vault_path || "");
+      setObsidianFilenameTemplate(settings.filename_template || "{date} {title}.md");
+      toast.success('Obsidian vault saved');
+      await Analytics.track('obsidian_vault_path_saved', {
+        configured: (!!settings.vault_path).toString(),
+      });
+    } catch (error) {
+      console.error('Failed to save Obsidian vault path:', error);
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingObsidianPath(false);
+    }
+  };
+
+  const handleOpenObsidianMeetingsFolder = async () => {
+    try {
+      await invoke('open_obsidian_meetings_folder');
+      await Analytics.track('storage_folder_opened', {
+        folder_type: 'obsidian_meetings',
+      });
+    } catch (error) {
+      console.error('Failed to open Obsidian Meetings folder:', error);
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleClearObsidianPath = async () => {
+    setObsidianVaultPath("");
+
+    try {
+      await invoke('set_obsidian_vault_path', {
+        vaultPath: null,
+      });
+      toast.success('Obsidian vault cleared');
+    } catch (error) {
+      console.error('Failed to clear Obsidian vault path:', error);
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -210,6 +277,51 @@ export function PreferenceSettings() {
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
+          </div>
+
+          <div className="p-4 border rounded-lg bg-gray-50">
+            <div className="font-medium mb-2">Obsidian Vault</div>
+            <div className="flex flex-col gap-3">
+              <input
+                value={obsidianVaultPath}
+                onChange={(event) => setObsidianVaultPath(event.target.value)}
+                placeholder="D:\\Path\\To\\ObsidianVault"
+                className="min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-mono text-gray-900"
+              />
+              <input
+                value={obsidianFilenameTemplate}
+                onChange={(event) => setObsidianFilenameTemplate(event.target.value)}
+                placeholder="{date} {title}.md"
+                className="min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-mono text-gray-900"
+              />
+              <div className="text-xs text-gray-600">
+                Filename placeholders: {"{date}"}, {"{title}"}, {"{id}"}, {"{short_id}"}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveObsidianPath}
+                  disabled={isSavingObsidianPath}
+                  className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors disabled:opacity-60"
+                >
+                  <Save className="w-4 h-4" />
+                  Save
+                </button>
+                <button
+                  onClick={handleClearObsidianPath}
+                  className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                  Clear
+                </button>
+                <button
+                  onClick={handleOpenObsidianMeetingsFolder}
+                  className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  Meetings
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

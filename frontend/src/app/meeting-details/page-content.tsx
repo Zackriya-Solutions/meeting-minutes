@@ -204,6 +204,7 @@ export default function PageContent({
           isSaving={meetingData.isSaving}
           onSaveAll={meetingData.saveAllChanges}
           onCopySummary={copyOperations.handleCopySummary}
+          onSaveToObsidian={copyOperations.handleSaveToObsidian}
           onOpenFolder={meetingOperations.handleOpenMeetingFolder}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}
