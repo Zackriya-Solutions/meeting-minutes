@@ -1,0 +1,76 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-tap:
+    name: Bump meetily cask to ${{ github.event.release.tag_name }}
+    runs-on: ubuntu-latest
+    if: >-
+      !github.event.release.prerelease &&
+      !github.event.release.draft
+
+    steps:
+      - name: Parse version
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Download macOS DMG and compute SHA256
+        id: artifact
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          DMG_NAME="meetily_${VERSION}_aarch64.dmg"
+          DMG_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${DMG_NAME}"
+
+          echo "Downloading: ${DMG_URL}"
+          curl -fsSL --retry 3 -o meetily.dmg "${DMG_URL}"
+
+          SHA256=$(sha256sum meetily.dmg | awk '{print $1}')
+          echo "sha256=${SHA256}"     >> "$GITHUB_OUTPUT"
+          echo "url=${DMG_URL}"       >> "$GITHUB_OUTPUT"
+          echo "dmg_name=${DMG_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: Zackriya-Solutions/homebrew-meetily
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update version and sha256 in cask
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256:  ${{ steps.artifact.outputs.sha256 }}
+        run: |
+          sed -i "s/^\(  version \"\)[^\"]*\"/\1${VERSION}\"/" homebrew-tap/Casks/meetily.rb
+          sed -i "s/^\(  sha256 \"\)[^\"]*\"/\1${SHA256}\"/" homebrew-tap/Casks/meetily.rb
+
+          echo "--- Updated cask ---"
+          cat homebrew-tap/Casks/meetily.rb
+
+      - name: Commit and push to tap
+        run: |
+          cd homebrew-tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add Casks/meetily.rb
+
+          if git diff --cached --quiet; then
+            echo "No changes — cask is already at ${{ steps.version.outputs.version }}"
+            exit 0
+          fi
+
+          git commit -m "chore: bump meetily to ${{ steps.version.outputs.version }}
+
+          Auto-updated by the release workflow in
+          https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+
+          git push
