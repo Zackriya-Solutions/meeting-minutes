@@ -284,7 +284,7 @@ export function BuiltInModelManager({
       <div
         className={cn(
           'grid gap-4',
-          layout === 'dialog' && 'max-h-[50vh] overflow-y-auto pr-2'
+          layout === 'dialog' && 'max-h-[50vh] overflow-y-auto pr-2 pb-2'
         )}
       >
         {models.map((model) => {
@@ -315,60 +315,38 @@ export function BuiltInModelManager({
                 }
               }}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-base font-bold text-gray-900">{model.display_name || model.name}</span>
+            <div className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="min-w-0 break-words text-base font-bold leading-snug text-gray-900">{model.display_name || model.name}</span>
                     {isAvailable && (
                       <>
-                        <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-green-600"></span>
+                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
+                          <span className="h-2 w-2 rounded-full bg-green-600"></span>
                           Ready
                         </span>
                         {selectedModel === model.name && (
-                          <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                          <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                             Selected
                           </span>
                         )}
                       </>
                     )}
                     {isCorrupted && (
-                      <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded flex items-center gap-1">
-                        <BadgeAlert className="w-3 h-3" />
+                      <span className="flex shrink-0 items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                        <BadgeAlert className="h-3 w-3" />
                         Corrupted
                       </span>
                     )}
                     {isError && (
-                      <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded">
+                      <span className="shrink-0 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
                         Error
                       </span>
                     )}
-                    {isNotDownloaded && !modelIsDownloading && (
-                      <span className="text-xs text-gray-600 font-medium">
-                        Not Downloaded
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    {model.description && (
-                      <p className="mb-1">{model.description}</p>
-                    )}
-                    {(isError || isCorrupted) && (
-                      <p className="mb-1 text-xs text-red-600">
-                        {isError && typeof model.status === 'object' && 'Error' in model.status
-                          ? (model.status as any).Error
-                          : isCorrupted
-                          ? 'File is corrupted. Retry download or delete.'
-                          : 'An error occurred'}
-                      </p>
-                    )}
-                    <div className="text-xs text-gray-500">
-                      <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
-                    </div>
                   </div>
                 </div>
-
-                <div className="ml-4 flex items-center gap-2">
+                <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:ml-4 sm:w-auto sm:justify-end">
                   {/* Not Downloaded - Show Download button */}
                   {isNotDownloaded && !modelIsDownloading && (
                     <Button
@@ -384,7 +362,6 @@ export function BuiltInModelManager({
                       Download
                     </Button>
                   )}
-
                   {/* Downloading - Show Cancel button */}
                   {modelIsDownloading && (
                     <Button
@@ -399,7 +376,6 @@ export function BuiltInModelManager({
                       Cancel
                     </Button>
                   )}
-
                   {/* Error - Show Retry button */}
                   {isError && !modelIsDownloading && (
                     <Button
@@ -415,7 +391,6 @@ export function BuiltInModelManager({
                       Retry
                     </Button>
                   )}
-
                   {/* Corrupted - Show both Retry and Delete buttons */}
                   {isCorrupted && !modelIsDownloading && (
                     <>
@@ -443,7 +418,6 @@ export function BuiltInModelManager({
                       </Button>
                     </>
                   )}
-
                   {/* Available - Show small trash icon (only if not currently selected) */}
                   {isAvailable && !modelIsDownloading && selectedModel !== model.name && (
                     <button
@@ -457,6 +431,24 @@ export function BuiltInModelManager({
                       <Trash2 className="h-4 w-4" />
                     </button>
                   )}
+                </div>
+              </div>
+              <div className="text-sm text-gray-600">
+                {model.description && (
+                  <p className="mb-1">{model.description}</p>
+                )}
+                {(isError || isCorrupted) && (
+                  <p className="mb-1 text-xs text-red-600">
+                    {isError && typeof model.status === 'object' && 'Error' in model.status
+                      ? (model.status as any).Error
+                      : isCorrupted
+                      ? 'File is corrupted. Retry download or delete.'
+                      : 'An error occurred'}
+                  </p>
+                )}
+                <div className="text-xs text-gray-500">
+                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
+                </div>
                 </div>
               </div>
 

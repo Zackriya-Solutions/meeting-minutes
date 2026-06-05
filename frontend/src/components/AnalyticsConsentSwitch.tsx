@@ -94,7 +94,7 @@ export default function AnalyticsConsentSwitch() {
 
         // Identify user with enhanced properties immediately after init
         await Analytics.identify(userId, {
-          app_version: '0.3.0',
+          app_version: '0.4.0',
           platform: 'tauri',
           first_seen: new Date().toISOString(),
           os: navigator.platform,
