@@ -86,6 +86,7 @@ export function useRecordingStop(
           message: string;
           folder_path?: string;
           meeting_name?: string;
+          realtime_transcription_enabled?: boolean;
         }>('recording-stopped', async (event) => {
           // Create promise that resolves when sessionStorage is set (prevents race condition)
           recordingStoppedDataRef.current = (async () => {
@@ -98,6 +99,10 @@ export function useRecordingStop(
             if (meeting_name) {
               sessionStorage.setItem('last_recording_meeting_name', meeting_name);
             }
+            sessionStorage.setItem(
+              'last_recording_realtime_transcription_enabled',
+              String(!!event.payload.realtime_transcription_enabled)
+            );
           })();
 
         });
@@ -119,6 +124,22 @@ export function useRecordingStop(
 
   // Main recording stop handler
   const handleRecordingStop = useCallback(async (isCallApi: boolean) => {
+    const waitForRecordingStoppedMetadata = async () => {
+      const deadline = Date.now() + 3000;
+
+      while (
+        Date.now() < deadline &&
+        sessionStorage.getItem('last_recording_realtime_transcription_enabled') === null
+      ) {
+        if (recordingStoppedDataRef.current) {
+          await recordingStoppedDataRef.current;
+          break;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    };
+
     if (recordingStoppedDataRef.current) {
       await recordingStoppedDataRef.current;
     }
@@ -145,23 +166,33 @@ export function useRecordingStop(
       // This function only handles post-stop processing (transcription wait, API call, navigation)
       console.log('Recording already stopped by RecordingControls, processing transcription...');
 
-      // Wait for transcription to complete
-      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');
-      console.log('Waiting for transcription to complete...');
+      // Wait for transcription to complete when the recording used live transcription.
+      await waitForRecordingStoppedMetadata();
+      const realtimeTranscriptionEnabled =
+        sessionStorage.getItem('last_recording_realtime_transcription_enabled') === 'true';
+      let transcriptionComplete = !realtimeTranscriptionEnabled;
+
+      if (realtimeTranscriptionEnabled) {
+        setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');
+        console.log('Waiting for transcription to complete...');
+      } else {
+        console.log('Realtime transcription disabled for this recording; skipping live transcript wait');
+      }
 
       const MAX_WAIT_TIME = 60000; // 60 seconds maximum wait (increased for longer processing)
       const POLL_INTERVAL = 500; // Check every 500ms
       let elapsedTime = 0;
-      let transcriptionComplete = false;
 
       // Listen for transcription-complete event
-      const unlistenComplete = await listen('transcription-complete', () => {
-        console.log('Received transcription-complete event');
-        transcriptionComplete = true;
-      });
+      const unlistenComplete = realtimeTranscriptionEnabled
+        ? await listen('transcription-complete', () => {
+          console.log('Received transcription-complete event');
+          transcriptionComplete = true;
+        })
+        : undefined;
 
       // Poll for transcription status
-      while (elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
+      while (realtimeTranscriptionEnabled && elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
         try {
           const status = await transcriptService.getTranscriptionStatus();
           console.log('Transcription status:', status);
@@ -197,11 +228,11 @@ export function useRecordingStop(
 
       // Clean up listener
       console.log('🧹 CLEANUP: Cleaning up transcription-complete listener');
-      unlistenComplete();
+      unlistenComplete?.();
 
-      if (!transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
+      if (realtimeTranscriptionEnabled && !transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
         console.warn('⏰ Transcription wait timeout reached after', elapsedTime, 'ms');
-      } else {
+      } else if (realtimeTranscriptionEnabled) {
         console.log('✅ Transcription completed after', elapsedTime, 'ms');
         // Wait longer for any late transcript segments (increased from 1s to 4s)
         console.log('⏳ Waiting for late transcript segments...');
@@ -233,7 +264,7 @@ export function useRecordingStop(
       // Save to SQLite
       // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
       // This ensures user sees all transcripts streaming in before database save
-      if (isCallApi && transcriptionComplete == true) {
+      if (isCallApi && (transcriptionComplete || !realtimeTranscriptionEnabled)) {
 
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 
@@ -299,6 +330,7 @@ export function useRecordingStop(
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
+          sessionStorage.removeItem('last_recording_realtime_transcription_enabled');
           // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
           sessionStorage.removeItem('indexeddb_current_meeting_id');
 
@@ -324,7 +356,9 @@ export function useRecordingStop(
 
           // Show success toast with navigation option
           toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+            description: realtimeTranscriptionEnabled
+              ? `${freshTranscripts.length} transcript segments saved.`
+              : 'Audio saved. You can transcribe it after the meeting.',
             action: {
               label: 'View Meeting',
               onClick: () => {

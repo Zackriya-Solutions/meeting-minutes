@@ -99,6 +99,8 @@ pub struct GetApiKeyRequest {
 pub struct TranscriptConfig {
     pub provider: String,
     pub model: String,
+    #[serde(rename = "realtimeTranscriptionEnabled")]
+    pub realtime_transcription_enabled: bool,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
 }
@@ -107,6 +109,8 @@ pub struct TranscriptConfig {
 pub struct SaveTranscriptConfigRequest {
     pub provider: String,
     pub model: String,
+    #[serde(rename = "realtimeTranscriptionEnabled")]
+    pub realtime_transcription_enabled: bool,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
 }
@@ -618,6 +622,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
                     Ok(Some(TranscriptConfig {
                         provider: config.provider,
                         model: config.model,
+                        realtime_transcription_enabled: config.realtime_transcription_enabled,
                         api_key,
                     }))
                 }
@@ -636,6 +641,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
             Ok(Some(TranscriptConfig {
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                realtime_transcription_enabled: false,
                 api_key: None,
             }))
         }
@@ -652,6 +658,7 @@ pub async fn api_save_transcript_config<R: Runtime>(
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
+    realtime_transcription_enabled: Option<bool>,
     api_key: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
@@ -661,7 +668,24 @@ pub async fn api_save_transcript_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    if let Err(e) = SettingsRepository::save_transcript_config(pool, &provider, &model).await {
+    let realtime_transcription_enabled = match realtime_transcription_enabled {
+        Some(value) => value,
+        None => SettingsRepository::get_transcript_config(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|config| config.realtime_transcription_enabled)
+            .unwrap_or(false),
+    };
+
+    if let Err(e) = SettingsRepository::save_transcript_config(
+        pool,
+        &provider,
+        &model,
+        realtime_transcription_enabled,
+    )
+    .await
+    {
         log_error!("Failed to save transcript config: {}", e);
         return Err(e.to_string());
     }

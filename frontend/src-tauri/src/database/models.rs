@@ -112,6 +112,9 @@ pub struct TranscriptSetting {
     pub id: String,
     pub provider: String,
     pub model: String,
+    #[sqlx(rename = "realtimeTranscriptionEnabled")]
+    #[serde(rename = "realtimeTranscriptionEnabled")]
+    pub realtime_transcription_enabled: bool,
     #[sqlx(rename = "whisperApiKey")]
     #[serde(rename = "whisperApiKey")]
     pub whisper_api_key: Option<String>,

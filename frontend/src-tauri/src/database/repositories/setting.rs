@@ -18,6 +18,8 @@ pub struct SaveModelConfigRequest {
 pub struct SaveTranscriptConfigRequest {
     pub provider: String,
     pub model: String,
+    #[serde(rename = "realtimeTranscriptionEnabled")]
+    pub realtime_transcription_enabled: bool,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
 }
@@ -154,18 +156,21 @@ impl SettingsRepository {
         pool: &SqlitePool,
         provider: &str,
         model: &str,
+        realtime_transcription_enabled: bool,
     ) -> std::result::Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO transcript_settings (id, provider, model)
-            VALUES ('1', $1, $2)
+            INSERT INTO transcript_settings (id, provider, model, realtimeTranscriptionEnabled)
+            VALUES ('1', $1, $2, $3)
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
-                model = excluded.model
+                model = excluded.model,
+                realtimeTranscriptionEnabled = excluded.realtimeTranscriptionEnabled
             "#,
         )
         .bind(provider)
         .bind(model)
+        .bind(realtime_transcription_enabled)
         .execute(pool)
         .await?;
 

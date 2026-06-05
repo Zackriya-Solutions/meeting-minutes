@@ -4,15 +4,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
+import { Switch } from './ui/switch';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 
 
 export interface TranscriptModelProps {
     provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
+    realtimeTranscriptionEnabled: boolean;
 }
 
 export interface TranscriptSettingsProps {
@@ -22,6 +25,7 @@ export interface TranscriptSettingsProps {
 }
 
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onModelSelect }: TranscriptSettingsProps) {
+    const { isRecording } = useRecordingState();
     const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
@@ -95,6 +99,29 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
+    const handleRealtimeToggle = async (checked: boolean) => {
+        const updatedConfig = {
+            ...transcriptModelConfig,
+            realtimeTranscriptionEnabled: checked,
+        };
+        setTranscriptModelConfig(updatedConfig);
+
+        try {
+            await invoke('api_save_transcript_config', {
+                provider: updatedConfig.provider,
+                model: updatedConfig.model,
+                realtimeTranscriptionEnabled: checked,
+                apiKey: updatedConfig.apiKey ?? null,
+            });
+        } catch (err) {
+            console.error('Failed to save realtime transcription setting:', err);
+            setTranscriptModelConfig({
+                ...updatedConfig,
+                realtimeTranscriptionEnabled: !checked,
+            });
+        }
+    };
+
     return (
         <div>
             <div>
@@ -102,6 +129,23 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     <h3 className="text-lg font-semibold text-gray-900">Transcript Settings</h3>
                 </div> */}
                 <div className="space-y-4 pb-6">
+                    <div className="flex items-center justify-between gap-4 rounded-md border border-gray-200 bg-white px-4 py-3">
+                        <div className="space-y-1">
+                            <Label className="text-sm font-medium text-gray-900">
+                                Realtime transcription
+                            </Label>
+                            <p className="text-xs text-gray-500">
+                                Generate transcript while recording. Uses more CPU. When off, audio is still recorded and can be transcribed after the meeting.
+                            </p>
+                        </div>
+                        <Switch
+                            checked={!!transcriptModelConfig.realtimeTranscriptionEnabled}
+                            onCheckedChange={handleRealtimeToggle}
+                            disabled={isRecording}
+                            aria-label="Toggle realtime transcription"
+                        />
+                    </div>
+
                     <div>
                         <Label className="block text-sm font-medium text-gray-700 mb-1">
                             Transcript Model

@@ -196,6 +196,7 @@ pub async fn complete_onboarding<R: Runtime>(
         pool,
         "parakeet",
         crate::config::DEFAULT_PARAKEET_MODEL,
+        false,
     ).await {
         error!("Failed to save transcription model config: {}", e);
         return Err(format!("Failed to save transcription model config: {}", e));

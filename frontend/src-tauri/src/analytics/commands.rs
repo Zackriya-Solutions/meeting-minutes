@@ -289,6 +289,7 @@ pub async fn track_meeting_ended(
     chunks_processed: u64,
     transcript_segments_count: u64,
     had_fatal_error: bool,
+    realtime_transcription_enabled: bool,
 ) -> Result<(), String> {
     let client = {
         let guard = ANALYTICS_CLIENT.lock().unwrap();
@@ -309,6 +310,7 @@ pub async fn track_meeting_ended(
             chunks_processed,
             transcript_segments_count,
             had_fatal_error,
+            realtime_transcription_enabled,
         ).await
     } else {
         Err("Analytics client not initialized".to_string())

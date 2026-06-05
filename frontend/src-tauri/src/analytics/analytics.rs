@@ -363,6 +363,7 @@ impl AnalyticsClient {
         chunks_processed: u64,
         transcript_segments_count: u64,
         had_fatal_error: bool,
+        realtime_transcription_enabled: bool,
     ) -> Result<(), String> {
         let mut properties = HashMap::new();
 
@@ -387,6 +388,10 @@ impl AnalyticsClient {
         properties.insert("chunks_processed".to_string(), chunks_processed.to_string());
         properties.insert("transcript_segments_count".to_string(), transcript_segments_count.to_string());
         properties.insert("had_fatal_error".to_string(), had_fatal_error.to_string());
+        properties.insert(
+            "realtime_transcription_enabled".to_string(),
+            realtime_transcription_enabled.to_string(),
+        );
 
         // Timestamp
         properties.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
