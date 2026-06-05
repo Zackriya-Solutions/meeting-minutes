@@ -42,6 +42,14 @@ export interface NotificationSettings {
   };
 }
 
+export interface MeetingDetectionSettings {
+  meeting_detection_enabled: boolean;
+  teams_detection_enabled: boolean;
+  teams_prompt_start: boolean;
+  teams_prompt_stop: boolean;
+  teams_prompt_cooldown_minutes: number;
+}
+
 interface ConfigContextType {
   // Model configuration
   modelConfig: ModelConfig;
@@ -87,10 +95,12 @@ interface ConfigContextType {
 
   // Preference settings (lazy loaded)
   notificationSettings: NotificationSettings | null;
+  meetingDetectionSettings: MeetingDetectionSettings | null;
   storageLocations: StorageLocations | null;
   isLoadingPreferences: boolean;
   loadPreferences: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => Promise<void>;
+  updateMeetingDetectionSettings: (settings: MeetingDetectionSettings) => Promise<void>;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -171,6 +181,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   // Preference settings state (lazy loaded)
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
+  const [meetingDetectionSettings, setMeetingDetectionSettings] = useState<MeetingDetectionSettings | null>(null);
   const [storageLocations, setStorageLocations] = useState<StorageLocations | null>(null);
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(false);
   const preferencesLoadedRef = useRef(false);
@@ -438,6 +449,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         setNotificationSettings(null);
       }
 
+      try {
+        const meetingSettings = await invoke<MeetingDetectionSettings>('get_meeting_detection_settings');
+        setMeetingDetectionSettings(meetingSettings);
+      } catch (meetingDetectionError) {
+        console.error('[ConfigContext] Failed to load meeting detection settings:', meetingDetectionError);
+        setMeetingDetectionSettings(null);
+      }
+
       // Load storage locations
       const [dbDir, modelsDir, recordingsDir] = await Promise.all([
         invoke<string>('get_database_directory'),
@@ -469,6 +488,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('[ConfigContext] Failed to update notification settings:', error);
       throw error; // Re-throw so component can handle error
+    }
+  }, []);
+
+  const updateMeetingDetectionSettings = useCallback(async (settings: MeetingDetectionSettings) => {
+    try {
+      await invoke('set_meeting_detection_settings', { settings });
+      setMeetingDetectionSettings(settings);
+    } catch (error) {
+      console.error('[ConfigContext] Failed to update meeting detection settings:', error);
+      throw error;
     }
   }, []);
 
@@ -505,10 +534,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelOptions,
     error,
     notificationSettings,
+    meetingDetectionSettings,
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings,
+    updateMeetingDetectionSettings,
   }), [
     modelConfig,
     isAutoSummary,
@@ -527,10 +558,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelOptions,
     error,
     notificationSettings,
+    meetingDetectionSettings,
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings,
+    updateMeetingDetectionSettings,
   ]);
 
   return (

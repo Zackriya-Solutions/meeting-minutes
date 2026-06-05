@@ -12,10 +12,12 @@ import { toast } from "sonner"
 export function PreferenceSettings() {
   const {
     notificationSettings,
+    meetingDetectionSettings,
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
-    updateNotificationSettings
+    updateNotificationSettings,
+    updateMeetingDetectionSettings
   } = useConfig();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
@@ -212,6 +214,34 @@ export function PreferenceSettings() {
 
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
+  const meetingDetectionSettingsValue = meetingDetectionSettings ?? {
+    meeting_detection_enabled: false,
+    teams_detection_enabled: true,
+    teams_prompt_start: true,
+    teams_prompt_stop: true,
+    teams_prompt_cooldown_minutes: 30,
+  };
+
+  const updateMeetingDetectionSetting = async (
+    patch: Partial<typeof meetingDetectionSettingsValue>
+  ) => {
+    try {
+      const updatedSettings = {
+        ...meetingDetectionSettingsValue,
+        ...patch,
+      };
+      await updateMeetingDetectionSettings(updatedSettings);
+      await Analytics.track('meeting_detection_settings_changed', {
+        meeting_detection_enabled: updatedSettings.meeting_detection_enabled.toString(),
+        teams_detection_enabled: updatedSettings.teams_detection_enabled.toString(),
+        teams_prompt_start: updatedSettings.teams_prompt_start.toString(),
+        teams_prompt_stop: updatedSettings.teams_prompt_stop.toString(),
+      });
+    } catch (error) {
+      console.error('Failed to update meeting detection settings:', error);
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -223,6 +253,60 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+      </div>
+
+      {/* Meeting Detection Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Meeting Detection</h3>
+              <p className="text-sm text-gray-600">Suggest recording actions when Teams appears to be in a call</p>
+            </div>
+            <Switch
+              checked={meetingDetectionSettingsValue.meeting_detection_enabled}
+              onCheckedChange={(checked) => updateMeetingDetectionSetting({ meeting_detection_enabled: checked })}
+            />
+          </div>
+
+          <div className="space-y-4 border-t border-gray-100 pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-medium text-gray-900">Detect Teams calls</div>
+                <p className="text-sm text-gray-600">Use local Windows signals for the new Teams app</p>
+              </div>
+              <Switch
+                checked={meetingDetectionSettingsValue.teams_detection_enabled}
+                disabled={!meetingDetectionSettingsValue.meeting_detection_enabled}
+                onCheckedChange={(checked) => updateMeetingDetectionSetting({ teams_detection_enabled: checked })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-medium text-gray-900">Suggest start recording</div>
+                <p className="text-sm text-gray-600">Prompt after Teams audio is active for about 30 seconds</p>
+              </div>
+              <Switch
+                checked={meetingDetectionSettingsValue.teams_prompt_start}
+                disabled={!meetingDetectionSettingsValue.meeting_detection_enabled}
+                onCheckedChange={(checked) => updateMeetingDetectionSetting({ teams_prompt_start: checked })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-medium text-gray-900">Suggest stop recording</div>
+                <p className="text-sm text-gray-600">Prompt when Teams audio appears inactive for about 60 to 90 seconds</p>
+              </div>
+              <Switch
+                checked={meetingDetectionSettingsValue.teams_prompt_stop}
+                disabled={!meetingDetectionSettingsValue.meeting_detection_enabled}
+                onCheckedChange={(checked) => updateMeetingDetectionSetting({ teams_prompt_stop: checked })}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
