@@ -25,6 +25,9 @@ sudo pacman -S base-devel cmake git
 ### 2. Build and Run
 
 ```bash
+cd frontend
+npm install
+
 # Development mode (with hot reload)
 ./dev-gpu.sh
 
