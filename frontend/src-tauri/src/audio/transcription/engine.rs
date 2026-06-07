@@ -5,7 +5,7 @@
 use super::provider::TranscriptionProvider;
 use log::{info, warn};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // ============================================================================
 // TRANSCRIPTION ENGINE ENUM
@@ -233,6 +233,12 @@ pub async fn get_or_init_whisper<R: Runtime>(
         engine_guard.as_ref().cloned()
     };
 
+    // Emit model loading status event
+    let _ = app.emit("model-loading-status", serde_json::json!({
+        "stage": "checking",
+        "message": "Checking transcription model..."
+    }));
+
     if let Some(engine) = existing_engine {
         // Check if a model is already loaded
         if engine.is_model_loaded().await {
@@ -277,12 +283,20 @@ pub async fn get_or_init_whisper<R: Runtime>(
                         "✅ Loaded model '{}' matches saved config, reusing",
                         current_model
                     );
+                    let _ = app.emit("model-loading-status", serde_json::json!({
+                        "stage": "ready",
+                        "message": format!("Model '{}' ready", current_model)
+                    }));
                     return Ok(engine);
                 } else {
                     info!(
                         "🔄 Loaded model '{}' doesn't match saved config '{}', reloading correct model...",
                         current_model, expected_model
                     );
+                    let _ = app.emit("model-loading-status", serde_json::json!({
+                        "stage": "switching",
+                        "message": format!("Switching model from '{}' to '{}'...", current_model, expected_model)
+                    }));
                     // Unload the incorrect model
                     engine.unload_model().await;
                     info!("📉 Unloaded incorrect model '{}'", current_model);
@@ -294,6 +308,10 @@ pub async fn get_or_init_whisper<R: Runtime>(
                     "✅ No specific model configured, using currently loaded model: '{}'",
                     current_model
                 );
+                let _ = app.emit("model-loading-status", serde_json::json!({
+                    "stage": "ready",
+                    "message": format!("Model '{}' ready", current_model)
+                }));
                 return Ok(engine);
             }
         } else {
@@ -388,11 +406,19 @@ pub async fn get_or_init_whisper<R: Runtime>(
             match model.status {
                 crate::whisper_engine::ModelStatus::Available => {
                     info!("Loading model: {}", model_to_load);
+                    let _ = app.emit("model-loading-status", serde_json::json!({
+                        "stage": "loading",
+                        "message": format!("Loading model '{}'...", model_to_load)
+                    }));
                     engine
                         .load_model(&model_to_load)
                         .await
                         .map_err(|e| format!("Failed to load model '{}': {}", model_to_load, e))?;
                     info!("✅ Model '{}' loaded successfully", model_to_load);
+                    let _ = app.emit("model-loading-status", serde_json::json!({
+                        "stage": "ready",
+                        "message": format!("Model '{}' ready", model_to_load)
+                    }));
                 }
                 crate::whisper_engine::ModelStatus::Missing => {
                     return Err(format!(
@@ -423,6 +449,10 @@ pub async fn get_or_init_whisper<R: Runtime>(
                     "Model '{}' not found, falling back to available model: '{}'",
                     model_to_load, fallback_model.name
                 );
+                let _ = app.emit("model-loading-status", serde_json::json!({
+                    "stage": "loading",
+                    "message": format!("Loading fallback model '{}'...", fallback_model.name)
+                }));
                 engine.load_model(&fallback_model.name).await.map_err(|e| {
                     format!(
                         "Failed to load fallback model '{}': {}",
@@ -433,6 +463,10 @@ pub async fn get_or_init_whisper<R: Runtime>(
                     "✅ Fallback model '{}' loaded successfully",
                     fallback_model.name
                 );
+                let _ = app.emit("model-loading-status", serde_json::json!({
+                    "stage": "ready",
+                    "message": format!("Model '{}' ready", fallback_model.name)
+                }));
             } else {
                 return Err(format!("Model '{}' is not supported and no other models are available. Please download a model from the settings.", model_to_load));
             }

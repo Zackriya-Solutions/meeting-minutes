@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
@@ -21,6 +21,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -61,6 +62,27 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
+
+  // Model loading status
+  const [modelStatus, setModelStatus] = useState<{ stage: string; message: string } | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen<{ stage: string; message: string }>('model-loading-status', (event) => {
+        if (!mounted) return;
+        const { stage, message } = event.payload;
+        if (stage === 'ready') {
+          setModelStatus({ stage, message });
+          setTimeout(() => { if (mounted) setModelStatus(null); }, 1500);
+        } else {
+          setModelStatus({ stage, message });
+        }
+      }).then(fn => { unlisten = fn; });
+    });
+    return () => { mounted = false; unlisten?.(); };
+  }, []);
 
   useEffect(() => {
     // Track page view
@@ -225,11 +247,24 @@ export default function Home() {
           status !== RecordingStatus.SAVING && (
             <div className="fixed bottom-12 left-0 right-0 z-10">
               <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
+                className="flex flex-col items-center pl-8 transition-[margin] duration-300"
                 style={{
                   marginLeft: sidebarCollapsed ? '4rem' : '16rem'
                 }}
               >
+                <AnimatePresence>
+                  {modelStatus && modelStatus.stage !== 'ready' && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="mb-2 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-1.5 shadow-md text-sm text-gray-600"
+                    >
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                      <span>{modelStatus.message}</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <div className="w-2/3 max-w-[750px] flex justify-center">
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
