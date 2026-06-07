@@ -8,12 +8,36 @@ This guide helps you build Meetily on Linux with **automatic GPU acceleration**.
 
 If you're new to building on Linux, start here. These simple commands work for most users:
 
-### 1. Install Basic Dependencies
+### 1. Install Dependencies
+
 
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+
+## Build essentials
+sudo apt install -y build-essential cmake git curl
+
+## Rust (if not already installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+## Node.js and pnpm (if not already installed)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+npm install -g pnpm
+
+## Tauri build dependencies (required)
+sudo apt install -y \
+    pkg-config \
+    libglib2.0-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libappindicator3-dev \
+    librsvg2-dev \
+    libssl-dev \
+    libasound2-dev \
+
 
 # Fedora/RHEL
 sudo dnf install gcc-c++ cmake git
@@ -129,7 +153,10 @@ Vulkan works on NVIDIA, AMD, and Intel GPUs. Good choice if CUDA/ROCm don't work
 
 ```bash
 # Ubuntu/Debian
-sudo apt install vulkan-sdk libopenblas-dev
+# Prerequisites: Node.js 20+, pnpm, Rust toolchain
+sudo apt install -y pkg-config libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+    libappindicator3-dev librsvg2-dev libssl-dev libasound2-dev clang \
+    libvulkan-dev glslang-tools libshaderc-dev glslc
 
 # Fedora
 sudo dnf install vulkan-devel openblas-devel
