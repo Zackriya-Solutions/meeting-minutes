@@ -115,6 +115,13 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 3. Drag **Meetily** to your Applications folder
 4. Open **Meetily** from Applications folder
 
+> [!TIP]
+> Meetily is available as a Homebrew cask:
+>
+> ```bash
+> brew install --cask meetily
+> ```
+
 ### 🐧 **Linux**
 
 Build from source following our detailed guides:
