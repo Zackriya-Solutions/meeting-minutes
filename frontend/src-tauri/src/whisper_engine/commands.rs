@@ -13,10 +13,13 @@ static MODELS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Initialize the models directory path using app_data_dir
 /// This should be called during app setup before whisper_init
 pub fn set_models_directory<R: Runtime>(app: &AppHandle<R>) {
-    let app_data_dir = app.path().app_data_dir()
-        .expect("Failed to get app data dir");
-
-    let models_dir = app_data_dir.join("models");
+    let models_dir = if let Ok(custom_dir) = std::env::var("MEETILY_MODELS_DIR") {
+        PathBuf::from(custom_dir)
+    } else {
+        let app_data_dir = app.path().app_data_dir()
+            .expect("Failed to get app data dir");
+        app_data_dir.join("models")
+    };
 
     // Create directory if it doesn't exist
     if !models_dir.exists() {
