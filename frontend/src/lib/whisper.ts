@@ -7,10 +7,12 @@ export interface ModelInfo {
   speed: ProcessingSpeed;
   status: ModelStatus;
   description?: string;
+  /** True for user-imported custom models; false for official catalog models. */
+  is_custom: boolean;
 }
 
-export type ModelAccuracy = 'High' | 'Good' | 'Decent';
-export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast';
+export type ModelAccuracy = 'High' | 'Good' | 'Decent' | 'Custom';
+export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast' | 'Unknown';
 
 export type ModelStatus =
   | 'Available'
@@ -330,5 +332,20 @@ export class WhisperAPI {
 
   static async openModelsFolder(): Promise<void> {
     await invoke('open_models_folder');
+  }
+
+  /**
+   * Copy a .bin/.gguf file from `sourcePath` into the app models directory.
+   * Returns the derived model name (filename without extension).
+   */
+  static async importCustomModel(sourcePath: string): Promise<string> {
+    return await invoke<string>('whisper_import_custom_model', { sourcePath });
+  }
+
+  /**
+   * Delete a custom (non-catalog) model file from the models directory.
+   */
+  static async deleteCustomModel(modelName: string): Promise<string> {
+    return await invoke<string>('whisper_delete_custom_model', { modelName });
   }
 }

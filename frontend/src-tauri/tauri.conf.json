@@ -65,6 +65,8 @@
                         "notification:allow-is-permission-granted",
                         "updater:default",
                         "process:default",
+                        "dialog:default",
+                        "dialog:allow-open",
                         {
                             "identifier": "fs:scope",
                             "allow": [
