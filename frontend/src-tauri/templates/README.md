@@ -47,7 +47,7 @@ Each template JSON file follows this schema:
 
 Users can add custom templates to the application data directory:
 
-- **macOS**: `~/Library/Application Support/Meetily/templates/`
+- **macOS**: `~/Library/Application Support/meetily/templates/`
 - **Windows**: `%APPDATA%\Meetily\templates\`
 - **Linux**: `~/.config/Meetily/templates/`
 
