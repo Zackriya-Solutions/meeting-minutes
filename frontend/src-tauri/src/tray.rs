@@ -21,10 +21,17 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Pass can_record=true initially, will be updated by update_tray_menu immediately
     let menu = build_menu(app, RecordingState::Stopped, true)?;
 
+    // Use a dedicated monochrome tray icon instead of the full-color app icon.
+    // On macOS, template images are automatically styled by the system to match
+    // the menu bar appearance (dark/light mode), preventing the purple color issue.
+    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray_icon.png"))
+        .expect("Failed to load tray icon");
+
     TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .tooltip("Meetily")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(tray_icon)
+        .icon_as_template(true)
         .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .build(app)?;
 
