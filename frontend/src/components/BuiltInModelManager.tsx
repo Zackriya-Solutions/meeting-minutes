@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,7 @@ export function BuiltInModelManager({
   onModelSelect,
   layout = 'inline',
 }: BuiltInModelManagerProps) {
+  const { t } = useTranslation();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasFetched, setHasFetched] = useState<boolean>(false);
@@ -62,7 +64,7 @@ export function BuiltInModelManager({
       }
     } catch (error) {
       console.error('Failed to fetch built-in AI models:', error);
-      toast.error('Failed to load models');
+      toast.error(t('modelSettings.failedToLoadModels'));
     } finally {
       setIsLoading(false);
       setHasFetched(true);
@@ -127,7 +129,7 @@ export function BuiltInModelManager({
           });
           // Refresh models list
           fetchModels();
-          toast.success(`Model ${model} downloaded successfully`);
+          toast.success(`${model}: ${t('onboarding.downloadComplete')}`);
         }
 
         // Handle cancelled status
@@ -216,7 +218,7 @@ export function BuiltInModelManager({
       }
 
       // For real errors, show toast and remove from downloading
-      toast.error(`Failed to download ${modelName}`);
+      toast.error(`${t('common.failed')}: ${modelName}`);
 
       setDownloadingModels((prev) => {
         const newSet = new Set(prev);
@@ -232,7 +234,7 @@ export function BuiltInModelManager({
   const cancelDownload = async (modelName: string) => {
     try {
       await invoke('builtin_ai_cancel_download', { modelName });
-      toast.info(`Download of ${modelName} cancelled`);
+      toast.info(`${t('onboarding.downloadCancelled')}: ${modelName}`);
       setDownloadingModels((prev) => {
         const newSet = new Set(prev);
         newSet.delete(modelName);
@@ -246,11 +248,11 @@ export function BuiltInModelManager({
   const deleteModel = async (modelName: string) => {
     try {
       await invoke('builtin_ai_delete_model', { modelName });
-      toast.success(`Model ${modelName} deleted`);
+      toast.success(`${t('common.delete')}: ${modelName}`);
       fetchModels();
     } catch (error) {
       console.error('Failed to delete model:', error);
-      toast.error(`Failed to delete ${modelName}`);
+      toast.error(`${t('common.failed')}: ${t('common.delete')} ${modelName}`);
     }
   };
 
@@ -269,7 +271,7 @@ export function BuiltInModelManager({
     return (
       <Alert>
         <AlertDescription>
-          No models found. Download a model to get started with Built-in AI.
+          {t('modelCard.noModelsFound')}
         </AlertDescription>
       </Alert>
     );
@@ -278,7 +280,7 @@ export function BuiltInModelManager({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h4 className="text-sm font-bold">Built-in AI Models</h4>
+        <h4 className="text-sm font-bold">{t('modelSettings.builtInAIModels')}</h4>
       </div>
 
       <div
@@ -324,11 +326,11 @@ export function BuiltInModelManager({
                       <>
                         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
                           <span className="h-2 w-2 rounded-full bg-green-600"></span>
-                          Ready
+                          {t('modelSettings.connectionSuccess')}
                         </span>
                         {selectedModel === model.name && (
                           <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            Selected
+                            {t('modelCard.currentlyUsing')}
                           </span>
                         )}
                       </>
@@ -336,12 +338,12 @@ export function BuiltInModelManager({
                     {isCorrupted && (
                       <span className="flex shrink-0 items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
                         <BadgeAlert className="h-3 w-3" />
-                        Corrupted
+                        {t('transcriptSettings.modelFileCorrupted')}
                       </span>
                     )}
                     {isError && (
                       <span className="shrink-0 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                        Error
+                        {t('common.error')}
                       </span>
                     )}
                   </div>
@@ -359,7 +361,7 @@ export function BuiltInModelManager({
                       }}
                     >
                       <Download className="mr-2 h-4 w-4" />
-                      Download
+                      {t('modelCard.download')}
                     </Button>
                   )}
                   {/* Downloading - Show Cancel button */}
@@ -373,7 +375,7 @@ export function BuiltInModelManager({
                         cancelDownload(model.name);
                       }}
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </Button>
                   )}
                   {/* Error - Show Retry button */}
@@ -426,7 +428,7 @@ export function BuiltInModelManager({
                         e.stopPropagation();
                         deleteModel(model.name);
                       }}
-                      title="Delete model"
+                      title={t('common.delete')}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -442,8 +444,8 @@ export function BuiltInModelManager({
                     {isError && typeof model.status === 'object' && 'Error' in model.status
                       ? (model.status as any).Error
                       : isCorrupted
-                      ? 'File is corrupted. Retry download or delete.'
-                      : 'An error occurred'}
+                      ? t('transcriptSettings.modelFileCorrupted')
+                      : t('common.error')}
                   </p>
                 )}
                 <div className="text-xs text-gray-500">
@@ -456,7 +458,7 @@ export function BuiltInModelManager({
               {modelIsDownloading && progress !== undefined && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-900">Downloading...</span>
+                    <span className="text-sm font-medium text-gray-900">{t('onboarding.downloading')}</span>
                     <span className="text-sm font-semibold text-gray-900">
                       {Math.round(progress)}%
                     </span>

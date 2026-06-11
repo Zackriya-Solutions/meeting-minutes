@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Info } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export interface BackendInfo {
   id: string;
@@ -20,6 +21,7 @@ export function AudioBackendSelector({
   disabled = false,
 }: AudioBackendSelectorProps) {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
+  const { t } = useTranslation();
   const [currentBackend, setCurrentBackend] = useState<string>('coreaudio');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export function AudioBackendSelector({
         }
       } catch (err) {
         console.error('Failed to load audio backends:', err);
-        setError('Failed to load backend options');
+        setError(t('recordingSettings.failedToSavePrefs'));
       } finally {
         setLoading(false);
       }
@@ -69,7 +71,7 @@ export function AudioBackendSelector({
       console.log(`Audio backend changed to: ${backendId}`);
     } catch (err) {
       console.error('Failed to set audio backend:', err);
-      setError('Failed to change backend. Please try again.');
+      setError(t('recordingSettings.failedToSavePrefs'));
     }
   };
 
@@ -105,7 +107,7 @@ export function AudioBackendSelector({
           </button>
           {showTooltip && (
             <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-gray-900 text-white rounded-lg shadow-lg">
-              <p className="font-semibold mb-1">Audio Capture Methods:</p>
+              <p className="font-semibold mb-1">{t('transcriptSettings.audioBackendSelector')}</p>
               <ul className="space-y-1">
                 {backends.map((backend) => (
                   <li key={backend.id}>
@@ -114,7 +116,7 @@ export function AudioBackendSelector({
                 ))}
               </ul>
               <p className="mt-2 text-gray-300">
-                Try different backends to find which works best for your system.
+                {t('transcriptSettings.tryDifferentBackends')}
               </p>
             </div>
           )}
@@ -175,9 +177,9 @@ export function AudioBackendSelector({
       </div>
 
       <div className="text-xs text-gray-500 space-y-1">
-        <p>• Backend selection only affects system audio capture</p>
-        <p>• Microphone always uses the default method</p>
-        <p>• Changes apply to new recording sessions</p>
+        <p>• {t('transcriptSettings.configureAudioRouting')}</p>
+        <p>• {t('transcriptSettings.defaultMic')}</p>
+        <p>• {t('onboarding.informParticipants')}</p>
       </div>
     </div>
   );

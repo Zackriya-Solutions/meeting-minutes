@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Speaker, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTranslation } from 'react-i18next';
 
 interface AudioOutputInfo {
   device_name: string;
@@ -26,6 +27,7 @@ export function BluetoothPlaybackWarning({
   const [isBluetoothActive, setIsBluetoothActive] = useState(false);
   const [deviceName, setDeviceName] = useState<string>('');
   const [isDismissed, setIsDismissed] = useState(false);
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (!enabled) return;
@@ -75,8 +77,8 @@ export function BluetoothPlaybackWarning({
             Bluetooth Playback Detected
           </AlertTitle>
           <AlertDescription className="text-yellow-800 mt-1">
-            You're using <strong>{deviceName}</strong> for playback.
-            Recordings may sound distorted or sped up through Bluetooth devices.
+            {t('importAudio.dropAudioFileOnly').split(' ')[0]} <strong>{deviceName}</strong>...
+            {t('transcriptRecovery.unknownError')}
             For accurate review, please use <strong>computer speakers</strong> or{' '}
             <strong>wired headphones</strong>.
             <br />
@@ -95,7 +97,7 @@ export function BluetoothPlaybackWarning({
           size="icon"
           onClick={() => setIsDismissed(true)}
           className="ml-4 h-6 w-6 text-yellow-700 hover:text-yellow-900 hover:bg-yellow-100"
-          aria-label="Dismiss warning"
+          aria-label={t("common.dismiss")}
         >
           <X className="h-4 w-4" />
         </Button>

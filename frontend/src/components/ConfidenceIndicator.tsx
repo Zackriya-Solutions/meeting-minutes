@@ -1,5 +1,7 @@
 'use client';
 
+import { useTranslation } from 'react-i18next';
+
 interface ConfidenceIndicatorProps {
   confidence: number;
   showIndicator?: boolean;
@@ -9,6 +11,7 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
   confidence,
   showIndicator = true,
 }) => {
+  const { t } = useTranslation();
   // Don't render if preference is disabled
   if (!showIndicator) {
     return null;
@@ -24,10 +27,10 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
 
   // Get descriptive label for accessibility
   const getConfidenceLabel = (conf: number): string => {
-    if (conf >= 0.8) return 'High confidence';
-    if (conf >= 0.7) return 'Good confidence';
-    if (conf >= 0.4) return 'Medium confidence';
-    return 'Low confidence';
+    if (conf >= 0.8) return t('transcriptSettings.audioAvailable');
+    if (conf >= 0.7) return t('common.success');
+    if (conf >= 0.4) return t('common.warning');
+    return t('common.error');
   };
 
   const confidencePercent = (confidence * 100).toFixed(0);

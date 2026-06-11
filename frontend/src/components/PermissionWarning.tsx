@@ -3,6 +3,7 @@ import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
+import { useTranslation } from 'react-i18next';
 
 interface PermissionWarningProps {
   hasMicrophone: boolean;
@@ -18,6 +19,7 @@ export function PermissionWarning({
   isRechecking = false
 }: PermissionWarningProps) {
   const isLinux = useIsLinux();
+  const { t } = useTranslation();
 
   // Don't show on Linux - permission handling is not needed
   if (isLinux) {
@@ -61,7 +63,7 @@ export function PermissionWarning({
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Permissions Required' : !hasMicrophone ? 'Microphone Permission Required' : 'System Audio Permission Required'}
+              {!hasMicrophone && !hasSystemAudio ? t('permissionWarning.title') : !hasMicrophone ? t('recording.permissionRequired') : t('recording.systemAudioNotAvailable').split(':')[0]}
             </div>
           </AlertTitle>
           {/* Action Buttons */}
@@ -101,11 +103,11 @@ export function PermissionWarning({
                   Meetily needs access to your microphone to record meetings. No microphone devices were detected.
                 </p>
                 <div className="space-y-2 text-sm mb-4">
-                  <p className="font-medium">Please check:</p>
+                  <p className="font-medium">{t('permissionWarning.completeSetupFirst')}</p>
                   <ul className="list-disc list-inside ml-2 space-y-1">
-                    <li>Your microphone is connected and powered on</li>
-                    <li>Microphone permission is granted in System Settings</li>
-                    <li>No other app is exclusively using the microphone</li>
+                    <li>{t('transcriptSettings.micConnected')}</li>
+                    <li>{t('onboarding.micGranted')}</li>
+                    <li>{t('permissionWarning.needToFinishOnboarding')}</li>
                   </ul>
                 </div>
               </>
@@ -116,16 +118,16 @@ export function PermissionWarning({
               <>
                 <p className="mb-3">
                   {hasMicrophone
-                    ? 'System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.'
-                    : 'System audio capture is also not available.'}
+                    ? t('recording.systemAudioNotAvailableMsg').split('\n')[0]
+                    : t('recording.systemAudioNotAvailableMsg').split('\n')[0]}
                 </p>
                 {isMacOS && (
                   <div className="space-y-2 text-sm mb-4">
-                    <p className="font-medium">To enable system audio on macOS:</p>
+                    <p className="font-medium">{t('transcriptSettings.toEnableSystemAudio')}</p>
                     <ul className="list-disc list-inside ml-2 space-y-1">
-                      <li>Install a virtual audio device (e.g., BlackHole 2ch)</li>
-                      <li>Grant Screen Recording permission to Meetily</li>
-                      <li>Configure your audio routing in Audio MIDI Setup</li>
+                      <li>{t('transcriptSettings.installVirtualAudio')}</li>
+                      <li>{t('onboarding.screenRecordingDesc')}</li>
+                      <li>{t('transcriptSettings.configureAudioRouting')}</li>
                     </ul>
                   </div>
                 )}

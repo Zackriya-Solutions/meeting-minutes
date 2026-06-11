@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
 import Analytics from '@/lib/analytics';
+import { useTranslation } from 'react-i18next';
 
 interface SummaryUpdaterButtonGroupProps {
   isSaving: boolean;
@@ -24,6 +25,7 @@ export function SummaryUpdaterButtonGroup({
   onOpenFolder,
   hasSummary
 }: SummaryUpdaterButtonGroupProps) {
+  const { t } = useTranslation();
   return (
     <ButtonGroup>
       {/* Save button */}
@@ -31,7 +33,7 @@ export function SummaryUpdaterButtonGroup({
         variant="outline"
         size="sm"
         className={`${isDirty ? 'bg-green-200' : ""}`}
-        title={isSaving ? "Saving" : "Save Changes"}
+        title={isSaving ? t("statusOverlays.saving") : t("common.save")}
         onClick={() => {
           Analytics.trackButtonClick('save_changes', 'meeting_details');
           onSave();
@@ -41,12 +43,12 @@ export function SummaryUpdaterButtonGroup({
         {isSaving ? (
           <>
             <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">Saving...</span>
+            <span className="hidden lg:inline">{t("statusOverlays.saving")}</span>
           </>
         ) : (
           <>
             <Save />
-            <span className="hidden lg:inline">Save</span>
+            <span className="hidden lg:inline">{t("common.save")}</span>
           </>
         )}
       </Button>
@@ -55,7 +57,7 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        title="Copy Summary"
+        title={t("common.copy")}
         onClick={() => {
           Analytics.trackButtonClick('copy_summary', 'meeting_details');
           onCopy();
@@ -64,7 +66,7 @@ export function SummaryUpdaterButtonGroup({
         className="cursor-pointer"
       >
         <Copy />
-        <span className="hidden lg:inline">Copy</span>
+        <span className="hidden lg:inline">{t("common.copy")}</span>
       </Button>
 
       {/* Find button */}

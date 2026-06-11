@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerateSummary, meeting }: Props) => {
+  const { t } = useTranslation();
   const generateUniqueId = (sectionKey: string) => {
     return `${sectionKey}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
@@ -709,7 +711,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleUndo}
             disabled={currentHistoryIndex === 0}
             className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
-            title="Undo"
+            title={t('common.undo')}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -730,7 +732,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleRedo}
             disabled={currentHistoryIndex === history.length - 1}
             className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
-            title="Redo"
+            title={t('common.redo')}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"

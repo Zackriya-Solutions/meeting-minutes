@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface EditableTitleProps {
   title: string;
@@ -19,6 +20,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
   onChange,
   onDelete,
 }) => {
+  const { t } = useTranslation();
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -67,7 +69,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
         <button 
           onClick={onStartEditing}
           className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-gray-100 rounded"
-          title="Edit section title"
+          title={t("common.edit") + " " + t("sidebar.editMeetingTitle")}
         >
           <svg 
             xmlns="http://www.w3.org/2000/svg" 
@@ -87,7 +89,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
           <button 
             onClick={onDelete}
             className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-gray-100 rounded text-red-600"
-            title="Delete section"
+            title={t("common.delete")}
           >
             <svg 
               xmlns="http://www.w3.org/2000/svg" 

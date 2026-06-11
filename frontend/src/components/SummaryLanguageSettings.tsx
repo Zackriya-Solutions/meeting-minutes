@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Globe, Pin } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -8,6 +9,7 @@ import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
 
 export function SummaryLanguageSettings() {
+  const { t } = useTranslation();
   const { recents, pinned, addRecent, removeRecent, setPinned } = useRecentLanguages();
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -19,11 +21,10 @@ export function SummaryLanguageSettings() {
     <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm relative">
       <div className="flex items-center gap-2 mb-2">
         <Globe size={18} className="text-gray-500" />
-        <h3 className="text-lg font-semibold text-gray-900">Summary Language</h3>
+        <h3 className="text-lg font-semibold text-gray-900">{t('summarySettings.languageSettings')}</h3>
       </div>
       <p className="text-sm text-gray-600 mb-4">
-        Pin one language as the default for new meetings. Unpinned languages remain as
-        quick-switch options in the summary generator. Auto uses the dominant transcript language.
+        {t('summarySettings.usesDominantLanguage')}
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -42,7 +43,7 @@ export function SummaryLanguageSettings() {
                 type="button"
                 aria-label={isPinned ? `Unpin ${labelForCode(code)} as default` : `Pin ${labelForCode(code)} as default`}
                 aria-pressed={isPinned}
-                title={isPinned ? 'Click to unset as default' : 'Click to set as default'}
+                title={isPinned ? t('summarySettings.usesDominantLanguage') : t('summarySettings.usesDominantLanguage')}
                 onClick={() => togglePin(code)}
                 className={`flex items-center gap-1.5 pl-3 pr-2 py-1 hover:brightness-95 active:brightness-90 ${
                   isPinned ? 'text-blue-800' : 'text-gray-800'
@@ -93,8 +94,8 @@ export function SummaryLanguageSettings() {
 
       <p className="text-xs text-gray-400 mt-3">
         {pinned
-          ? `Default: ${labelForCode(pinned)} - click it again to unset. Max 5 quick-switch options.`
-          : 'Click any language to set it as your default. Max 5 quick-switch options.'}
+          ? `${t('common.note')}: ${labelForCode(pinned)} - click it again to unset. Max 5 quick-switch options.`
+          : t('summarySettings.usesDominantLanguage') + '. Max 5 quick-switch options.'}
       </p>
     </div>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useEffect, useState } from 'react';
 
@@ -9,6 +10,7 @@ interface RecordingStatusBarProps {
 }
 
 export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused = false }) => {
+  const { t } = useTranslation();
   // Get recording duration from backend-synced context (in seconds)
   // Backend polls every 500ms, providing smooth updates
   const { activeDuration, isRecording } = useRecordingState();
@@ -40,7 +42,7 @@ export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused
     >
       <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-red-500 animate-pulse'}`} />
       <span className={`text-sm ${isPaused ? 'text-orange-700' : 'text-gray-700'}`}>
-        {isPaused ? 'Paused' : 'Recording'} • {formatDuration(displaySeconds)}
+        {isPaused ? t('recording.pause') : t('recording.start').replace('Start ', '')} • {formatDuration(displaySeconds)}
       </span>
     </motion.div>
   );

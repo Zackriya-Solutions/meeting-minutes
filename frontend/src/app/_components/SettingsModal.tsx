@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
+import { useTranslation } from "react-i18next";
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
@@ -57,6 +58,7 @@ export function SettingsModals({
   } = useConfig();
 
   const { isRecording } = useRecordingState();
+  const { t } = useTranslation();
 
   return <>
     {/* Legacy Settings Modal */}
@@ -292,7 +294,7 @@ export function SettingsModals({
               onClick={() => onClose('modelSelector')}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
             >
-              {messages.modelSelector ? 'Cancel' : 'Done'}
+              {messages.modelSelector ? t('common.cancel') : t('common.done')}
             </button>
           </div>
         </div>
