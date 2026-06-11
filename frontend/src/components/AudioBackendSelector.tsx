@@ -129,7 +129,8 @@ export function AudioBackendSelector({
 
       <div className="space-y-2">
         {backends.map((backend) => {
-          const isDisabled = disabled;
+          const isComingSoon = backend.id === 'screencapturekit';
+          const isDisabled = disabled || isComingSoon;
 
           return (
             <label
@@ -157,6 +158,11 @@ export function AudioBackendSelector({
                   {currentBackend === backend.id && (
                     <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
                       Active
+                    </span>
+                  )}
+                  {isComingSoon && (
+                    <span title="This backend is under development and will be available in a future release." className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded cursor-help">
+                      Coming soon
                     </span>
                   )}
                 </div>
