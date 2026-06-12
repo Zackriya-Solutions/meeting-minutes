@@ -64,6 +64,17 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 
 </details>
 
+## About this fork
+**Meetily-Local** is an independent fork of the original [Zackriya-Solutions/meetily](https://github.com/Zackriya-Solutions/meetily) project (the "Meetily Community Edition"), which is MIT-licensed.
+
+This fork is **fully independent** — not technically a GitHub fork anymore — and there is no commercial product. Everything is and will remain MIT-licensed and free.
+
+**What's different in Meetily-Local vs. upstream as of v0.4.0:**
+
+✅ **Linux is a first-class target**. Audio capture (cpal/PipeWire), WebKitGTK rendering, and ALSA device enumeration all fixed and tested.
+✅ **Modern dependencies**. whisper-rs 0.13 → 0.16 (drops ~30 MB of vendored patches), Tauri 2.6 → 2.11, all plugins current.
+Credit for the original architecture, models, and significant feature work [goes to](https://github.com/sujithatzackriya) Sujith S and the original Zackriya-Solutions community. See [Acknowledgments](https://github.com/Hankanman/Meetily-Local#acknowledgments).
+
 ## Introduction
 
 Meetily is a privacy-first AI meeting assistant that runs entirely on your local machine. It captures your meetings, transcribes them in real-time, and generates summaries, all without sending any data to the cloud. This makes it the perfect solution for professionals and enterprises who need to maintain complete control over their sensitive information.
