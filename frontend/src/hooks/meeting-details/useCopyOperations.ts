@@ -4,6 +4,12 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import {
+  TranscriptExportFormat,
+  formatTranscriptTxt,
+  formatTranscriptVtt,
+  buildExportFileName,
+} from '@/lib/transcriptExport';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -104,6 +110,52 @@ export function useCopyOperations({
     });
   }, [meeting, meetingTitle, fetchAllTranscripts]);
 
+  // Export transcript to a file (.txt or .vtt) via a native "Save As" dialog
+  const handleExportTranscript = useCallback(async (format: TranscriptExportFormat) => {
+    const allTranscripts = await fetchAllTranscripts(meeting.id);
+
+    if (!allTranscripts.length) {
+      toast.error('No transcripts available to export');
+      return;
+    }
+
+    const title = meetingTitle ?? meeting.title ?? 'Transcript';
+    const content =
+      format === 'vtt'
+        ? formatTranscriptVtt(allTranscripts)
+        : formatTranscriptTxt(allTranscripts, title, meeting.created_at);
+
+    try {
+      const savedPath = await invokeTauri<string | null>('export_transcript_file', {
+        defaultFileName: `${buildExportFileName(title)}.${format}`,
+        content,
+        extension: format,
+      });
+
+      if (!savedPath) {
+        // User cancelled the save dialog
+        return;
+      }
+
+      toast.success(`Transcript exported as ${format.toUpperCase()}`);
+
+      const wordCount = allTranscripts
+        .map(t => t.text.split(/\s+/).length)
+        .reduce((a, b) => a + b, 0);
+
+      await Analytics.trackButtonClick(`export_transcript_${format}`, 'meeting_details');
+      await Analytics.trackCopy('transcript', {
+        meeting_id: meeting.id,
+        transcript_length: allTranscripts.length.toString(),
+        word_count: wordCount.toString(),
+        export_format: format,
+      });
+    } catch (error) {
+      console.error('❌ Failed to export transcript:', error);
+      toast.error('Failed to export transcript');
+    }
+  }, [meeting, meetingTitle, fetchAllTranscripts]);
+
   // Copy summary to clipboard
   const handleCopySummary = useCallback(async () => {
     try {
@@ -191,6 +243,7 @@ export function useCopyOperations({
 
   return {
     handleCopyTranscript,
+    handleExportTranscript,
     handleCopySummary,
   };
 }
