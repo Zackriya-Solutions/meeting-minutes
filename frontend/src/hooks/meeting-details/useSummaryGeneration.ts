@@ -155,6 +155,7 @@ export function useSummaryGeneration({
         chunkSize: 40000,
         overlap: 1000,
         customPrompt: customPrompt,
+        systemPrompt: modelConfig.summarySystemPrompt || null,
         templateId: selectedTemplate,
         summaryLanguage,
       }) as any;

@@ -171,6 +171,15 @@ fn build_final_report_system_prompt(
     )
 }
 
+fn append_summary_system_prompt(base_prompt: &str, summary_system_prompt: &str) -> String {
+    let trimmed = summary_system_prompt.trim();
+    if trimmed.is_empty() {
+        return base_prompt.to_string();
+    }
+
+    format!("{base_prompt}\n\n**ADDITIONAL USER-DEFINED SYSTEM INSTRUCTIONS:**\n{trimmed}")
+}
+
 /// Rough token count estimation using character count
 pub fn rough_token_count(s: &str) -> usize {
     let char_count = s.chars().count();
@@ -327,6 +336,7 @@ pub async fn generate_meeting_summary(
     api_key: &str,
     text: &str,
     custom_prompt: &str,
+    summary_system_prompt: &str,
     template_id: &str,
     template: &Template,
     token_threshold: usize,
@@ -385,7 +395,10 @@ pub async fn generate_meeting_summary(
             info!("Split transcript into {} chunks", num_chunks);
 
             let mut chunk_summaries = Vec::new();
-            let system_prompt_chunk = "You are an expert meeting summarizer.";
+            let system_prompt_chunk = append_summary_system_prompt(
+                "You are an expert meeting summarizer.",
+                summary_system_prompt,
+            );
 
             for (i, chunk) in chunks.iter().enumerate() {
                 // Check for cancellation before processing each chunk
@@ -404,7 +417,7 @@ pub async fn generate_meeting_summary(
                     provider,
                     model_name,
                     api_key,
-                    system_prompt_chunk,
+                    &system_prompt_chunk,
                     &user_prompt_chunk,
                     ollama_endpoint,
                     custom_openai_endpoint,
@@ -450,14 +463,17 @@ pub async fn generate_meeting_summary(
                     chunk_summaries.len()
                 );
                 let combined_text = chunk_summaries.join("\n---\n");
-                let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
+                let system_prompt_combine = append_summary_system_prompt(
+                    "You are an expert at synthesizing meeting summaries.",
+                    summary_system_prompt,
+                );
                 let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
                 generate_summary(
                     client,
                     provider,
                     model_name,
                     api_key,
-                    system_prompt_combine,
+                    &system_prompt_combine,
                     &user_prompt_combine,
                     ollama_endpoint,
                     custom_openai_endpoint,
@@ -479,8 +495,10 @@ pub async fn generate_meeting_summary(
         let clean_template_markdown = template.to_markdown_structure();
         let section_instructions = template.to_section_instructions();
 
-        let final_system_prompt =
-            build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
+        let final_system_prompt = append_summary_system_prompt(
+            &build_final_report_system_prompt(&section_instructions, &clean_template_markdown),
+            summary_system_prompt,
+        );
 
         let mut final_user_prompt = format!(
             "<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n"

@@ -18,7 +18,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
     apiKey: null,
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
+    summarySystemPrompt: typeof window !== 'undefined' ? localStorage.getItem('summarySystemPrompt') || '' : '',
   });
 
   const { isAutoSummary, toggleIsAutoSummary } = useConfig();
@@ -58,6 +59,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
             console.error('Failed to fetch custom OpenAI config:', err);
           }
         }
+        data.summarySystemPrompt = localStorage.getItem('summarySystemPrompt') || '';
         setModelConfig(data);
       }
     } catch (error) {
@@ -84,7 +86,10 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       const { listen } = await import('@tauri-apps/api/event');
       const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
         console.log('SummaryModelSettings received model-config-updated event:', event.payload);
-        setModelConfig(event.payload);
+        setModelConfig(prev => ({
+          ...event.payload,
+          summarySystemPrompt: event.payload.summarySystemPrompt ?? prev.summarySystemPrompt ?? localStorage.getItem('summarySystemPrompt') ?? '',
+        }));
       });
 
       return unlisten;

@@ -59,6 +59,7 @@ const ENGLISH_CACHE_FIELD: &str = "english_cache";
 struct SummaryCacheSource {
     transcript_fingerprint: String,
     custom_prompt_fingerprint: String,
+    system_prompt_fingerprint: String,
     template_id: String,
     template_fingerprint: String,
     token_threshold: usize,
@@ -94,6 +95,7 @@ fn stable_text_fingerprint(text: &str) -> String {
 fn build_summary_cache_source(
     text: &str,
     custom_prompt: &str,
+    system_prompt: &str,
     template_id: &str,
     template_fingerprint: &str,
     token_threshold: usize,
@@ -108,6 +110,7 @@ fn build_summary_cache_source(
     SummaryCacheSource {
         transcript_fingerprint: stable_text_fingerprint(text),
         custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
+        system_prompt_fingerprint: stable_text_fingerprint(system_prompt),
         template_id: template_id.to_string(),
         template_fingerprint: template_fingerprint.to_string(),
         token_threshold,
@@ -290,6 +293,7 @@ impl SummaryService {
     /// * `model_provider` - LLM provider name (e.g., "ollama", "openai")
     /// * `model_name` - Specific model (e.g., "gpt-4", "llama3.2:latest")
     /// * `custom_prompt` - Optional user-provided context
+    /// * `system_prompt` - Persistent system-level summary instructions
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
         _app: AppHandle<R>,
@@ -299,6 +303,7 @@ impl SummaryService {
         model_provider: String,
         model_name: String,
         custom_prompt: String,
+        system_prompt: String,
         template_id: String,
         summary_language: Option<String>,
     ) {
@@ -465,6 +470,7 @@ impl SummaryService {
         let cache_source = build_summary_cache_source(
             &text,
             &custom_prompt,
+            &system_prompt,
             &template_id,
             &template_fingerprint,
             token_threshold,
@@ -512,6 +518,7 @@ impl SummaryService {
             &final_api_key,
             &text,
             &custom_prompt,
+            &system_prompt,
             &template_id,
             &template,
             token_threshold,
@@ -707,6 +714,7 @@ mod tests {
         build_summary_cache_source(
             "transcript body",
             "custom prompt",
+            "system prompt",
             "standard_meeting",
             &template_fingerprint,
             3700,
@@ -806,6 +814,7 @@ mod tests {
             build_summary_cache_source(
                 "changed transcript",
                 "custom prompt",
+                "system prompt",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -820,6 +829,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "changed prompt",
+                "system prompt",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -834,6 +844,22 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "changed system prompt",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "system prompt",
                 "daily_standup",
                 &template_fingerprint,
                 3700,
@@ -848,6 +874,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "system prompt",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -862,6 +889,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "system prompt",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -876,6 +904,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "system prompt",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -890,6 +919,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "system prompt",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,

@@ -212,3 +212,14 @@
     overflow: visible !important;
   }
 }
+.dark *::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.35);
+}
+
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
+.dark * {
+  scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+}

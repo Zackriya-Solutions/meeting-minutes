@@ -43,6 +43,7 @@ export interface ModelConfig {
   maxTokens?: number | null;
   temperature?: number | null;
   topP?: number | null;
+  summarySystemPrompt?: string | null;
 }
 
 interface OllamaModel {
@@ -265,7 +266,10 @@ export function ModelSettingsModal({
       try {
         const data = (await invoke('api_get_model_config')) as any;
         if (data && data.provider !== null) {
-          setModelConfig(data);
+          setModelConfig({
+            ...data,
+            summarySystemPrompt: localStorage.getItem('summarySystemPrompt') || '',
+          });
 
           // Fetch API key if not included in response and provider requires it
           if (data.provider !== 'ollama' && !data.apiKey) {
@@ -647,11 +651,14 @@ export function ModelSettingsModal({
       maxTokens: modelConfig.provider === 'custom-openai' && customMaxTokens ? parseInt(customMaxTokens, 10) : null,
       temperature: modelConfig.provider === 'custom-openai' && customTemperature ? parseFloat(customTemperature) : null,
       topP: modelConfig.provider === 'custom-openai' && customTopP ? parseFloat(customTopP) : null,
+      summarySystemPrompt: modelConfig.summarySystemPrompt?.trim() || null,
       // For custom-openai, use the customOpenAIModel as the model field
       model: modelConfig.provider === 'custom-openai' ? customOpenAIModel.trim() : modelConfig.model,
     };
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
+
+    localStorage.setItem('summarySystemPrompt', updatedConfig.summarySystemPrompt || '');
 
     // Persist confirmed model choice to per-provider cache
     if (updatedConfig.model) {
@@ -941,6 +948,27 @@ export function ModelSettingsModal({
                 </PopoverContent>
               </Popover>
             )}
+          </div>
+        </div>
+
+        <div className="space-y-4 border-t pt-4">
+          <div>
+            <Label htmlFor="summary-system-prompt">Summary System Prompt</Label>
+            <textarea
+              id="summary-system-prompt"
+              value={modelConfig.summarySystemPrompt || ''}
+              onChange={(event) => {
+                setModelConfig((prev: ModelConfig) => ({
+                  ...prev,
+                  summarySystemPrompt: event.target.value,
+                }));
+              }}
+              placeholder="Add persistent system-level instructions for meeting summaries..."
+              className="mt-1 w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Applied to every summary generated with this app. Meeting-specific context can still be added before generation.
+            </p>
           </div>
         </div>
 
