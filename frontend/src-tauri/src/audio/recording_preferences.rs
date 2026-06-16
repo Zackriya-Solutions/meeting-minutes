@@ -76,6 +76,20 @@ pub fn get_default_recordings_folder() -> PathBuf {
     }
 }
 
+/// Resolve the folder where recordings should be saved.
+pub async fn get_recordings_save_folder<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    match load_recording_preferences(app).await {
+        Ok(prefs) => prefs.save_folder,
+        Err(e) => {
+            warn!(
+                "Failed to load recording preferences for save folder, using default: {}",
+                e
+            );
+            get_default_recordings_folder()
+        }
+    }
+}
+
 /// Ensure the recordings directory exists
 pub fn ensure_recordings_directory(path: &PathBuf) -> Result<()> {
     if !path.exists() {
