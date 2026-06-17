@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { useConfig } from '@/contexts/ConfigContext';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -19,6 +20,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const { refreshRecordingsStorageLocation } = useConfig();
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -154,6 +156,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     setSaving(true);
     try {
       await invoke('set_recording_preferences', { preferences: prefs });
+      await refreshRecordingsStorageLocation();
       onSave?.(prefs);
 
       if (successMessage) {
