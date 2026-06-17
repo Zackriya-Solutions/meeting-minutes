@@ -742,7 +742,7 @@ pub async fn api_delete_api_key<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_delete_meeting<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
@@ -755,8 +755,35 @@ pub async fn api_delete_meeting<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
+    let folder_path = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|meeting| meeting.folder_path.filter(|path| !path.trim().is_empty()));
+
+    let save_folder = crate::audio::recording_preferences::load_recording_preferences(&app)
+        .await
+        .map(|preferences| preferences.save_folder)
+        .unwrap_or_else(|_| crate::audio::recording_preferences::get_default_recordings_folder());
+    let allowed_roots = crate::audio::meeting_folder::recordings_roots(save_folder);
+
     match MeetingsRepository::delete_meeting(pool, &meeting_id).await {
         Ok(true) => {
+            if let Some(path) = folder_path {
+                if let Err(error) =
+                    crate::audio::meeting_folder::delete_meeting_folder_if_allowed(
+                        &path,
+                        &allowed_roots,
+                    )
+                {
+                    log_warn!(
+                        "Meeting {} deleted from database but folder cleanup failed: {}",
+                        meeting_id,
+                        error
+                    );
+                }
+            }
+
             log_info!("Successfully deleted meeting {}", meeting_id);
             Ok(serde_json::json!({
                 "status": "success",
