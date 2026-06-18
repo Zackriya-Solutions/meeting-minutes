@@ -34,7 +34,7 @@ interface SummaryPanelProps {
   onStartEditTitle: () => void;
   onFinishEditTitle: () => void;
   isTitleDirty: boolean;
-  summaryRef: RefObject<BlockNoteSummaryViewRef>;
+  summaryRef: RefObject<BlockNoteSummaryViewRef | null>;
   isSaving: boolean;
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;

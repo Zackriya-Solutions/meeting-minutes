@@ -105,7 +105,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   });
   const [permissionsSkipped, setPermissionsSkipped] = useState(false);
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout>();
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const initializeSummaryModelSelection = async (preferredModel = selectedSummaryModel) => {
     try {
@@ -469,7 +469,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       // Clear any pending auto-saves
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = undefined;
+        saveTimeoutRef.current = null;
       }
 
       let modelToSave = selectedSummaryModel;

@@ -10,7 +10,7 @@ export const useAudioPlayer = (audioPath: string | null) => {
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const startTimeRef = useRef<number>(0);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number | null>(null);
   const seekTimeRef = useRef<number>(0);
 
   const initAudioContext = async () => {
@@ -138,7 +138,7 @@ export const useAudioPlayer = (audioPath: string | null) => {
     console.log('Stopping playback');
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
-      rafRef.current = undefined;
+      rafRef.current = null;
     }
     if (sourceRef.current) {
       try {
