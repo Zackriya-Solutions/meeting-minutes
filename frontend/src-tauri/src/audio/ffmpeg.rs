@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use which::which;
 
 #[cfg(not(windows))]
-const EXECUTABLE_NAME: &str = "ffmpeg";
+const EXECUTABLE_NAME: &str = "meetily-ffmpeg";
 
 #[cfg(windows)]
-const EXECUTABLE_NAME: &str = "ffmpeg.exe";
+const EXECUTABLE_NAME: &str = "meetily-ffmpeg.exe";
 
 static FFMPEG_PATH: Lazy<Option<PathBuf>> = Lazy::new(find_ffmpeg_path_internal);
 

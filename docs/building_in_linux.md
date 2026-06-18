@@ -13,14 +13,18 @@ If you're new to building on Linux, start here. These simple commands work for m
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git clang libclang-dev librsvg2-dev \
+    libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
 
 # Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+sudo dnf install gcc-c++ cmake git clang clang-devel librsvg2-devel \
+    webkit2gtk4.1-devel libsoup3-devel
 
 # Arch Linux
-sudo pacman -S base-devel cmake git
+sudo pacman -S base-devel cmake git clang librsvg webkit2gtk-4.1
 ```
+
+> ⚠️ **Note:** `clang` and `libclang-dev` are required for building the llama-cpp bindings. Without them, you'll get errors like `'stdbool.h' file not found` during compilation. `librsvg2-dev` is required for AppImage bundling. `libwebkit2gtk-4.1-dev` and related packages are required for the Tauri webview.
 
 ### 2. Build and Run
 
@@ -220,6 +224,27 @@ src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
 ---
 
 ## 🧭 Troubleshooting
+
+### "'stdbool.h' file not found" or bindgen errors
+
+- **Fix:** Install `clang` and `libclang-dev` packages
+- **Ubuntu/Debian:** `sudo apt install clang libclang-dev`
+- **Fedora:** `sudo dnf install clang clang-devel`
+- **Why:** The llama-cpp-sys crate uses bindgen which requires libclang to parse C headers
+
+### "there is no 'libdir' variable for 'librsvg-2.0' library" (AppImage bundling)
+
+- **Fix:** Install `librsvg2-dev` package
+- **Ubuntu/Debian:** `sudo apt install librsvg2-dev`
+- **Fedora:** `sudo dnf install librsvg2-devel`
+- **Why:** The linuxdeploy GTK plugin requires librsvg pkg-config data for AppImage bundling
+
+### "javascriptcoregtk-4.1" or "libsoup-3.0" not found
+
+- **Fix:** Install WebKit2GTK development packages
+- **Ubuntu/Debian:** `sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev`
+- **Fedora:** `sudo dnf install webkit2gtk4.1-devel libsoup3-devel`
+- **Why:** Tauri requires WebKit2GTK for the webview component
 
 ### "CUDA toolkit not found"
 

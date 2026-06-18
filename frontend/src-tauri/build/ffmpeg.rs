@@ -13,9 +13,9 @@ pub fn ensure_ffmpeg_binary() {
     println!("cargo:warning=🎬 Checking FFmpeg binary for target: {}", target);
 
     let binary_name = if target.contains("windows") {
-        format!("ffmpeg-{}.exe", target)
+        format!("meetily-ffmpeg-{}.exe", target)
     } else {
-        format!("ffmpeg-{}", target)
+        format!("meetily-ffmpeg-{}", target)
     };
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
