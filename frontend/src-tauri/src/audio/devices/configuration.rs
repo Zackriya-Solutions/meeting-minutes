@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::atomic::AtomicU64;
@@ -121,15 +122,19 @@ pub async fn get_device_and_config(
         use cpal::traits::{DeviceTrait, HostTrait};
 
         let host = cpal::default_host();
+        debug!("[DeviceConfig] Looking for device: '{}' (type: {:?})", audio_device.name, audio_device.device_type);
 
         match audio_device.device_type {
             DeviceType::Input => {
+                debug!("[DeviceConfig] Searching input devices for microphone...");
                 for device in host.input_devices()? {
                     if let Ok(name) = device.name() {
+                        debug!("[DeviceConfig] Checking input device: '{}'", name);
                         if name == audio_device.name {
                             let default_config = device
                                 .default_input_config()
                                 .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                            info!("[DeviceConfig] Found microphone: '{}' with config: {:?}", name, default_config);
                             return Ok((device, default_config));
                         }
                     }
@@ -154,19 +159,79 @@ pub async fn get_device_and_config(
 
                 #[cfg(target_os = "linux")]
                 {
-                    // For Linux, we use PulseAudio monitor sources for system audio
-                    if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Alsa) {
-                        for device in pulse_host.input_devices()? {
+                    // For Linux, system audio uses PulseAudio/PipeWire monitor sources
+                    // Monitor sources are INPUT devices that capture audio from output sinks
+                    info!("[DeviceConfig] Linux: Looking for system audio device '{}' in input devices", audio_device.name);
+
+                    // Check if this is a PulseAudio/PipeWire source (contains "alsa_output" or ends with ".monitor")
+                    let is_pulseaudio_source = audio_device.name.contains("alsa_output")
+                        || audio_device.name.contains("alsa_input")
+                        || audio_device.name.ends_with(".monitor");
+
+                    if is_pulseaudio_source {
+                        info!("[DeviceConfig] Linux: '{}' is a PulseAudio/PipeWire source", audio_device.name);
+
+                        // For PulseAudio sources, we need to set PULSE_SOURCE and use "pulse" ALSA device
+                        // This tells the pulse ALSA plugin which source to capture from
+                        std::env::set_var("PULSE_SOURCE", &audio_device.name);
+                        info!("[DeviceConfig] Linux: Set PULSE_SOURCE={}", audio_device.name);
+
+                        // Find and use the "pulse" ALSA device
+                        for device in host.input_devices()? {
                             if let Ok(name) = device.name() {
-                                if name == audio_device.name {
+                                if name == "pulse" {
                                     let default_config = device
                                         .default_input_config()
-                                        .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                                        .map_err(|e| anyhow!("Failed to get pulse input config: {}", e))?;
+                                    info!("[DeviceConfig] Linux: Using 'pulse' device to capture from '{}', config: {:?}",
+                                          audio_device.name, default_config);
                                     return Ok((device, default_config));
                                 }
                             }
                         }
+
+                        warn!("[DeviceConfig] Linux: 'pulse' ALSA device not found - PulseAudio/ALSA plugin may not be installed");
                     }
+
+                    // Collect all available input devices for debugging
+                    let mut available_inputs: Vec<String> = Vec::new();
+
+                    // Search input devices for the monitor source (ALSA direct)
+                    for device in host.input_devices()? {
+                        if let Ok(name) = device.name() {
+                            available_inputs.push(name.clone());
+                            debug!("[DeviceConfig] Linux: Checking input device: '{}'", name);
+
+                            // Exact match
+                            if name == audio_device.name {
+                                let default_config = device
+                                    .default_input_config()
+                                    .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                                info!("[DeviceConfig] Linux: Found exact match for system audio: '{}' with config: {:?}",
+                                      name, default_config);
+                                return Ok((device, default_config));
+                            }
+                        }
+                    }
+
+                    // Try partial matching (for friendly names or ALSA variants)
+                    debug!("[DeviceConfig] Linux: No exact match, trying partial match...");
+                    for device in host.input_devices()? {
+                        if let Ok(name) = device.name() {
+                            if name.contains(&audio_device.name) || audio_device.name.contains(&name) {
+                                let default_config = device
+                                    .default_input_config()
+                                    .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                                info!("[DeviceConfig] Linux: Found partial match for system audio: '{}' (requested: '{}')",
+                                      name, audio_device.name);
+                                return Ok((device, default_config));
+                            }
+                        }
+                    }
+
+                    // Log available devices for troubleshooting
+                    warn!("[DeviceConfig] Linux: System audio device '{}' not found!", audio_device.name);
+                    warn!("[DeviceConfig] Linux: Available input devices: {:?}", available_inputs);
                 }
             }
         }

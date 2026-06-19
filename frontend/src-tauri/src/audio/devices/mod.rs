@@ -12,6 +12,8 @@ pub mod fallback;
 pub use discovery::{list_audio_devices, trigger_audio_permission};
 pub use microphone::{default_input_device, find_builtin_input_device};
 pub use speakers::{default_output_device, find_builtin_output_device};
+#[cfg(target_os = "linux")]
+pub use speakers::default_system_audio_device;
 pub use configuration::{get_device_and_config, parse_audio_device, AudioDevice, DeviceType, DeviceControl, AudioTranscriptionEngine, LAST_AUDIO_CAPTURE};
 
 // Re-export fallback functions (platform-specific)

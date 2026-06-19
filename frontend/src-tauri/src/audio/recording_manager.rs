@@ -8,8 +8,11 @@ use super::devices::{AudioDevice, list_audio_devices};
 #[cfg(target_os = "macos")]
 use super::devices::get_safe_recording_devices_macos;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
 use super::devices::{default_input_device, default_output_device};
+
+#[cfg(target_os = "linux")]
+use super::devices::{default_input_device, default_system_audio_device};
 use super::recording_state::{RecordingState, AudioChunk, DeviceType as RecordingDeviceType};
 use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
@@ -189,11 +192,49 @@ impl RecordingManager {
             self.start_recording(microphone_device, system_device, auto_save).await
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            info!("🐧 [Linux] Starting recording with default devices");
+
+            // Get default microphone
+            let microphone_device = match default_input_device() {
+                Ok(device) => {
+                    info!("[Linux] Using default microphone: {}", device.name);
+                    Some(Arc::new(device))
+                }
+                Err(e) => {
+                    warn!("[Linux] No default microphone available: {}", e);
+                    None
+                }
+            };
+
+            // Get system audio via monitor source (Linux-specific)
+            // On Linux, system audio capture uses PulseAudio monitor sources which are INPUT devices
+            let system_device = match default_system_audio_device() {
+                Ok(device) => {
+                    info!("[Linux] Using monitor source for system audio: {}", device.name);
+                    Some(Arc::new(device))
+                }
+                Err(e) => {
+                    warn!("[Linux] No system audio (monitor) available: {}", e);
+                    warn!("[Linux] System audio will not be captured. Ensure PulseAudio is running.");
+                    None
+                }
+            };
+
+            // Ensure at least microphone is available
+            if microphone_device.is_none() {
+                return Err(anyhow::anyhow!("No microphone device available"));
+            }
+
+            self.start_recording(microphone_device, system_device, auto_save).await
+        }
+
+        #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
         {
             info!("Starting recording with default devices");
 
-            // Get default devices (no Bluetooth override on Windows/Linux)
+            // Get default devices (Windows)
             let microphone_device = match default_input_device() {
                 Ok(device) => {
                     info!("Using default microphone: {}", device.name);

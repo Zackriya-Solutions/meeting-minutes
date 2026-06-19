@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use cpal::traits::{HostTrait, DeviceTrait};
-use log::{info, warn};
+use log::{debug, info, warn};
 
 use super::configuration::{AudioDevice, DeviceType};
 
@@ -112,4 +112,82 @@ pub fn find_builtin_output_device() -> Result<Option<AudioDevice>> {
 
     warn!("⚠️ No built-in speaker found (searched {} patterns)", builtin_patterns.len());
     Ok(None)
+}
+
+/// Get the default system audio capture device for Linux
+///
+/// On Linux, system audio capture works via PulseAudio/PipeWire monitor sources.
+/// Monitor sources have names ending in ".monitor" and capture audio playing through
+/// the corresponding output sink.
+///
+/// This function:
+/// 1. First tries to get monitors from pactl (PulseAudio/PipeWire)
+/// 2. Falls back to ALSA loopback devices
+///
+/// Priority order:
+/// 1. Built-in audio monitor (pci-*)
+/// 2. Any other PulseAudio monitor
+/// 3. ALSA loopback device
+#[cfg(target_os = "linux")]
+pub fn default_system_audio_device() -> Result<AudioDevice> {
+    use std::process::Command;
+
+    info!("[Linux] Looking for default system audio device (monitor source)...");
+
+    let mut builtin_monitor: Option<String> = None;
+    let mut any_monitor: Option<String> = None;
+
+    // First, try to get PulseAudio/PipeWire monitors via pactl
+    if let Ok(output) = Command::new("pactl")
+        .args(["list", "sources", "short"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() >= 2 {
+                    let source_name = parts[1].trim();
+                    if source_name.ends_with(".monitor") {
+                        debug!("[Linux] Found PulseAudio monitor: {}", source_name);
+
+                        // Prioritize built-in audio (pci-based)
+                        if source_name.contains("pci-") && builtin_monitor.is_none() {
+                            info!("[Linux] Found built-in audio monitor: {}", source_name);
+                            builtin_monitor = Some(source_name.to_string());
+                        } else if any_monitor.is_none() {
+                            info!("[Linux] Found monitor source: {}", source_name);
+                            any_monitor = Some(source_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Return PulseAudio monitor if found
+    if let Some(name) = builtin_monitor {
+        info!("[Linux] Using built-in audio monitor as default system audio: {}", name);
+        return Ok(AudioDevice::new(name, DeviceType::Output));
+    }
+
+    if let Some(name) = any_monitor {
+        info!("[Linux] Using monitor source as default system audio: {}", name);
+        return Ok(AudioDevice::new(name, DeviceType::Output));
+    }
+
+    // Fall back to ALSA loopback devices from cpal
+    let host = cpal::default_host();
+    for device in host.input_devices()? {
+        if let Ok(name) = device.name() {
+            if name.contains("Loopback") || name.to_lowercase().contains("loopback") {
+                info!("[Linux] Using ALSA loopback as default system audio: {}", name);
+                return Ok(AudioDevice::new(name, DeviceType::Output));
+            }
+        }
+    }
+
+    warn!("[Linux] No monitor source found for system audio capture!");
+    warn!("[Linux] Ensure PulseAudio/PipeWire is running. Run 'pactl list sources short' to check.");
+    Err(anyhow!("No system audio device (monitor source) found on Linux"))
 }
