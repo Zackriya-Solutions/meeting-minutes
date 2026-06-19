@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod floating_indicator;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -425,6 +426,9 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
+            // Start the floating recording indicator driver
+            floating_indicator::init(_app.handle());
+
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
             let app_for_notif = _app.handle().clone();
@@ -522,10 +526,20 @@ pub fn run() {
                     }
                 }
             }
+
+            // Track main window focus to drive the floating recording indicator
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if window.label() == "main" {
+                    floating_indicator::set_main_focused(*focused);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,
+            floating_indicator::stop_recording_from_indicator,
+            floating_indicator::set_indicator_dragging,
+            floating_indicator::set_floating_indicator_enabled,
             is_recording,
             get_transcription_status,
             read_audio_file,
