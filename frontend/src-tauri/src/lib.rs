@@ -64,6 +64,48 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
+#[derive(Debug, Serialize, Clone)]
+pub struct BuildInfo {
+    pub version: String,
+    pub gpu_backend: String,
+    pub build_profile: String,
+    pub target_os: String,
+    pub target_arch: String,
+}
+
+#[tauri::command]
+fn get_build_info() -> BuildInfo {
+    let gpu_backend = if cfg!(feature = "cuda") {
+        "CUDA"
+    } else if cfg!(feature = "vulkan") {
+        "Vulkan"
+    } else if cfg!(feature = "metal") {
+        "Metal"
+    } else if cfg!(feature = "coreml") {
+        "CoreML"
+    } else if cfg!(feature = "hipblas") {
+        "HipBLAS (AMD ROCm)"
+    } else if cfg!(feature = "openblas") {
+        "OpenBLAS (CPU)"
+    } else {
+        "CPU"
+    };
+
+    let build_profile = if cfg!(debug_assertions) {
+        "Debug"
+    } else {
+        "Release"
+    };
+
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        gpu_backend: gpu_backend.to_string(),
+        build_profile: build_profile.to_string(),
+        target_os: std::env::consts::OS.to_string(),
+        target_arch: std::env::consts::ARCH.to_string(),
+    }
+}
+
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
@@ -748,6 +790,7 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            get_build_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
