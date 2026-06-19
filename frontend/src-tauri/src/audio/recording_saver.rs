@@ -231,6 +231,15 @@ impl RecordingSaver {
         // Load preferences to get base recordings folder
         let base_folder = super::recording_preferences::get_default_recordings_folder();
 
+        // Ensure base recordings directory exists (critical for first-run scenarios)
+        // On first installation, this directory won't exist yet and must be created
+        // before we can create meeting subfolders within it.
+        if !base_folder.exists() {
+            info!("Creating base recordings directory: {}", base_folder.display());
+            std::fs::create_dir_all(&base_folder)
+                .map_err(|e| anyhow::anyhow!("Failed to create recordings directory {}: {}", base_folder.display(), e))?;
+        }
+
         // Create meeting folder structure (with or without .checkpoints/ subdirectory)
         let meeting_folder = create_meeting_folder(&base_folder, meeting_name, create_checkpoints)?;
 

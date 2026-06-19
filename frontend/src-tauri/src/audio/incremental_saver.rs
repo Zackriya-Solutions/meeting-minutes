@@ -34,9 +34,13 @@ impl IncrementalAudioSaver {
     pub fn new(meeting_folder: PathBuf, sample_rate: u32) -> Result<Self> {
         let checkpoints_dir = meeting_folder.join(".checkpoints");
 
-        // Verify checkpoints directory exists
+        // Create checkpoints directory if it doesn't exist (fixes first-run audio save issue)
+        // On first installation, the directory may not exist yet, so we create it defensively
+        // rather than failing. This ensures audio recordings are saved from the very first use.
         if !checkpoints_dir.exists() {
-            return Err(anyhow!("Checkpoints directory does not exist: {}", checkpoints_dir.display()));
+            info!("Creating checkpoints directory: {}", checkpoints_dir.display());
+            std::fs::create_dir_all(&checkpoints_dir)
+                .map_err(|e| anyhow!("Failed to create checkpoints directory {}: {}", checkpoints_dir.display(), e))?;
         }
 
         Ok(Self {
