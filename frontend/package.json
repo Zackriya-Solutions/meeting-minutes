@@ -25,7 +25,10 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
-        "lint": "next lint"
+        "lint": "next lint",
+        "test:e2e": "playwright test",
+        "test:e2e:update": "playwright test --update-snapshots",
+        "test:theme-audit": "node scripts/check-theme-tokens.mjs"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
@@ -96,6 +99,7 @@
         }
     },
     "devDependencies": {
+        "@playwright/test": "^1.61.0",
         "@tailwindcss/typography": "^0.5.15",
         "@tauri-apps/cli": "^2.1.0",
         "@tauri-apps/plugin-fs": "~2.4.0",

@@ -24,6 +24,7 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { E2EBootstrap } from '@/testing/E2EBootstrap'
 
 
 // Module-level component — stable reference across RootLayout re-renders.
@@ -226,6 +227,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="font-sans antialiased">
+        <E2EBootstrap />
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
