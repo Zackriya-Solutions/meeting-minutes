@@ -25,6 +25,7 @@ import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { E2EBootstrap } from '@/testing/E2EBootstrap'
+import { ThemeScript } from '@/components/ThemeScript'
 
 
 // Module-level component — stable reference across RootLayout re-renders.
@@ -225,7 +226,10 @@ export default function RootLayout({
   }
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body className="font-sans antialiased">
         <E2EBootstrap />
         <AnalyticsProvider>

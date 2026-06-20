@@ -7,8 +7,15 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import {
+  applyEffectiveTheme,
+  parseThemeMode,
+  resolveEffectiveTheme,
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+} from '@/lib/theme';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type { ThemeMode } from '@/lib/theme';
 
 export interface OllamaModel {
   name: string;
@@ -106,11 +113,8 @@ function getStoredSummarySystemPrompt() {
 }
 
 function getStoredThemeMode(): ThemeMode {
-  if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('themeMode');
-    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
-  }
-  return 'system';
+  if (typeof window === 'undefined') return 'system';
+  return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
 }
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
@@ -173,7 +177,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   });
 
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
-  const [isDarkTheme, setIsDarkTheme] = useState(false);
+  const [isDarkTheme, setIsDarkTheme] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('dark'),
+  );
 
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
@@ -411,7 +419,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const setThemeMode = useCallback((mode: ThemeMode) => {
     setThemeModeState(mode);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('themeMode', mode);
+      window.localStorage.setItem(THEME_STORAGE_KEY, mode);
     }
   }, []);
 
@@ -420,10 +428,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const applyTheme = () => {
-      const shouldUseDark = themeMode === 'dark' || (themeMode === 'system' && media.matches);
-      setIsDarkTheme(shouldUseDark);
-      document.documentElement.classList.toggle('dark', shouldUseDark);
-      document.documentElement.style.colorScheme = shouldUseDark ? 'dark' : 'light';
+      const effectiveTheme = resolveEffectiveTheme(themeMode, media.matches);
+      applyEffectiveTheme(effectiveTheme);
+      setIsDarkTheme(effectiveTheme === 'dark');
     };
 
     applyTheme();
