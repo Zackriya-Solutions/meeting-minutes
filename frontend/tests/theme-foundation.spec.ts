@@ -77,3 +77,51 @@ test('invalid stored theme falls back to the dark system theme', async ({
 
   await expect(page.locator('html')).toHaveClass(/dark/);
 });
+
+test('unavailable theme storage falls back to system without blocking render', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    const originalGetItem = Storage.prototype.getItem;
+    Storage.prototype.getItem = function getItem(key) {
+      if (key === 'themeMode') {
+        throw new DOMException('Theme storage unavailable', 'SecurityError');
+      }
+      return originalGetItem.call(this, key);
+    };
+  });
+
+  await page.goto('/settings');
+
+  await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  expect(pageErrors).toEqual([]);
+});
+
+test('selected theme still applies when theme storage writes fail', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.addInitScript(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === 'themeMode') {
+        throw new DOMException('Theme storage unavailable', 'SecurityError');
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.goto('/settings');
+  await page.getByRole('button', { name: 'Dark', exact: true }).click();
+
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  expect(pageErrors).toEqual([]);
+});

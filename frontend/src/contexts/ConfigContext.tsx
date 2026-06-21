@@ -114,7 +114,12 @@ function getStoredSummarySystemPrompt() {
 
 function getStoredThemeMode(): ThemeMode {
   if (typeof window === 'undefined') return 'system';
-  return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+
+  try {
+    return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return 'system';
+  }
 }
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
@@ -419,7 +424,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const setThemeMode = useCallback((mode: ThemeMode) => {
     setThemeModeState(mode);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+      } catch {}
     }
   }, []);
 
