@@ -95,13 +95,13 @@
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --info: 217 91% 60%;
-    --info-foreground: 0 0% 100%;
+    --info-foreground: 222 47% 11%;
     --success: 142 71% 45%;
-    --success-foreground: 0 0% 100%;
+    --success-foreground: 144 61% 8%;
     --warning: 45 93% 47%;
     --warning-foreground: 26 83% 14%;
     --recording: 0 84% 60%;
-    --recording-foreground: 0 0% 100%;
+    --recording-foreground: 0 63% 12%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
     --ring: 0 0% 3.9%;
