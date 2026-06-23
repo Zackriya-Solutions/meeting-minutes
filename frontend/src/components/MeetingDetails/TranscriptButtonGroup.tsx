@@ -3,15 +3,23 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Copy, FolderOpen, RefreshCw, Download } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
+import { TranscriptExportFormat } from '@/lib/transcriptExport';
 
 
 interface TranscriptButtonGroupProps {
   transcriptCount: number;
   onCopyTranscript: () => void;
+  onExportTranscript: (format: TranscriptExportFormat) => void;
   onOpenMeetingFolder: () => Promise<void>;
   meetingId?: string;
   meetingFolderPath?: string | null;
@@ -22,6 +30,7 @@ interface TranscriptButtonGroupProps {
 export function TranscriptButtonGroup({
   transcriptCount,
   onCopyTranscript,
+  onExportTranscript,
   onOpenMeetingFolder,
   meetingId,
   meetingFolderPath,
@@ -53,6 +62,28 @@ export function TranscriptButtonGroup({
           <Copy />
           <span className="hidden lg:inline">Copy</span>
         </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={transcriptCount === 0}
+              title={transcriptCount === 0 ? 'No transcript available' : 'Export Transcript'}
+            >
+              <Download />
+              <span className="hidden lg:inline">Export</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => onExportTranscript('txt')}>
+              Plain text (.txt)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExportTranscript('vtt')}>
+              Subtitles with timestamps (.vtt)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Button
           size="sm"

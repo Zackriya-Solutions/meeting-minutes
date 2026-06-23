@@ -1165,6 +1165,66 @@ pub async fn open_meeting_folder<R: Runtime>(
     }
 }
 
+/// Open a native "Save As" dialog and write the provided text to the chosen file.
+///
+/// Used to export meeting transcripts as plain text (.txt) or WebVTT (.vtt).
+/// The transcript content is formatted on the frontend and passed in here so the
+/// formatting logic stays shared with the existing "Copy transcript" feature.
+///
+/// Returns the saved file path, or `None` if the user cancelled the dialog.
+#[tauri::command]
+pub async fn export_transcript_file<R: Runtime>(
+    app: AppHandle<R>,
+    default_file_name: String,
+    content: String,
+    extension: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    log_info!(
+        "export_transcript_file called (name: {}, ext: {}, {} bytes)",
+        default_file_name,
+        extension,
+        content.len()
+    );
+
+    let (filter_name, ext) = match extension.as_str() {
+        "vtt" => ("WebVTT Subtitles", "vtt"),
+        _ => ("Text File", "txt"),
+    };
+
+    // Show the dialog on a blocking thread to avoid stalling the async runtime.
+    let app_clone = app.clone();
+    let default_name = default_file_name.clone();
+    let file_path = tokio::task::spawn_blocking(move || {
+        app_clone
+            .dialog()
+            .file()
+            .add_filter(filter_name, &[ext])
+            .set_file_name(&default_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("File dialog task failed: {}", e))?;
+
+    match file_path {
+        Some(path) => {
+            let path_buf = path
+                .into_path()
+                .map_err(|e| format!("Invalid save path: {}", e))?;
+            std::fs::write(&path_buf, content)
+                .map_err(|e| format!("Failed to write transcript file: {}", e))?;
+            let path_str = path_buf.to_string_lossy().to_string();
+            log_info!("Transcript exported to: {}", path_str);
+            Ok(Some(path_str))
+        }
+        None => {
+            log_info!("User cancelled transcript export");
+            Ok(None)
+        }
+    }
+}
+
 // Simple test command to check backend connectivity
 #[tauri::command]
 pub async fn test_backend_connection<R: Runtime>(
