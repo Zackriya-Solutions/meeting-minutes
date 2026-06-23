@@ -13,10 +13,9 @@ pub const CLUSTER_SIMILARITY_THRESHOLD: f32 = 0.55;
 /// Slightly stricter than intra-meeting clustering to avoid false renames.
 pub const PROFILE_MATCH_THRESHOLD: f32 = 0.60;
 
-/// Conservative live default: Meetily's current local diarization path is
-/// tuned for one-on-one and small two-person meetings. Outlier embeddings
-/// should not mint unlimited anonymous speakers during live transcription.
-pub const DEFAULT_MAX_ANONYMOUS_SPEAKERS: usize = 2;
+/// Default speaker cap per meeting. High enough for typical team meetings;
+/// prevents runaway cluster creation from noisy embeddings.
+pub const DEFAULT_MAX_ANONYMOUS_SPEAKERS: usize = 10;
 
 pub struct SpeakerCluster {
     pub centroid: Vec<f32>,
