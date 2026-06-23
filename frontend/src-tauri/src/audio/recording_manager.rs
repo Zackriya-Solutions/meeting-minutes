@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 use anyhow::Result;
 use log::{debug, error, info, warn};
@@ -432,6 +433,11 @@ impl RecordingManager {
     /// Set the meeting name for this recording session
     pub fn set_meeting_name(&mut self, name: Option<String>) {
         self.recording_saver.set_meeting_name(name);
+    }
+
+    /// Set the base folder where meeting recordings are stored.
+    pub fn set_save_folder(&mut self, folder: PathBuf) {
+        self.recording_saver.set_save_folder(folder);
     }
 
     /// Add a structured transcript segment to be saved later
