@@ -31,6 +31,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const [showFloatingIndicator, setShowFloatingIndicator] = useState(true);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -68,6 +69,21 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       }
     };
     loadNotificationPref();
+  }, []);
+
+  // Load floating recording indicator preference
+  useEffect(() => {
+    const loadFloatingIndicatorPref = async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const show = await store.get<boolean>('show_floating_indicator') ?? true;
+        setShowFloatingIndicator(show);
+      } catch (error) {
+        console.error('Failed to load floating indicator preference:', error);
+      }
+    };
+    loadFloatingIndicatorPref();
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
@@ -145,6 +161,24 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       });
     } catch (error) {
       console.error('Failed to save notification preference:', error);
+      toast.error('Failed to save preference');
+    }
+  };
+
+  const handleFloatingIndicatorToggle = async (enabled: boolean) => {
+    try {
+      setShowFloatingIndicator(enabled);
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set('show_floating_indicator', enabled);
+      await store.save();
+      await invoke('set_floating_indicator_enabled', { enabled });
+      toast.success('Preference saved');
+      await Analytics.track('floating_indicator_preference_changed', {
+        enabled: enabled.toString()
+      });
+    } catch (error) {
+      console.error('Failed to save floating indicator preference:', error);
       toast.error('Failed to save preference');
     }
   };
@@ -272,6 +306,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
+        />
+      </div>
+
+      {/* Floating Recording Indicator Toggle */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Floating Recording Indicator</div>
+          <div className="text-sm text-gray-600">
+            Show a small draggable widget with a live mic waveform and stop button when you switch away from Meetily during a recording
+          </div>
+        </div>
+        <Switch
+          checked={showFloatingIndicator}
+          onCheckedChange={handleFloatingIndicatorToggle}
         />
       </div>
 

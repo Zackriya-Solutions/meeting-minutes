@@ -81,6 +81,20 @@
                             ]
                         }
                     ]
+                },
+                {
+                    "identifier": "floating-indicator",
+                    "description": "Floating recording indicator pill window",
+                    "windows": [
+                        "floating-indicator"
+                    ],
+                    "permissions": [
+                        "core:event:default",
+                        "core:window:default",
+                        "core:window:allow-start-dragging",
+                        "core:webview:default",
+                        "core:app:default"
+                    ]
                 }
             ]
         }
