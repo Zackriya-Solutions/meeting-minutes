@@ -135,10 +135,25 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "appleSpeech" => {
+            info!("🍎 Validating Apple Speech availability...");
+            #[cfg(target_os = "macos")]
+            {
+                crate::apple_speech_engine::commands::apple_speech_init()
+                    .await
+                    .map_err(|e| format!("Apple Speech not available: {}", e))?;
+                info!("✅ Apple Speech validation successful");
+                Ok(())
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err("Apple Speech is only available on macOS".to_string())
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper', 'parakeet', or 'appleSpeech'.",
                 other
             ))
         }
@@ -210,6 +225,36 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 None => {
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
+            }
+        }
+        "appleSpeech" => {
+            info!("🍎 Initializing Apple Speech transcription engine");
+            #[cfg(target_os = "macos")]
+            {
+                let engine = {
+                    let guard = crate::apple_speech_engine::commands::APPLE_SPEECH_ENGINE
+                        .lock()
+                        .unwrap();
+                    guard.as_ref().cloned()
+                };
+
+                match engine {
+                    Some(engine) => {
+                        if engine.is_model_loaded().await {
+                            info!("✅ Apple Speech engine ready");
+                            Ok(TranscriptionEngine::Provider(
+                                Arc::new(super::AppleSpeechProvider::new(engine)),
+                            ))
+                        } else {
+                            Err("Apple Speech recognizer is not available".to_string())
+                        }
+                    }
+                    None => Err("Apple Speech engine not initialized. This should not happen after validation.".to_string()),
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err("Apple Speech is only available on macOS".to_string())
             }
         }
         "localWhisper" | _ => {

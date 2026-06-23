@@ -173,6 +173,29 @@ cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["a
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 
+# Apple Speech Recognition (SFSpeechRecognizer) for native macOS transcription
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSError", "NSArray", "alloc", "block2"] }
+objc2-speech = { version = "0.3", features = [
+    "SFSpeechRecognizer",
+    "SFSpeechRecognitionRequest",
+    "SFSpeechRecognitionResult",
+    "SFSpeechRecognitionTask",
+    "SFTranscription",
+    "SFTranscriptionSegment",
+    "alloc",
+    "block2",
+    "objc2-avf-audio",
+] }
+objc2-avf-audio = { version = "0.3", features = [
+    "AVAudioBuffer",
+    "AVAudioFormat",
+    "AVAudioTypes",
+    "AVAudioChannelLayout",
+    "alloc",
+] }
+
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
 whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
