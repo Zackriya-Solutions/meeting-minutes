@@ -105,6 +105,21 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    #[sqlx(rename = "summarySystemPrompt")]
+    #[serde(rename = "summarySystemPrompt")]
+    pub summary_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryChunkSystemPrompt")]
+    #[serde(rename = "summaryChunkSystemPrompt")]
+    pub summary_chunk_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryChunkPrompt")]
+    #[serde(rename = "summaryChunkPrompt")]
+    pub summary_chunk_prompt: Option<String>,
+    #[sqlx(rename = "summaryCombineSystemPrompt")]
+    #[serde(rename = "summaryCombineSystemPrompt")]
+    pub summary_combine_system_prompt: Option<String>,
+    #[sqlx(rename = "summaryCombinePrompt")]
+    #[serde(rename = "summaryCombinePrompt")]
+    pub summary_combine_prompt: Option<String>,
 }
 
 impl Setting {

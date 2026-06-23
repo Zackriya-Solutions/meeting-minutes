@@ -340,6 +340,24 @@ impl SummaryService {
             }
         };
 
+        // Load configurable summary prompts from settings (with fallback to defaults)
+        let (
+            saved_summary_system_prompt,
+            saved_summary_chunk_system_prompt,
+            saved_summary_chunk_prompt,
+            saved_summary_combine_system_prompt,
+            saved_summary_combine_prompt,
+        ) = match SettingsRepository::get_model_config(&pool).await {
+            Ok(Some(config)) => (
+                config.summary_system_prompt,
+                config.summary_chunk_system_prompt,
+                config.summary_chunk_prompt,
+                config.summary_combine_system_prompt,
+                config.summary_combine_prompt,
+            ),
+            Ok(None) | Err(_) => (None, None, None, None, None),
+        };
+
         // Get Ollama endpoint if provider is Ollama
         let ollama_endpoint = if provider == LLMProvider::Ollama {
             match SettingsRepository::get_model_config(&pool).await {
@@ -525,6 +543,11 @@ impl SummaryService {
             summary_language.as_deref(),
             detected_summary_language.as_deref(),
             cached_english.as_deref(),
+            saved_summary_system_prompt.as_deref(),
+            saved_summary_chunk_system_prompt.as_deref(),
+            saved_summary_chunk_prompt.as_deref(),
+            saved_summary_combine_system_prompt.as_deref(),
+            saved_summary_combine_prompt.as_deref(),
         )
         .await;
 

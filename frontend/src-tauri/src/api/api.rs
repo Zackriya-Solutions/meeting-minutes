@@ -600,6 +600,31 @@ pub async fn api_get_model_config<R: Runtime>(
 }
 
 #[tauri::command]
+pub fn api_get_default_summary_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_chunk_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_chunk_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_combine_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_combine_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string()
+}
+
+#[tauri::command]
 pub async fn api_save_model_config<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
@@ -608,6 +633,11 @@ pub async fn api_save_model_config<R: Runtime>(
     whisper_model: String,
     api_key: Option<String>,
     ollama_endpoint: Option<String>,
+    summary_system_prompt: Option<String>,
+    summary_chunk_system_prompt: Option<String>,
+    summary_chunk_prompt: Option<String>,
+    summary_combine_system_prompt: Option<String>,
+    summary_combine_prompt: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -619,12 +649,47 @@ pub async fn api_save_model_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
+    // Read existing config to preserve prompts not explicitly provided
+    let existing_config = match SettingsRepository::get_model_config(pool).await {
+        Ok(config) => config,
+        Err(e) => {
+            log_warn!("Failed to read existing summary prompts, using defaults: {}", e);
+            None
+        }
+    };
+
+    let summary_system_prompt_to_save = summary_system_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_system_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string());
+    let summary_chunk_system_prompt_to_save = summary_chunk_system_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_chunk_system_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string());
+    let summary_chunk_prompt_to_save = summary_chunk_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_chunk_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string());
+    let summary_combine_system_prompt_to_save = summary_combine_system_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_combine_system_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string());
+    let summary_combine_prompt_to_save = summary_combine_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_combine_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string());
+
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
         &provider,
         &model,
         &whisper_model,
         ollama_endpoint.as_deref(),
+        Some(&summary_system_prompt_to_save),
+        Some(&summary_chunk_system_prompt_to_save),
+        Some(&summary_chunk_prompt_to_save),
+        Some(&summary_combine_system_prompt_to_save),
+        Some(&summary_combine_prompt_to_save),
     )
     .await
     {

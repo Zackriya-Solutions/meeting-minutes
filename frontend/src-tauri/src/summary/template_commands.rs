@@ -1,6 +1,6 @@
 use crate::summary::templates;
 use serde::{Deserialize, Serialize};
-use tauri::Runtime;
+use tauri::{Manager, Runtime};
 use tracing::{info, warn};
 
 /// Template metadata for UI display
@@ -14,6 +14,25 @@ pub struct TemplateInfo {
 
     /// Brief description of the template's purpose
     pub description: String,
+
+    /// Whether this template is currently overridden by user JSON
+    #[serde(rename = "isCustom")]
+    pub is_custom: bool,
+
+    /// Source currently used for this template (custom, bundled, or builtIn)
+    pub source: templates::TemplateSource,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TemplateJsonResponse {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "templateJson")]
+    pub template_json: String,
+    #[serde(rename = "isCustom")]
+    pub is_custom: bool,
+    pub source: templates::TemplateSource,
 }
 
 /// Detailed template structure for preview/debugging
@@ -32,6 +51,30 @@ pub struct TemplateDetails {
     pub sections: Vec<String>,
 }
 
+fn ensure_custom_templates_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
+    templates::set_custom_templates_dir(app_data_dir.join("templates"));
+    Ok(())
+}
+
+fn template_json_response(
+    template_id: String,
+    template_json: templates::TemplateJson,
+) -> Result<TemplateJsonResponse, String> {
+    let template = templates::validate_and_parse_template(&template_json.json)?;
+    Ok(TemplateJsonResponse {
+        id: template_id,
+        name: template.name,
+        description: template.description,
+        template_json: template_json.json,
+        is_custom: template_json.source == templates::TemplateSource::Custom,
+        source: template_json.source,
+    })
+}
+
 /// Lists all available templates
 ///
 /// Returns templates from both built-in (embedded) and custom (user data directory) sources.
@@ -41,24 +84,95 @@ pub struct TemplateDetails {
 /// Vector of TemplateInfo with id, name, and description for each template
 #[tauri::command]
 pub async fn api_list_templates<R: Runtime>(
-    _app: tauri::AppHandle<R>,
+    app: tauri::AppHandle<R>,
 ) -> Result<Vec<TemplateInfo>, String> {
     info!("api_list_templates called");
+    ensure_custom_templates_dir(&app)?;
 
     let templates = templates::list_templates();
 
     let template_infos: Vec<TemplateInfo> = templates
         .into_iter()
-        .map(|(id, name, description)| TemplateInfo {
-            id,
-            name,
-            description,
+        .map(|(id, name, description)| {
+            let source = templates::get_template_json_with_source(&id)
+                .map(|template_json| template_json.source)
+                .unwrap_or(templates::TemplateSource::BuiltIn);
+            TemplateInfo {
+                id,
+                name,
+                description,
+                is_custom: source == templates::TemplateSource::Custom,
+                source,
+            }
         })
         .collect();
 
     info!("Found {} available templates", template_infos.len());
 
     Ok(template_infos)
+}
+
+#[tauri::command]
+pub async fn api_get_template_json<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateJsonResponse, String> {
+    info!(
+        "api_get_template_json called for template_id: {}",
+        template_id
+    );
+    ensure_custom_templates_dir(&app)?;
+
+    let template_json = templates::get_template_json_with_source(&template_id)?;
+    template_json_response(template_id, template_json)
+}
+
+#[tauri::command]
+pub async fn api_get_default_template_json<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateJsonResponse, String> {
+    info!(
+        "api_get_default_template_json called for template_id: {}",
+        template_id
+    );
+    ensure_custom_templates_dir(&app)?;
+
+    let template_json = templates::get_default_template_json_with_source(&template_id)?;
+    template_json_response(template_id, template_json)
+}
+
+#[tauri::command]
+pub async fn api_save_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+    template_json: String,
+) -> Result<TemplateJsonResponse, String> {
+    info!("api_save_template called for template_id: {}", template_id);
+    ensure_custom_templates_dir(&app)?;
+
+    let template = templates::save_custom_template_json(&template_id, &template_json)?;
+    Ok(TemplateJsonResponse {
+        id: template_id,
+        name: template.name,
+        description: template.description,
+        template_json,
+        is_custom: true,
+        source: templates::TemplateSource::Custom,
+    })
+}
+
+#[tauri::command]
+pub async fn api_reset_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateJsonResponse, String> {
+    info!("api_reset_template called for template_id: {}", template_id);
+    ensure_custom_templates_dir(&app)?;
+
+    templates::reset_custom_template(&template_id)?;
+    let template_json = templates::get_template_json_with_source(&template_id)?;
+    template_json_response(template_id, template_json)
 }
 
 /// Gets detailed information about a specific template
@@ -73,7 +187,10 @@ pub async fn api_get_template_details<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<TemplateDetails, String> {
-    info!("api_get_template_details called for template_id: {}", template_id);
+    info!(
+        "api_get_template_details called for template_id: {}",
+        template_id
+    );
 
     let template = templates::get_template(&template_id)?;
 
