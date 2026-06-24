@@ -8,6 +8,21 @@
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 
+export interface RemoteConfig {
+  endpointUrl: string;
+  bearerToken: string;
+  model: string;
+  defaultLanguage: string;
+  minSpeakers: number | null;
+  maxSpeakers: number | null;
+}
+
+export interface RemoteTestResult {
+  elapsedMs: number;
+  segmentCount: number;
+  textPreview: string;
+}
+
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
   model: string;
@@ -111,6 +126,25 @@ export class ConfigService {
       apiKey,
       model,
     });
+  }
+
+  async getTranscriptRemoteConfig(): Promise<RemoteConfig | null> {
+    const raw = await invoke<string | null>('api_get_transcript_remote_config');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as RemoteConfig;
+    } catch (err) {
+      console.error('Failed to parse remote config JSON:', err);
+      return null;
+    }
+  }
+
+  async saveTranscriptRemoteConfig(config: RemoteConfig): Promise<void> {
+    await invoke<void>('api_save_transcript_remote_config', { config });
+  }
+
+  async testTranscriptRemoteConnection(config: RemoteConfig): Promise<RemoteTestResult> {
+    return invoke<RemoteTestResult>('api_test_transcript_remote_connection', { config });
   }
 }
 

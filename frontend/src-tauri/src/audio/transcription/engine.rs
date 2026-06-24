@@ -74,6 +74,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
         Err(e) => {
@@ -82,6 +83,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
     };
@@ -135,6 +137,22 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "remote" => {
+            // ponytail: validation for remote = endpoint_url present in saved config.
+            // The worker may be reachable or not; we cannot probe here without side
+            // effects. Defer full reachability to the user-driven "Test connection"
+            // button in Settings.
+            info!("🔍 Validating RemoteProvider configuration...");
+            crate::api::api::api_get_transcript_remote_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to read remote transcript config: {e}"))?
+            .ok_or_else(|| "RemoteProvider selected but no configuration saved. Open Settings → Transcription and configure an endpoint.".to_string())?;
+            Ok(())
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -170,6 +188,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
         Err(e) => {
@@ -178,6 +197,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
     };
@@ -211,6 +231,36 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "remote" => {
+            // ponytail: instantiate a fresh RemoteProvider per engine request; the
+            // provider holds a reqwest::Client + config and is cheap to construct.
+            // Per-segment cloning of the engine is fine because client connections
+            // are pooled inside reqwest::Client.
+            info!("🌐 Initializing RemoteProvider transcription engine");
+
+            let cfg_json = crate::api::api::api_get_transcript_remote_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to read remote transcript config: {e}"))?
+            .ok_or_else(|| "RemoteProvider selected but no configuration saved".to_string())?;
+
+            let payload: crate::api::api::RemoteConfigPayload = serde_json::from_str(&cfg_json)
+                .map_err(|e| format!("RemoteProvider config is not valid JSON: {e}"))?;
+            let prov_cfg = super::remote_provider::RemoteProviderConfig {
+                endpoint_url: payload.endpoint_url,
+                bearer_token: payload.bearer_token,
+                model: if payload.model.is_empty() { "default".into() } else { payload.model },
+                default_lang: if payload.default_language.is_empty() { "en".into() } else { payload.default_language },
+                min_speakers: payload.min_speakers,
+                max_speakers: payload.max_speakers,
+                request_timeout: std::time::Duration::from_secs(300),
+            };
+            let provider = super::remote_provider::RemoteProvider::new(prov_cfg);
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");

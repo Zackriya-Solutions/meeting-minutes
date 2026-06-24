@@ -231,6 +231,38 @@ impl SettingsRepository {
         Ok(api_key)
     }
 
+    /// Save the RemoteProvider configuration as a JSON blob.
+    /// Other providers ignore this column. Stored per-row at id='1'.
+    pub async fn save_transcript_remote_config(
+        pool: &SqlitePool,
+        config_json: &str,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, remoteConfig)
+            VALUES ('1', 'remote', 'default', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                remoteConfig = excluded.remoteConfig
+            "#,
+        )
+        .bind(config_json)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Fetch the RemoteProvider configuration JSON, if any.
+    pub async fn get_transcript_remote_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT remoteConfig FROM transcript_settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+        Ok(row.and_then(|(c,)| c))
+    }
+
     pub async fn delete_api_key(
         pool: &SqlitePool,
         provider: &str,
