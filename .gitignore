@@ -77,3 +77,6 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+# python sidecar venv
+sidecar/.venv/
+sidecar/__pycache__/

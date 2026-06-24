@@ -6,6 +6,15 @@ import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { RecordingStatusBar } from './RecordingStatusBar';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  LangView,
+  LANG_LABEL,
+  LANG_ORDER,
+  targetForView,
+  translateSegment,
+  alreadyTarget,
+  copyText,
+} from '@/lib/meetLog';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -146,6 +155,87 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
     return () => window.removeEventListener('confidenceIndicatorChanged', handleConfidenceChange);
   }, []);
 
+  // ── Real-time translation (Original/Thai/English/Bilingual) + copy ───────
+  const [langView, setLangView] = useState<LangView>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('meetLogLangView') as LangView | null;
+      if (saved && LANG_ORDER.includes(saved)) return saved;
+    }
+    return 'original';
+  });
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  // translations[id] = { th?, en? } per-segment, per-target
+  const [translations, setTranslations] = useState<Record<string, { th?: string; en?: string }>>({});
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const chooseView = (v: LangView) => {
+    setLangView(v);
+    setLangMenuOpen(false);
+    if (typeof window !== 'undefined') localStorage.setItem('meetLogLangView', v);
+  };
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1400);
+  };
+
+  const handleCopy = async (text: string, label = 'Copied') => {
+    const ok = await copyText(text);
+    showToast(ok ? label : 'Copy failed');
+  };
+
+  // Translate finalized segments into the active target as needed.
+  useEffect(() => {
+    const target = targetForView(langView);
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      for (const t of transcripts) {
+        if (t.is_partial) continue;
+        const text = (t.text || '').trim();
+        if (!text || alreadyTarget(text, target)) continue;
+        if (translations[t.id]?.[target] !== undefined) continue;
+        const out = await translateSegment(text, target);
+        if (cancelled) return;
+        setTranslations((prev) => {
+          if (prev[t.id]?.[target] !== undefined) return prev;
+          return { ...prev, [t.id]: { ...prev[t.id], [target]: out } };
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [langView, transcripts, translations]);
+
+  // Translation shown for a transcript given the current view (or undefined).
+  const translatedFor = (t: Transcript): string | undefined => {
+    const target = targetForView(langView);
+    if (!target) return undefined;
+    const text = (t.text || '').trim();
+    if (alreadyTarget(text, target)) return undefined;
+    return translations[t.id]?.[target];
+  };
+
+  // Build a markdown copy of the whole transcript honoring the current view.
+  const copyAll = async () => {
+    const lines = transcripts.map((t) => {
+      const ts = t.audio_start_time !== undefined
+        ? formatRecordingTime(t.audio_start_time)
+        : `[${t.timestamp}]`;
+      const original = (t.text || '').trim();
+      const tr = translatedFor(t);
+      if (langView === 'bilingual' && tr && tr !== original) {
+        return `${ts} ${original}\n        ↳ ${tr}`;
+      }
+      if (langView === 'thai' || langView === 'english') return `${ts} ${tr ?? original}`;
+      return `${ts} ${original}`;
+    });
+    await handleCopy(lines.join('\n'), 'Transcript copied');
+  };
+
   // Listen for speech-detected event
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -251,6 +341,77 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
 
   return (
     <div className="px-4 py-2">
+      {/* Meet-log toolbar: language dropdown + แปลเป็นไทย + copy-all */}
+      {transcripts.length > 0 && (
+        <div className="sticky top-0 z-20 flex items-center justify-between bg-white/90 backdrop-blur py-2 mb-1">
+          <span className="text-xs font-medium text-gray-500">Transcript</span>
+          <div className="flex items-center gap-2">
+            {/* Quick action: translate everything to Thai (bilingual) */}
+            <button
+              onClick={() => chooseView('bilingual')}
+              title="แปลทั้ง transcript เป็นไทย (แสดงคู่กับต้นฉบับ)"
+              className={`rounded-md border px-2 py-1 text-xs ${
+                langView === 'bilingual'
+                  ? 'border-blue-500 bg-blue-50 text-blue-600'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              🇹🇭 แปลเป็นไทย
+            </button>
+
+            {/* Language dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setLangMenuOpen((o) => !o)}
+                title="Choose transcript language"
+                className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                <span className="font-semibold">Language:</span>
+                <span className="text-gray-700">{LANG_LABEL[langView]}</span>
+                <span className="text-gray-400">▾</span>
+              </button>
+              {langMenuOpen && (
+                <div className="absolute right-0 z-30 mt-1 w-36 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg">
+                  {LANG_ORDER.map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => chooseView(v)}
+                      className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
+                        v === langView ? 'bg-blue-50 text-blue-600' : 'text-gray-700'
+                      }`}
+                    >
+                      {LANG_LABEL[v]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={copyAll}
+              title="Copy entire transcript"
+              className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              ⧉ Copy all
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Copy toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-gray-900 px-3 py-1.5 text-xs text-white shadow-lg"
+          >
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Recording Status Bar - Sticky at top, always visible when recording */}
       <AnimatePresence>
         {isRecording && (
@@ -281,7 +442,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
             transition={{ duration: 0.15 }}
             className="mb-3"
           >
-            <div className="flex items-start gap-2">
+            <div className="group flex items-start gap-2">
               <Tooltip>
                 <TooltipTrigger>
                   <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
@@ -317,17 +478,51 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                       </p>
                     </div>
                   </div>
-                ) : (
-                  // Regular transcript - simple text
-                  <div className="relative">
-                    <p className="text-base text-gray-800 leading-relaxed" style={{ visibility: 'hidden' }}>
-                      {sizerText}
-                    </p>
-                    <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
-                      {displayText}
-                    </p>
-                  </div>
-                )}
+                ) : (() => {
+                  // Regular transcript with translation view + per-line copy.
+                  const translated = translatedFor(transcript);
+                  const replaceMain = (langView === 'thai' || langView === 'english')
+                    && !!translated && translated.trim().length > 0;
+                  const mainText = replaceMain ? translated : displayText;
+                  const sizerMain = replaceMain ? translated : sizerText;
+                  // partial = faded/italic, final = solid
+                  const isFinal = !transcript.is_partial;
+                  const textColor = isFinal ? 'text-gray-800' : 'text-gray-400 italic';
+                  const copyMain = replaceMain ? translated : transcript.text;
+                  return (
+                    <div>
+                      <div className="relative flex items-start gap-1">
+                        <div className="relative flex-1">
+                          <p className={`text-base ${textColor} leading-relaxed`} style={{ visibility: 'hidden' }}>
+                            {sizerMain}
+                          </p>
+                          <p className={`text-base ${textColor} leading-relaxed absolute top-0 left-0`}>
+                            {mainText}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleCopy(copyMain)}
+                          title="Copy line"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-gray-600 text-xs mt-1 flex-shrink-0"
+                        >
+                          ⧉
+                        </button>
+                      </div>
+                      {langView === 'bilingual' && !!translated && translated !== transcript.text && (
+                        <div className="flex items-start gap-1 mt-0.5">
+                          <p className="flex-1 text-sm text-blue-600/80 leading-relaxed">🇹🇭 {translated}</p>
+                          <button
+                            onClick={() => handleCopy(translated, 'แปลแล้ว — คัดลอก')}
+                            title="Copy translation"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-gray-600 text-xs flex-shrink-0"
+                          >
+                            ⧉
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </motion.div>

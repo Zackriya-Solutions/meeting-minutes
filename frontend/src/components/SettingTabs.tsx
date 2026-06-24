@@ -3,6 +3,7 @@ import { ModelConfig, ModelSettingsModal } from "./ModelSettingsModal"
 import { TranscriptModelProps, TranscriptSettings } from "./TranscriptSettings"
 import { RecordingSettings, RecordingPreferences } from "./RecordingSettings"
 import { About } from "./About";
+import MeetLogSummaryModel from "./MeetLogSummaryModel";
 
 interface SettingTabsProps {
     modelConfig: ModelConfig;
@@ -45,6 +46,7 @@ modelConfig={modelConfig}
 setModelConfig={setModelConfig}
 onSave={onSave}
 />
+    <MeetLogSummaryModel />
   </TabsContent>
 <TabsContent value="transcriptSettings">
     <TranscriptSettings

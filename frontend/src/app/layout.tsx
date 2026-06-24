@@ -5,6 +5,8 @@ import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
+import MeetLogSearch from '@/components/MeetLogSearch'
+import QuickNote from '@/components/QuickNote'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { Toaster, toast } from 'sonner'
 import "sonner/dist/styles.css"
@@ -97,6 +99,29 @@ export default function RootLayout({
         setOnboardingCompleted(false)
       })
   }, [])
+
+  // Quick Note end-of-day rollover (NOTE_ROLLOVER=on_launch): archive past days
+  // + carry pending cards forward. Runs once the main app is shown.
+  useEffect(() => {
+    if (showOnboarding || !onboardingCompleted) return;
+    // Re-apply the saved meeting-log summary model override (lives in Rust memory).
+    const savedModel = typeof window !== 'undefined' ? localStorage.getItem('meetLogSummaryModel') : null;
+    if (savedModel) {
+      invoke('meeting_log_set_summary_model', { model: savedModel }).catch(() => {});
+    }
+    const t = setTimeout(() => {
+      invoke<{ archived_days: string[]; carried: number }>('quick_notes_rollover')
+        .then((res) => {
+          if (res && (res.archived_days.length > 0 || res.carried > 0)) {
+            toast.success('Quick Note rollover', {
+              description: `archived ${res.archived_days.length} day(s), carried ${res.carried} card(s) forward`,
+            });
+          }
+        })
+        .catch((e) => console.error('quick_notes_rollover failed:', e));
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [showOnboarding, onboardingCompleted]);
 
   // Disable context menu in production
   useEffect(() => {
@@ -254,6 +279,8 @@ export default function RootLayout({
                                 <div className="flex">
                                   <Sidebar />
                                   <MainContent>{children}</MainContent>
+                                  <MeetLogSearch />
+                                  <QuickNote />
                                 </div>
                               )}
                               {/* Import audio overlay and dialog */}

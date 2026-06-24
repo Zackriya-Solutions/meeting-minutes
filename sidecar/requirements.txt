@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27
+pythainlp>=5.0
+sqlite-vec>=0.1.6

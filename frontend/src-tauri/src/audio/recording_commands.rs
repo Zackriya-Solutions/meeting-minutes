@@ -224,6 +224,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
             now.format("%Y-%m-%d_%H-%M-%S")
         )
     });
+    // Start the meeting-log session (creates date folder + live transcript file).
+    crate::meeting_log::begin(&effective_meeting_name);
     manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
@@ -282,6 +284,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     if let Some(manager) = manager_guard.as_ref() {
                         manager.add_transcript_segment(segment);
                     }
+                }
+
+                // Live meeting-log: append finalized segments to disk immediately
+                // (crash-safe). Partial hypotheses are skipped to avoid duplicates.
+                if !update.is_partial {
+                    crate::meeting_log::record_final(&update.text, None);
                 }
             }
         });
@@ -395,6 +403,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             now.format("%Y-%m-%d_%H-%M-%S")
         )
     });
+    // Start the meeting-log session (creates date folder + live transcript file).
+    crate::meeting_log::begin(&effective_meeting_name);
     manager.set_meeting_name(Some(effective_meeting_name));
 
     // Set up error callback
@@ -453,6 +463,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     if let Some(manager) = manager_guard.as_ref() {
                         manager.add_transcript_segment(segment);
                     }
+                }
+
+                // Live meeting-log: append finalized segments to disk immediately
+                // (crash-safe). Partial hypotheses are skipped to avoid duplicates.
+                if !update.is_partial {
+                    crate::meeting_log::record_final(&update.text, None);
                 }
             }
         });
@@ -849,6 +865,26 @@ pub async fn stop_recording<R: Runtime>(
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
+
+    // Finalize the meeting-log session: structured summary + daily-log append +
+    // memory indexing. The live transcript is already on disk, so we run this in
+    // the background and notify the frontend when the summary file is ready.
+    {
+        let app_for_log = app.clone();
+        tokio::spawn(async move {
+            if let Some(res) = crate::meeting_log::end().await {
+                let _ = app_for_log.emit(
+                    "meeting-log-finalized",
+                    serde_json::json!({
+                        "summary_path": res.summary_path,
+                        "daily_log_path": res.daily_log_path,
+                        "transcript_path": res.transcript_path,
+                        "topics": res.topics,
+                    }),
+                );
+            }
+        });
+    }
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.

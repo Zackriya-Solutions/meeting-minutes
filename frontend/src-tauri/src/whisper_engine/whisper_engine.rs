@@ -523,6 +523,9 @@ impl WhisperEngine {
         let adaptive_config = hardware_profile.get_whisper_config();
 
         // ADAPTIVE parameters - optimized for current hardware
+        // Technical-term glossary, declared before `params` so it outlives the
+        // initial-prompt pointer whisper-rs holds during `full()`.
+        let glossary_prompt = crate::meeting_log::config().glossary.join(", ");
         let mut params = FullParams::new(SamplingStrategy::BeamSearch {
             beam_size: adaptive_config.beam_size as i32,
             patience: 1.0
@@ -539,6 +542,12 @@ impl WhisperEngine {
         };
         params.set_language(language_code);
         params.set_translate(should_translate);
+
+        // Inject the glossary as whisper's initial prompt so Thai/English
+        // code-switched speech keeps terms like Kafka/ACL/gRPC in English.
+        if !glossary_prompt.is_empty() {
+            params.set_initial_prompt(&glossary_prompt);
+        }
 
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
@@ -640,6 +649,9 @@ impl WhisperEngine {
         let adaptive_config = hardware_profile.get_whisper_config();
 
         // ADAPTIVE parameters - optimized for current hardware
+        // Technical-term glossary, declared before `params` so it outlives the
+        // initial-prompt pointer whisper-rs holds during `full()`.
+        let glossary_prompt = crate::meeting_log::config().glossary.join(", ");
         let mut params = FullParams::new(SamplingStrategy::BeamSearch {
             beam_size: adaptive_config.beam_size as i32,
             patience: 1.0
@@ -656,6 +668,12 @@ impl WhisperEngine {
         };
         params.set_language(language_code);
         params.set_translate(should_translate);
+
+        // Inject the glossary as whisper's initial prompt so Thai/English
+        // code-switched speech keeps terms like Kafka/ACL/gRPC in English.
+        if !glossary_prompt.is_empty() {
+            params.set_initial_prompt(&glossary_prompt);
+        }
 
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards

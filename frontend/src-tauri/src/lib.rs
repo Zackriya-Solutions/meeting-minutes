@@ -48,6 +48,7 @@ pub mod openai;
 pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
+pub mod meeting_log;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
@@ -420,6 +421,9 @@ pub fn run() {
         .setup(|_app| {
             log::info!("Application setup complete");
 
+            // Best-effort: start the local ML sidecar (translation + memory search).
+            meeting_log::sidecar::ensure_started();
+
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
@@ -530,6 +534,19 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
+            meeting_log::commands::meeting_log_config,
+            meeting_log::commands::meeting_log_translate,
+            meeting_log::commands::meeting_log_search,
+            meeting_log::commands::meeting_log_reveal,
+            meeting_log::commands::meeting_log_list_models,
+            meeting_log::commands::meeting_log_set_summary_model,
+            meeting_log::commands::meeting_log_get_summary_model,
+            meeting_log::notes::quick_notes_today,
+            meeting_log::notes::quick_note_add,
+            meeting_log::notes::quick_note_toggle,
+            meeting_log::notes::quick_note_update_text,
+            meeting_log::notes::quick_note_delete,
+            meeting_log::notes::quick_notes_rollover,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,
