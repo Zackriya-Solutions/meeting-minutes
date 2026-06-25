@@ -8,7 +8,7 @@ type RGBA = [number, number, number, number];
 type ThemeMode = 'light' | 'dark';
 type AlertStatus = 'info' | 'success' | 'warning' | 'destructive';
 
-const solidStatuses = ['info', 'success', 'warning', 'recording'] as const;
+const solidStatuses = ['info', 'success', 'warning', 'destructive', 'recording'] as const;
 const alertStatuses: AlertStatus[] = [
   'info',
   'success',
@@ -230,4 +230,40 @@ test('cards, dialogs, and popovers are elevated above the dark page background',
   await expect(dialog).toBeVisible();
   await expect(dialog).not.toHaveCSS('background-color', pageBackground);
   await expect(dialog).toHaveCSS('color', 'rgb(250, 250, 250)');
+});
+
+test('destructive text remains readable on dark semantic surfaces', async ({
+  page,
+}) => {
+  await openSettings(page, 'dark');
+
+  const measurements = await page.evaluate(() => {
+    const bodyBackground = getComputedStyle(document.body).backgroundColor;
+    const probe = document.createElement('div');
+    probe.className = 'bg-card text-destructive';
+    probe.textContent = 'Destructive status text';
+    document.body.appendChild(probe);
+
+    const style = getComputedStyle(probe);
+    const result = {
+      bodyBackground,
+      cardBackground: style.backgroundColor,
+      destructiveText: style.color,
+    };
+
+    probe.remove();
+    return result;
+  });
+
+  const bodyRgb = parseColor(measurements.bodyBackground).slice(0, 3) as RGB;
+  const cardRgb = compositeColor(parseColor(measurements.cardBackground), bodyRgb);
+  const destructiveRgb = compositeColor(
+    parseColor(measurements.destructiveText),
+    cardRgb,
+  );
+
+  expect(
+    contrastRatio(destructiveRgb, cardRgb),
+    'destructive text contrast on dark card',
+  ).toBeGreaterThanOrEqual(4.5);
 });

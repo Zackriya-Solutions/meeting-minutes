@@ -69,6 +69,10 @@ module.exports = {
         DEFAULT: 'hsl(var(--recording))',
         foreground: 'hsl(var(--recording-foreground))'
       },
+      overlay: {
+        DEFAULT: 'hsl(var(--overlay))',
+        foreground: 'hsl(var(--overlay-foreground))'
+      },
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',

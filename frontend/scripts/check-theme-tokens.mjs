@@ -4,8 +4,12 @@ import path from 'node:path';
 const roots = ['src'];
 const forbiddenPatterns = [
   /\bbg-white\b/g,
-  /\b(?:bg|border|divide|ring|text)-(?:slate|gray|zinc|neutral|stone)-\d+\b/g,
-  /#(?:fff(?:fff)?|f9fafb|f3f4f6|e5e7eb|d1d5db|9ca3af|6b7280|4b5563|374151|1f2937|111827)\b/gi,
+  /\bbg-black(?:\/\d+)?\b/g,
+  /\bbg-opacity-\d+\b/g,
+  /\btext-white\b/g,
+  /\b(?:bg|border|border-[trblxy]|divide|placeholder|ring|text)-(?:slate|gray|zinc|neutral|stone)-\d+\b/g,
+  /\b(?:hover:)?(?:bg|border|ring|text)-[a-z-]+\/\d+\/\d+\b/g,
+  /#(?:fff(?:fff)?|f9fafb|f3f4f6|e5e7eb|d1d5db|9ca3af|6b7280|4b5563|374151|1f2937|111827|3b82f6)\b/gi,
 ];
 const allowlist = new Set();
 const failures = [];

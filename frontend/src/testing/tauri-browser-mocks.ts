@@ -27,6 +27,39 @@ const newOnboardingStatus = {
   current_step: 1,
 };
 
+const browserStore = new Map<string, unknown>();
+
+const knownNoopCommands = new Set([
+  'set_audio_backend',
+  'set_language_preference',
+  'set_notification_settings',
+  'set_recording_preferences',
+  'start_analytics_session',
+  'start_audio_level_monitoring',
+  'start_import_audio_command',
+  'start_recording',
+  'start_recording_with_devices_and_meeting',
+  'start_retranscription_command',
+  'stop_audio_level_monitoring',
+  'stop_recording',
+  'track_analytics_disabled',
+  'track_analytics_enabled',
+  'track_analytics_transparency_viewed',
+  'track_custom_prompt_used',
+  'track_daily_active_user',
+  'track_event',
+  'track_feature_used',
+  'track_meeting_deleted',
+  'track_meeting_started',
+  'track_model_changed',
+  'track_recording_started',
+  'track_recording_stopped',
+  'track_settings_changed',
+  'track_summary_generation_completed',
+  'track_summary_regenerated',
+  'track_user_first_launch',
+]);
+
 const commandFixtures: Record<string, unknown> = {
   get_onboarding_status: completedOnboardingStatus,
   get_recording_state: { is_recording: false, is_paused: false },
@@ -51,7 +84,7 @@ const commandFixtures: Record<string, unknown> = {
   },
   api_get_summary: {
     status: 'completed',
-    meeting_name: meeting.title,
+    meetingName: meeting.title,
     meeting_id: meeting.id,
     start: '2026-06-20T09:00:00Z',
     end: '2026-06-20T09:30:00Z',
@@ -114,7 +147,6 @@ const commandFixtures: Record<string, unknown> = {
     },
   ],
   builtin_ai_get_recommended_model: 'qwen3.5:2b',
-  builtin_ai_is_model_ready: true,
   builtin_ai_download_model: null,
   check_first_launch: false,
   check_default_legacy_database: null,
@@ -130,8 +162,7 @@ const commandFixtures: Record<string, unknown> = {
       name: 'parakeet-tdt-0.6b-v3-int8',
       path: '/tmp/models/parakeet-tdt-0.6b-v3-int8',
       size_mb: 670,
-      accuracy: 'High',
-      speed: 'Ultra Fast',
+      speed: 'Ultra Fast (v3)',
       status: 'Available',
       description: 'Recommended local transcription model.',
       quantization: 'Int8',
@@ -170,20 +201,49 @@ export function installTauriBrowserMocks() {
   installed = true;
   mockWindows('main');
   mockIPC(
-    (command) => {
+    (command, payload) => {
       const scenarioFixture = getScenarioFixture(command);
       if (scenarioFixture !== undefined) return scenarioFixture;
-      if (command in commandFixtures) return commandFixtures[command];
-
+      if (command === 'plugin:store|load') return 1;
       if (
-        command.startsWith('track_') ||
-        command.startsWith('plugin:') ||
-        command.startsWith('set_') ||
-        command.startsWith('start_') ||
-        command.startsWith('stop_')
+        command === 'plugin:store|has' ||
+        command === 'plugin:store|get' ||
+        command === 'plugin:store|set'
       ) {
+        const key =
+          typeof payload === 'object' &&
+          payload !== null &&
+          'key' in payload &&
+          typeof payload.key === 'string'
+            ? payload.key
+            : '';
+
+        if (command === 'plugin:store|has') return browserStore.has(key);
+        if (command === 'plugin:store|get') {
+          return [browserStore.get(key), browserStore.has(key)];
+        }
+
+        const value =
+          typeof payload === 'object' &&
+          payload !== null &&
+          'value' in payload
+            ? payload.value
+            : undefined;
+        browserStore.set(key, value);
         return null;
       }
+      if (command === 'plugin:store|save') return null;
+      if (command === 'builtin_ai_is_model_ready') {
+        return (
+          typeof payload === 'object' &&
+          payload !== null &&
+          'modelName' in payload &&
+          payload.modelName === 'qwen3.5:2b'
+        );
+      }
+      if (command in commandFixtures) return commandFixtures[command];
+
+      if (knownNoopCommands.has(command)) return null;
 
       throw new Error(`[E2E fixture missing] ${command}`);
     },

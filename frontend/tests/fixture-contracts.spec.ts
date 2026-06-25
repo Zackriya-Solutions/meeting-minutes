@@ -67,18 +67,65 @@ test('built-in model fixtures expose ready and downloadable states', async ({
   await page.goto('/settings');
   await page.getByRole('tab', { name: 'Summary' }).click();
 
-  const readyModel = page.locator('div').filter({
-    has: page.getByText('Qwen 3.5 2B (Balanced)', { exact: true }),
-  }).filter({
-    has: page.getByText('Ready', { exact: true }),
-  });
-  await expect(readyModel.first()).toBeVisible();
+  const readyModel = page
+    .getByText('Qwen 3.5 2B (Balanced)', { exact: true })
+    .locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]');
+  await expect(readyModel.getByText('Ready', { exact: true })).toBeVisible();
 
-  const downloadableModel = page.locator('div').filter({
-    has: page.getByText('Qwen 3.5 4B (High Quality)', { exact: true }),
-  }).filter({
-    has: page.getByRole('button', { name: 'Download' }),
+  const downloadableModel = page
+    .getByText('Qwen 3.5 4B (High Quality)', { exact: true })
+    .locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]');
+  await expect(
+    downloadableModel.getByRole('button', { name: 'Download' }),
+  ).toBeVisible();
+
+  const readiness = await page.evaluate(async () => {
+    const invoke = (
+      window as typeof window & {
+        __TAURI_INTERNALS__: {
+          invoke: (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
+        };
+      }
+    ).__TAURI_INTERNALS__.invoke;
+
+    return {
+      available: await invoke('builtin_ai_is_model_ready', {
+        modelName: 'qwen3.5:2b',
+      }),
+      unavailable: await invoke('builtin_ai_is_model_ready', {
+        modelName: 'qwen3.5:4b',
+      }),
+    };
   });
-  await expect(downloadableModel.first()).toBeVisible();
+
+  expect(readiness).toEqual({
+    available: true,
+    unavailable: false,
+  });
   expect(missingFixtures).toEqual([]);
+});
+
+test('unknown commands fail loudly instead of matching a prefix', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  const error = await page.evaluate(async () => {
+    const invoke = (
+      window as typeof window & {
+        __TAURI_INTERNALS__: {
+          invoke: (command: string) => Promise<unknown>;
+        };
+      }
+    ).__TAURI_INTERNALS__.invoke;
+
+    try {
+      await invoke('track_unexpected_theme_event');
+      return null;
+    } catch (caught) {
+      return String(caught);
+    }
+  });
+
+  expect(error).toContain('[E2E fixture missing] track_unexpected_theme_event');
 });
