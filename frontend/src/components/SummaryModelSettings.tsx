@@ -276,7 +276,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
               to preserve the selected summary template.
             </p>
             <Textarea
-              value={modelConfig.summarySystemPrompt}
+              value={modelConfig.summarySystemPrompt ?? ''}
               onChange={(event) => setModelConfig((prev) => ({
                 ...prev,
                 summarySystemPrompt: event.target.value,
@@ -292,7 +292,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
               System role used when summarizing each transcript chunk.
             </p>
             <Textarea
-              value={modelConfig.summaryChunkSystemPrompt}
+              value={modelConfig.summaryChunkSystemPrompt ?? ''}
               onChange={(event) => setModelConfig((prev) => ({
                 ...prev,
                 summaryChunkSystemPrompt: event.target.value,
@@ -310,7 +310,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
               where the chunk text should be inserted.
             </p>
             <Textarea
-              value={modelConfig.summaryChunkPrompt}
+              value={modelConfig.summaryChunkPrompt ?? ''}
               onChange={(event) => setModelConfig((prev) => ({
                 ...prev,
                 summaryChunkPrompt: event.target.value,
@@ -326,7 +326,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
               System role used when merging intermediate chunk summaries.
             </p>
             <Textarea
-              value={modelConfig.summaryCombineSystemPrompt}
+              value={modelConfig.summaryCombineSystemPrompt ?? ''}
               onChange={(event) => setModelConfig((prev) => ({
                 ...prev,
                 summaryCombineSystemPrompt: event.target.value,
@@ -344,7 +344,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
               where the intermediate summaries should be inserted.
             </p>
             <Textarea
-              value={modelConfig.summaryCombinePrompt}
+              value={modelConfig.summaryCombinePrompt ?? ''}
               onChange={(event) => setModelConfig((prev) => ({
                 ...prev,
                 summaryCombinePrompt: event.target.value,
