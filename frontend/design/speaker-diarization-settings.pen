@@ -1,0 +1,465 @@
+{
+  "version": "2.11",
+  "name": "Speaker Diarization Settings",
+  "context": "Pencil-level UI plan for speaker diarization settings, live transcript states, and post-call speaker review. Created 2026-06-26.",
+  "children": [
+    {
+      "id": "speaker_diarization_settings_transcription",
+      "type": "frame",
+      "name": "01 Settings - Transcription - Speaker Labels",
+      "context": "Primary settings placement. Controls should be built from reusable settings primitives: SettingsSection, SettingsRow, SettingsStatusBadge, ExpandableAdvancedSettings, ModelAvailabilityRow.",
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 1024,
+      "fill": {
+        "type": "solid",
+        "color": "#0f172a"
+      },
+      "children": [
+        {
+          "id": "settings_header",
+          "type": "text",
+          "text": "Settings / Transcription",
+          "x": 96,
+          "y": 72,
+          "width": 520,
+          "height": 40,
+          "style": {
+            "fontSize": 28,
+            "fontWeight": 700,
+            "color": "#f8fafc"
+          }
+        },
+        {
+          "id": "speaker_section_card",
+          "type": "rect",
+          "x": 96,
+          "y": 152,
+          "width": 880,
+          "height": 620,
+          "radius": 16,
+          "fill": {
+            "type": "solid",
+            "color": "#111827"
+          },
+          "stroke": {
+            "color": "#334155",
+            "width": 1
+          }
+        },
+        {
+          "id": "speaker_section_title",
+          "type": "text",
+          "text": "Speaker labels",
+          "x": 128,
+          "y": 184,
+          "width": 320,
+          "height": 32,
+          "style": {
+            "fontSize": 22,
+            "fontWeight": 700,
+            "color": "#f8fafc"
+          }
+        },
+        {
+          "id": "speaker_section_badge",
+          "type": "badge",
+          "text": "Beta",
+          "x": 312,
+          "y": 184,
+          "width": 64,
+          "height": 28,
+          "fill": {
+            "type": "solid",
+            "color": "#1d4ed8"
+          },
+          "style": {
+            "fontSize": 13,
+            "fontWeight": 600,
+            "color": "#dbeafe"
+          }
+        },
+        {
+          "id": "speaker_section_description",
+          "type": "text",
+          "text": "Label who spoke in the transcript. Live labels are provisional; final labels are applied after the meeting.",
+          "x": 128,
+          "y": 224,
+          "width": 760,
+          "height": 44,
+          "style": {
+            "fontSize": 15,
+            "color": "#94a3b8"
+          }
+        },
+        {
+          "id": "row_enable",
+          "type": "settings-row",
+          "title": "Enable speaker diarization",
+          "description": "Add speaker labels to transcripts without identifying people by voice.",
+          "control": "switch:on",
+          "x": 128,
+          "y": 296,
+          "width": 816,
+          "height": 76
+        },
+        {
+          "id": "row_mode",
+          "type": "settings-row",
+          "title": "Mode",
+          "description": "Recommended: show provisional labels during the call, then refine after recording stops.",
+          "control": "select:Live + post-call refinement",
+          "x": 128,
+          "y": 388,
+          "width": 816,
+          "height": 88
+        },
+        {
+          "id": "row_provisional",
+          "type": "settings-row",
+          "title": "Show provisional labels during call",
+          "description": "Display live Speaker 1 / Speaker 2 labels with a provisional badge.",
+          "control": "switch:on",
+          "x": 128,
+          "y": 492,
+          "width": 816,
+          "height": 76
+        },
+        {
+          "id": "row_post_call",
+          "type": "settings-row",
+          "title": "Run post-call refinement automatically",
+          "description": "After the meeting, analyze the full audio and replace provisional labels when quality is good.",
+          "control": "switch:on",
+          "x": 128,
+          "y": 584,
+          "width": 816,
+          "height": 88
+        },
+        {
+          "id": "row_overlap",
+          "type": "settings-row",
+          "title": "Overlap handling",
+          "description": "Interruptions are marked as Multiple speakers.",
+          "control": "locked-value:Multiple speakers",
+          "x": 128,
+          "y": 688,
+          "width": 816,
+          "height": 64
+        },
+        {
+          "id": "source_quality_card",
+          "type": "rect",
+          "x": 1008,
+          "y": 152,
+          "width": 336,
+          "height": 316,
+          "radius": 16,
+          "fill": {
+            "type": "solid",
+            "color": "#082f49"
+          },
+          "stroke": {
+            "color": "#0369a1",
+            "width": 1
+          }
+        },
+        {
+          "id": "source_quality_title",
+          "type": "text",
+          "text": "Audio source quality",
+          "x": 1032,
+          "y": 184,
+          "width": 260,
+          "height": 28,
+          "style": {
+            "fontSize": 18,
+            "fontWeight": 700,
+            "color": "#e0f2fe"
+          }
+        },
+        {
+          "id": "source_quality_body",
+          "type": "text",
+          "text": "Best results require separate microphone and system audio. If only mixed audio is available, show a warning and keep diarization optional.",
+          "x": 1032,
+          "y": 228,
+          "width": 280,
+          "height": 112,
+          "style": {
+            "fontSize": 14,
+            "color": "#bae6fd"
+          }
+        },
+        {
+          "id": "model_status",
+          "type": "model-availability-row",
+          "text": "Diarization model: Installed / Local",
+          "x": 1032,
+          "y": 368,
+          "width": 280,
+          "height": 48,
+          "status": "local"
+        }
+      ]
+    },
+    {
+      "id": "speaker_diarization_live_transcript",
+      "type": "frame",
+      "name": "02 Live Transcript - Provisional Labels",
+      "context": "Live state. Speaker labels are useful but explicitly provisional. Overlap is marked as Multiple speakers.",
+      "x": 1520,
+      "y": 0,
+      "width": 1440,
+      "height": 1024,
+      "fill": {
+        "type": "solid",
+        "color": "#f8fafc"
+      },
+      "children": [
+        {
+          "id": "live_title",
+          "type": "text",
+          "text": "Live transcript",
+          "x": 96,
+          "y": 72,
+          "width": 360,
+          "height": 40,
+          "style": {
+            "fontSize": 28,
+            "fontWeight": 700,
+            "color": "#0f172a"
+          }
+        },
+        {
+          "id": "live_status_badge",
+          "type": "badge",
+          "text": "Speaker labels provisional",
+          "x": 396,
+          "y": 78,
+          "width": 220,
+          "height": 28,
+          "fill": {
+            "type": "solid",
+            "color": "#fef3c7"
+          },
+          "style": {
+            "fontSize": 13,
+            "fontWeight": 600,
+            "color": "#92400e"
+          }
+        },
+        {
+          "id": "transcript_panel",
+          "type": "rect",
+          "x": 96,
+          "y": 152,
+          "width": 912,
+          "height": 680,
+          "radius": 16,
+          "fill": {
+            "type": "solid",
+            "color": "#ffffff"
+          },
+          "stroke": {
+            "color": "#e2e8f0",
+            "width": 1
+          }
+        },
+        {
+          "id": "line_you",
+          "type": "transcript-line",
+          "speaker": "You",
+          "speakerColor": "#2563eb",
+          "timestamp": "00:12",
+          "text": "Let's walk through the action items first.",
+          "x": 128,
+          "y": 192,
+          "width": 820,
+          "height": 72
+        },
+        {
+          "id": "line_speaker_1",
+          "type": "transcript-line",
+          "speaker": "Speaker 1",
+          "speakerColor": "#16a34a",
+          "timestamp": "00:20",
+          "badge": "Provisional",
+          "text": "I can take the analytics follow-up.",
+          "x": 128,
+          "y": 288,
+          "width": 820,
+          "height": 72
+        },
+        {
+          "id": "line_overlap",
+          "type": "transcript-line",
+          "speaker": "Multiple speakers",
+          "speakerColor": "#f97316",
+          "timestamp": "00:25",
+          "badge": "Overlap",
+          "text": "— yeah, one second — / — can I add something?",
+          "x": 128,
+          "y": 384,
+          "width": 820,
+          "height": 88
+        },
+        {
+          "id": "line_unknown",
+          "type": "transcript-line",
+          "speaker": "Unknown speaker",
+          "speakerColor": "#64748b",
+          "timestamp": "00:34",
+          "badge": "Low confidence",
+          "text": "Short backchannels should not create permanent new speakers.",
+          "x": 128,
+          "y": 496,
+          "width": 820,
+          "height": 88
+        },
+        {
+          "id": "live_side_note",
+          "type": "callout",
+          "title": "Live rule",
+          "text": "Do not feed provisional speaker labels into final summary as if they were authoritative. Prefer post-call final labels.",
+          "x": 1040,
+          "y": 152,
+          "width": 304,
+          "height": 188,
+          "tone": "warning"
+        }
+      ]
+    },
+    {
+      "id": "speaker_diarization_post_call_review",
+      "type": "frame",
+      "name": "03 Meeting Details - Post-call Speaker Review",
+      "context": "Post-call state. Offline labels replace live labels when successful. Review tools handle dense-call mistakes such as split speakers and overlap.",
+      "x": 3040,
+      "y": 0,
+      "width": 1440,
+      "height": 1024,
+      "fill": {
+        "type": "solid",
+        "color": "#f8fafc"
+      },
+      "children": [
+        {
+          "id": "review_title",
+          "type": "text",
+          "text": "Meeting transcript",
+          "x": 96,
+          "y": 72,
+          "width": 420,
+          "height": 40,
+          "style": {
+            "fontSize": 28,
+            "fontWeight": 700,
+            "color": "#0f172a"
+          }
+        },
+        {
+          "id": "final_status_badge",
+          "type": "badge",
+          "text": "Final speaker labels applied",
+          "x": 420,
+          "y": 78,
+          "width": 224,
+          "height": 28,
+          "fill": {
+            "type": "solid",
+            "color": "#dcfce7"
+          },
+          "style": {
+            "fontSize": 13,
+            "fontWeight": 600,
+            "color": "#166534"
+          }
+        },
+        {
+          "id": "review_toolbar",
+          "type": "toolbar",
+          "x": 96,
+          "y": 144,
+          "width": 912,
+          "height": 64,
+          "actions": [
+            "Rename speaker",
+            "Merge speakers",
+            "Split selection",
+            "Mark overlap",
+            "Re-run diarization"
+          ]
+        },
+        {
+          "id": "speaker_list_card",
+          "type": "rect",
+          "x": 1040,
+          "y": 144,
+          "width": 304,
+          "height": 420,
+          "radius": 16,
+          "fill": {
+            "type": "solid",
+            "color": "#ffffff"
+          },
+          "stroke": {
+            "color": "#e2e8f0",
+            "width": 1
+          }
+        },
+        {
+          "id": "speaker_list",
+          "type": "speaker-list",
+          "x": 1064,
+          "y": 176,
+          "width": 256,
+          "height": 328,
+          "speakers": [
+            {
+              "label": "You",
+              "color": "#2563eb",
+              "duration": "18m"
+            },
+            {
+              "label": "Speaker 1",
+              "color": "#16a34a",
+              "duration": "24m"
+            },
+            {
+              "label": "Speaker 2",
+              "color": "#9333ea",
+              "duration": "11m"
+            },
+            {
+              "label": "Unknown / short",
+              "color": "#64748b",
+              "duration": "1m"
+            }
+          ]
+        },
+        {
+          "id": "quality_flags",
+          "type": "callout",
+          "title": "Quality flags",
+          "text": "Show Needs review when clusters are fragmented, too much speech is unknown, or only mixed audio was available.",
+          "x": 1040,
+          "y": 596,
+          "width": 304,
+          "height": 160,
+          "tone": "info"
+        },
+        {
+          "id": "review_notes",
+          "type": "annotation",
+          "text": "Dense-call acceptance: main speakers stable, overlaps honest, manual corrections fast. Do not promise exact attribution for every short interruption.",
+          "x": 96,
+          "y": 864,
+          "width": 900,
+          "height": 72
+        }
+      ]
+    }
+  ]
+}
