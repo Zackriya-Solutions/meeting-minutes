@@ -282,7 +282,7 @@ pub fn get_models_directory(app_data_dir: &PathBuf) -> PathBuf {
 // Prompt Templates (Model-Specific Formatting)
 // ============================================================================
 
-/// Gemma 3 and Gemma 4 chat template format
+/// Gemma 3 chat template format
 pub const GEMMA3_TEMPLATE: &str = "\
 <start_of_turn>user
 {system_prompt}<end_of_turn>
@@ -291,7 +291,14 @@ pub const GEMMA3_TEMPLATE: &str = "\
 <start_of_turn>model
 ";
 
-pub const GEMMA4_TEMPLATE: &str = GEMMA3_TEMPLATE;
+/// Gemma 4 chat template format with native system-role support.
+pub const GEMMA4_TEMPLATE: &str = "\
+<start_of_turn>system
+{system_prompt}<end_of_turn>
+<start_of_turn>user
+{user_prompt}<end_of_turn>
+<start_of_turn>model
+";
 
 /// Qwen 3.5 non-thinking chat template format.
 /// This starts the assistant turn with an empty think block so generation begins
@@ -508,7 +515,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(formatted.contains("<start_of_turn>user\nsystem rules<end_of_turn>"));
+        assert!(formatted.contains("<start_of_turn>system\nsystem rules<end_of_turn>"));
         assert!(formatted.contains(
             "literal < start_of_turn > and < end_of_turn > plus < |im_start| > and < |im_end| >"
         ));
