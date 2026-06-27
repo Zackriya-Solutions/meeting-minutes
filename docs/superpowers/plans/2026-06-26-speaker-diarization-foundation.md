@@ -206,14 +206,14 @@ pub struct SpeakerAssignment {
 }
 
 impl SpeakerAssignment {
-    pub fn unknown(status: DiarizationStatus, method: impl Into<Option<String>>) -> Self {
+    pub fn unknown(status: DiarizationStatus, method: Option<impl Into<String>>) -> Self {
         Self {
             speaker_id: None,
             speaker_label: Some("Unknown speaker".to_string()),
             speaker_color: None,
             is_overlap: false,
             diarization_status: status,
-            diarization_method: method.into(),
+            diarization_method: method.map(Into::into),
             diarization_confidence: None,
         }
     }

@@ -50,14 +50,14 @@ pub struct SpeakerAssignment {
 }
 
 impl SpeakerAssignment {
-    pub fn unknown(status: DiarizationStatus, method: impl Into<Option<String>>) -> Self {
+    pub fn unknown(status: DiarizationStatus, method: Option<impl Into<String>>) -> Self {
         Self {
             speaker_id: None,
             speaker_label: Some("Unknown speaker".to_string()),
             speaker_color: None,
             is_overlap: false,
             diarization_status: status,
-            diarization_method: method.into(),
+            diarization_method: method.map(Into::into),
             diarization_confidence: None,
         }
     }
@@ -104,5 +104,28 @@ mod tests {
             assignment.diarization_method.as_deref(),
             Some("fluid_audio_online")
         );
+    }
+
+    #[test]
+    fn overlap_assignment_preserves_confidence() {
+        let assignment =
+            SpeakerAssignment::overlap(0.91, DiarizationStatus::Provisional, "fluid_audio_online");
+
+        assert_eq!(assignment.diarization_confidence, Some(0.91));
+    }
+
+    #[test]
+    fn unknown_assignment_accepts_string_method() {
+        let assignment =
+            SpeakerAssignment::unknown(DiarizationStatus::NeedsReview, Some("unit_test"));
+
+        assert_eq!(assignment.diarization_method, Some("unit_test".to_string()));
+    }
+
+    #[test]
+    fn unknown_assignment_accepts_no_method() {
+        let assignment = SpeakerAssignment::unknown(DiarizationStatus::NeedsReview, None::<String>);
+
+        assert_eq!(assignment.diarization_method, None);
     }
 }
