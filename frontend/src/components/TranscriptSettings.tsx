@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { SpeakerDiarizationSettings } from './SpeakerDiarizationSettings';
 
 
 export interface TranscriptModelProps {
@@ -219,12 +220,13 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             </div>
                         </div>
                     )}
+
+                    <SpeakerDiarizationSettings />
                 </div>
             </div>
         </div >
     )
 }
-
 
 
 
