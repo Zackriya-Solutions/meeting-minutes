@@ -683,6 +683,8 @@ Do not commit this task alone if compile is broken. Commit together with Task 4 
 
 - Modify: `frontend/src-tauri/src/database/repositories/meeting.rs`
 - Modify: `frontend/src-tauri/src/database/repositories/transcript.rs`
+- Modify: `frontend/src-tauri/src/audio/common.rs` (compile-surface update for new `TranscriptSegment` fields)
+- Modify: `frontend/src-tauri/src/audio/import.rs` (compile-surface test fixture update for new `TranscriptSegment` fields)
 
 - [ ] **Step 1: Update meeting transcript mapping**
 
@@ -751,7 +753,7 @@ Expected after mapping fixes: no diarization-related compile errors. Environment
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/src-tauri/migrations/20260626000100_add_diarization_foundation.sql frontend/src-tauri/src/database/models.rs frontend/src-tauri/src/api/api.rs frontend/src-tauri/src/database/repositories/meeting.rs frontend/src-tauri/src/database/repositories/transcript.rs
+git add frontend/src-tauri/migrations/20260626000100_add_diarization_foundation.sql frontend/src-tauri/src/database/models.rs frontend/src-tauri/src/api/api.rs frontend/src-tauri/src/database/repositories/meeting.rs frontend/src-tauri/src/database/repositories/transcript.rs frontend/src-tauri/src/audio/common.rs frontend/src-tauri/src/audio/import.rs
 git commit -m "feat: persist transcript diarization metadata"
 ```
 
