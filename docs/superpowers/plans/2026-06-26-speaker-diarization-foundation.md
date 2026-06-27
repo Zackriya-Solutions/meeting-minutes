@@ -144,7 +144,7 @@ mod tests {
 Run:
 
 ```bash
-cargo test -p meetily diarization::types::tests::diarization_status_serializes_as_snake_case
+cargo test -p meetily diarization::types::tests
 ```
 
 Expected before implementation: compile fails because `DiarizationStatus` and `SpeakerAssignment` are not defined.
@@ -251,6 +251,27 @@ mod tests {
         assert_eq!(assignment.diarization_status, DiarizationStatus::Provisional);
         assert_eq!(assignment.diarization_method.as_deref(), Some("fluid_audio_online"));
     }
+
+    #[test]
+    fn overlap_assignment_preserves_confidence() {
+        let assignment = SpeakerAssignment::overlap(0.91, DiarizationStatus::Provisional, "fluid_audio_online");
+
+        assert_eq!(assignment.diarization_confidence, Some(0.91));
+    }
+
+    #[test]
+    fn unknown_assignment_accepts_string_method() {
+        let assignment = SpeakerAssignment::unknown(DiarizationStatus::NeedsReview, Some("unit_test"));
+
+        assert_eq!(assignment.diarization_method, Some("unit_test".to_string()));
+    }
+
+    #[test]
+    fn unknown_assignment_accepts_no_method() {
+        let assignment = SpeakerAssignment::unknown(DiarizationStatus::NeedsReview, None::<String>);
+
+        assert_eq!(assignment.diarization_method, None);
+    }
 }
 ```
 
@@ -273,7 +294,7 @@ pub mod diarization;
 Run:
 
 ```bash
-cargo test -p meetily diarization::types::tests::diarization_status_serializes_as_snake_case
+cargo test -p meetily diarization::types::tests
 ```
 
 Expected after implementation: PASS when the Xcode baseline blocker is resolved.
