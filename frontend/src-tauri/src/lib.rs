@@ -644,6 +644,9 @@ pub fn run() {
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
+            // Diarization settings commands
+            diarization::commands::get_diarization_settings,
+            diarization::commands::save_diarization_settings,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,
