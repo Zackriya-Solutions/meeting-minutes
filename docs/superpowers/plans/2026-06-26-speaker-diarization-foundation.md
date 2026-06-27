@@ -257,10 +257,10 @@ mod tests {
 Create `frontend/src-tauri/src/diarization/mod.rs`:
 
 ```rust
-pub mod alignment;
-pub mod commands;
 pub mod types;
 ```
+
+Do not declare `alignment` or `commands` in Task 1. Those files are created by later tasks; declaring them before the files exist would introduce a non-baseline compile failure.
 
 Add this module declaration near the other module declarations in `frontend/src-tauri/src/lib.rs`:
 
@@ -382,6 +382,13 @@ cargo test -p meetily diarization::alignment::tests
 Expected before implementation: compile fails because `assign_speaker_to_transcript` is missing.
 
 - [ ] **Step 3: Implement minimal alignment**
+
+Add the alignment module declaration to `frontend/src-tauri/src/diarization/mod.rs`:
+
+```rust
+pub mod alignment;
+pub mod types;
+```
 
 Insert above the test module in `frontend/src-tauri/src/diarization/alignment.rs`:
 
@@ -723,6 +730,7 @@ git commit -m "feat: persist transcript diarization metadata"
 - Create: `frontend/src-tauri/src/database/repositories/diarization.rs`
 - Modify: `frontend/src-tauri/src/database/repositories/mod.rs` if it exists
 - Modify: `frontend/src-tauri/src/diarization/commands.rs`
+- Modify: `frontend/src-tauri/src/diarization/mod.rs`
 - Modify: `frontend/src-tauri/src/lib.rs`
 
 - [ ] **Step 1: Create repository**
@@ -866,6 +874,14 @@ pub async fn save_diarization_settings<R: Runtime>(
 
 - [ ] **Step 3: Register commands**
 
+Add the commands module declaration to `frontend/src-tauri/src/diarization/mod.rs`:
+
+```rust
+pub mod alignment;
+pub mod commands;
+pub mod types;
+```
+
 In `frontend/src-tauri/src/lib.rs`, add command registrations in the existing `tauri::generate_handler!` list:
 
 ```rust
@@ -886,7 +902,7 @@ Expected: command registration compiles when environment baseline is fixed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src-tauri/src/database/repositories/diarization.rs frontend/src-tauri/src/database/repositories/mod.rs frontend/src-tauri/src/diarization/commands.rs frontend/src-tauri/src/lib.rs
+git add frontend/src-tauri/src/database/repositories/diarization.rs frontend/src-tauri/src/database/repositories/mod.rs frontend/src-tauri/src/diarization/commands.rs frontend/src-tauri/src/diarization/mod.rs frontend/src-tauri/src/lib.rs
 git commit -m "feat: add diarization settings commands"
 ```
 
