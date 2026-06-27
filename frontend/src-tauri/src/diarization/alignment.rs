@@ -27,6 +27,7 @@ pub fn assign_speaker_to_transcript(
         );
     }
 
+    let min_overlap_ratio = normalize_min_overlap_ratio(min_overlap_ratio);
     let mut best_segment: Option<(&SpeakerSegment, f64)> = None;
 
     for segment in segments {
@@ -74,6 +75,14 @@ pub fn assign_speaker_to_transcript(
         diarization_status: segment.diarization_status,
         diarization_method: Some(method.to_string()),
         diarization_confidence: segment.confidence,
+    }
+}
+
+fn normalize_min_overlap_ratio(ratio: f64) -> f64 {
+    if ratio.is_nan() {
+        1.0
+    } else {
+        ratio.clamp(0.0, 1.0)
     }
 }
 
@@ -148,6 +157,107 @@ mod tests {
             &transcript,
             &[segment("Speaker 1", 0.0, 1.0)],
             0.1,
+            "unit_test",
+        );
+
+        assert_eq!(assignment.speaker_label.as_deref(), Some("Unknown speaker"));
+        assert_eq!(
+            assignment.diarization_status,
+            DiarizationStatus::NeedsReview
+        );
+    }
+
+    #[test]
+    fn ignores_segment_below_min_overlap_ratio() {
+        let transcript = TranscriptWindow {
+            transcript_id: "t4".to_string(),
+            audio_start_time: Some(10.0),
+            audio_end_time: Some(20.0),
+        };
+
+        let assignment = assign_speaker_to_transcript(
+            &transcript,
+            &[segment("Speaker 1", 10.0, 12.0)],
+            0.5,
+            "unit_test",
+        );
+
+        assert_eq!(assignment.speaker_label.as_deref(), Some("Unknown speaker"));
+        assert_eq!(
+            assignment.diarization_status,
+            DiarizationStatus::NeedsReview
+        );
+    }
+
+    #[test]
+    fn accepts_segment_at_min_overlap_ratio_boundary() {
+        let transcript = TranscriptWindow {
+            transcript_id: "t5".to_string(),
+            audio_start_time: Some(10.0),
+            audio_end_time: Some(20.0),
+        };
+
+        let assignment = assign_speaker_to_transcript(
+            &transcript,
+            &[segment("Speaker 1", 10.0, 15.0)],
+            0.5,
+            "unit_test",
+        );
+
+        assert_eq!(assignment.speaker_label.as_deref(), Some("Speaker 1"));
+        assert_eq!(assignment.speaker_id.as_deref(), Some("speaker-1"));
+    }
+
+    #[test]
+    fn negative_min_overlap_ratio_behaves_like_zero() {
+        let transcript = TranscriptWindow {
+            transcript_id: "t6".to_string(),
+            audio_start_time: Some(10.0),
+            audio_end_time: Some(20.0),
+        };
+
+        let assignment = assign_speaker_to_transcript(
+            &transcript,
+            &[segment("Speaker 1", 10.0, 11.0)],
+            -0.5,
+            "unit_test",
+        );
+
+        assert_eq!(assignment.speaker_label.as_deref(), Some("Speaker 1"));
+        assert_eq!(assignment.speaker_id.as_deref(), Some("speaker-1"));
+    }
+
+    #[test]
+    fn min_overlap_ratio_above_one_behaves_like_one() {
+        let transcript = TranscriptWindow {
+            transcript_id: "t7".to_string(),
+            audio_start_time: Some(10.0),
+            audio_end_time: Some(20.0),
+        };
+
+        let assignment = assign_speaker_to_transcript(
+            &transcript,
+            &[segment("Speaker 1", 10.0, 20.0)],
+            1.5,
+            "unit_test",
+        );
+
+        assert_eq!(assignment.speaker_label.as_deref(), Some("Speaker 1"));
+        assert_eq!(assignment.speaker_id.as_deref(), Some("speaker-1"));
+    }
+
+    #[test]
+    fn nan_min_overlap_ratio_behaves_like_one() {
+        let transcript = TranscriptWindow {
+            transcript_id: "t8".to_string(),
+            audio_start_time: Some(10.0),
+            audio_end_time: Some(20.0),
+        };
+
+        let assignment = assign_speaker_to_transcript(
+            &transcript,
+            &[segment("Speaker 1", 10.0, 15.0)],
+            f64::NAN,
             "unit_test",
         );
 

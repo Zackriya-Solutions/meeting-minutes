@@ -392,6 +392,8 @@ mod tests {
 }
 ```
 
+Also cover threshold behavior: segments below `min_overlap_ratio` are ignored, segments at the exact boundary are accepted, negative thresholds behave like `0.0`, thresholds above `1.0` behave like `1.0`, and `NaN` behaves conservatively like `1.0`.
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run:
@@ -432,6 +434,7 @@ pub fn assign_speaker_to_transcript(
         return SpeakerAssignment::unknown(DiarizationStatus::NeedsReview, Some(method.to_string()));
     }
 
+    let min_overlap_ratio = normalize_min_overlap_ratio(min_overlap_ratio);
     let mut best_segment: Option<(&SpeakerSegment, f64)> = None;
 
     for segment in segments {
@@ -473,6 +476,14 @@ pub fn assign_speaker_to_transcript(
         diarization_status: segment.diarization_status,
         diarization_method: Some(method.to_string()),
         diarization_confidence: segment.confidence,
+    }
+}
+
+fn normalize_min_overlap_ratio(ratio: f64) -> f64 {
+    if ratio.is_nan() {
+        1.0
+    } else {
+        ratio.clamp(0.0, 1.0)
     }
 }
 ```
