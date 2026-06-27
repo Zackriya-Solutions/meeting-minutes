@@ -15,13 +15,13 @@
 Implementation worktree:
 
 ```text
-/Users/themaddoxed/Desktop/meeting-minutes/.worktrees/speaker-diarization
+/Users/themaddoxed/Desktop/meeting-minutes/.worktrees/codex-port-v042
 ```
 
 Branch:
 
 ```text
-feature/speaker-diarization
+codex-port-v042
 ```
 
 Baseline status observed before implementation:
