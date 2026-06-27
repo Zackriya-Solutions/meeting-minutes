@@ -501,7 +501,7 @@ Expected after implementation: PASS when baseline build environment is fixed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src-tauri/src/diarization/alignment.rs
+git add frontend/src-tauri/src/diarization/alignment.rs frontend/src-tauri/src/diarization/mod.rs
 git commit -m "feat: align diarization segments to transcripts"
 ```
 
