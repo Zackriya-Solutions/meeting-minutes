@@ -10,7 +10,7 @@ const toneClassName: Record<SettingsStatusBadgeTone, string> = {
   final: 'bg-green-100 text-green-800',
   fallback: 'bg-orange-100 text-orange-800',
   review: 'bg-purple-100 text-purple-800',
-  unavailable: 'bg-gray-100 text-gray-700',
+  unavailable: 'bg-muted text-muted-foreground',
 };
 
 interface SettingsStatusBadgeProps {

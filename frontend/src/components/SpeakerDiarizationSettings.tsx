@@ -31,6 +31,27 @@ export function SpeakerDiarizationSettings() {
       .catch(error => console.error('[SpeakerDiarizationSettings] Failed to save:', error));
   };
 
+  const handleEnabledChange = (enabled: boolean) => {
+    if (!enabled) {
+      update({ enabled: false, mode: 'off' });
+      return;
+    }
+
+    update({
+      enabled: true,
+      mode: diarizationSettings.mode === 'off' ? 'live_plus_post_call' : diarizationSettings.mode,
+    });
+  };
+
+  const handleModeChange = (mode: DiarizationMode) => {
+    if (mode === 'off') {
+      update({ mode: 'off', enabled: false });
+      return;
+    }
+
+    update({ mode, enabled: true });
+  };
+
   const liveModeEnabled = diarizationSettings.enabled && diarizationSettings.mode === 'live_plus_post_call';
 
   return (
@@ -46,7 +67,7 @@ export function SpeakerDiarizationSettings() {
           <Switch
             checked={diarizationSettings.enabled}
             disabled={isLoadingDiarizationSettings}
-            onCheckedChange={(enabled) => update({ enabled, mode: enabled ? diarizationSettings.mode : 'off' })}
+            onCheckedChange={handleEnabledChange}
           />
         }
       />
@@ -58,7 +79,7 @@ export function SpeakerDiarizationSettings() {
           <Select
             value={diarizationSettings.mode}
             disabled={!diarizationSettings.enabled || isLoadingDiarizationSettings}
-            onValueChange={(mode) => update({ mode: mode as DiarizationMode })}
+            onValueChange={(mode) => handleModeChange(mode as DiarizationMode)}
           >
             <SelectTrigger className="w-[260px]">
               <SelectValue />
