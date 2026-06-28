@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import type { DiarizationStatus } from "@/types/diarization";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -69,6 +70,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp,
     text,
     confidence,
+    speakerLabel,
+    speakerColor,
+    isOverlap,
+    diarizationStatus,
     isStreaming,
     showConfidence,
 }: {
@@ -76,6 +81,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp: number;
     text: string;
     confidence?: number;
+    speakerLabel?: string | null;
+    speakerColor?: string | null;
+    isOverlap?: boolean | null;
+    diarizationStatus?: DiarizationStatus | null;
     isStreaming: boolean;
     showConfidence: boolean;
 }) {
@@ -97,6 +106,31 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
+                    {(speakerLabel || isOverlap || diarizationStatus) && (
+                        <div className="mb-1 flex items-center gap-2 text-xs">
+                            <span
+                                className="font-medium"
+                                style={{ color: speakerColor || (isOverlap ? '#f97316' : '#475569') }}
+                            >
+                                {isOverlap ? 'Multiple speakers' : speakerLabel}
+                            </span>
+                            {diarizationStatus === 'provisional' && (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
+                                    Provisional
+                                </span>
+                            )}
+                            {diarizationStatus === 'final' && (
+                                <span className="rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800">
+                                    Final
+                                </span>
+                            )}
+                            {diarizationStatus === 'needs_review' && (
+                                <span className="rounded-full bg-purple-100 px-2 py-0.5 font-medium text-purple-800">
+                                    Needs review
+                                </span>
+                            )}
+                        </div>
+                    )}
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
                             <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
@@ -294,6 +328,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        speakerLabel={segment.speaker_label}
+                                        speakerColor={segment.speaker_color}
+                                        isOverlap={segment.is_overlap}
+                                        diarizationStatus={segment.diarization_status}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
@@ -350,6 +388,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        speakerLabel={segment.speaker_label}
+                                        speakerColor={segment.speaker_color}
+                                        isOverlap={segment.is_overlap}
+                                        diarizationStatus={segment.diarization_status}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />

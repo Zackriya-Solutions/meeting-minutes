@@ -315,6 +315,13 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
             duration: update.duration,
+            speaker_id: update.speaker_id,
+            speaker_label: update.speaker_label,
+            speaker_color: update.speaker_color,
+            is_overlap: update.is_overlap,
+            diarization_status: update.diarization_status,
+            diarization_method: update.diarization_method,
+            diarization_confidence: update.diarization_confidence,
           };
 
           // Add to buffer
@@ -383,6 +390,13 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
+            speaker_id: segment.speaker_id,
+            speaker_label: segment.speaker_label,
+            speaker_color: segment.speaker_color,
+            is_overlap: segment.is_overlap,
+            diarization_status: segment.diarization_status,
+            diarization_method: segment.diarization_method,
+            diarization_confidence: segment.diarization_confidence,
           }));
 
           setTranscripts(formattedTranscripts);
@@ -424,6 +438,13 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       audio_start_time: update.audio_start_time,
       audio_end_time: update.audio_end_time,
       duration: update.duration,
+      speaker_id: update.speaker_id,
+      speaker_label: update.speaker_label,
+      speaker_color: update.speaker_color,
+      is_overlap: update.is_overlap,
+      diarization_status: update.diarization_status,
+      diarization_method: update.diarization_method,
+      diarization_confidence: update.diarization_confidence,
     };
 
     setTranscripts(prev => {
@@ -465,7 +486,13 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
+      .map(t => {
+        const speaker = t.is_overlap
+          ? 'Multiple speakers'
+          : (t.speaker_label || undefined);
+        const speakerPrefix = speaker ? ` ${speaker}:` : '';
+        return `${formatTime(t.audio_start_time)}${speakerPrefix} ${t.text}`;
+      })
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 

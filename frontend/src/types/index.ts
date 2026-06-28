@@ -16,6 +16,13 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  speaker_id?: string | null;
+  speaker_label?: string | null;
+  speaker_color?: string | null;
+  is_overlap?: boolean | null;
+  diarization_status?: 'none' | 'provisional' | 'final' | 'fallback_to_live' | 'failed' | 'needs_review' | null;
+  diarization_method?: string | null;
+  diarization_confidence?: number | null;
 }
 
 export interface TranscriptUpdate {
@@ -30,6 +37,13 @@ export interface TranscriptUpdate {
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
   duration: number;          // Segment duration in seconds
+  speaker_id?: string | null;
+  speaker_label?: string | null;
+  speaker_color?: string | null;
+  is_overlap?: boolean | null;
+  diarization_status?: 'none' | 'provisional' | 'final' | 'fallback_to_live' | 'failed' | 'needs_review' | null;
+  diarization_method?: string | null;
+  diarization_confidence?: number | null;
 }
 
 export interface Block {
@@ -107,4 +121,11 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  speaker_id?: string | null;
+  speaker_label?: string | null;
+  speaker_color?: string | null;
+  is_overlap?: boolean | null;
+  diarization_status?: 'none' | 'provisional' | 'final' | 'fallback_to_live' | 'failed' | 'needs_review' | null;
+  diarization_method?: string | null;
+  diarization_confidence?: number | null;
 }
