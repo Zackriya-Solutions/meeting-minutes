@@ -37,11 +37,16 @@ const REMOTE_BLANK: RemoteConfig = {
 
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onModelSelect }: TranscriptSettingsProps) {
     const { selectedLanguage, setSelectedLanguage } = useConfig();
-    const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
+    // TranscriptModelProps state is lifted into useConfig(); we render directly from the
+    // prop on every render and only persist through the provider/model effect below.
+    // No local `uiProvider` indirection: that path re-introduced a sync loop with the
+    // mount-time load in app/settings/page.tsx AND ConfigContext's loadTranscriptConfig
+    // effect, both of which call setTranscriptModelConfig for the same record.
+    const provider = transcriptModelConfig.provider;
+    const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey ?? null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
-    const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
 
     // Remote-specific form state. Loaded from backend on first mount, kept in sync
     // when the user toggles provider => 'remote'.
@@ -64,16 +69,21 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         return () => { cancelled = true; };
     }, []);
 
-    // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
+    // Sync apiKey local state when provider flips away from a cloud backend.
+    // We do NOT mirror provider changes into local state — provider already lives in
+    // `transcriptModelConfig` (controlled). The previous effect `setUiProvider(...)` here
+    // formed one half of a Maximum-update-depth-style cycle: settings/page.tsx and
+    // ConfigContext each had their own mount-time load effect, both called
+    // setTranscriptModelConfig, which propagated to TranscriptSettings and triggered
+    // setUiProvider, which re-rendered the controlled <Select>. With apiKey-state
+    // synchronization now keyed on provider the only side-effect on provider-change
+    // is clearing stale cloud keys, and the effect itself only fires when provider
+    // actually differs by React's bailout rules.
     useEffect(() => {
-        setUiProvider(transcriptModelConfig.provider);
-    }, [transcriptModelConfig.provider]);
-
-    useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
+        if (provider === 'localWhisper' || provider === 'parakeet') {
             setApiKey(null);
         }
-    }, [transcriptModelConfig.provider]);
+    }, [provider]);
 
     const fetchApiKey = async (provider: string) => {
         try {
@@ -86,6 +96,42 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             setApiKey(null);
         }
     };
+
+    // Persist provider/model to backend on user-initiated changes only. Two guards:
+    //  1. `lastSavedRef` tracks the last triple sent to the backend; we skip the save
+    //     when the prop already matches what we persisted. This stops
+    //     mount-time loads in settings/page.tsx and ConfigContext from re-triggering
+    //     a write.
+    //  2. `mountSkipRef` lets the first effect run (the initial mount) pass through
+    //     without firing a save — it only snapshots the persisted state.
+    //  3. A 500ms debounce coalesces burst flips (e.g. provider/model picked together).
+    const lastSavedRef = useRef<{ provider: string; model: string } | null>(null);
+    const mountSkipRef = useRef(true);
+    useEffect(() => {
+        if (mountSkipRef.current) {
+            mountSkipRef.current = false;
+            lastSavedRef.current = {
+                provider: transcriptModelConfig.provider,
+                model: transcriptModelConfig.model,
+            };
+            return;
+        }
+        const last = lastSavedRef.current;
+        if (last && last.provider === transcriptModelConfig.provider && last.model === transcriptModelConfig.model) {
+            return;
+        }
+        const handle = window.setTimeout(() => {
+            void configService.saveTranscriptConfig(transcriptModelConfig as TranscriptModelProps)
+                .then(() => {
+                    lastSavedRef.current = {
+                        provider: transcriptModelConfig.provider,
+                        model: transcriptModelConfig.model,
+                    };
+                })
+                .catch((err) => console.error('saveTranscriptConfig:', err));
+        }, 500);
+        return () => window.clearTimeout(handle);
+    }, [transcriptModelConfig.provider, transcriptModelConfig.model]);
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
@@ -163,28 +209,33 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </Label>
                         <div className="flex space-x-2 mx-1">
                             <Select
-                                value={uiProvider}
+                                value={provider}
                                 onValueChange={(value) => {
-                                    const provider = value as TranscriptModelProps['provider'];
-                                    setUiProvider(provider);
+                                    const next = value as TranscriptModelProps['provider'];
                                     // tally: cloud providers need api key backend lookup; remote
                                     // brings its own config in the RemoteConfig JSON.
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'remote') {
-                                        fetchApiKey(provider);
+                                    if (next !== 'localWhisper' && next !== 'parakeet' && next !== 'remote') {
+                                        fetchApiKey(next);
                                     }
-                                    if (provider === 'remote') {
+                                    if (next === 'remote') {
                                         setApiKey(null);
                                     }
-                                    // ponytail: persist provider choice so the next mount keeps it.
-                                    void configService.saveTranscriptConfig({
+                                    // Mirror into lifted state. Persistence is handled by the
+                                    // dedicated debounced effect below, never inline — inline
+                                    // saves during onValueChange can land mid-render and
+                                    // re-trigger the loadTranscriptConfig effects on
+                                    // settings/page.tsx and ConfigContext (the sync-loop root).
+                                    const nextModel = transcriptModelConfig.model || (
+                                        next === 'groq' ? 'whisper-large-v3'
+                                            : next === 'localWhisper' ? 'large-v3'
+                                                : next === 'parakeet' ? transcriptModelConfig.model
+                                                    : ''
+                                    );
+                                    setTranscriptModelConfig({
                                         ...transcriptModelConfig,
-                                        provider,
-                                        model: transcriptModelConfig.model || (
-                                            provider === 'groq' ? 'whisper-large-v3'
-                                                : provider === 'localWhisper' ? 'large-v3'
-                                                : ''
-                                        ),
-                                    } as TranscriptModelProps).catch((e) => console.error('saveTranscriptConfig(provider):', e));
+                                        provider: next,
+                                        model: nextModel,
+                                    } as TranscriptModelProps);
                                 }}
                             >
                                 <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
@@ -198,19 +249,19 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'remote' && (
+                            {provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'remote' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
                                         const model = value as TranscriptModelProps['model'];
-                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
+                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider, model });
                                     }}
                                 >
                                     <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
                                         <SelectValue placeholder="Select model" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {modelOptions[uiProvider].map((model) => (
+                                        {modelOptions[provider].map((model) => (
                                             <SelectItem key={model} value={model}>{model}</SelectItem>
                                         ))}
                                     </SelectContent>
@@ -220,7 +271,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     </div>
 
-                    {uiProvider === 'remote' && (
+                    {provider === 'remote' && (
                         <div className="space-y-3 mt-4 border-t pt-4">
                             <div className="grid gap-1">
                                 <Label>Endpoint URL</Label>
@@ -317,7 +368,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     )}
 
-                    {uiProvider === 'localWhisper' && (
+                    {provider === 'localWhisper' && (
                         <div className="mt-6">
                             <ModelManager
                                 selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
@@ -327,7 +378,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     )}
 
-                    {uiProvider === 'parakeet' && (
+                    {provider === 'parakeet' && (
                         <div className="mt-6">
                             <ParakeetModelManager
                                 selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
@@ -341,7 +392,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         <LanguageSelection
                             selectedLanguage={selectedLanguage || 'auto'}
                             onLanguageChange={(lang) => setSelectedLanguage(lang)}
-                            provider={uiProvider}
+                            provider={provider}
                         />
                     </div>
 
