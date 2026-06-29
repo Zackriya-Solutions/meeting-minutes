@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
@@ -8,6 +8,8 @@ import { Eye, EyeOff, Lock, Unlock, Wifi } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 import { configService, RemoteConfig } from '@/services/configService';
+import { useConfig } from '@/contexts/ConfigContext';
+import { LanguageSelection } from './LanguageSelection';
 
 
 export interface TranscriptModelProps {
@@ -34,6 +36,7 @@ const REMOTE_BLANK: RemoteConfig = {
 };
 
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onModelSelect }: TranscriptSettingsProps) {
+    const { selectedLanguage, setSelectedLanguage } = useConfig();
     const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
@@ -88,7 +91,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         parakeet: [], // Model selection handled by ParakeetModelManager component
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
-        groq: ['llama-3.3-70b-versatile'],
+        groq: ['whisper-large-v3', 'whisper-large-v3-turbo', 'distil-whisper-large-v3-en'],
         openai: ['gpt-4o'],
     };
     const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
@@ -164,16 +167,24 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    // The four cloud-only providers need a backend API key lookup.
-                                    // "remote" carries its own config (endpointUrl + bearerToken
-                                    // inside the RemoteConfig JSON) — never look up a stale key.
+                                    // tally: cloud providers need api key backend lookup; remote
+                                    // brings its own config in the RemoteConfig JSON.
                                     if (provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'remote') {
                                         fetchApiKey(provider);
                                     }
-                                    // ponytail: clear out cloud-specific api-key state when entering remote.
                                     if (provider === 'remote') {
                                         setApiKey(null);
                                     }
+                                    // ponytail: persist provider choice so the next mount keeps it.
+                                    void configService.saveTranscriptConfig({
+                                        ...transcriptModelConfig,
+                                        provider,
+                                        model: transcriptModelConfig.model || (
+                                            provider === 'groq' ? 'whisper-large-v3'
+                                                : provider === 'localWhisper' ? 'large-v3'
+                                                : ''
+                                        ),
+                                    } as TranscriptModelProps).catch((e) => console.error('saveTranscriptConfig(provider):', e));
                                 }}
                             >
                                 <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
@@ -182,10 +193,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
-                                    <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
-                                    <SelectItem value="groq">☁️ Groq</SelectItem>
-                                    <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
+                                    <SelectItem value="groq">☁️ Groq (Cloud Whisper)</SelectItem>
                                     <SelectItem value="remote">🌐 Remote HTTPS (Generic)</SelectItem>
                                 </SelectContent>
                             </Select>
@@ -328,6 +336,14 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             />
                         </div>
                     )}
+
+                    <div className="mt-6">
+                        <LanguageSelection
+                            selectedLanguage={selectedLanguage || 'auto'}
+                            onLanguageChange={(lang) => setSelectedLanguage(lang)}
+                            provider={uiProvider}
+                        />
+                    </div>
 
 
                     {requiresApiKey && (

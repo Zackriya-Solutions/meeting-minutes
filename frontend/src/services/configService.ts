@@ -70,6 +70,22 @@ export class ConfigService {
   }
 
   /**
+   * ponytail: persist provider/model/apiKey triple to the Tauri settings store.
+   * Provider-only flips (no model change yet) flow through here so the
+   * user's selection survives page reload / recording cycles. The Rust
+   * command `api_save_transcript_config` upserts (provider, model) in
+   * `transcript_settings` and, when api_key is Some+non-empty, the
+   * matching column (groqApiKey etc.).
+   */
+  async saveTranscriptConfig(config: TranscriptModelProps): Promise<{ status: string; message: string }> {
+    return invoke<{ status: string; message: string }>('api_save_transcript_config', {
+      provider: config.provider,
+      model: config.model,
+apiKey: config.apiKey ?? null,
+    });
+  }
+
+  /**
    * Get saved summary model configuration
    * @returns Promise with { provider, model, whisperModel }
    */
