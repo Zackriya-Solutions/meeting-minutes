@@ -153,6 +153,22 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             .ok_or_else(|| "RemoteProvider selected but no configuration saved. Open Settings → Transcription and configure an endpoint.".to_string())?;
             Ok(())
         }
+        "groq" => {
+            // ponytail: Groq reqs are only the api_key + a model id;
+            // both come from `transcript_settings` columns we already
+            // store. Network reachability is deferred to the live
+            // transcribe path so we don't add latency on validation.
+            info!("🔍 Validating Groq configuration...");
+            let app_state = app.state::<crate::state::AppState>();
+            let pool = app_state.db_manager.pool();
+            let key = crate::database::repositories::setting::SettingsRepository::get_transcript_api_key(pool, "groq")
+                .await
+                .map_err(|e| format!("Failed to read Groq API key: {e}"))?;
+            if key.as_deref().map(str::is_empty).unwrap_or(true) {
+                return Err("Groq selected but no API key saved. Open Settings → Transcription and paste your Groq API key.".to_string());
+            }
+            Ok(())
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -260,6 +276,34 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 request_timeout: std::time::Duration::from_secs(300),
             };
             let provider = super::remote_provider::RemoteProvider::new(prov_cfg);
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
+        }
+        "groq" => {
+            // ponytail: construct GroqProvider from api_key + model
+            // already on disk. Per-segment cloning is fine because
+            // reqwest::Client pools connections.
+            info!("🦙 Initializing Groq transcription engine");
+
+            let cfg = config;
+
+            let app_state = app.state::<crate::state::AppState>();
+            let pool = app_state.db_manager.pool();
+            let api_key = crate::database::repositories::setting::SettingsRepository::get_transcript_api_key(pool, "groq")
+                .await
+                .map_err(|e| format!("Failed to read Groq API key: {e}"))?
+                .unwrap_or_default();
+
+            if api_key.is_empty() {
+                return Err("Groq selected but no API key saved".to_string());
+            }
+
+            let prov_cfg = super::groq_provider::GroqConfig {
+                api_key,
+                model: if cfg.model.is_empty() { "whisper-large-v3".into() } else { cfg.model },
+                default_lang: "en".into(),
+                request_timeout: std::time::Duration::from_secs(120),
+            };
+            let provider = super::groq_provider::GroqProvider::new(prov_cfg);
             Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {

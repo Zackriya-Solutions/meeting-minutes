@@ -8,6 +8,7 @@ pub mod parakeet_provider;
 pub mod engine;
 pub mod worker;
 pub mod remote_provider;
+pub mod groq_provider;
 
 // Re-export commonly used types
 pub use provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};
@@ -25,3 +26,4 @@ pub use worker::{
     TranscriptUpdate
 };
 pub use remote_provider::{RemoteProvider, RemoteProviderConfig};
+pub use groq_provider::{GroqProvider, GroqConfig};
