@@ -13,9 +13,9 @@ import { LanguageSelection } from './LanguageSelection';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'remote';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'remote' | 'disabled';
     model: string;
-    apiKey?: string | null;
+    apiKeyVal?: string | null;
     /** Remote-only. Backend returns this as a JSON string when present. */
     remoteConfig?: RemoteConfig | null;
 }
@@ -43,7 +43,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     // mount-time load in app/settings/page.tsx AND ConfigContext's loadTranscriptConfig
     // effect, both of which call setTranscriptModelConfig for the same record.
     const provider = transcriptModelConfig.provider;
-    const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey ?? null);
+    const [apiKeyVal, setApiKeyVal] = useState<string | null>(transcriptModelConfig.apiKeyVal ?? null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
@@ -80,8 +80,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     // is clearing stale cloud keys, and the effect itself only fires when provider
     // actually differs by React's bailout rules.
     useEffect(() => {
-        if (provider === 'localWhisper' || provider === 'parakeet') {
-            setApiKey(null);
+        if (provider === 'localWhisper' || provider === 'parakeet' || provider === 'disabled') {
+            setApiKeyVal(null);
         }
     }, [provider]);
 
@@ -90,10 +90,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
             const data = await invoke('api_get_transcript_api_key', { provider }) as string;
 
-            setApiKey(data || '');
+            setApiKeyVal(data || '');
         } catch (err) {
             console.error('Error fetching API key:', err);
-            setApiKey(null);
+            setApiKeyVal(null);
         }
     };
 
@@ -217,8 +217,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     if (next !== 'localWhisper' && next !== 'parakeet' && next !== 'remote') {
                                         fetchApiKey(next);
                                     }
-                                    if (next === 'remote') {
-                                        setApiKey(null);
+                                    if (next === 'remote' || next === 'disabled') {
+                                        setApiKeyVal(null);
                                     }
                                     // Mirror into lifted state. Persistence is handled by the
                                     // dedicated debounced effect below, never inline — inline
@@ -246,26 +246,29 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
                                     <SelectItem value="groq">☁️ Groq (Cloud Whisper)</SelectItem>
                                     <SelectItem value="remote">🌐 Remote HTTPS (Generic)</SelectItem>
+                                    <SelectItem value="disabled">⏸  Disabled (Recording Only — Low CPU/RAM)</SelectItem>
                                 </SelectContent>
                             </Select>
 
-                            {provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'remote' && (
-                                <Select
-                                    value={transcriptModelConfig.model}
-                                    onValueChange={(value) => {
-                                        const model = value as TranscriptModelProps['model'];
-                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider, model });
-                                    }}
-                                >
-                                    <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                        <SelectValue placeholder="Select model" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {modelOptions[provider].map((model) => (
-                                            <SelectItem key={model} value={model}>{model}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            {provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'remote' && provider !== 'disabled' && (
+                                (provider === 'groq' || provider === 'deepgram' || provider === 'elevenLabs' || provider === 'openai') && (
+                                    <Select
+                                        value={transcriptModelConfig.model}
+                                        onValueChange={(value) => {
+                                            const model = value as TranscriptModelProps['model'];
+                                            setTranscriptModelConfig({ ...transcriptModelConfig, provider, model });
+                                        }}
+                                    >
+                                        <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
+                                            <SelectValue placeholder="Select model" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {modelOptions[provider as keyof typeof modelOptions].map((model) => (
+                                                <SelectItem key={model} value={model}>{model}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )
                             )}
 
                         </div>
@@ -407,8 +410,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     type={showApiKey ? "text" : "password"}
                                     className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''
                                         }`}
-                                    value={apiKey || ''}
-                                    onChange={(e) => setApiKey(e.target.value)}
+                                    value={apiKeyVal || ''}
+                                    onChange={(e) => setApiKeyVal(e.target.value)}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
                                     placeholder="Enter your API key"

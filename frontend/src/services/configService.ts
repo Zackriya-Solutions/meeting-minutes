@@ -81,7 +81,7 @@ export class ConfigService {
     return invoke<{ status: string; message: string }>('api_save_transcript_config', {
       provider: config.provider,
       model: config.model,
-apiKey: config.apiKey ?? null,
+      apiKeyVal: config.apiKeyVal ?? null
     });
   }
 

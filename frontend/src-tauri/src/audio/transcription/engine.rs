@@ -169,6 +169,12 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             }
             Ok(())
         }
+        "disabled" => {
+            // ponytail: "disabled" is opt-out of live transcription. No
+            // model to load, no endpoint to validate. Closes #519 + #338.
+            info!("⏸  Transcription is disabled; recording-only mode.");
+            Ok(())
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -310,6 +316,14 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             info!("🎤 Initializing Whisper transcription engine");
             let whisper_engine = get_or_init_whisper(app).await?;
             Ok(TranscriptionEngine::Whisper(whisper_engine))
+        }
+        "disabled" => {
+            // ponytail: opt-out of live transcription. The worker still
+            // runs but every segment call returns Ok(empty). Closes
+            // #519 + #338; user can post-hoc transcribe the WAV.
+            info!("⏸  Initializing DisabledProvider (recording-only mode)");
+            let provider = super::disabled_provider::DisabledProvider;
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
     }
 }
