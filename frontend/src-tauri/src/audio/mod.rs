@@ -4,6 +4,7 @@ pub mod decoder;
 pub mod encode;
 pub mod ffmpeg;
 pub mod vad;
+pub mod soniox;
 
 // Modularized device management
 pub mod devices;
@@ -118,4 +119,3 @@ pub use decoder::{decode_audio_file, DecodedAudio};
 
 // Export audio constants
 pub use constants::AUDIO_EXTENSIONS;
-
