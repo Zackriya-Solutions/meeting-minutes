@@ -7,10 +7,11 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { DEFAULT_SONIOX_REALTIME_MODEL } from '@/constants/modelDefaults';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'soniox' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
@@ -53,12 +54,25 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
+        soniox: [DEFAULT_SONIOX_REALTIME_MODEL],
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = uiProvider === 'soniox' || uiProvider === 'deepgram' || uiProvider === 'elevenLabs' || uiProvider === 'openai' || uiProvider === 'groq';
+
+    const saveCloudConfig = async (provider: TranscriptModelProps['provider'], model: string, key: string | null) => {
+        try {
+            await invoke('api_save_transcript_config', {
+                provider,
+                model,
+                apiKey: key || null
+            });
+        } catch (error) {
+            console.error('Failed to save transcript provider:', error);
+        }
+    };
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -114,6 +128,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     setUiProvider(provider);
                                     if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
+                                        const model = modelOptions[provider][0];
+                                        const nextConfig = { ...transcriptModelConfig, provider, model };
+                                        setTranscriptModelConfig(nextConfig);
+                                        saveCloudConfig(provider, model, apiKey);
                                     }
                                 }}
                             >
@@ -123,6 +141,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="soniox">☁️ Soniox (Cloud)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -136,6 +155,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     onValueChange={(value) => {
                                         const model = value as TranscriptModelProps['model'];
                                         setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
+                                        saveCloudConfig(uiProvider, model, apiKey);
                                     }}
                                 >
                                     <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
@@ -185,6 +205,18 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         }`}
                                     value={apiKey || ''}
                                     onChange={(e) => setApiKey(e.target.value)}
+                                    onBlur={() => {
+                                        if (requiresApiKey) {
+                                            const model = transcriptModelConfig.model || modelOptions[uiProvider][0];
+                                            saveCloudConfig(uiProvider, model, apiKey);
+                                            setTranscriptModelConfig({
+                                                ...transcriptModelConfig,
+                                                provider: uiProvider,
+                                                model,
+                                                apiKey
+                                            });
+                                        }
+                                    }}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
                                     placeholder="Enter your API key"
@@ -224,7 +256,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
 
 
 

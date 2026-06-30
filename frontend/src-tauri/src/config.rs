@@ -11,6 +11,12 @@ pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
+/// Default Soniox model for realtime cloud transcription.
+pub const DEFAULT_SONIOX_REALTIME_MODEL: &str = "stt-rt-v5";
+
+/// Default Soniox model for async cloud transcription of existing files.
+pub const DEFAULT_SONIOX_ASYNC_MODEL: &str = "stt-async-v5";
+
 /// Whisper model catalog with metadata for all supported models.
 /// Used by both WhisperEngine::discover_models() and discover_models_standalone().
 ///

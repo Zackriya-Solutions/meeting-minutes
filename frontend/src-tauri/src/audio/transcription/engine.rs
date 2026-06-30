@@ -135,10 +135,23 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "soniox" => {
+            info!("🔍 Validating Soniox API key...");
+            match crate::audio::soniox::validate_configured_api_key(app).await {
+                Ok(()) => {
+                    info!("✅ Soniox API key is configured");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Soniox validation failed: {}", e);
+                    Err(e)
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for recording. Please select 'localWhisper', 'parakeet', or 'soniox'.",
                 other
             ))
         }
@@ -212,10 +225,24 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 }
             }
         }
+        "soniox" => {
+            Err("Soniox realtime transcription is handled by the Soniox streaming worker".to_string())
+        }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");
             let whisper_engine = get_or_init_whisper(app).await?;
             Ok(TranscriptionEngine::Whisper(whisper_engine))
+        }
+    }
+}
+
+pub async fn is_soniox_transcription_provider<R: Runtime>(app: &AppHandle<R>) -> bool {
+    match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        Ok(Some(config)) => config.provider == crate::audio::soniox::PROVIDER,
+        Ok(None) => false,
+        Err(e) => {
+            warn!("⚠️ Failed to read transcript config while checking Soniox provider: {}", e);
+            false
         }
     }
 }

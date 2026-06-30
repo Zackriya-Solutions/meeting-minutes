@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { DEFAULT_SONIOX_ASYNC_MODEL } from '@/constants/modelDefaults';
 
 export interface RawModelInfo {
   name: string;
@@ -8,7 +9,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'soniox';
   name: string;
   displayName: string;
   size_mb: number;
@@ -77,6 +78,13 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    allModels.push({
+      provider: 'soniox',
+      name: DEFAULT_SONIOX_ASYNC_MODEL,
+      displayName: `☁️ Soniox: ${DEFAULT_SONIOX_ASYNC_MODEL}`,
+      size_mb: 0,
+    });
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -88,7 +96,8 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'soniox' && m.provider === 'soniox')
     );
 
     // Only set default model if user hasn't manually selected one
