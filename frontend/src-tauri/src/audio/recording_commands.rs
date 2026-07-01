@@ -613,6 +613,29 @@ pub async fn stop_recording<R: Runtime>(
         info!("ℹ️ No transcription task found to wait for");
     }
 
+    // Step 2.5: Drain any chunks that were buffered while transcription was paused.
+    // The worker task above only drains the live receiver; chunks that sat in
+    // PAUSED_CHUNKS at the moment TRANSCRIPTION_PAUSED was set are still owned by
+    // the global mutex. Re-acquire the live engine (still loaded at this point)
+    // and transcribe them so a paused-then-stopped recording is not lost.
+    {
+        let _ = app.emit(
+            "recording-shutdown-progress",
+            serde_json::json!({
+                "stage": "draining_paused_chunks",
+                "message": "Transcribing audio captured while transcription was paused...",
+                "progress": 55
+            }),
+        );
+        let drained = transcription::worker::drain_and_transcribe_paused_chunks(&app).await;
+        if drained > 0 {
+            info!(
+                "\u{2705} Post-recording drain transcribed {} paused chunk(s) before unload",
+                drained
+            );
+        }
+    }
+
     // Step 3: Now safely unload Whisper model after ALL chunks are processed
     let _ = app.emit(
         "recording-shutdown-progress",

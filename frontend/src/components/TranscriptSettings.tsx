@@ -4,13 +4,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { Eye, EyeOff, Lock, Unlock, Wifi } from 'lucide-react';
+import { Eye, EyeOff, Lock, Unlock, Wifi, Save } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 import { configService, RemoteConfig } from '@/services/configService';
 import { useConfig } from '@/contexts/ConfigContext';
 import { LanguageSelection } from './LanguageSelection';
-
 
 export interface TranscriptModelProps {
     provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'remote' | 'disabled';
@@ -55,19 +54,19 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [remoteTestMessage, setRemoteTestMessage] = useState<string>('');
 
     // Load remote config on first mount and whenever provider flips to 'remote'.
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const cfg = await configService.getTranscriptRemoteConfig();
-                if (cancelled) return;
-                if (cfg) setRemoteDraft(cfg);
-            } catch (err) {
-                console.error('Failed to load remote config:', err);
-            }
-        })();
-        return () => { cancelled = true; };
-    }, []);
+        useEffect(() => {
+            let cancelled = false;
+            (async () => {
+                try {
+                    const cfg = await configService.getTranscriptRemoteConfig();
+                    if (cancelled) return;
+                    if (cfg) setRemoteDraft(cfg);
+                } catch (err) {
+                    console.error('Failed to load remote config:', err);
+                }
+            })();
+            return () => { cancelled = true; };
+        }, []);
 
     // Sync apiKey local state when provider flips away from a cloud backend.
     // We do NOT mirror provider changes into local state — provider already lives in
@@ -87,9 +86,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
     const fetchApiKey = async (provider: string) => {
         try {
-
             const data = await invoke('api_get_transcript_api_key', { provider }) as string;
-
             setApiKeyVal(data || '');
         } catch (err) {
             console.error('Error fetching API key:', err);
@@ -132,6 +129,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }, 500);
         return () => window.clearTimeout(handle);
     }, [transcriptModelConfig.provider, transcriptModelConfig.model]);
+
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
@@ -141,6 +139,60 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         openai: ['gpt-4o'],
     };
     const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+
+    // Debounced auto-save for API key changes (separate from provider/model)
+    const apiKeySaveTimeoutRef = useRef<number | null>(null);
+    useEffect(() => {
+        if (requiresApiKey && apiKeyVal && apiKeyVal.length > 0) {
+            if (apiKeySaveTimeoutRef.current) window.clearTimeout(apiKeySaveTimeoutRef.current);
+            apiKeySaveTimeoutRef.current = window.setTimeout(() => {
+                void configService.saveTranscriptConfig({
+                    ...transcriptModelConfig,
+                    apiKeyVal: apiKeyVal
+                } as TranscriptModelProps).catch((err) => console.error('saveTranscriptConfig (apiKey):', err));
+            }, 800);
+        }
+        return () => {
+            if (apiKeySaveTimeoutRef.current) window.clearTimeout(apiKeySaveTimeoutRef.current);
+        };
+    }, [apiKeyVal, requiresApiKey, transcriptModelConfig.provider, transcriptModelConfig.model]);
+
+    // Explicit Save button state. Distinct from auto-save so the user can
+    // force-flush an in-progress debounce. `savedAt` flips to a new Date()
+    // on success; the toast reads it and clears itself after 2s.
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const lastSavedKeyRef = useRef<string | null>(null);
+    const handleSaveApiKey = async () => {
+        if (isApiKeyLocked) {
+            // Vibrate the lock icon so the user understands why the click did nothing.
+            setIsLockButtonVibrating(true);
+            setTimeout(() => setIsLockButtonVibrating(false), 500);
+            return;
+        }
+        if (!apiKeyVal || apiKeyVal.length === 0) {
+            setSaveStatus('error');
+            setSaveError('API key is empty');
+            return;
+        }
+        setSaveStatus('saving');
+        setSaveError(null);
+        try {
+            await configService.saveTranscriptConfig({
+                ...transcriptModelConfig,
+                apiKeyVal: apiKeyVal
+            } as TranscriptModelProps);
+            lastSavedKeyRef.current = apiKeyVal;
+            setSaveStatus('saved');
+            // Auto-clear the "saved" toast after 2s so the button returns to idle.
+            window.setTimeout(() => {
+                setSaveStatus((cur) => (cur === 'saved' ? 'idle' : cur));
+            }, 2000);
+        } catch (err) {
+            setSaveStatus('error');
+            setSaveError(String((err as Error)?.message || err));
+        }
+    };
 
     const updateRemoteDraft = (patch: Partial<RemoteConfig>) => {
         setRemoteDraft(prev => ({ ...prev, ...patch }));
@@ -153,7 +205,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             const res = await configService.testTranscriptRemoteConnection(remoteDraft);
             setRemoteTestStatus('ok');
             setRemoteTestMessage(
-                `Connected in ${res.elapsedMs} ms; ${res.segmentCount} segment(s)${res.textPreview ? `; preview: "${res.textPreview}"` : ''}`
+                `Connected in ${res.elapsedMs} ms; ${res.segmentCount} segment(s)${res.textPreview ? `; preview: \"${res.textPreview}\"` : ''}`
             );
         } catch (err) {
             setRemoteTestStatus('fail');
@@ -270,7 +322,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     </Select>
                                 )
                             )}
-
                         </div>
                     </div>
 
@@ -399,7 +450,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         />
                     </div>
 
-
                     {requiresApiKey && (
                         <div>
                             <Label className="block text-sm font-medium text-gray-700 mb-1">
@@ -408,8 +458,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             <div className="relative mx-1">
                                 <Input
                                     type={showApiKey ? "text" : "password"}
-                                    className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''
-                                        }`}
+                                    className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                                     value={apiKeyVal || ''}
                                     onChange={(e) => setApiKeyVal(e.target.value)}
                                     disabled={isApiKeyLocked}
@@ -422,14 +471,36 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50 rounded-md cursor-not-allowed"
                                     />
                                 )}
-                                <div className="absolute inset-y-0 right-0 pr-1 flex items-center">
+                                <div className="absolute inset-y-0 right-0 pr-1 flex items-center gap-1">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={handleSaveApiKey}
+                                        disabled={isApiKeyLocked || saveStatus === 'saving'}
+                                        title={
+                                            isApiKeyLocked
+                                                ? 'Unlock the field to edit'
+                                                : saveStatus === 'saving'
+                                                    ? 'Saving…'
+                                                    : 'Save API key'
+                                        }
+                                        className={
+                                            saveStatus === 'saved'
+                                                ? 'text-green-600'
+                                                : saveStatus === 'error'
+                                                    ? 'text-red-600'
+                                                    : ''
+                                        }
+                                    >
+                                        <Save className="h-4 w-4" />
+                                    </Button>
                                     <Button
                                         type="button"
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
-                                        className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''
-                                            }`}
+                                        className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}`}
                                         title={isApiKeyLocked ? "Unlock to edit" : "Lock to prevent editing"}
                                     >
                                         {isApiKeyLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
@@ -444,6 +515,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     </Button>
                                 </div>
                             </div>
+                            {saveStatus === 'saved' && (
+                                <p className="text-xs text-green-700 mt-1" role="status">API key saved</p>
+                            )}
+                            {saveStatus === 'error' && saveError && (
+                                <p className="text-xs text-red-700 mt-1" role="alert">{saveError}</p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -451,11 +528,3 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
-
-
-
-
-
-
-
