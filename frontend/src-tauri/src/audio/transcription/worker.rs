@@ -114,6 +114,7 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
     let mut transcribed = 0usize;
     for chunk in buffered {
         let chunk_id = chunk.chunk_id;
+        let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
         // Mirror transcribe_chunk_with_provider's behaviour: skip empty audio,
         // dispatch on engine variant, emit transcript-update on success.
         let res: std::result::Result<(String, Option<f32>, bool), TranscriptionError> = (|| async {
@@ -163,7 +164,6 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
                 if text.trim().is_empty() || !meets_threshold {
                     continue;
                 }
-                let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
                 let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
                 let update = TranscriptUpdate {
                     text,
