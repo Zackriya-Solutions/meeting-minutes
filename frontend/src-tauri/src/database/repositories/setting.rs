@@ -191,20 +191,28 @@ impl SettingsRepository {
                 }
             };
 
-            // Use the actual provider being saved, not hardcoded 'parakeet'
-            // Also preserve the current model if one exists, otherwise use a default
-            let current_model = if provider == "parakeet" {
-                crate::config::DEFAULT_PARAKEET_MODEL
-            } else {
-                // Get the existing model for this provider, or use a sensible default
-                ""
-            };
+            // First get the current model to preserve it
+            let current_model: Option<String> = sqlx::query_scalar(
+                "SELECT model FROM transcript_settings WHERE id = '1' LIMIT 1"
+            )
+            .fetch_optional(pool)
+            .await?;
+
+            let current_model = current_model.unwrap_or_else(|| {
+                if provider == "parakeet" {
+                    crate::config::DEFAULT_PARAKEET_MODEL.to_string()
+                } else {
+                    String::new()
+                }
+            });
 
             let query = format!(
                 r#"
                 INSERT INTO transcript_settings (id, provider, model, "{}")
                 VALUES ('1', $1, $2, $3)
                 ON CONFLICT(id) DO UPDATE SET
+                    provider = excluded.provider,
+                    model = excluded.model,
                     "{}" = $3
                 "#,
                 api_key_column, api_key_column
