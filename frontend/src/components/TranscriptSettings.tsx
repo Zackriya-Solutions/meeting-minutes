@@ -47,6 +47,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
 
+    // Debounced save timer ref for api-key typing. Coalesces rapid edits
+    // so we don't fire one Rust command per keystroke.
+    const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
     // Remote-specific form state. Loaded from backend on first mount, kept in sync
     // when the user toggles provider => 'remote'.
     const [remoteDraft, setRemoteDraft] = useState<RemoteConfig>(REMOTE_BLANK);
@@ -68,7 +72,14 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             return () => { cancelled = true; };
         }, []);
 
-    // Sync apiKey local state when provider flips away from a cloud backend.
+    // Clean up debounce timer on unmount
+    useEffect(() => {
+        return () => {
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        };
+    }, []);
+
+    // Sync apiKey local state when provider flips to a local-only backend.
     // We do NOT mirror provider changes into local state — provider already lives in
     // `transcriptModelConfig` (controlled). The previous effect `setUiProvider(...)` here
     // formed one half of a Maximum-update-depth-style cycle: settings/page.tsx and
@@ -79,7 +90,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     // is clearing stale cloud keys, and the effect itself only fires when provider
     // actually differs by React's bailout rules.
     useEffect(() => {
-        if (provider === 'localWhisper' || provider === 'parakeet' || provider === 'disabled') {
+        if (provider === 'localWhisper' || provider === 'parakeet' || provider === 'disabled' || provider === 'remote') {
             setApiKeyVal(null);
         }
     }, [provider]);
@@ -205,7 +216,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             const res = await configService.testTranscriptRemoteConnection(remoteDraft);
             setRemoteTestStatus('ok');
             setRemoteTestMessage(
-                `Connected in ${res.elapsedMs} ms; ${res.segmentCount} segment(s)${res.textPreview ? `; preview: \"${res.textPreview}\"` : ''}`
+                `Connected in ${res.elapsedMs} ms; ${res.segmentCount} segment(s)${res.textPreview ? `; preview: "${res.textPreview}"` : ''}`
             );
         } catch (err) {
             setRemoteTestStatus('fail');
@@ -264,9 +275,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 value={provider}
                                 onValueChange={(value) => {
                                     const next = value as TranscriptModelProps['provider'];
-                                    // tally: cloud providers need api key backend lookup; remote
+                                    // Cloud providers need api key backend lookup; remote
                                     // brings its own config in the RemoteConfig JSON.
-                                    if (next !== 'localWhisper' && next !== 'parakeet' && next !== 'remote') {
+                                    if (next !== 'localWhisper' && next !== 'parakeet' && next !== 'remote' && next !== 'disabled') {
                                         fetchApiKey(next);
                                     }
                                     if (next === 'remote' || next === 'disabled') {
@@ -442,89 +453,86 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     )}
 
-                    <div className="mt-6">
-                        <LanguageSelection
-                            selectedLanguage={selectedLanguage || 'auto'}
-                            onLanguageChange={(lang) => setSelectedLanguage(lang)}
-                            provider={provider}
-                        />
-                    </div>
-
                     {requiresApiKey && (
-                        <div>
+                        <div className="space-y-3 mt-4">
                             <Label className="block text-sm font-medium text-gray-700 mb-1">
-                                API Key
+                                API Key {provider === 'groq' ? '(gsk_...)' : provider === 'deepgram' ? '(dg_...)' : provider === 'elevenLabs' ? '(eleven_...)' : '(sk-...)'}
                             </Label>
-                            <div className="relative mx-1">
-                                <Input
-                                    type={showApiKey ? "text" : "password"}
-                                    className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                                    value={apiKeyVal || ''}
-                                    onChange={(e) => setApiKeyVal(e.target.value)}
-                                    disabled={isApiKeyLocked}
-                                    onClick={handleInputClick}
-                                    placeholder="Enter your API key"
-                                />
-                                {isApiKeyLocked && (
-                                    <div
+                            <div className="flex items-center space-x-1">
+                                <div className="relative flex-1">
+                                    <Input
+                                        type={showApiKey ? 'text' : 'password'}
+                                        placeholder={`Enter ${provider === 'groq' ? 'Groq' : provider === 'deepgram' ? 'Deepgram' : provider === 'elevenLabs' ? 'ElevenLabs' : 'OpenAI'} API key`}
+                                        value={apiKeyVal ?? ''}
+                                        onChange={(e) => setApiKeyVal(e.target.value)}
+                                        disabled={isApiKeyLocked}
                                         onClick={handleInputClick}
-                                        className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50 rounded-md cursor-not-allowed"
-                                    />
-                                )}
-                                <div className="absolute inset-y-0 right-0 pr-1 flex items-center gap-1">
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={handleSaveApiKey}
-                                        disabled={isApiKeyLocked || saveStatus === 'saving'}
-                                        title={
-                                            isApiKeyLocked
-                                                ? 'Unlock the field to edit'
-                                                : saveStatus === 'saving'
-                                                    ? 'Saving…'
-                                                    : 'Save API key'
-                                        }
                                         className={
-                                            saveStatus === 'saved'
-                                                ? 'text-green-600'
-                                                : saveStatus === 'error'
-                                                    ? 'text-red-600'
-                                                    : ''
+                                            (isApiKeyLocked ? 'opacity-50 cursor-not-allowed' : '') +
+                                            (isLockButtonVibrating ? ' border-red-400 ring-red-400' : '')
                                         }
-                                    >
-                                        <Save className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
-                                        className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''}`}
-                                        title={isApiKeyLocked ? "Unlock to edit" : "Lock to prevent editing"}
-                                    >
-                                        {isApiKeyLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => setShowApiKey(!showApiKey)}
-                                    >
-                                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                    </Button>
+                                    />
                                 </div>
+                                {isApiKeyLocked ? (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => setIsApiKeyLocked(false)}
+                                        className={'p-2 rounded-md hover:bg-gray-100 transition-transform ' + (isLockButtonVibrating ? 'animate-vibrate' : '')}
+                                        title="Unlock to edit API key"
+                                    >
+                                        <Lock className={`w-5 h-5 text-gray-400 ${isLockButtonVibrating ? 'text-red-500' : ''}`} />
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => setIsApiKeyLocked(true)}
+                                        className="p-2 rounded-md hover:bg-gray-100"
+                                        title="Lock API key"
+                                    >
+                                        <Unlock className="w-5 h-5 text-green-500" />
+                                    </Button>
+                                )}
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setShowApiKey(!showApiKey)}
+                                    className="p-2 rounded-md hover:bg-gray-100"
+                                    title={showApiKey ? 'Hide API key' : 'Show API key'}
+                                >
+                                    {showApiKey ? <EyeOff className="w-5 h-5 text-gray-400" /> : <Eye className="w-5 h-5 text-gray-400" />}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={handleSaveApiKey}
+                                    disabled={isApiKeyLocked || saveStatus === 'saving'}
+                                    className={`p-2 rounded-md hover:bg-gray-100 ${saveStatus === 'saved' ? 'text-green-500' : saveStatus === 'error' ? 'text-red-500' : ''}`}
+                                    title="Save API key"
+                                >
+                                    <Save className="w-5 h-5" />
+                                </Button>
                             </div>
                             {saveStatus === 'saved' && (
-                                <p className="text-xs text-green-700 mt-1" role="status">API key saved</p>
+                                <p className="text-xs text-green-600">API key saved</p>
                             )}
-                            {saveStatus === 'error' && saveError && (
-                                <p className="text-xs text-red-700 mt-1" role="alert">{saveError}</p>
+                            {saveStatus === 'error' && (
+                                <p className="text-xs text-red-600">{saveError || 'Failed to save API key'}</p>
                             )}
                         </div>
                     )}
+
+                    <LanguageSelection
+                                            selectedLanguage={selectedLanguage}
+                                            onLanguageChange={setSelectedLanguage}
+                                        />
                 </div>
             </div>
-        </div >
-    )
+        </div>
+    );
 }

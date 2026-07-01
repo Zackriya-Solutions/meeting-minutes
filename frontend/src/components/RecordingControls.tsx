@@ -159,19 +159,27 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [onRecordingStart, isStarting, isValidatingModel, selectedDevices, meetingName, isRecording]);
 
   const stopRecordingAction = useCallback(async () => {
-    console.log('Executing stop recording...');
-    try {
-      setIsProcessing(true);
-      const dataDir = await appDataDir();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const savePath = `${dataDir}/recording-${timestamp}.wav`;
-      console.log('Saving recording to:', savePath);
-      console.log('About to call stop_recording command');
-      const result = await invoke('stop_recording', {
-        args: {
-          save_path: savePath
-        }
-      });
+      console.log('Executing stop recording...');
+      try {
+        setIsProcessing(true);
+        const dataDir = await appDataDir();
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const savePath = `${dataDir}/recording-${timestamp}.wav`;
+        console.log('Saving recording to:', savePath);
+        // Race invoke('stop_recording') against a 30s timeout so the UI
+        // doesn't hang indefinitely if the Rust backend gets stuck (e.g.
+        // waiting for a transcription task that never finishes). The user
+        // can retry on timeout.
+        const result = await Promise.race([
+          invoke('stop_recording', {
+            args: {
+              save_path: savePath
+            }
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('stop_recording timed out after 30s')), 30000)
+          )
+        ]);
       console.log('stop_recording command completed successfully:', result);
       setRecordingPath(savePath);
       // setShowPlayback(true);

@@ -151,9 +151,9 @@ impl TranscriptionProvider for GroqProvider {
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
         let lang_ref: Option<&str> = language
             .as_deref()
-            .filter(|l| !l.is_empty())
+            .filter(|l| !l.is_empty() && *l != "auto")
             .or_else(|| {
-                if self.config.default_lang.is_empty() {
+                if self.config.default_lang.is_empty() || self.config.default_lang == "auto" {
                     None
                 } else {
                     Some(self.config.default_lang.as_str())

@@ -16,6 +16,9 @@ pub enum TranscriptionEngine {
     Whisper(Arc<crate::whisper_engine::WhisperEngine>),  // Direct access (backward compat)
     Parakeet(Arc<crate::parakeet_engine::ParakeetEngine>), // Direct access (backward compat)
     Provider(Arc<dyn TranscriptionProvider>),  // Trait-based (preferred for new code)
+    /// #338 — transcription intentionally disabled (record-only mode).
+    /// No model is loaded; the worker drains audio chunks without transcribing.
+    Disabled,
 }
 
 impl TranscriptionEngine {
@@ -25,6 +28,9 @@ impl TranscriptionEngine {
             Self::Whisper(engine) => engine.is_model_loaded().await,
             Self::Parakeet(engine) => engine.is_model_loaded().await,
             Self::Provider(provider) => provider.is_model_loaded().await,
+            // ponytail: Disabled is by construction "nothing running" — return
+            // false so the worker takes its no-model path without panicking.
+            Self::Disabled => false,
         }
     }
 
@@ -34,6 +40,7 @@ impl TranscriptionEngine {
             Self::Whisper(engine) => engine.get_current_model().await,
             Self::Parakeet(engine) => engine.get_current_model().await,
             Self::Provider(provider) => provider.get_current_model().await,
+            Self::Disabled => None,
         }
     }
 
@@ -43,7 +50,13 @@ impl TranscriptionEngine {
             Self::Whisper(_) => "Whisper (direct)",
             Self::Parakeet(_) => "Parakeet (direct)",
             Self::Provider(provider) => provider.provider_name(),
+            Self::Disabled => "Disabled (record-only)",
         }
+    }
+
+    /// True when the user picked "Disable transcription" in Settings (#338).
+    pub fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
     }
 }
 
@@ -90,6 +103,13 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
 
     // Validate based on provider
     match config.provider.as_str() {
+        "disabled" | "none" | "" => {
+            // ponytail: #338 record-only mode. No model needed; recording
+            // proceeds and saves the raw WAV. The worker drains chunks but
+            // does not transcribe.
+            info!("🎙️ Transcription disabled — record-only mode");
+            Ok(())
+        }
         "localWhisper" => {
             info!("🔍 Validating Whisper model...");
             // Ensure whisper engine is initialized first
@@ -169,12 +189,6 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             }
             Ok(())
         }
-        "disabled" => {
-            // ponytail: "disabled" is opt-out of live transcription. No
-            // model to load, no endpoint to validate. Closes #519 + #338.
-            info!("⏸  Transcription is disabled; recording-only mode.");
-            Ok(())
-        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -226,6 +240,13 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
 
     // Initialize the appropriate engine based on provider
     match config.provider.as_str() {
+        "disabled" | "none" | "" => {
+            // ponytail: #338 — recording proceeds, no ASR runs. The worker
+            // drains chunks without transcribing and the audio saver still
+            // writes the WAV.
+            info!("🎙️ Transcription disabled — no engine will be initialized");
+            Ok(TranscriptionEngine::Disabled)
+        }
         "parakeet" => {
             info!("🦜 Initializing Parakeet transcription engine");
 
@@ -310,14 +331,6 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 request_timeout: std::time::Duration::from_secs(120),
             };
             let provider = super::groq_provider::GroqProvider::new(prov_cfg);
-            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
-        }
-        "disabled" => {
-            // ponytail: opt-out of live transcription. The worker still
-            // runs but every segment call returns Ok(empty). Closes
-            // #519 + #338; user can post-hoc transcribe the WAV.
-            info!("⏸  Initializing DisabledProvider (recording-only mode)");
-            let provider = super::disabled_provider::DisabledProvider;
             Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {

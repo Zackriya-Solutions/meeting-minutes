@@ -537,17 +537,7 @@ pub async fn stop_recording<R: Runtime>(
         }
     }
 
-    // Step 1.5: Clean up transcript listener to release microphone
-    // Unlisten transcript-update event to prevent lingering references
-    {
-        use tauri::Listener;
-        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
-            app.unlisten(listener_id);
-            info!("✅ Transcript-update listener removed");
-        }
-    }
-
-    // Step 2: Signal transcription workers to finish processing ALL queued chunks
+        // Step 2: Signal transcription workers to finish processing ALL queued chunks
     let _ = app.emit(
         "recording-shutdown-progress",
         serde_json::json!({
@@ -636,7 +626,18 @@ pub async fn stop_recording<R: Runtime>(
         }
     }
 
-    // Step 3: Now safely unload Whisper model after ALL chunks are processed
+        // Step 3.5: Clean up transcript listener after ALL chunks (including drain) are processed.
+        // Moved from former step 1.5 to here so that paused-chunk drain events (step 2.5) are still
+        // caught by the listener and persisted to the recording manager.
+        {
+            use tauri::Listener;
+            if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
+                app.unlisten(listener_id);
+                info!("✅ Transcript-update listener removed after chunk drain");
+            }
+        }
+
+        // Step 4: Now safely unload model after ALL chunks are processed
     let _ = app.emit(
         "recording-shutdown-progress",
         serde_json::json!({

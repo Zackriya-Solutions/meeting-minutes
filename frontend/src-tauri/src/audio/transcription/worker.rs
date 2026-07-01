@@ -137,9 +137,10 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
                     }
                 }
                 TranscriptionEngine::Parakeet(p) => match p.transcribe_audio(speech_samples).await {
-                    Ok(text) => Ok((text.trim().to_string(), None, false)),
-                    Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
-                },
+                                    Ok(text) => Ok((text.trim().to_string(), None, false)),
+                                    Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
+                                },
+                                TranscriptionEngine::Disabled => Err(TranscriptionError::EngineFailed("transcription is disabled".into())),
                 TranscriptionEngine::Provider(provider) => {
                     let language = crate::get_language_preference_internal();
                     match provider.transcribe(speech_samples, language).await {
@@ -157,9 +158,10 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
         match res {
             Ok((text, confidence_opt, is_partial)) => {
                 let confidence_threshold = match &engine {
-                    TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
-                    TranscriptionEngine::Parakeet(_) => 0.0,
-                };
+                                    TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
+                                    TranscriptionEngine::Parakeet(_) => 0.0,
+                                    TranscriptionEngine::Disabled => 0.0,
+                                };
                 let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
                 if text.trim().is_empty() || !meets_threshold {
                     continue;
@@ -245,6 +247,24 @@ pub fn start_transcription_task<R: Runtime>(
             }
         };
 
+        // ponytail: #338 — record-only mode. Drain chunks without transcribing so
+        // the recording path still produces a WAV (handled upstream by the
+        // audio saver); we never speak to a model and never emit transcript updates.
+        if transcription_engine.is_disabled() {
+            info!("🎙️ Transcription disabled — draining audio chunks without ASR");
+            let _ = app.emit("transcription-disabled", serde_json::json!({
+                "message": "Transcription is disabled; recording audio only"
+            }));
+            // Drain the channel so the recorder-side sender doesn't block.
+            let mut receiver = transcription_receiver;
+            let mut drained: u64 = 0;
+            while let Some(_chunk) = receiver.recv().await {
+                drained += 1;
+            }
+            info!("🎙️ Drained {} audio chunks (transcription disabled)", drained);
+            return;
+        }
+
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
@@ -264,6 +284,7 @@ pub fn start_transcription_task<R: Runtime>(
                 TranscriptionEngine::Whisper(e) => TranscriptionEngine::Whisper(e.clone()),
                 TranscriptionEngine::Parakeet(e) => TranscriptionEngine::Parakeet(e.clone()),
                 TranscriptionEngine::Provider(p) => TranscriptionEngine::Provider(p.clone()),
+                TranscriptionEngine::Disabled => TranscriptionEngine::Disabled,
             };
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
@@ -370,9 +391,10 @@ pub fn start_transcription_task<R: Runtime>(
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold
                                     let confidence_threshold = match &engine_clone {
-                                        TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
-                                        TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
-                                    };
+                                                                            TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
+                                                                            TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
+                                                                            TranscriptionEngine::Disabled => 0.0,
+                                                                        };
 
                                     let confidence_str = match confidence_opt {
                                         Some(c) => format!("{:.2}", c),
@@ -738,53 +760,57 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             }
         }
         TranscriptionEngine::Provider(provider) => {
-            // NEW: Trait-based provider (clean, unified interface)
-            let language = crate::get_language_preference_internal();
+                    // NEW: Trait-based provider (clean, unified interface)
+                    let language = crate::get_language_preference_internal();
 
-            match provider.transcribe(speech_samples, language).await {
-                Ok(result) => {
-                    let cleaned_text = result.text.trim().to_string();
-                    if cleaned_text.is_empty() {
-                        return Ok((String::new(), result.confidence, result.is_partial));
+                    match provider.transcribe(speech_samples, language).await {
+                        Ok(result) => {
+                            let cleaned_text = result.text.trim().to_string();
+                            if cleaned_text.is_empty() {
+                                return Ok((String::new(), result.confidence, result.is_partial));
+                            }
+
+                            let confidence_str = match result.confidence {
+                                Some(c) => format!("confidence: {:.2}", c),
+                                None => "no confidence".to_string(),
+                            };
+
+                            info!(
+                                "{} transcription complete for chunk {}: '{}' ({}, partial: {})",
+                                provider.provider_name(),
+                                chunk.chunk_id,
+                                cleaned_text,
+                                confidence_str,
+                                result.is_partial
+                            );
+
+                            Ok((cleaned_text, result.confidence, result.is_partial))
+                        }
+                        Err(e) => {
+                            error!(
+                                "{} transcription failed for chunk {}: {}",
+                                provider.provider_name(),
+                                chunk.chunk_id,
+                                e
+                            );
+
+                            let _ = app.emit(
+                                "transcription-error",
+                                &serde_json::json!({
+                                    "error": e.to_string(),
+                                    "userMessage": format!("Transcription failed: {}", e),
+                                    "actionable": false
+                                }),
+                            );
+
+                            Err(e)
+                        }
                     }
-
-                    let confidence_str = match result.confidence {
-                        Some(c) => format!("confidence: {:.2}", c),
-                        None => "no confidence".to_string(),
-                    };
-
-                    info!(
-                        "{} transcription complete for chunk {}: '{}' ({}, partial: {})",
-                        provider.provider_name(),
-                        chunk.chunk_id,
-                        cleaned_text,
-                        confidence_str,
-                        result.is_partial
-                    );
-
-                    Ok((cleaned_text, result.confidence, result.is_partial))
                 }
-                Err(e) => {
-                    error!(
-                        "{} transcription failed for chunk {}: {}",
-                        provider.provider_name(),
-                        chunk.chunk_id,
-                        e
-                    );
-
-                    let _ = app.emit(
-                        "transcription-error",
-                        &serde_json::json!({
-                            "error": e.to_string(),
-                            "userMessage": format!("Transcription failed: {}", e),
-                            "actionable": false
-                        }),
-                    );
-
-                    Err(e)
+                TranscriptionEngine::Disabled => {
+                    warn!("transcribe_chunk_with_provider called with Disabled engine — skipping chunk {}", chunk.chunk_id);
+                    Err(TranscriptionError::EngineFailed("transcription is disabled".into()))
                 }
-            }
-        }
     }
 }
 
