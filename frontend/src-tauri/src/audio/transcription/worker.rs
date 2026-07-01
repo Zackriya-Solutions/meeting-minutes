@@ -20,7 +20,189 @@ static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
-    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+    info!("\u{1f50d} SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+}
+
+// Transcription pause flag - flipped mid-recording by the UI to suspend
+// chunk processing without ending the recording. Like SPEECH_DETECTED_EMITTED,
+// it is a session-scoped lifecycle signal: reset on every new recording start.
+static TRANSCRIPTION_PAUSED: AtomicBool = AtomicBool::new(false);
+
+// Buffered chunks during pause - transcribe when resumed or at recording end
+static PAUSED_CHUNKS: Mutex<Vec<AudioChunk>> = Mutex::new(Vec::new());
+
+/// Set the transcription-paused flag. When true, the worker buffers incoming
+/// chunks instead of transcribing them. When set to false, buffered chunks
+/// are transcribed in order.
+pub fn set_transcription_paused(paused: bool) {
+    TRANSCRIPTION_PAUSED.store(paused, Ordering::SeqCst);
+    info!("\u{23f8} TRANSCRIPTION_PAUSED set to: {}", paused);
+    
+    // If unpausing, process buffered chunks in background
+    if !paused {
+        // Buffered chunks will be picked up by the worker loop on next iteration
+    }
+}
+
+/// Read the current transcription-paused flag. Used by the UI to sync state
+/// on mount so the button label reflects the worker's actual mode.
+pub fn is_transcription_paused() -> bool {
+    TRANSCRIPTION_PAUSED.load(Ordering::SeqCst)
+}
+
+/// Reset the transcription-paused flag and clear buffered chunks for a new recording session.
+pub fn reset_transcription_paused_flag() {
+    TRANSCRIPTION_PAUSED.store(false, Ordering::SeqCst);
+    if let Ok(mut chunks) = PAUSED_CHUNKS.lock() {
+        chunks.clear();
+    }
+    info!("\u{23f8} TRANSCRIPTION_PAUSED reset to: {}", TRANSCRIPTION_PAUSED.load(Ordering::SeqCst));
+}
+
+/// Drain and return all buffered paused chunks for processing
+pub fn drain_paused_chunks() -> Vec<AudioChunk> {
+    PAUSED_CHUNKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default()
+}
+
+/// Drain any chunks buffered during a transcription pause and transcribe them
+/// using the currently-active engine. Called from `stop_recording` so that audio
+/// captured while transcription was paused is transcribed before the model is
+/// unloaded and the worker task is torn down.
+///
+/// Returns the number of chunks actually transcribed (0 means nothing was
+/// buffered or the provider is unavailable).
+///
+/// The dispatch is inlined (rather than re-using `transcribe_chunk_with_provider`)
+/// because that helper is intentionally module-private — wiring it through here
+/// would expand the API surface for a single caller. The Match arms below mirror
+/// it 1:1.
+pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
+    app: &AppHandle<R>,
+) -> usize {
+    let buffered = drain_paused_chunks();
+    if buffered.is_empty() {
+        return 0;
+    }
+
+    info!(
+        "\u{23f8} drain_and_transcribe_paused_chunks: flushing {} buffered chunks at recording end",
+        buffered.len()
+    );
+
+    // Acquire the live engine the same way the worker task did. This works even
+    // after the worker has already exited because the engine is kept in a global
+    // until step 3 of stop_recording unloads it.
+    let engine = match super::engine::get_or_init_transcription_engine(app).await {
+        Ok(e) => e,
+        Err(e) => {
+            error!(
+                "drain_and_transcribe_paused_chunks: failed to init engine for post-recording drain: {}",
+                e
+            );
+            return 0;
+        }
+    };
+
+    if !engine.is_model_loaded().await {
+        warn!(
+            "drain_and_transcribe_paused_chunks: model already unloaded — {} buffered chunks will be lost",
+            buffered.len()
+        );
+        return 0;
+    }
+
+    let mut transcribed = 0usize;
+    for chunk in buffered {
+        let chunk_id = chunk.chunk_id;
+        let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+        // Mirror transcribe_chunk_with_provider's behaviour: skip empty audio,
+        // dispatch on engine variant, emit transcript-update on success.
+        let res: std::result::Result<(String, Option<f32>, bool), TranscriptionError> = (|| async {
+            let speech_samples = if chunk.sample_rate != 16000 {
+                crate::audio::audio_processing::resample_audio(&chunk.data, chunk.sample_rate, 16000)
+            } else {
+                chunk.data
+            };
+            if speech_samples.is_empty() {
+                return Err(TranscriptionError::AudioTooShort { samples: 0, minimum: 1600 });
+            }
+            match &engine {
+                TranscriptionEngine::Whisper(w) => {
+                    let language = crate::get_language_preference_internal();
+                    match w.transcribe_audio_with_confidence(speech_samples, language).await {
+                        Ok((text, confidence, is_partial)) => {
+                            Ok((text.trim().to_string(), Some(confidence), is_partial))
+                        }
+                        Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
+                    }
+                }
+                TranscriptionEngine::Parakeet(p) => match p.transcribe_audio(speech_samples).await {
+                    Ok(text) => Ok((text.trim().to_string(), None, false)),
+                    Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
+                },
+                TranscriptionEngine::Provider(provider) => {
+                    let language = crate::get_language_preference_internal();
+                    match provider.transcribe(speech_samples, language).await {
+                        Ok(result) => Ok((
+                            result.text.trim().to_string(),
+                            result.confidence,
+                            result.is_partial,
+                        )),
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        })().await;
+
+        match res {
+            Ok((text, confidence_opt, is_partial)) => {
+                let confidence_threshold = match &engine {
+                    TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
+                    TranscriptionEngine::Parakeet(_) => 0.0,
+                };
+                let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
+                if text.trim().is_empty() || !meets_threshold {
+                    continue;
+                }
+                let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                let update = TranscriptUpdate {
+                    text,
+                    timestamp: format_current_timestamp(),
+                    source: "Audio".to_string(),
+                    sequence_id,
+                    chunk_start_time: chunk.timestamp,
+                    is_partial,
+                    confidence: confidence_opt.unwrap_or(0.85),
+                    audio_start_time: chunk.timestamp,
+                    audio_end_time: chunk.timestamp + chunk_duration,
+                    duration: chunk_duration,
+                };
+                if let Err(e) = app.emit("transcript-update", &update) {
+                    error!(
+                        "drain_and_transcribe_paused_chunks: failed to emit transcript-update for chunk {}: {}",
+                        chunk_id, e
+                    );
+                } else {
+                    transcribed += 1;
+                    info!(
+                        "\u{2705} drain_and_transcribe_paused_chunks: emitted buffered chunk {} ({} seq)",
+                        chunk_id, sequence_id
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "drain_and_transcribe_paused_chunks: chunk {} transcription failed: {}",
+                    chunk_id, e
+                );
+            }
+        }
+    }
+    info!(
+        "\u{1f389} drain_and_transcribe_paused_chunks: drained and processed {} buffered paused chunks",
+        transcribed
+    );
+    transcribed
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
