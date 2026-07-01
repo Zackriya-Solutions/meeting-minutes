@@ -8,7 +8,7 @@ use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 
 // Sequence counter for transcript updates
@@ -20,7 +20,7 @@ static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
-    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+    info!("\u{1f50d} SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 }
 
 // Transcription pause flag - flipped mid-recording by the UI to suspend
@@ -28,12 +28,20 @@ pub fn reset_speech_detected_flag() {
 // it is a session-scoped lifecycle signal: reset on every new recording start.
 static TRANSCRIPTION_PAUSED: AtomicBool = AtomicBool::new(false);
 
-/// Set the transcription-paused flag. When true, the worker drops incoming
-/// chunks (just bumping the completed counter so the drain/end logic still
-/// resolves) instead of routing them to a provider.
+// Buffered chunks during pause - transcribe when resumed or at recording end
+static PAUSED_CHUNKS: Mutex<Vec<AudioChunk>> = Mutex::new(Vec::new());
+
+/// Set the transcription-paused flag. When true, the worker buffers incoming
+/// chunks instead of transcribing them. When set to false, buffered chunks
+/// are transcribed in order.
 pub fn set_transcription_paused(paused: bool) {
     TRANSCRIPTION_PAUSED.store(paused, Ordering::SeqCst);
-    info!("⏸ TRANSCRIPTION_PAUSED set to: {}", paused);
+    info!("\u{23f8} TRANSCRIPTION_PAUSED set to: {}", paused);
+    
+    // If unpausing, process buffered chunks in background
+    if !paused {
+        // Buffered chunks will be picked up by the worker loop on next iteration
+    }
 }
 
 /// Read the current transcription-paused flag. Used by the UI to sync state
@@ -42,10 +50,18 @@ pub fn is_transcription_paused() -> bool {
     TRANSCRIPTION_PAUSED.load(Ordering::SeqCst)
 }
 
-/// Reset the transcription-paused flag for a new recording session.
+/// Reset the transcription-paused flag and clear buffered chunks for a new recording session.
 pub fn reset_transcription_paused_flag() {
     TRANSCRIPTION_PAUSED.store(false, Ordering::SeqCst);
-    info!("⏸ TRANSCRIPTION_PAUSED reset to: {}", TRANSCRIPTION_PAUSED.load(Ordering::SeqCst));
+    if let Ok(mut chunks) = PAUSED_CHUNKS.lock() {
+        chunks.clear();
+    }
+    info!("\u{23f8} TRANSCRIPTION_PAUSED reset to: {}", TRANSCRIPTION_PAUSED.load(Ordering::SeqCst));
+}
+
+/// Drain and return all buffered paused chunks for processing
+pub fn drain_paused_chunks() -> Vec<AudioChunk> {
+    PAUSED_CHUNKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -143,35 +159,53 @@ pub fn start_transcription_task<R: Runtime>(
                     };
 
                     match chunk {
-                        Some(chunk) => {
-                            // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
-                            // Only log every 10th chunk per worker to reduce I/O overhead
-                            let should_log_this_chunk = chunk.chunk_id % 10 == 0;
+                                            Some(chunk) => {
+                                                // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
+                                                // Only log every 10th chunk per worker to reduce I/O overhead
+                                                let should_log_this_chunk = chunk.chunk_id % 10 == 0;
 
-                            // In-session pause toggle: while TRANSCRIPTION_PAUSED is set
-                            // by the UI, the worker silently drops the chunk (just bumping
-                            // the completed counter so the drain/end logic still resolves)
-                            // instead of routing it to a provider. Logged at the same 10-chunk
-                            // cadence as the normal hot-path logger to avoid spam.
-                            if TRANSCRIPTION_PAUSED.load(Ordering::SeqCst) {
-                                if should_log_this_chunk {
-                                    info!(
-                                        "⏸ Worker {} skipping chunk {} while transcription is paused",
-                                        worker_id, chunk.chunk_id
-                                    );
-                                }
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
-                                continue;
-                            }
+                                                // In-session pause toggle: while TRANSCRIPTION_PAUSED is set
+                                                // by the UI, the worker buffers incoming chunks instead of
+                                                // transcribing them. Buffered chunks are processed when
+                                                // transcription is resumed or at recording end.
+                                                if TRANSCRIPTION_PAUSED.load(Ordering::SeqCst) {
+                                                                                                    // Buffer the chunk for later transcription
+                                                                                                    let chunk_id = chunk.chunk_id; // Log before move
+                                                                                                    if let Ok(mut paused_chunks) = PAUSED_CHUNKS.lock() {
+                                                                                                        paused_chunks.push(chunk);
+                                                                                                    }
+                                                                                                    if should_log_this_chunk {
+                                                                                                        info!(
+                                                                                                            "⏸ Worker {} buffering chunk {} while transcription is paused",
+                                                                                                            worker_id, chunk_id
+                                                                                                        );
+                                                                                                    }
+                                                                                                    // Don't increment completed counter - we'll process these later
+                                                                                                    continue;
+                                                                                                }
 
-                            if should_log_this_chunk {
-                                info!(
-                                    "👷 Worker {} processing chunk {} with {} samples",
-                                    worker_id,
-                                    chunk.chunk_id,
-                                    chunk.data.len()
-                                );
-                            }
+                                                // Check if there are buffered paused chunks to process first
+                                                let paused_chunks = drain_paused_chunks();
+                                                if !paused_chunks.is_empty() {
+                                                    info!("▶ Worker {} processing {} buffered paused chunks", worker_id, paused_chunks.len());
+                                                    for pchunk in paused_chunks {
+                                                        // Process each buffered chunk
+                                                        if !engine_clone.is_model_loaded().await {
+                                                            warn!("⚠️ Worker {}: Model unloaded while processing buffered chunks", worker_id);
+                                                            break;
+                                                        }
+                                                        let _ = transcribe_chunk_with_provider(&engine_clone, pchunk, &app_clone).await;
+                                                    }
+                                                }
+
+                                                if should_log_this_chunk {
+                                                    info!(
+                                                        "👷 Worker {} processing chunk {} with {} samples",
+                                                        worker_id,
+                                                        chunk.chunk_id,
+                                                        chunk.data.len()
+                                                    );
+                                                }
 
                             // Check if model is still loaded before processing
                             if !engine_clone.is_model_loaded().await {

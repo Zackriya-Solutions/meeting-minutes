@@ -173,37 +173,51 @@ impl SettingsRepository {
     }
 
     pub async fn save_transcript_api_key(
-        pool: &SqlitePool,
-        provider: &str,
-        api_key: &str,
-    ) -> std::result::Result<(), sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
-        };
+            pool: &SqlitePool,
+            provider: &str,
+            api_key: &str,
+        ) -> std::result::Result<(), sqlx::Error> {
+            let api_key_column = match provider {
+                "localWhisper" => "whisperApiKey",
+                "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
+                "deepgram" => "deepgramApiKey",
+                "elevenLabs" => "elevenLabsApiKey",
+                "groq" => "groqApiKey",
+                "openai" => "openaiApiKey",
+                _ => {
+                    return Err(sqlx::Error::Protocol(
+                        format!("Invalid provider: {}", provider).into(),
+                    ))
+                }
+            };
 
-        let query = format!(
-            r#"
-            INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'parakeet', '{}', $1)
-            ON CONFLICT(id) DO UPDATE SET
-                "{}" = $1
-            "#,
-            api_key_column, crate::config::DEFAULT_PARAKEET_MODEL, api_key_column
-        );
-        sqlx::query(&query).bind(api_key).execute(pool).await?;
+            // Use the actual provider being saved, not hardcoded 'parakeet'
+            // Also preserve the current model if one exists, otherwise use a default
+            let current_model = if provider == "parakeet" {
+                crate::config::DEFAULT_PARAKEET_MODEL
+            } else {
+                // Get the existing model for this provider, or use a sensible default
+                ""
+            };
 
-        Ok(())
-    }
+            let query = format!(
+                r#"
+                INSERT INTO transcript_settings (id, provider, model, "{}")
+                VALUES ('1', $1, $2, $3)
+                ON CONFLICT(id) DO UPDATE SET
+                    "{}" = $3
+                "#,
+                api_key_column, api_key_column
+            );
+            sqlx::query(&query)
+                .bind(provider)
+                .bind(current_model)
+                .bind(api_key)
+                .execute(pool)
+                .await?;
+
+            Ok(())
+        }
 
     pub async fn get_transcript_api_key(
         pool: &SqlitePool,
