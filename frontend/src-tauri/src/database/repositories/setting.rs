@@ -191,19 +191,41 @@ impl SettingsRepository {
             }
         };
 
-        let query = format!(
-            r#"
-            INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'parakeet', '{}', $1)
-            ON CONFLICT(id) DO UPDATE SET
-                "{}" = $1
-            "#,
-            api_key_column, crate::config::DEFAULT_PARAKEET_MODEL, api_key_column
-        );
-        sqlx::query(&query).bind(api_key).execute(pool).await?;
+            // First get the current model to preserve it
+            let current_model: Option<String> = sqlx::query_scalar(
+                "SELECT model FROM transcript_settings WHERE id = '1' LIMIT 1"
+            )
+            .fetch_optional(pool)
+            .await?;
 
-        Ok(())
-    }
+            let current_model = current_model.unwrap_or_else(|| {
+                if provider == "parakeet" {
+                    crate::config::DEFAULT_PARAKEET_MODEL.to_string()
+                } else {
+                    String::new()
+                }
+            });
+
+            let query = format!(
+                r#"
+                INSERT INTO transcript_settings (id, provider, model, "{}")
+                VALUES ('1', $1, $2, $3)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    "{}" = $3
+                "#,
+                api_key_column, api_key_column
+            );
+            sqlx::query(&query)
+                .bind(provider)
+                .bind(current_model)
+                .bind(api_key)
+                .execute(pool)
+                .await?;
+
+            Ok(())
+        }
 
     pub async fn get_transcript_api_key(
         pool: &SqlitePool,
