@@ -105,6 +105,27 @@ export class RecordingService {
     return invoke('resume_recording');
   }
 
+  /**
+   * Toggle the in-session transcription pause flag. Unlike pauseRecording
+   * (which suspends audio capture itself), this only signals the worker to
+   * drop incoming chunks without ending the recording. The transcript stops
+   * growing until called again with `false`.
+   * @param paused - true to suspend transcription, false to resume
+   * @returns Promise<void>
+   */
+  async setTranscriptionPaused(paused: boolean): Promise<void> {
+    return invoke('set_transcription_paused', { paused });
+  }
+
+  /**
+   * Read the current transcription-paused flag from the worker so the UI
+   * button label can be synced on mount (e.g. after a hot reload).
+   * @returns Promise<boolean>
+   */
+  async isTranscriptionPaused(): Promise<boolean> {
+    return invoke('is_transcription_paused');
+  }
+
   // Event Listeners
 
   /**

@@ -23,6 +23,31 @@ pub fn reset_speech_detected_flag() {
     info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 }
 
+// Transcription pause flag - flipped mid-recording by the UI to suspend
+// chunk processing without ending the recording. Like SPEECH_DETECTED_EMITTED,
+// it is a session-scoped lifecycle signal: reset on every new recording start.
+static TRANSCRIPTION_PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// Set the transcription-paused flag. When true, the worker drops incoming
+/// chunks (just bumping the completed counter so the drain/end logic still
+/// resolves) instead of routing them to a provider.
+pub fn set_transcription_paused(paused: bool) {
+    TRANSCRIPTION_PAUSED.store(paused, Ordering::SeqCst);
+    info!("⏸ TRANSCRIPTION_PAUSED set to: {}", paused);
+}
+
+/// Read the current transcription-paused flag. Used by the UI to sync state
+/// on mount so the button label reflects the worker's actual mode.
+pub fn is_transcription_paused() -> bool {
+    TRANSCRIPTION_PAUSED.load(Ordering::SeqCst)
+}
+
+/// Reset the transcription-paused flag for a new recording session.
+pub fn reset_transcription_paused_flag() {
+    TRANSCRIPTION_PAUSED.store(false, Ordering::SeqCst);
+    info!("⏸ TRANSCRIPTION_PAUSED reset to: {}", TRANSCRIPTION_PAUSED.load(Ordering::SeqCst));
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptUpdate {
     pub text: String,
@@ -122,6 +147,22 @@ pub fn start_transcription_task<R: Runtime>(
                             // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
                             // Only log every 10th chunk per worker to reduce I/O overhead
                             let should_log_this_chunk = chunk.chunk_id % 10 == 0;
+
+                            // In-session pause toggle: while TRANSCRIPTION_PAUSED is set
+                            // by the UI, the worker silently drops the chunk (just bumping
+                            // the completed counter so the drain/end logic still resolves)
+                            // instead of routing it to a provider. Logged at the same 10-chunk
+                            // cadence as the normal hot-path logger to avoid spam.
+                            if TRANSCRIPTION_PAUSED.load(Ordering::SeqCst) {
+                                if should_log_this_chunk {
+                                    info!(
+                                        "⏸ Worker {} skipping chunk {} while transcription is paused",
+                                        worker_id, chunk.chunk_id
+                                    );
+                                }
+                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                continue;
+                            }
 
                             if should_log_this_chunk {
                                 info!(

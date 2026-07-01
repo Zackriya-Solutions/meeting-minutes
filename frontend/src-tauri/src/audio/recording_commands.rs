@@ -26,6 +26,7 @@ use super::{
 use super::transcription::{
     self,
     reset_speech_detected_flag,
+    reset_transcription_paused_flag,
 };
 
 // Re-export TranscriptUpdate for backward compatibility
@@ -249,6 +250,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
+    reset_transcription_paused_flag(); // Reset session-scoped pause flag with new recording
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -420,6 +422,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
+    reset_transcription_paused_flag(); // Reset session-scoped pause flag with new recording
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -976,6 +979,28 @@ pub async fn resume_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), Strin
     } else {
         Err("No recording manager found".to_string())
     }
+}
+
+/// Toggle the in-session transcription pause flag.
+///
+/// Unlike `pause_recording` (which suspends audio capture itself), this only
+/// signals the transcription worker to drop incoming chunks without ending
+/// the recording. The recording continues; the transcript just stops growing
+/// until the user resumes. Useful for skipping typing/silent stretches
+/// mid-meeting without restarting the whole session.
+#[tauri::command]
+pub async fn set_transcription_paused(paused: bool) -> Result<(), String> {
+    info!("Setting transcription_paused to {}", paused);
+    transcription::set_transcription_paused(paused);
+    Ok(())
+}
+
+/// Read the current transcription-paused flag. Used by the UI to sync the
+/// button label/state on mount so it reflects the worker's actual mode
+/// (e.g. after a hot-reload during an active recording).
+#[tauri::command]
+pub async fn is_transcription_paused() -> Result<bool, String> {
+    Ok(transcription::is_transcription_paused())
 }
 
 /// Check if recording is currently paused

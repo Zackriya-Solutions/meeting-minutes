@@ -312,11 +312,6 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             let provider = super::groq_provider::GroqProvider::new(prov_cfg);
             Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
-        "localWhisper" | _ => {
-            info!("🎤 Initializing Whisper transcription engine");
-            let whisper_engine = get_or_init_whisper(app).await?;
-            Ok(TranscriptionEngine::Whisper(whisper_engine))
-        }
         "disabled" => {
             // ponytail: opt-out of live transcription. The worker still
             // runs but every segment call returns Ok(empty). Closes
@@ -324,6 +319,11 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             info!("⏸  Initializing DisabledProvider (recording-only mode)");
             let provider = super::disabled_provider::DisabledProvider;
             Ok(TranscriptionEngine::Provider(Arc::new(provider)))
+        }
+        "localWhisper" | _ => {
+            info!("🎤 Initializing Whisper transcription engine");
+            let whisper_engine = get_or_init_whisper(app).await?;
+            Ok(TranscriptionEngine::Whisper(whisper_engine))
         }
     }
 }

@@ -24,6 +24,9 @@ pub use engine::{
 pub use worker::{
     start_transcription_task,
     reset_speech_detected_flag,
+    set_transcription_paused,
+    is_transcription_paused,
+    reset_transcription_paused_flag,
     TranscriptUpdate
 };
 pub use remote_provider::{RemoteProvider, RemoteProviderConfig};
