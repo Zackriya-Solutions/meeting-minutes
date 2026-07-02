@@ -140,42 +140,52 @@ export function useRecordingStart(
     }
   }, []);
 
+  /** Shared handler for a failed transcription-provider readiness check.
+   *  Shows a toast with a context-sensitive message based on `tr.reason`,
+   *  optionally triggers the model-selector modal, and resets status to IDLE.
+   *  Returns `true` if the guard blocked recording (caller should return early). */
+  const guardTranscriptionModel = useCallback(async (
+    tr: { ok: boolean; reason?: string; provider: string },
+    showModal?: (name: 'modelSelector', message?: string) => void,
+  ): Promise<boolean> => {
+    if (tr.ok) return false;
+
+    const isDownloading = await checkIfModelDownloading();
+    if (isDownloading && tr.provider === 'parakeet') {
+      toast.info('Model download in progress', {
+        description: 'Please wait for the transcription model to finish downloading before recording.',
+        duration: 5000,
+      });
+      Analytics.trackButtonClick('start_recording_blocked_downloading', '_doctor_replaced_');
+    } else {
+      const reasonText =
+        tr.reason === 'whisper-model-missing' ? 'Whisper model not downloaded — open Settings → Transcription to download one'
+        : tr.reason === 'parakeet-model-missing' ? 'Parakeet model not downloaded — open Settings → Transcription to download one'
+        : tr.reason === 'remote-config-missing' ? 'Remote provider has no endpoint configured — open Settings → Transcription'
+        : tr.reason && tr.reason.endsWith('-api-key-missing') ? 'API key missing — open Settings → Transcription to paste it'
+        : tr.reason === 'whisper-init-failed' ? 'Failed to initialize Whisper engine'
+        : 'Transcription model not ready';
+      toast.error('Transcription model not ready', {
+        description: reasonText,
+        duration: 5000,
+      });
+      showModal?.('modelSelector', 'Transcription model setup required');
+      Analytics.trackButtonClick('start_recording_blocked_missing', '_doctor_replaced_');
+    }
+    setStatus(RecordingStatus.IDLE);
+    return true;
+  }, [checkIfModelDownloading, setStatus]);
+
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
     try {
-      console.log('handleRecordingStart called - checking Parakeet model status');
+      console.log('handleRecordingStart called - checking transcription provider status');
 
-      // Check if Parakeet transcription model is ready before starting
+      // Check if transcription provider is ready before starting
       const tr = await checkTranscriptProviderReady();
-      if (!tr.ok) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading && tr.provider === 'parakeet') {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', '_doctor_replaced_');
-        } else {
-          const reasonText =
-            tr.reason === 'whisper-model-missing' ? 'Whisper model not downloaded — open Settings → Transcription to download one'
-            : tr.reason === 'parakeet-model-missing' ? 'Parakeet model not downloaded — open Settings → Transcription to download one'
-            : tr.reason === 'remote-config-missing' ? 'Remote provider has no endpoint configured — open Settings → Transcription'
-            : tr.reason && tr.reason.endsWith('-api-key-missing') ? 'API key missing — open Settings → Transcription to paste it'
-            : tr.reason === 'whisper-init-failed' ? 'Failed to initialize Whisper engine'
-            : 'Transcription model not ready';
-          toast.error('Transcription model not ready', {
-            description: reasonText,
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', '_doctor_replaced_');
-        }
-        setStatus(RecordingStatus.IDLE);
-        return;
-      }
+      if (await guardTranscriptionModel(tr, showModal)) return;
 
-
-      console.log('Parakeet ready - setting up meeting title and state');
+      console.log('Provider ready - setting up meeting title and state');
 
       const randomTitle = generateMeetingTitle();
       setMeetingTitle(randomTitle);
@@ -210,7 +220,7 @@ export function useRecordingStart(
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptProviderReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptProviderReady, guardTranscriptionModel, selectedDevices, showModal, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -222,35 +232,12 @@ export function useRecordingStart(
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
 
-          // Check if Parakeet transcription model is ready before starting
-      const tr = await checkTranscriptProviderReady();
-      if (!tr.ok) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading && tr.provider === 'parakeet') {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', '_doctor_replaced_');
-        } else {
-          const reasonText =
-            tr.reason === 'whisper-model-missing' ? 'Whisper model not downloaded — open Settings → Transcription to download one'
-            : tr.reason === 'parakeet-model-missing' ? 'Parakeet model not downloaded — open Settings → Transcription to download one'
-            : tr.reason === 'remote-config-missing' ? 'Remote provider has no endpoint configured — open Settings → Transcription'
-            : tr.reason && tr.reason.endsWith('-api-key-missing') ? 'API key missing — open Settings → Transcription to paste it'
-            : tr.reason === 'whisper-init-failed' ? 'Failed to initialize Whisper engine'
-            : 'Transcription model not ready';
-          toast.error('Transcription model not ready', {
-            description: reasonText,
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', '_doctor_replaced_');
-        }
-        setStatus(RecordingStatus.IDLE);
-        return;
-      }
-
+          // Check if transcription provider is ready before starting
+          const tr = await checkTranscriptProviderReady();
+          if (await guardTranscriptionModel(tr, showModal)) {
+            setIsAutoStarting(false);
+            return;
+          }
 
           // Start the actual backend recording
           try {
@@ -301,7 +288,7 @@ export function useRecordingStart(
     clearTranscripts,
     setIsMeetingActive,
     checkTranscriptProviderReady,
-    checkIfModelDownloading,
+    guardTranscriptionModel,
     showModal,
     setStatus,
   ]);
@@ -314,38 +301,15 @@ export function useRecordingStart(
         return;
       }
 
-      console.log('Direct start from sidebar - checking Parakeet model status');
+      console.log('Direct start from sidebar - checking transcription provider status');
       setIsAutoStarting(true);
 
-      // Check if Parakeet transcription model is ready before starting
+      // Check if transcription provider is ready before starting
       const tr = await checkTranscriptProviderReady();
-      if (!tr.ok) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading && tr.provider === 'parakeet') {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', '_doctor_replaced_');
-        } else {
-          const reasonText =
-            tr.reason === 'whisper-model-missing' ? 'Whisper model not downloaded — open Settings → Transcription to download one'
-            : tr.reason === 'parakeet-model-missing' ? 'Parakeet model not downloaded — open Settings → Transcription to download one'
-            : tr.reason === 'remote-config-missing' ? 'Remote provider has no endpoint configured — open Settings → Transcription'
-            : tr.reason && tr.reason.endsWith('-api-key-missing') ? 'API key missing — open Settings → Transcription to paste it'
-            : tr.reason === 'whisper-init-failed' ? 'Failed to initialize Whisper engine'
-            : 'Transcription model not ready';
-          toast.error('Transcription model not ready', {
-            description: reasonText,
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', '_doctor_replaced_');
-        }
-        setStatus(RecordingStatus.IDLE);
+      if (await guardTranscriptionModel(tr, showModal)) {
+        setIsAutoStarting(false);
         return;
       }
-
 
       try {
         // Generate meeting title
@@ -397,7 +361,7 @@ export function useRecordingStart(
     clearTranscripts,
     setIsMeetingActive,
     checkTranscriptProviderReady,
-    checkIfModelDownloading,
+    guardTranscriptionModel,
     showModal,
     setStatus,
   ]);
