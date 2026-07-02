@@ -159,27 +159,32 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [onRecordingStart, isStarting, isValidatingModel, selectedDevices, meetingName, isRecording]);
 
   const stopRecordingAction = useCallback(async () => {
-      console.log('Executing stop recording...');
-      try {
-        setIsProcessing(true);
-        const dataDir = await appDataDir();
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const savePath = `${dataDir}/recording-${timestamp}.wav`;
-        console.log('Saving recording to:', savePath);
-        // Race invoke('stop_recording') against a 30s timeout so the UI
-        // doesn't hang indefinitely if the Rust backend gets stuck (e.g.
-        // waiting for a transcription task that never finishes). The user
-        // can retry on timeout.
-        const result = await Promise.race([
-          invoke('stop_recording', {
-            args: {
-              save_path: savePath
-            }
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('stop_recording timed out after 30s')), 30000)
-          )
-        ]);
+    console.log('Executing stop recording...');
+    try {
+      setIsProcessing(true);
+      const dataDir = await appDataDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const savePath = `${dataDir}/recording-${timestamp}.wav`;
+      console.log('Saving recording to:', savePath);
+      // Race invoke('stop_recording') against a 120s timeout. The Rust
+      // backend can take up to 10 minutes on the transcription wait, but
+      // we cap the frontend wait at 120s. If the backend doesn't respond
+      // by then, the timeout fires: we reset the UI so the stop button
+      // is clickable again and the user can retry. Crucially we do NOT
+      // call onRecordingStop(false) here — that would tell the parent
+      // the recording stopped, collapsing the UI to the start button,
+      // while the backend is still recording (IS_RECORDING still true).
+      // The user retries until the backend eventually finishes.
+      const result = await Promise.race([
+        invoke('stop_recording', {
+          args: {
+            save_path: savePath
+          }
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('stop_recording timed out')), 120000)
+        )
+      ]);
       console.log('stop_recording command completed successfully:', result);
       setRecordingPath(savePath);
       // setShowPlayback(true);
@@ -205,8 +210,15 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           return;
         }
       }
+      // On timeout (or any error that isn't "No recording in progress"),
+      // reset UI state but do NOT call onRecordingStop — the backend is
+      // still recording. The stop button becomes clickable again so the
+      // user can retry. A toast warns them what happened.
       setIsProcessing(false);
-      onRecordingStop(false);
+      if ((error as Error)?.message?.includes('timed out')) {
+        console.warn('⏱️ stop_recording timed out — backend still processing, user can retry');
+      }
+      // No onRecordingStop(false) here — would falsely signal "stopped"
     } finally {
       setIsStopping(false);
     }

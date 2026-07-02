@@ -1,0 +1,1093 @@
+{
+  "communities": {
+    "0": [
+      "arabic_whisper_model",
+      "dockerfile",
+      "handler_py",
+      "plans_runpod_whisperx",
+      "pyannote_diarization",
+      "remote_provider",
+      "reqwest_http",
+      "retranscription_rs",
+      "runpod_whisper_provider",
+      "setting_rs",
+      "tokio_async",
+      "transcription_engine",
+      "transcription_provider",
+      "whisperx"
+    ],
+    "1": [
+      "bluetooth_playback_notice_a2dp_profile",
+      "bluetooth_playback_notice_airpods_pro",
+      "bluetooth_playback_notice_bluetooth_audio_stack",
+      "bluetooth_playback_notice_bluetooth_headphones",
+      "bluetooth_playback_notice_coreaudio",
+      "bluetooth_playback_notice_ffmpeg",
+      "bluetooth_playback_notice_hfp_profile",
+      "bluetooth_playback_notice_ldac_codec",
+      "bluetooth_playback_notice_macos",
+      "bluetooth_playback_notice_resampling",
+      "bluetooth_playback_notice_sony_wh1000xm4"
+    ],
+    "2": [
+      "digicert_keylocker",
+      "openblas_acceleration",
+      "vulkan_acceleration",
+      "workflow_dispatch",
+      "workflows_build_devtest_yml",
+      "workflows_build_linux_yml",
+      "workflows_build_test_yml",
+      "workflows_build_windows_yml",
+      "workflows_build_yml",
+      "workflows_pr_main_check_yml",
+      "workflows_release_yml"
+    ],
+    "3": [
+      "github_issue_335",
+      "plans_upstream_pr",
+      "pr_1_branch",
+      "pr_2_branch",
+      "upstream_repo"
+    ],
+    "4": [
+      "apple_developer_certificate",
+      "metal_acceleration",
+      "workflows_build_macos_yml"
+    ],
+    "5": [
+      "bluetooth_playback_notice_48khz",
+      "bluetooth_playback_notice_ffprobe",
+      "bluetooth_playback_notice_meetily"
+    ],
+    "6": [
+      "hooks_usetranscriptrecovery_usetranscriptrecoveryreturn",
+      "services_indexeddbservice_meetingmetadata",
+      "services_indexeddbservice_storedtranscript"
+    ],
+    "7": [
+      "workflows_acceleration_guide_md",
+      "workflows_readme_devtest_md",
+      "workflows_workflows_overview_md"
+    ],
+    "8": [
+      "bluetooth_playback_notice_computer_speakers",
+      "bluetooth_playback_notice_wired_headphones"
+    ],
+    "9": [
+      "components_transcriptsettings_transcriptmodelprops",
+      "services_configservice_remoteconfig"
+    ],
+    "10": [
+      "components_virtualizedtranscriptview_virtualizedtranscriptviewprops",
+      "types_index_transcriptsegmentdata"
+    ],
+    "11": [
+      "services_storageservice_savemeetingrequest",
+      "types_index_transcript"
+    ],
+    "12": [
+      "aisummary_blocknotesummaryview_blocknotesummaryviewref"
+    ],
+    "13": [
+      "app_page_home"
+    ],
+    "14": [
+      "audio_system_audio_types_systemaudiocommands"
+    ],
+    "15": [
+      "audio_system_audio_types_systemaudioevents"
+    ],
+    "16": [
+      "blocknoteeditor_basicblocknotetest_basicblocknotetest"
+    ],
+    "17": [
+      "blocknoteeditor_editor_editor"
+    ],
+    "18": [
+      "bluetooth_playback_notice_aac_codec"
+    ],
+    "19": [
+      "bluetooth_playback_notice_apple_tn2321"
+    ],
+    "20": [
+      "bluetooth_playback_notice_sbc_codec"
+    ],
+    "21": [
+      "components_analyticsdatamodal_analyticsdatamodal"
+    ],
+    "22": [
+      "components_audiobackendselector_backendinfo"
+    ],
+    "23": [
+      "components_bluetoothplaybackwarning_bluetoothplaybackwarning"
+    ],
+    "24": [
+      "components_chunkprogressdisplay_chunkstatus"
+    ],
+    "25": [
+      "components_chunkprogressdisplay_processingprogress"
+    ],
+    "26": [
+      "components_consoletoggle_consoletoggle"
+    ],
+    "27": [
+      "components_customdialog_customdialog"
+    ],
+    "28": [
+      "components_deviceselection_audiodevice"
+    ],
+    "29": [
+      "components_deviceselection_audioleveldata"
+    ],
+    "30": [
+      "components_deviceselection_audiolevelupdate"
+    ],
+    "31": [
+      "components_deviceselection_selecteddevices"
+    ],
+    "32": [
+      "components_emptystatesummary_emptystatesummary"
+    ],
+    "33": [
+      "components_languageselection_language"
+    ],
+    "34": [
+      "components_messagetoast_messagetoast"
+    ],
+    "35": [
+      "components_modelsettingsmodal_modelconfig"
+    ],
+    "36": [
+      "components_parakeetmodelmanager_parakeetmodelmanager"
+    ],
+    "37": [
+      "components_preferencesettings_preferencesettings"
+    ],
+    "38": [
+      "components_recordingsettings_recordingpreferences"
+    ],
+    "39": [
+      "components_settingtabs_settingtabs"
+    ],
+    "40": [
+      "components_statusoverlays_statusoverlays"
+    ],
+    "41": [
+      "components_summarymodelsettings_summarymodelsettings"
+    ],
+    "42": [
+      "components_transcriptsettings_transcriptsettingsprops"
+    ],
+    "43": [
+      "components_updatecheckprovider_updatecheckprovider"
+    ],
+    "44": [
+      "components_updatecheckprovider_useupdatecheckcontext"
+    ],
+    "45": [
+      "components_updatenotification_setupdatedialogcallback"
+    ],
+    "46": [
+      "components_updatenotification_showupdatenotification"
+    ],
+    "47": [
+      "components_whispermodelmanager_modelmanager"
+    ],
+    "48": [
+      "confirmationmodel_confirmation_modal_confirmationmodal"
+    ],
+    "49": [
+      "constants_audioformats_audioextension"
+    ],
+    "50": [
+      "constants_audioformats_getaudioformatsdisplaylist"
+    ],
+    "51": [
+      "contexts_configcontext_configprovider"
+    ],
+    "52": [
+      "contexts_configcontext_notificationsettings"
+    ],
+    "53": [
+      "contexts_configcontext_ollamamodel"
+    ],
+    "54": [
+      "contexts_configcontext_storagelocations"
+    ],
+    "55": [
+      "contexts_configcontext_useconfig"
+    ],
+    "56": [
+      "contexts_importdialogcontext_importdialogprovider"
+    ],
+    "57": [
+      "contexts_ollamadownloadcontext_ollamadownloadprovider"
+    ],
+    "58": [
+      "contexts_onboardingcontext_onboardingprovider"
+    ],
+    "59": [
+      "contexts_recordingpostprocessingprovider_recordingpostprocessingprovider"
+    ],
+    "60": [
+      "contexts_recordingstatecontext_recordingstateprovider"
+    ],
+    "61": [
+      "contexts_transcriptcontext_transcriptprovider"
+    ],
+    "62": [
+      "contexts_transcriptcontext_usetranscripts"
+    ],
+    "63": [
+      "hooks_useautoscroll_useautoscroll"
+    ],
+    "64": [
+      "hooks_useimportaudio_audiofileinfo"
+    ],
+    "65": [
+      "hooks_useimportaudio_importerror"
+    ],
+    "66": [
+      "hooks_useimportaudio_importprogress"
+    ],
+    "67": [
+      "hooks_useimportaudio_importresult"
+    ],
+    "68": [
+      "hooks_useimportaudio_importstatus"
+    ],
+    "69": [
+      "hooks_useimportaudio_useimportaudio"
+    ],
+    "70": [
+      "hooks_useimportaudio_useimportaudiooptions"
+    ],
+    "71": [
+      "hooks_useimportaudio_useimportaudioreturn"
+    ],
+    "72": [
+      "hooks_usemodalstate_modaltype"
+    ],
+    "73": [
+      "hooks_usemodalstate_usemodalstate"
+    ],
+    "74": [
+      "hooks_usepaginatedtranscripts_usepaginatedtranscripts"
+    ],
+    "75": [
+      "hooks_usepermissioncheck_permissionstatus"
+    ],
+    "76": [
+      "hooks_usepermissioncheck_usepermissioncheck"
+    ],
+    "77": [
+      "hooks_useplatform_platform"
+    ],
+    "78": [
+      "hooks_useplatform_useislinux"
+    ],
+    "79": [
+      "hooks_useplatform_useplatform"
+    ],
+    "80": [
+      "hooks_useprocessingprogress_processingsession"
+    ],
+    "81": [
+      "hooks_useprocessingprogress_useprocessingprogress"
+    ],
+    "82": [
+      "hooks_userecentlanguages_userecentlanguages"
+    ],
+    "83": [
+      "hooks_userecordingstart_userecordingstart"
+    ],
+    "84": [
+      "hooks_userecordingstatesync_userecordingstatesync"
+    ],
+    "85": [
+      "hooks_userecordingstop_userecordingstop"
+    ],
+    "86": [
+      "hooks_usetranscriptionmodels_modeloption"
+    ],
+    "87": [
+      "hooks_usetranscriptionmodels_rawmodelinfo"
+    ],
+    "88": [
+      "hooks_usetranscriptionmodels_usetranscriptionmodels"
+    ],
+    "89": [
+      "hooks_usetranscriptrecovery_usetranscriptrecovery"
+    ],
+    "90": [
+      "hooks_usetranscriptstreaming_usetranscriptstreaming"
+    ],
+    "91": [
+      "hooks_useupdatecheck_useupdatecheck"
+    ],
+    "92": [
+      "id_page_generatestaticparams"
+    ],
+    "93": [
+      "importaudio_importdropoverlay_importdropoverlay"
+    ],
+    "94": [
+      "issue_template_bug_report_md"
+    ],
+    "95": [
+      "issue_template_documentation_md"
+    ],
+    "96": [
+      "issue_template_feature_request_md"
+    ],
+    "97": [
+      "lib_analytics_analytics"
+    ],
+    "98": [
+      "lib_analytics_analyticsproperties"
+    ],
+    "99": [
+      "lib_analytics_deviceinfo"
+    ],
+    "100": [
+      "lib_analytics_usersession"
+    ],
+    "101": [
+      "lib_blocknote_markdown_blockstomarkdownsafely"
+    ],
+    "102": [
+      "lib_builtin_ai_builtinaiapi"
+    ],
+    "103": [
+      "lib_builtin_ai_builtinmodelinfo"
+    ],
+    "104": [
+      "lib_builtin_ai_builtinmodelstatus"
+    ],
+    "105": [
+      "lib_builtin_ai_getstatuscolor"
+    ],
+    "106": [
+      "lib_builtin_ai_getstatuslabel"
+    ],
+    "107": [
+      "lib_builtin_ai_ismodelavailable"
+    ],
+    "108": [
+      "lib_builtin_ai_ismodelcorrupted"
+    ],
+    "109": [
+      "lib_builtin_ai_ismodeldownloading"
+    ],
+    "110": [
+      "lib_builtin_ai_ismodelerror"
+    ],
+    "111": [
+      "lib_builtin_ai_ismodelnotdownloaded"
+    ],
+    "112": [
+      "lib_onboarding_summary_model_formatsummarymodelsizelabelfrommb"
+    ],
+    "113": [
+      "lib_onboarding_summary_model_getdownloadtotalmb"
+    ],
+    "114": [
+      "lib_onboarding_summary_model_getsummarymodelsizelabel"
+    ],
+    "115": [
+      "lib_onboarding_summary_model_getsummarymodelsizemb"
+    ],
+    "116": [
+      "lib_onboarding_summary_model_resolveonboardingsummarymodelstatus"
+    ],
+    "117": [
+      "lib_parakeet_formatfilesize"
+    ],
+    "118": [
+      "lib_parakeet_getmodeldisplayinfo"
+    ],
+    "119": [
+      "lib_parakeet_getmodeldisplayname"
+    ],
+    "120": [
+      "lib_parakeet_getmodelicon"
+    ],
+    "121": [
+      "lib_parakeet_getmodelperformancebadge"
+    ],
+    "122": [
+      "lib_parakeet_getrecommendedmodel"
+    ],
+    "123": [
+      "lib_parakeet_getstatuscolor"
+    ],
+    "124": [
+      "lib_parakeet_isquantizedmodel"
+    ],
+    "125": [
+      "lib_parakeet_modelaccuracy"
+    ],
+    "126": [
+      "lib_parakeet_modeldisplayinfo"
+    ],
+    "127": [
+      "lib_parakeet_modelstatus"
+    ],
+    "128": [
+      "lib_parakeet_parakeetapi"
+    ],
+    "129": [
+      "lib_parakeet_parakeetenginestate"
+    ],
+    "130": [
+      "lib_parakeet_parakeetmodelinfo"
+    ],
+    "131": [
+      "lib_parakeet_processingspeed"
+    ],
+    "132": [
+      "lib_parakeet_quantizationtype"
+    ],
+    "133": [
+      "lib_recordingnotification_showrecordingnotification"
+    ],
+    "134": [
+      "lib_summary_language_preferences_applypinnedsummarylanguagetomeeting"
+    ],
+    "135": [
+      "lib_summary_language_preferences_detectandcachesummarylanguage"
+    ],
+    "136": [
+      "lib_summary_language_preferences_detecttranscriptsummarylanguage"
+    ],
+    "137": [
+      "lib_summary_language_preferences_meetingsummarylanguagepreference"
+    ],
+    "138": [
+      "lib_summary_language_preferences_readcacheddetectedsummarylanguage"
+    ],
+    "139": [
+      "lib_summary_language_preferences_readmeetingsummarylanguage"
+    ],
+    "140": [
+      "lib_summary_language_preferences_readpinnedsummarylanguagedefault"
+    ],
+    "141": [
+      "lib_summary_language_preferences_savecacheddetectedsummarylanguage"
+    ],
+    "142": [
+      "lib_summary_language_preferences_savemeetingsummarylanguage"
+    ],
+    "143": [
+      "lib_summary_language_preferences_summarylanguagedetectionreason"
+    ],
+    "144": [
+      "lib_summary_language_preferences_summarylanguagedetectionresult"
+    ],
+    "145": [
+      "lib_summary_language_preferences_summarylanguagestorage"
+    ],
+    "146": [
+      "lib_summary_language_preferences_writepinnedsummarylanguagedefault"
+    ],
+    "147": [
+      "lib_summary_languages_labelforcode"
+    ],
+    "148": [
+      "lib_summary_languages_languageoption"
+    ],
+    "149": [
+      "lib_summary_languages_normaliselanguagecode"
+    ],
+    "150": [
+      "lib_utils_cn"
+    ],
+    "151": [
+      "lib_utils_isollamanotinstallederror"
+    ],
+    "152": [
+      "lib_whisper_downloadmodelrequest"
+    ],
+    "153": [
+      "lib_whisper_formatfilesize"
+    ],
+    "154": [
+      "lib_whisper_getmodelbasename"
+    ],
+    "155": [
+      "lib_whisper_getmodelicon"
+    ],
+    "156": [
+      "lib_whisper_getmodelperformancebadge"
+    ],
+    "157": [
+      "lib_whisper_getmodeltagline"
+    ],
+    "158": [
+      "lib_whisper_getmodeltype"
+    ],
+    "159": [
+      "lib_whisper_getrecommendedmodel"
+    ],
+    "160": [
+      "lib_whisper_getstatuscolor"
+    ],
+    "161": [
+      "lib_whisper_groupmodelsbybase"
+    ],
+    "162": [
+      "lib_whisper_isquantizedmodel"
+    ],
+    "163": [
+      "lib_whisper_modelaccuracy"
+    ],
+    "164": [
+      "lib_whisper_modeldownloadprogress"
+    ],
+    "165": [
+      "lib_whisper_modelinfo"
+    ],
+    "166": [
+      "lib_whisper_modelstatus"
+    ],
+    "167": [
+      "lib_whisper_processingspeed"
+    ],
+    "168": [
+      "lib_whisper_switchmodelrequest"
+    ],
+    "169": [
+      "lib_whisper_transcribeaudiorequest"
+    ],
+    "170": [
+      "lib_whisper_whisperapi"
+    ],
+    "171": [
+      "lib_whisper_whisperenginestate"
+    ],
+    "172": [
+      "meeting_details_page_content_pagecontent"
+    ],
+    "173": [
+      "meeting_details_usecopyoperations_usecopyoperations"
+    ],
+    "174": [
+      "meeting_details_usemeetingdata_usemeetingdata"
+    ],
+    "175": [
+      "meeting_details_usemeetingoperations_usemeetingoperations"
+    ],
+    "176": [
+      "meeting_details_usemodelconfiguration_usemodelconfiguration"
+    ],
+    "177": [
+      "meeting_details_usesummarygeneration_usesummarygeneration"
+    ],
+    "178": [
+      "meeting_details_usetemplates_usetemplates"
+    ],
+    "179": [
+      "meetingdetails_transcriptbuttongroup_transcriptbuttongroup"
+    ],
+    "180": [
+      "services_configservice_configservice"
+    ],
+    "181": [
+      "services_configservice_customopenaiconfig"
+    ],
+    "182": [
+      "services_configservice_modelconfig"
+    ],
+    "183": [
+      "services_configservice_recordingpreferences"
+    ],
+    "184": [
+      "services_configservice_remotetestresult"
+    ],
+    "185": [
+      "services_recordingservice_recordingservice"
+    ],
+    "186": [
+      "services_recordingservice_recordingstate"
+    ],
+    "187": [
+      "services_recordingservice_recordingstoppedpayload"
+    ],
+    "188": [
+      "services_storageservice_meeting"
+    ],
+    "189": [
+      "services_storageservice_savemeetingresponse"
+    ],
+    "190": [
+      "services_storageservice_storageservice"
+    ],
+    "191": [
+      "services_transcriptservice_modeldownloadcompletepayload"
+    ],
+    "192": [
+      "services_transcriptservice_transcriptionerrorpayload"
+    ],
+    "193": [
+      "services_transcriptservice_transcriptionstatus"
+    ],
+    "194": [
+      "services_transcriptservice_transcriptservice"
+    ],
+    "195": [
+      "services_updateservice_updateinfo"
+    ],
+    "196": [
+      "services_updateservice_updateprogress"
+    ],
+    "197": [
+      "services_updateservice_updateservice"
+    ],
+    "198": [
+      "shared_statusindicator_statusindicator"
+    ],
+    "199": [
+      "sidebar_sidebarprovider_currentmeeting"
+    ],
+    "200": [
+      "sidebar_sidebarprovider_sidebarprovider"
+    ],
+    "201": [
+      "steps_welcomestep_welcomestep"
+    ],
+    "202": [
+      "types_betafeatures_betafeaturekey"
+    ],
+    "203": [
+      "types_betafeatures_betafeatures"
+    ],
+    "204": [
+      "types_betafeatures_loadbetafeatures"
+    ],
+    "205": [
+      "types_betafeatures_savebetafeatures"
+    ],
+    "206": [
+      "types_index_apiresponse"
+    ],
+    "207": [
+      "types_index_block"
+    ],
+    "208": [
+      "types_index_blocknoteblock"
+    ],
+    "209": [
+      "types_index_meetingmetadata"
+    ],
+    "210": [
+      "types_index_message"
+    ],
+    "211": [
+      "types_index_paginatedtranscriptsresponse"
+    ],
+    "212": [
+      "types_index_section"
+    ],
+    "213": [
+      "types_index_summary"
+    ],
+    "214": [
+      "types_index_summarydataresponse"
+    ],
+    "215": [
+      "types_index_summaryformat"
+    ],
+    "216": [
+      "types_index_summaryresponse"
+    ],
+    "217": [
+      "types_index_transcriptupdate"
+    ],
+    "218": [
+      "types_onboarding_onboardingcontainerprops"
+    ],
+    "219": [
+      "types_onboarding_onboardingpermissions"
+    ],
+    "220": [
+      "types_onboarding_onboardingstep"
+    ],
+    "221": [
+      "types_onboarding_permissionrowprops"
+    ],
+    "222": [
+      "types_onboarding_permissionstatus"
+    ],
+    "223": [
+      "types_onboarding_statusindicatorprops"
+    ],
+    "224": [
+      "types_summary_processrequest"
+    ],
+    "225": [
+      "types_summary_summary"
+    ],
+    "226": [
+      "types_summary_summaryresponse"
+    ],
+    "227": [
+      "ui_button_buttonprops"
+    ]
+  },
+  "cohesion": {
+    "0": 0.21978021978021978,
+    "1": 0.2,
+    "2": 0.23636363636363636,
+    "3": 0.4,
+    "4": 0.6666666666666666,
+    "5": 0.6666666666666666,
+    "6": 0.6666666666666666,
+    "7": 1.0,
+    "8": 1.0,
+    "9": 1.0,
+    "10": 1.0,
+    "11": 1.0,
+    "12": 1.0,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0,
+    "16": 1.0,
+    "17": 1.0,
+    "18": 1.0,
+    "19": 1.0,
+    "20": 1.0,
+    "21": 1.0,
+    "22": 1.0,
+    "23": 1.0,
+    "24": 1.0,
+    "25": 1.0,
+    "26": 1.0,
+    "27": 1.0,
+    "28": 1.0,
+    "29": 1.0,
+    "30": 1.0,
+    "31": 1.0,
+    "32": 1.0,
+    "33": 1.0,
+    "34": 1.0,
+    "35": 1.0,
+    "36": 1.0,
+    "37": 1.0,
+    "38": 1.0,
+    "39": 1.0,
+    "40": 1.0,
+    "41": 1.0,
+    "42": 1.0,
+    "43": 1.0,
+    "44": 1.0,
+    "45": 1.0,
+    "46": 1.0,
+    "47": 1.0,
+    "48": 1.0,
+    "49": 1.0,
+    "50": 1.0,
+    "51": 1.0,
+    "52": 1.0,
+    "53": 1.0,
+    "54": 1.0,
+    "55": 1.0,
+    "56": 1.0,
+    "57": 1.0,
+    "58": 1.0,
+    "59": 1.0,
+    "60": 1.0,
+    "61": 1.0,
+    "62": 1.0,
+    "63": 1.0,
+    "64": 1.0,
+    "65": 1.0,
+    "66": 1.0,
+    "67": 1.0,
+    "68": 1.0,
+    "69": 1.0,
+    "70": 1.0,
+    "71": 1.0,
+    "72": 1.0,
+    "73": 1.0,
+    "74": 1.0,
+    "75": 1.0,
+    "76": 1.0,
+    "77": 1.0,
+    "78": 1.0,
+    "79": 1.0,
+    "80": 1.0,
+    "81": 1.0,
+    "82": 1.0,
+    "83": 1.0,
+    "84": 1.0,
+    "85": 1.0,
+    "86": 1.0,
+    "87": 1.0,
+    "88": 1.0,
+    "89": 1.0,
+    "90": 1.0,
+    "91": 1.0,
+    "92": 1.0,
+    "93": 1.0,
+    "94": 1.0,
+    "95": 1.0,
+    "96": 1.0,
+    "97": 1.0,
+    "98": 1.0,
+    "99": 1.0,
+    "100": 1.0,
+    "101": 1.0,
+    "102": 1.0,
+    "103": 1.0,
+    "104": 1.0,
+    "105": 1.0,
+    "106": 1.0,
+    "107": 1.0,
+    "108": 1.0,
+    "109": 1.0,
+    "110": 1.0,
+    "111": 1.0,
+    "112": 1.0,
+    "113": 1.0,
+    "114": 1.0,
+    "115": 1.0,
+    "116": 1.0,
+    "117": 1.0,
+    "118": 1.0,
+    "119": 1.0,
+    "120": 1.0,
+    "121": 1.0,
+    "122": 1.0,
+    "123": 1.0,
+    "124": 1.0,
+    "125": 1.0,
+    "126": 1.0,
+    "127": 1.0,
+    "128": 1.0,
+    "129": 1.0,
+    "130": 1.0,
+    "131": 1.0,
+    "132": 1.0,
+    "133": 1.0,
+    "134": 1.0,
+    "135": 1.0,
+    "136": 1.0,
+    "137": 1.0,
+    "138": 1.0,
+    "139": 1.0,
+    "140": 1.0,
+    "141": 1.0,
+    "142": 1.0,
+    "143": 1.0,
+    "144": 1.0,
+    "145": 1.0,
+    "146": 1.0,
+    "147": 1.0,
+    "148": 1.0,
+    "149": 1.0,
+    "150": 1.0,
+    "151": 1.0,
+    "152": 1.0,
+    "153": 1.0,
+    "154": 1.0,
+    "155": 1.0,
+    "156": 1.0,
+    "157": 1.0,
+    "158": 1.0,
+    "159": 1.0,
+    "160": 1.0,
+    "161": 1.0,
+    "162": 1.0,
+    "163": 1.0,
+    "164": 1.0,
+    "165": 1.0,
+    "166": 1.0,
+    "167": 1.0,
+    "168": 1.0,
+    "169": 1.0,
+    "170": 1.0,
+    "171": 1.0,
+    "172": 1.0,
+    "173": 1.0,
+    "174": 1.0,
+    "175": 1.0,
+    "176": 1.0,
+    "177": 1.0,
+    "178": 1.0,
+    "179": 1.0,
+    "180": 1.0,
+    "181": 1.0,
+    "182": 1.0,
+    "183": 1.0,
+    "184": 1.0,
+    "185": 1.0,
+    "186": 1.0,
+    "187": 1.0,
+    "188": 1.0,
+    "189": 1.0,
+    "190": 1.0,
+    "191": 1.0,
+    "192": 1.0,
+    "193": 1.0,
+    "194": 1.0,
+    "195": 1.0,
+    "196": 1.0,
+    "197": 1.0,
+    "198": 1.0,
+    "199": 1.0,
+    "200": 1.0,
+    "201": 1.0,
+    "202": 1.0,
+    "203": 1.0,
+    "204": 1.0,
+    "205": 1.0,
+    "206": 1.0,
+    "207": 1.0,
+    "208": 1.0,
+    "209": 1.0,
+    "210": 1.0,
+    "211": 1.0,
+    "212": 1.0,
+    "213": 1.0,
+    "214": 1.0,
+    "215": 1.0,
+    "216": 1.0,
+    "217": 1.0,
+    "218": 1.0,
+    "219": 1.0,
+    "220": 1.0,
+    "221": 1.0,
+    "222": 1.0,
+    "223": 1.0,
+    "224": 1.0,
+    "225": 1.0,
+    "226": 1.0,
+    "227": 1.0
+  },
+  "gods": [
+    {
+      "id": "plans_runpod_whisperx",
+      "label": "Speaker Diarization + Arabic Whisper on RunPod for Meetily",
+      "degree": 12
+    },
+    {
+      "id": "workflow_dispatch",
+      "label": "Manual Workflow Trigger",
+      "degree": 6
+    },
+    {
+      "id": "plans_upstream_pr",
+      "label": "Meetily + RunPod WhisperX — Upstream-PR Iteration",
+      "degree": 6
+    },
+    {
+      "id": "remote_provider",
+      "label": "RemoteProvider",
+      "degree": 5
+    },
+    {
+      "id": "handler_py",
+      "label": "RunPod handler.py",
+      "degree": 5
+    },
+    {
+      "id": "bluetooth_playback_notice_bluetooth_headphones",
+      "label": "Bluetooth Headphones",
+      "degree": 5
+    },
+    {
+      "id": "transcription_provider",
+      "label": "TranscriptionProvider trait",
+      "degree": 4
+    },
+    {
+      "id": "vulkan_acceleration",
+      "label": "Vulkan GPU Acceleration",
+      "degree": 3
+    },
+    {
+      "id": "bluetooth_playback_notice_bluetooth_audio_stack",
+      "label": "Bluetooth Audio Stack",
+      "degree": 3
+    },
+    {
+      "id": "bluetooth_playback_notice_resampling",
+      "label": "Audio Resampling",
+      "degree": 3
+    }
+  ],
+  "surprises": [
+    {
+      "source": "Speaker Diarization + Arabic Whisper on RunPod for Meetily",
+      "target": "retranscription module",
+      "source_files": [
+        ".hermes/plans/2026-06-24_100758-meetily-runpod-whisperx.md",
+        "frontend/src-tauri/src/audio/retranscription.rs"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "crosses file types (doc ↔ code); connects across different repos/directories; peripheral node `retranscription module` unexpectedly reaches hub `Speaker Diarization + Arabic Whisper on RunPod for Meetily`"
+    },
+    {
+      "source": "Speaker Diarization + Arabic Whisper on RunPod for Meetily",
+      "target": "RunpodWhisperProvider",
+      "source_files": [
+        ".hermes/plans/2026-06-24_100758-meetily-runpod-whisperx.md",
+        "frontend/src-tauri/src/audio/transcription/runpod_provider.rs"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "crosses file types (doc ↔ code); connects across different repos/directories; peripheral node `RunpodWhisperProvider` unexpectedly reaches hub `Speaker Diarization + Arabic Whisper on RunPod for Meetily`"
+    },
+    {
+      "source": "Speaker Diarization + Arabic Whisper on RunPod for Meetily",
+      "target": "SettingsRepository",
+      "source_files": [
+        ".hermes/plans/2026-06-24_100758-meetily-runpod-whisperx.md",
+        "frontend/src-tauri/src/database/repositories/setting.rs"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "crosses file types (doc ↔ code); connects across different repos/directories; peripheral node `SettingsRepository` unexpectedly reaches hub `Speaker Diarization + Arabic Whisper on RunPod for Meetily`"
+    },
+    {
+      "source": "Speaker Diarization + Arabic Whisper on RunPod for Meetily",
+      "target": "TranscriptionEngine",
+      "source_files": [
+        ".hermes/plans/2026-06-24_100758-meetily-runpod-whisperx.md",
+        "frontend/src-tauri/src/audio/transcription/engine.rs"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "crosses file types (doc ↔ code); connects across different repos/directories; peripheral node `TranscriptionEngine` unexpectedly reaches hub `Speaker Diarization + Arabic Whisper on RunPod for Meetily`"
+    },
+    {
+      "source": "Meetily + RunPod WhisperX — Upstream-PR Iteration",
+      "target": "RemoteProvider",
+      "source_files": [
+        ".hermes/plans/2026-06-24_140000-meetily-upstream-pr.md",
+        "frontend/src-tauri/src/audio/transcription/remote_provider.rs"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "crosses file types (doc ↔ code); connects across different repos/directories; bridges separate communities"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `Meetily + RunPod WhisperX — Upstream-PR Iteration` connect `Community 3` to `Community 0`?",
+      "why": "High betweenness centrality (0.002) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `Manual Workflow Trigger` connect `Community 2` to `Community 4`?",
+      "why": "High betweenness centrality (0.002) - this node is a cross-community bridge."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `SystemAudioCommands`, `SystemAudioEvents`, `StatusOverlays` to the rest of the system?",
+      "why": "244 weakly-connected nodes found - possible documentation gaps or missing edges."
+    }
+  ]
+}

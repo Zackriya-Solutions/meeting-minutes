@@ -1,0 +1,48 @@
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3118
+
+ ✓ Starting...
+ ✓ Ready in 2.1s
+ ○ Compiling / ...
+ ✓ Compiled / in 4.1s (1919 modules)
+ GET / 200 in 4557ms
+ ✓ Compiled in 372ms (959 modules)
+ ○ Compiling /settings ...
+ ✓ Compiled /settings in 968ms (1967 modules)
+ GET /settings 200 in 1177ms
+ GET /settings 200 in 78ms
+ GET /settings 200 in 65ms
+ GET /settings 200 in 67ms
+ GET /settings 200 in 84ms
+ GET /settings 200 in 42ms
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 745ms (1938 modules)
+ GET /_next/static/chunks/app/settings/page.js 404 in 945ms
+ GET /_next/static/chunks/app/settings/page.js 404 in 78ms
+ ✓ Compiled /settings in 155ms (992 modules)
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 1419ms (2207 modules)
+ ✓ Compiled /_not-found in 201ms (2196 modules)
+ GET /_next/static/chunks/app/settings/page.js 404 in 312ms
+ GET /settings 200 in 153ms
+ GET /_next/static/css/app/layout.css?v=1782743200497 404 in 57ms
+ GET /_next/static/chunks/main-app.js?v=1782743200497 404 in 69ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 65ms
+ GET /_next/static/chunks/app/settings/page.js 404 in 65ms
+ GET /settings 200 in 662ms
+ ✓ Compiled in 3.9s (2173 modules)
+ ✓ Compiled in 1624ms (2173 modules)
+ ✓ Compiled in 1533ms (2173 modules)
+ ✓ Compiled in 1402ms (2173 modules)
+ ✓ Compiled in 1265ms (2173 modules)
+ ✓ Compiled in 1254ms (2173 modules)
+ ✓ Compiled in 1310ms (2173 modules)
+ ✓ Compiled in 1386ms (2173 modules)
+ ✓ Compiled in 1469ms (2173 modules)
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 2.2s (2176 modules)
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 924ms (2164 modules)
+ GET /_next/static/chunks/app/settings/page.js 500 in 5560ms
+ GET /_next/static/chunks/app/settings/page.js 500 in 28ms
+ GET /_next/static/chunks/app/settings/page.js 500 in 39ms

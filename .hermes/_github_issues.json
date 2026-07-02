@@ -1,0 +1,1562 @@
+[
+  {
+    "number": 531,
+    "title": "Auto-stop recording after configurable inactivity timeout",
+    "labels": [],
+    "comments": 1,
+    "created": "2026-06-26",
+    "body": "**Problem**\n\nRecording is manual start/stop. If you forget to stop it \u2014 e.g. you step away after a Teams/Zoom call ends \u2014 the recording keeps running for hours, producing huge audio files and transcripts full of post-meeting ambient noise, and the session stays stuck in `recording` status. I've had a recording run to ~24 hours this way, which also means a long wait for transcription to catch up.\n\n"
+  },
+  {
+    "number": 529,
+    "title": "[BUG] Transcription Engine does not load at the first start",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2026-06-24",
+    "body": "Good afternoon! I just downloaded the latest version of the 0.4.0 app for Windows, I have Win10pro, I'm from Russia, and I think I might be subject to blocking. Please help me, I can't even start using the app. When I try to launch it for the first time, the transcription model doesn't download. However, another model downloads. I don't know what to do. Is it possible to upload my own models for w"
+  },
+  {
+    "number": 527,
+    "title": "[FEATURE] pluggable HTTPS-backed remote ASR provider (relates to #335)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-06-24",
+    "body": "\n\n## Feature Description\n\nSurface existing `TranscriptionProvider` trait via a small, vendor-neutral HTTPS backend so users can plug meetily into any remote ASR (WhisperX-compatible handler on cloud GPU, self-hosted inference server, etc.) without vendoring a specific provider.\n\n## Problem Statement\n\n`TranscriptionProvider` (in `frontend/src-tauri/src/audio/transcription/provider.rs`) already has "
+  },
+  {
+    "number": 526,
+    "title": "[FEATURE] read proposed models from config",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-06-23",
+    "body": "## Feature Description\nMove available API model lists out of hardcoded source code and into a small configuration file.\n\n## Problem Statement\nAPI model names change frequently. Hardcoding model lists means every new model, renamed model, or deprecated model requires a code change, rebuild, and release, even though\nthe app behavior has not changed.\n\n## Proposed Solution\nLoad provider model options "
+  },
+  {
+    "number": 522,
+    "title": "[FEATURE] Floating, draggable recording indicator when switching away from the app",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-06-19",
+    "body": "## Feature Description\nA small, always-on-top, draggable floating widget (a \"pill\") that appears while a recording is in progress and the main Meetily window is not focused. It shows a live microphone waveform, the elapsed recording time, and a stop button, so you can see that recording is active and stop it without switching back to the app.\n\n## Problem Statement\nOnce a recording starts and you s"
+  },
+  {
+    "number": 520,
+    "title": "[DOCS]",
+    "labels": [
+      "documentation"
+    ],
+    "comments": 0,
+    "created": "2026-06-18",
+    "body": "## **Disclaimer**\nThe following is not intended as legal advice and you are strongly encouraged to speak with a lawyer if the matters discussed below affect you.\n\nSee https://github.com/Daimon-Law/Terms-of-Use-for-Daimon-Law-Repositories for futher dislaimers about this contribution.\n\n## Documentation Issue\n\nThe FAQ answer \"Why is Meetily bot-free and what does that mean?\" sells the absence of a r"
+  },
+  {
+    "number": 519,
+    "title": "[FEATURE] Disable real-time transcription",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2026-06-17",
+    "body": "## Feature Description\nAdd an option to disable real-time transcription during recording.\n\n## Problem Statement\nI really like the program and it has been very useful for me. However, I use it on a computer with limited hardware resources, and depending on what else I am running, the system can become slow.\n\nReal-time transcription also does not work very well for my workflow. I usually prefer to f"
+  },
+  {
+    "number": 518,
+    "title": "[FEATURE] Delete Recording files when deleting from UI",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-06-17",
+    "body": "## Feature Description\nWhen I delete a meeting from the UI, it stops showing in the UI. However, all the files - MP4, transcript, etc. still remains in the disk. When deleting a meeting, we should be able to delete the backend files as well. \n\n## Problem Statement\nWhen I delete a meeting from the UI, it stops showing in the UI. However, all the files - MP4, transcript, etc. still remains in the di"
+  },
+  {
+    "number": 509,
+    "title": "[BUG] ScreenCaptureKit backend incorrectly disabled in UI (AudioBackendSelector.tsx)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-06-09",
+    "body": "## Bug Description\n\nScreenCaptureKit is always shown as **Disabled** in the Settings UI, even when the user has granted the required macOS permission (*System Settings \u2192 Privacy & Security \u2192 Screen and System Audio Recording*).\n\n## Root Cause\n\nIn `frontend/src/components/AudioBackendSelector.tsx`, the condition that disables a backend has a variable naming error:\n\n```typescript\n// Line ~96\nconst i"
+  },
+  {
+    "number": 507,
+    "title": "[FEATURE]  Enable to REtranscribe with COSTOM ENDPOINT.",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-06-08",
+    "body": "## Feature Description\nImplement integration for external transcription models, similar to the existing summary model integration. This will allow users to utilize external services, such as Whisper running on Ollama, for post-processing retranscription.\n\n## Problem Statement\nCurrently, the application is limited to using only the internally integrated transcription model, preventing users from le"
+  },
+  {
+    "number": 505,
+    "title": "Feature request: automatic silence detection and trimming to reclaim disk space \ud83c\udf99\ufe0f",
+    "labels": [],
+    "comments": 1,
+    "created": "2026-06-06",
+    "body": "## Summary\n\nLove this project, it's genuinely one of the most useful tools I've come across \ud83d\ude80. One gap I've noticed: recordings frequently run far longer than the actual meeting because the app keeps capturing after everyone has left the call. On a typical week this has left me with several multi-gigabyte files where the majority of the runtime is dead air.\n\n## The problem\n\nWhen Meetily is left ru"
+  },
+  {
+    "number": 496,
+    "title": "[BUG] Camera invisible to other participants in Google Meet (Safari) while Meetily is recording",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-06-03",
+    "body": "## Bug Description\n\nWhen Meetily is actively recording (screen/audio capture), other participants in a Google Meet call cannot see my camera feed. The issue only occurs in Safari \u2014 Google Meet in Safari shows no video to remote participants while Meetily capture is running.\n\n## Environment\n\n- **macOS:** 26.5 (Build 25F71)\n- **Meetily version:** 0.3.0\n- **Browser:** Safari (required \u2014 VoiceOver acc"
+  },
+  {
+    "number": 494,
+    "title": "[Linux] Support system ffmpeg / custom FFMPEG_PATH in build-gpu.sh",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2026-06-01",
+    "body": "## Problem\n\nWhen building on Linux via a package manager (e.g. Arch Linux AUR), the build\nscript `build-gpu.sh` downloads a static FFmpeg binary (~40MB) from GitHub at\nbuild time. This violates AUR packaging policy, which requires all external\nsources to be declared upfront in the PKGBUILD.\n\n## Request\n\nWould it be possible to support a `FFMPEG_PATH` environment variable in\n`build-gpu.sh` and the "
+  },
+  {
+    "number": 493,
+    "title": "[FEATURE] Have the option of selecting custom trained whisper models.",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 7,
+    "created": "2026-06-01",
+    "body": "## Feature Description\nThe ability to use a custom Whisper model.\n\n## Problem Statement\nThere are bunch of whisper models that have been made for specific languages, currently we just get a list of base whisper models to pick from.\n\n## Proposed Solution\nA model weight selector with models stored locally,,\n\n## User Story\nAs users speaking other languages, i would love to be able to utilize custom t"
+  },
+  {
+    "number": 481,
+    "title": "[BUG] save_folder recording preference is ignored \u2014 recordings always save to the default Music folder",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-05-29",
+    "body": "**Summary:** The configurable `save_folder` in `RecordingPreferences` has no effect. Recordings always save to the platform default (`%USERPROFILE%\\Music\\meetily-recordings` on Windows), even when a different folder is set in `recording_preferences.json`.\n\n**Root cause (from source):** `frontend/src-tauri/src/audio/recording_saver.rs` \u2192 `initialize_meeting_folder()` calls `recording_preferences::g"
+  },
+  {
+    "number": 474,
+    "title": "[FEATURE] Meeting Domain vocabulary hints for Whisper (initial_prompt)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-05-20",
+    "body": "## Problem\n\nWhisper struggles with proper nouns, client names, and domain jargon \u2014 especially in non-English languages (Norwegian dialects in our case). The model swallows correct names and substitutes phonetic look-alikes. Today there is no way in Meetily to bias the decoder toward known vocabulary.\n\nExamples from a recent Norwegian meeting transcribed with NB-Whisper-large:\n- \"Helgevold\" \u2192 \"Helg"
+  },
+  {
+    "number": 465,
+    "title": "Meetily v0.3.0 crashes silently on pre-Haswell CPUs (no AVX2) \u2014 ORT session in audio pipeline fails regardless of transcription engine",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-05-12",
+    "body": "# Meetily v0.3.0 crashes silently on pre-Haswell CPUs (no AVX2) \u2014 ORT session in the audio pipeline fails regardless of transcription engine selected\n\n## Summary\n\nOn Windows machines whose CPU does not support AVX2 (e.g. Intel Ivy Bridge / pre-2013 Xeon E5 v2 / older AMD), Meetily v0.3.0 closes silently the moment the user clicks **Record** or **Import audio**. The UI shows no error, no Windows di"
+  },
+  {
+    "number": 461,
+    "title": "[BUG] Meeting notes panel does not show at all. probable bug with viewport/panel",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2026-05-08",
+    "body": "## Bug Description\nAfter summary notes are generated, they can not be displayed in the sidepanel. \n\n## Current Behavior\n[Describe what is currently happening]\nI go to a meeting, take notes, finish, everything works correct. But the meeting notes do not get shown. It looks like a viewport/sidepanel bug \n\n## Expected Behavior\nThe meeting notes shall be seen.\n\n## Steps to Reproduce\n1. Record a meetin"
+  },
+  {
+    "number": 458,
+    "title": "Typo in macOS custom templates path (Meetily \u2192 meetily) in README",
+    "labels": [
+      "documentation"
+    ],
+    "comments": 1,
+    "created": "2026-05-07",
+    "body": "## Title\nTypo in macOS custom templates path (`Meetily` \u2192 `meetily`) in README\n\n## Description\nThere is a small typo in the macOS custom templates path inside the README documentation.\n\n**File:**  \n`frontend/src-tauri/templates/README.md`\n\n### Current\n```txt\nmacOS: ~/Library/Application Support/Meetily/templates/\n````\n\n### Expected\n\n```txt\nmacOS: ~/Library/Application Support/meetily/templates/\n``"
+  },
+  {
+    "number": 456,
+    "title": "[BUG] Local Whisper models not using GPU.",
+    "labels": [
+      "bug"
+    ],
+    "comments": 11,
+    "created": "2026-05-06",
+    "body": "## Bug Description\nUsing Local Whisper models in the community version of Meetily does not use GPU CUDA when generating a transcription.  Have tested using Whisper Large V3 Turbo and Whisper samll-q5_1.  Am using \n\n## Current Behavior\nStart recording, join teams bridge, and meetily takes 35 seconds to process 4 seconds of voice on Whisper small-q5_1 model.  Transcription is worse the longer the ca"
+  },
+  {
+    "number": 454,
+    "title": "bug: Fresh clone fails to compile with Tauri 2.11+",
+    "labels": [],
+    "comments": 1,
+    "created": "2026-05-06",
+    "body": "## Description\nA fresh `git clone` followed by `pnpm install && ./build-gpu.sh` fails to compile with 15 errors like:\n\n```\nerror[E0433]: cannot find `__tauri_command_name_api_process_transcript` in `summary`\nerror[E0433]: cannot find `__tauri_command_name_api_get_summary` in `summary`\n...\n```\n\n## Steps to Reproduce\n1. `git clone https://github.com/Zackriya-Solutions/meeting-minutes`\n2. `cd meeting"
+  },
+  {
+    "number": 450,
+    "title": "[BUG] Microphone input not captured on Mac when using Bluetooth headphones",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2026-04-25",
+    "body": "## Bug Description\nMeetily Pro does not capture or transcribe local microphone input when Bluetooth headphones are set as the audio input device. Other input sources work correctly: built-in MacBook microphone and a USB webcam microphone both transcribe as expected. The issue reproduces with two different Bluetooth devices (AirPods and Bose QC Ultra), suggesting it's not device-specific.\n\n## Curre"
+  },
+  {
+    "number": 449,
+    "title": "[FEATURE] Connect with Google Calendar to automatic recording start and stop.",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2026-04-24",
+    "body": "It is more of a hassle to manually start and stop the recording. Could we just connect it with Google Calendar through webhooks or api to automatically start and stop recording."
+  },
+  {
+    "number": 448,
+    "title": "[BUG] Privacy policy says meeting titles aren't collected, but they are",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2026-04-23",
+    "body": "## Bug description\n\nThe \"What We DON'T Collect\" section in `PRIVACY_POLICY.md` states:\n\n> \u274c File names, **meeting titles**, or metadata\n\nThe `track_meeting_started` function in `frontend/src-tauri/src/analytics/analytics.rs` sends the meeting title to PostHog on every meeting start:\n\n```rust\npub async fn track_meeting_started(&self, meeting_id: &str, meeting_title: &str) -> Result<(), String> {\n  "
+  },
+  {
+    "number": 441,
+    "title": "[FEATURE] Allow Exporting Transcription",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2026-04-19",
+    "body": "First, Meetily is an excellent idea. Our line of work stresses privacy and portability, so we appreciate the local processing and the choice of models across platforms. In some application, users require not just a summary \u2013 but a transcription. Since the app already transcribes, it seems trivial to add an `Export Transcription` feature.\n\n## Feature Description\nAfter a transcription is generated, "
+  },
+  {
+    "number": 437,
+    "title": "[BUG] Linux audio device picker shows raw ALSA PCM names (sysdefault:CARD=, front:CARD=\u2026,DEV=0, surround*, iec958, hw:)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-04-17",
+    "body": "## Bug Description\nOn Linux, the microphone and speaker pickers are populated with raw ALSA PCM names rather than friendly device names. The list contains every ALSA profile permutation per audio card (`sysdefault:CARD=X`, `front:CARD=X,DEV=0`, `surround40:CARD=X`, `surround51:CARD=X`, `surround71:CARD=X`, `iec958:CARD=X`, etc.) which is confusing and effectively unusable.\n\n## Current Behavior\nOpe"
+  },
+  {
+    "number": 435,
+    "title": "[BUG] Blank/white window on Linux launch (WebKitGTK DMABUF renderer)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-04-17",
+    "body": "## Bug Description\nOn Linux, Meetily (AppImage, `.deb`, and dev builds) frequently launches to a **blank white window** \u2014 the window frame appears but the WebView area never renders any UI. Users can't interact with the app at all. No error dialog, no crash, no obvious log output.\n\nThis is caused by WebKitGTK's newer DMABUF-based renderer failing to initialize on common Linux setups \u2014 notably mach"
+  },
+  {
+    "number": 433,
+    "title": "[BUG] Recording glitches concurrent Teams/Zoom/WebRTC audio on Linux (PipeWire quantum shrink)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-04-17",
+    "body": "## Bug Description\nOn Linux (PipeWire + `pipewire-alsa`), starting a recording in Meetily causes **other apps using the microphone** \u2014 Microsoft Teams, Zoom, Discord, browser WebRTC \u2014 to develop glitchy audio and A/V sync problems for the duration of the recording. The moment recording stops, those apps return to normal.\n\nMeetily's own recording works fine; the harm is to other concurrent audio cl"
+  },
+  {
+    "number": 431,
+    "title": "[BUG] Getting issues in transcription from OpenAI compatible",
+    "labels": [
+      "bug"
+    ],
+    "comments": 3,
+    "created": "2026-04-16",
+    "body": "## Bug Description\nGetting a issue for transcription\n\n## Current Behavior\ntranscription coming back gibberish\n\n<img width=\"1133\" height=\"1662\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/02103762-92aa-46c1-bca6-a74445902f40\" />\n\n## Expected Behavior\nOpenAI transcriptions correct\n\n## Possible Solution\nWe are getting errors on our openai server that suggests we need to add a couple o"
+  },
+  {
+    "number": 429,
+    "title": "[BUG] Fail to load model for summarization and retranscribe",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2026-04-14",
+    "body": "## Bug Description\n\"Failed to load model\"\n## Current Behavior\nDownloaded various local models to test, none of them work for me. When retranscribe, it will stuck permanently at 25%. When choose summarization, it reported \"Failed to load model\". There is no where to adjust configurations of the models.\n\n## Environment\n- OS: Windows\n- Version: v0.3.0\n\n## Screenshots/Videos\n<img width=\"974\" height=\"4"
+  },
+  {
+    "number": 428,
+    "title": "[BUG] building fails on archlinux",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2026-04-14",
+    "body": "## Bug Description\nbuilding this software on archlinux per readme file I get \n``` error[E0609]: no field `greedy` on type `whisper_full_params` --> /home/user/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/whisper-rs-0.13.2/src/whisper_params.rs:62:20 | 62 | fp.greedy.best_of = best_of; | ^^^^^^ unknown field | = note: available field is: `_address` ``` \nThen many similar errors\nThen ``` err"
+  },
+  {
+    "number": 427,
+    "title": "[BUG] Arabic is not reading well in all Models",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2026-04-13",
+    "body": "## Bug Description\nTested arabic but not working well checked all models \n\n## Current Behavior\nStarted the meetily with Teams in a arabic meeting and it's messed things up \n\n## Expected Behavior\nshould listen well to arabic but not doing well \n\n## Steps to Reproduce\n1. [First step]\n2. [Second step]\n3. [And so on...]\n\n## Environment\n- OS: [e.g., macOS, Windows, Linux]\n- Browser: [e.g., Chrome, Fire"
+  },
+  {
+    "number": 426,
+    "title": "Bug: cidre dependency breaks Linux builds \u2014 not platform-gated to macOS",
+    "labels": [],
+    "comments": 2,
+    "created": "2026-04-10",
+    "body": "## Problem\nLinux builds fail because `cidre` (a macOS-only crate) is declared as \nan unconditional dependency in `frontend/src-tauri/Cargo.toml` (line 167).\n\n## Error\n\nerror: no matching package named cidre found location searched: [https://github.com/yury/cidre?rev=a9587fa](https://github.com/yury/cidre?rev=a9587fa&utm_source=you.com) required by package meetily v0.3.0\n\n## Environment\n- Ubuntu 24"
+  },
+  {
+    "number": 425,
+    "title": "Batch transcript",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-04-09",
+    "body": "# Batch Transcript Processing\n\n## Feature Description\nThe ability to select and process multiple audio/video recording files simultaneously, either by selecting multiple files through the file picker, dragging and dropping a batch of files onto the app, or pointing Meetily at an entire folder and having it process every recording inside it sequentially.\n\n## Problem Statement\nCurrently Meetily only"
+  },
+  {
+    "number": 424,
+    "title": "[FEATURE] Folder Structure for Organizing Recordings & Notes",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-04-09",
+    "body": "## Feature Description\nIntroduce the ability to create and manage folders within Meetily to organize recordings, transcripts, and meeting notes. Users should be able to group related meetings (e.g., by project, client, or topic) into folders for better navigation and structure.\n\n## Problem Statement\nCurrently, all recordings and notes are displayed in a flat list, which becomes difficult to manage"
+  },
+  {
+    "number": 422,
+    "title": "[FEATURE] Select default meeting template for summary generation?",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2026-04-07",
+    "body": "## Feature Description\nI'd love to be able to set a specific meeting template as default for summary generation.\n\n## Problem Statement\nRight now I have imported a custom meeting summary template, but Meetily defaults to processing transcriptions as 'standard meeting notes'. \n\n## Proposed Solution\nI'd like an icon next to each summary template in the dropdown templates menu that can be clicked to s"
+  },
+  {
+    "number": 421,
+    "title": "macOS menu bar tray icon uses full-color purple app icon",
+    "labels": [],
+    "comments": 1,
+    "created": "2026-04-07",
+    "body": "## Problem\n\nOn macOS, Meetily currently uses the full-color app icon for the menu bar tray icon. That makes the tray item appear purple instead of matching the native monochrome system menu bar icons.\n\n## Expected behavior\n\nThe menu bar tray icon should use a template-safe monochrome Meetily icon so macOS can render it correctly in light and dark mode.\n\n## Proposed fix\n\nUse a dedicated monochrome "
+  },
+  {
+    "number": 415,
+    "title": "[BUG] Windows Whisper transcription latency",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2026-03-28",
+    "body": "## Bug Description\nUnable to get transcrption or audio segment with Whisper\n\n## Current Behavior\nEverything is working as expected with default settings (parakeet lightning). \nBut as soon as I change my transcription model for local whisper (any model), I'm not able to stop the recording.\nI click on stop button, and the \"processing recording\" indication is shown endlessly.\nI can change options set"
+  },
+  {
+    "number": 414,
+    "title": "Screen Recording",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 4,
+    "created": "2026-03-26",
+    "body": "## Feature Description\nSimple screen recording for meetings\n\n## Problem Statement\nMeetily currently records live transcript, but transcript alone is not enough for meetings where important context is shown on screen.\n\nIn many meetings, users share:\n- product demos\n- dashboards\n- documents\n- slides\n- technical walkthroughs\n\nAfter the meeting, users may want to review what was shown, not just what w"
+  },
+  {
+    "number": 413,
+    "title": "[FEATURE] Change summary output language",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2026-03-25",
+    "body": "## Feature Description\nAdd an option to configure the language in which meeting summaries are generated, independent of the spoken language in the meeting.\n\n## Problem Statement\nCurrently, summaries are generated in a fixed or auto-detected language with no user control. Users who conduct meetings in one language but require documentation/summaries in another (e.g., English meetings \u2192 Polish summa"
+  },
+  {
+    "number": 411,
+    "title": "Add dark mode support",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2026-03-23",
+    "body": "I\u2019d like to add dark mode support to Meetily to improve usability in low-light environments and match modern UI expectations.\n\n**Proposed approach**\n- Add a theme system with light / dark modes\n- Default to system preference using prefers-color-scheme\n- Include a manual toggle (e.g., in settings or navbar)\n- Persist user preference (e.g., localStorage or user settings if applicable)\n\n**Implementat"
+  },
+  {
+    "number": 410,
+    "title": "Offline install for windows",
+    "labels": [],
+    "comments": 2,
+    "created": "2026-03-23",
+    "body": "my network is not allowing me to download the models , how to install Meetily offline "
+  },
+  {
+    "number": 408,
+    "title": "Evaluate Granite-4.0-1B-Speech as alternative STT engine",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-03-23",
+    "body": "## Summary\n\nIBM's [Granite-4.0-1B-Speech](https://huggingface.co/ibm-granite/granite-4.0-1b-speech) (~2B params, Apache 2.0) achieves state-of-the-art English ASR with **5.52 WER** on the OpenASR leaderboard \u2014 roughly 2 points better than Whisper Large V3 (~7.4 WER). It supports 7 languages including Portuguese, and runs at 280x real-time on GPU.\n\nThis model is worth evaluating as a future alterna"
+  },
+  {
+    "number": 405,
+    "title": "[BUG] Gemma3:4b Unabled to load while generating summary",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2026-03-13",
+    "body": "## Bug Description\nThe application fails to generate a summary when using the local Gemma 3 4B (Balanced) model. The software is unable to initialize or load the specific .gguf file from the local storage path.\n\n## Current Behavior\nWhen clicking the \"Generate Summary\" button, the process terminates immediately with the following error message:\nGeneration failed: Failed to load model: unable to loa"
+  },
+  {
+    "number": 399,
+    "title": "[BUG]Imported meeting causing out of sync transcript segment with audio(only the last segment, edge case)",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2026-03-12",
+    "body": "## Bug Description\nIn import meetings\nthe last transcript segment's timestamp is out of the length of the whole meeting(Not consistent Bug)\n\n## Current Behavior\nthe last transcript segment's timestamp is out of the length of the whole meeting(Not consistent Bug)\n\n## Expected Behavior\nthe last speech timestamp should be matching the actual speech in the audio(should not exceeds from the duration of"
+  },
+  {
+    "number": 395,
+    "title": "[FEATURE] Add support for a small new Qwen 3.5 models",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 3,
+    "created": "2026-03-09",
+    "body": "## Feature Description\nPlease consider adding a new small model from the Qwen 3.5 family as an available option.\nQwen\u2019s smaller models have shown very strong capabilities relative to their size, especially in instruction-following, reasoning efficiency, and overall quality per parameter. A compact Qwen 3.5 model could provide users with a better lightweight alternative for everyday use cases where"
+  },
+  {
+    "number": 394,
+    "title": "[BUG] Save button in summary editor does not persist edits (v0.3.0)",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-03-09",
+    "body": "## Bug Description\nEditing the meeting summary works (the text field accepts changes), and the Save button is highlighted and clickable. However, after clicking Save, there is no visual feedback\u2014no message, no spinner, no confirmation. When the meeting screen is reopened, the edits are lost and the summary is reverted to the previous state.\n\n## Steps to Reproduce\n1. Open a meeting in Meetily v0.3."
+  },
+  {
+    "number": 393,
+    "title": "[FEATURE] Merge Meetings \u2013 Ability to combine consecutive meetings into a single meeting via UI",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-03-09",
+    "body": "## Feature Description\nAdd functionality to the interface (UI) that allows users to merge two or more consecutive meetings (recorded minutes apart) into a single meeting. This would include transcriptions, summaries, audio files, and metadata.\n\n## Problem Statement\nCurrently, when a meeting is interrupted and resumed, Meetily creates separate meetings in the UI and database, even though they are p"
+  },
+  {
+    "number": 389,
+    "title": "[FEATURE] Ability to take notes during recording",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2026-03-06",
+    "body": "<img width=\"218\" height=\"296\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c26247f0-3bb8-41dd-8add-8fc8d2d70400\" />\n\n## Feature Description\nAdd an integrated text editor within the recording interface. This allows users to jot down notes, key insights, or action items in real-time while Meetify is recording audio, ideally syncing notes with the recording\u2019s timestamp.\n\n## Problem Sta"
+  },
+  {
+    "number": 387,
+    "title": "Feature request: Automatic meeting detection and recording",
+    "labels": [],
+    "comments": 11,
+    "created": "2026-03-05",
+    "body": "It would be great if Meetily could automatically detect when a video meeting starts (Zoom, Microsoft Teams, Google Meet) and begin recording without manual intervention.\n\nI noticed the fork at https://github.com/qaid/meeting-minutes-autodetect has implemented this by monitoring running processes to detect active meetings, with support for:\n\n- Auto-start recording when a meeting is detected\n- Auto-"
+  },
+  {
+    "number": 386,
+    "title": "[Security] CORS wildcard on unauthenticated FastAPI backend exposes meeting data when running native backend or Docker",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2026-03-05",
+    "body": "# [Security] CORS wildcard on unauthenticated FastAPI backend exposes meeting data when running native backend or Docker\n\n## Bug Description\n\nWhen running Meetily using the native backend (`./clean_start_backend.sh`) or Docker (`./run-docker.sh`), the FastAPI server starts on `http://localhost:5167` with `Access-Control-Allow-Origin: *` and no authentication on any `/api/*` route. Any webpage open"
+  },
+  {
+    "number": 383,
+    "title": "[BUG] System sound not captured on pipewire (Linux)",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2026-03-03",
+    "body": "## Bug Description\nWhen using meetily on Linux with pipewire sound server, system sound are neither captured (in the output recording) nor transcribed\n\n## Current Behavior\nCurrently meetily does not find system sound sink to record audio when using pipewire sound server\n\n## Expected Behavior\nI expect meetily to record system audio \n\n## Steps to Reproduce\n1. Build meetily on linux with pipewire\n2. "
+  },
+  {
+    "number": 382,
+    "title": "[BUG] build.sh panicked",
+    "labels": [
+      "bug"
+    ],
+    "comments": 3,
+    "created": "2026-03-03",
+    "body": "## Bug Description\nthread 'main' (301200) panicked at ~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/llama-cpp-sys-2-0.1.137/build.rs:474:10:\n  Failed to generate bindings: ClangDiagnostic(\"/home/benoit/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/llama-cpp-sys-2-0.1.137/llama.cpp/ggml/include/ggml.h:211:10: fatal error: 'stdbool.h' file not found\\n\")\n\n## Current Behavior\ncannot co"
+  },
+  {
+    "number": 377,
+    "title": "[Feature Request] Enable direct inline editing of transcripts for re-summarization",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 6,
+    "created": "2026-03-02",
+    "body": "[Description]: Currently, transcripts and summaries are read-only within the application UI. To correct errors, users must export or copy text to an external editor.\n\n[Proposed Enhancement]:\nImplement a \"Click-to-Edit\" or \"Edit Mode\" directly within the transcript view.\nUser Workflow/Benefit:\n\n[Correction]: Easily fix misheard technical terms or names directly in the app.\nAI Accuracy: Once correct"
+  },
+  {
+    "number": 376,
+    "title": "[BUG] - Cannot change Meeting Recordings folder location in Community Edition - only \"Open\" button available",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2026-03-01",
+    "body": "## Description\nIn Meetily Community Edition, under \"Data Storage Locations\" \u2192 \"Meeting Recordings\", only an \"Open\" button is available. There is no option to change the storage path (e.g. \"Change\" or \"Browse\"), although documentation describes this as available.\n\n## Steps to reproduce\n1. Open Meetily Community Edition\n2. Navigate to Settings \u2192 Data Storage Locations\n3. View \"Meeting Recordings\"\n4."
+  },
+  {
+    "number": 371,
+    "title": "malware detected in Mac App by VirusTotal",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-02-26",
+    "body": "It seems that there is one IP used by ffmpeg in the Mac app that seems suspicious by the corresponding AV-engine?\n\n<img width=\"1320\" height=\"437\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/a16968cf-ee08-4bce-94b3-391a3513167b\" />\n\n<img width=\"1315\" height=\"499\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/d9193d5e-291b-4c25-919d-92c8f0c9b549\" />\n\n<img width=\"1328\" h"
+  },
+  {
+    "number": 370,
+    "title": "Transcribe multiple languages in a single call",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-02-26",
+    "body": "## Feature Description\nI would like to see a feature where language switches are detected automatically, so that each part of the meeting is correctly transcribed, even if the language is switched. \nAnother option would be to ignore all non-default language talk.\n\n## Problem Statement\nDuring meetings with stakeholders from different countries, sometimes different teams have short discussions betwe"
+  },
+  {
+    "number": 367,
+    "title": "[FEATURE] Progress bar or some other way to see how long on-device AI note generation will take",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-02-24",
+    "body": "## Feature Description\nI'd like to see a progress bar or some other indication of how long the current AI generation will take as on my laptop with only Intel Iris iGPU a simple 20-minute transcript that ChatGPT can process into notes in ~5 seconds can take like 5-10 minutes. \n\n## Problem Statement\nCurrently the only sign it's doing anything is a spinning icon that says 'generating AI summary'.\n\n"
+  },
+  {
+    "number": 364,
+    "title": "[BUG] Azure OpenAI: 400 Bad Request \u2013 max_tokens unsupported for gpt-5.1-chat / gpt-5.2-chat (use max_completion_tokens)",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2026-02-23",
+    "body": "## Bug Description\n\nUsing Azure OpenAI with the models **`gpt-5.1-chat`** and **`gpt-5.2-chat`** results in a `400 Bad Request` error because the client sends `max_tokens`, which these models no longer support. They require `max_completion_tokens` instead.  \nThe same code works with **`gpt-5-chat`**, so the issue seems to be model\u2011specific parameter handling.\n\n## Current Behavior\n\nThe app fails wh"
+  },
+  {
+    "number": 359,
+    "title": "[FEATURE] Gemini and NVIDIA NIM API Key Support!",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2026-02-19",
+    "body": "## Feature Description\nThe main feature I'm looking for is to be able to use Gemini API and NVIDIA NIM API, as these are the two prominent API providers that have generous free tiers that we're using. However, right now, neither of these are compatible :("
+  },
+  {
+    "number": 357,
+    "title": "[FEATURE] Add Live Editing of Transcript",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-02-18",
+    "body": "## Feature Description\nEnable live editing of the transcript during an active meeting.\n\n## Problem Statement\nThe live transcript cannot currently be edited during the meeting. Errors (e.g., names, technical terms) accumulate and must be corrected afterward in a separate notepad or word.\n\nAdditionally, these transcription errors are carried into the AI-generated summary, which can lead to incorrect"
+  },
+  {
+    "number": 356,
+    "title": "[BUG]",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2026-02-16",
+    "body": "Bug Description\nParakeet v3 transcription fails with ORT error for sessions longer than ~5 minutes. Short sessions (under 5 min) transcribe successfully, but sessions of 10+ minutes consistently fail.\nCurrent Behavior\nRecording stops successfully and audio file is saved completely. When transcription begins for sessions ~10 minutes or longer, it fails with:\ntranscription failed: transcription engi"
+  },
+  {
+    "number": 355,
+    "title": "[FEATURE] Add dark theme / dark mode support",
+    "labels": [],
+    "comments": 2,
+    "created": "2026-02-16",
+    "body": "### Story\nAs a User with sight disabilities\nI want to have an option to set the dark theme\nSo I can use the app without troubles\n\n### Problem\nThe current light-only UI causes significant eye strain and usability issues, especially for users with visual impairments/disabilities. For people with light sensitivity, a bright white interface makes the app difficult to use, particularly during or after "
+  },
+  {
+    "number": 343,
+    "title": "[FEATURE] Optional tray icon visibility and safer minimize-to-tray behavior",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-02-09",
+    "body": "## Feature Description\nAdd two optional behaviors:\n1) Allow disabling the tray/system tray icon.\n2) Allow \"Close to tray\" (minimize instead of exiting), but only when the tray icon is enabled.\n\nThis keeps privacy guarantees intact while giving users better control over UX and screen-sharing scenarios.\n\n## Problem Statement\nCurrently:\n- The tray icon is always visible.\n- Clicking \"Close\" fully exit"
+  },
+  {
+    "number": 338,
+    "title": "[FEATURE] Disable Transcription",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 7,
+    "created": "2026-02-07",
+    "body": "## Feature Description\nI would like to be able to disable automatic transcription and utilise the software just for audio capture for later transcription.\n\n## Problem Statement\nFor some computers that are really slow and buggy - I am finding issues within meetings where the meeting quality is degrading due to ai local processing. \n\n## Proposed Solution\ndisable transcription and summary so all that"
+  },
+  {
+    "number": 337,
+    "title": "Selective Input/Output Audio Capture + Muted-Mic Awareness",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2026-02-06",
+    "body": "## Feature Description\nAdd the ability to independently enable/disable transcription from microphone input and system output audio sources. Additionally, explore (aspirationally) detecting when the user is muted in conferencing apps (e.g., Teams, Zoom) to automatically suppress microphone transcription.\n\n## Problem Statement\nMeetily currently hooks into system-level audio sinks and sources to gene"
+  },
+  {
+    "number": 335,
+    "title": "[FEATURE] VibeVoice-ASR for speaker diarization and domain-specific terminology",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 4,
+    "created": "2026-02-05",
+    "body": "## Feature Description\n\nIntegrate **Microsoft VibeVoice ASR** as an optional transcription engine to provide unified \"Rich Transcription,\" including native speaker diarization and domain-specific terminology support.\n\n## Problem Statement\n\nWhisper and Parakeet don't support speaker diarization and customized context, which can lead to alignment errors and \"speaker drift\" in long meetings. Furtherm"
+  },
+  {
+    "number": 333,
+    "title": "[BUG] Meetly not using CUDA/GPU with provided models",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2026-02-04",
+    "body": "## Bug Description\nApp only using CPU when summarizing\n\n## Current Behavior\nCU is being utilized when it should be the GPU.\n\n## Expected Behavior\nFor GPU tu be utilized when using Gemma-4B.\n\n## Steps to Reproduce\n1. [First step]\n2. [Second step]\n3. [And so on...]\n\n## Environment\n- OS: Windows 11\n- \n## Screenshots/Videos\n\n<img width=\"972\" height=\"929\" alt=\"Image\" src=\"https://github.com/user-attach"
+  },
+  {
+    "number": 327,
+    "title": "[FEATURE] Include Noise Cancelling Functions",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-02-03",
+    "body": "## Feature Description\nI would love to see the ability to have noise cancelling functions like Krisp. It's the only reason I can't move from them to your solution entirely yet, because the AI summaries came long after their noise cancellation function. \n\n## Problem Statement\nThis would eliminate the need for hardware or meeting noise cancellation, which normally is pretty subpar.\n\n## Proposed Solu"
+  },
+  {
+    "number": 318,
+    "title": "[BUG] Transcription model not ready",
+    "labels": [
+      "bug"
+    ],
+    "comments": 5,
+    "created": "2026-01-27",
+    "body": "## Bug Description\nApp forces you to have Parakeet Lightning installed. Even if other model is downloaded, wont transcript without parkeet \n\n## Current Behavior\nApp wont generate transcript if Parakeet Lightning is not installed on the machine, even if a different transcription model is selected \n\n## Expected Behavior\nAble to delete Parakeet Lightning and use any other transcription model \n\n## Ste"
+  },
+  {
+    "number": 312,
+    "title": "[FEATURE] Use Laptop NPU for Local Whisper Models",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-01-21",
+    "body": "## Feature Description\nAbility to use NPU present in many newer laptops to run the local whisper model.\n\n## Problem Statement\nCurrently is ran by offloading to RAM\n\n## Proposed Solution\nLook into these!\n- https://www.intel.com/content/www/us/en/developer/videos/prototype-deploy-llm-applications-on-intel-npus.html\n\n- https://intel.github.io/intel-npu-acceleration-library/llm.html\n\n## User Story\nAs "
+  },
+  {
+    "number": 310,
+    "title": "[BUG] Custom OpenAI connection to OWUI not working",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2026-01-20",
+    "body": "## Bug Description\nOpenWebUI passes through compatible OpenAI api through their address/api/v1 - and our setup currently works correctly with n8n\n\n## Current Behavior\nWhen trying to connect Meetily via the custom OpenAI connection it is failing to connect even with the correct api key.\n\n## Expected Behavior\nMeetily able to connect to a compatible openai server\n\n## Steps to Reproduce\n1. Setup the c"
+  },
+  {
+    "number": 308,
+    "title": "Bug Report / Question: Unnecessary format validation in template system",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2026-01-17",
+    "body": "## Summary\n\nThe template system in `frontend/src-tauri/src/summary/templates/types.rs` enforces strict validation for the `format` field (only allowing `\"paragraph\"`, `\"list\"`, or `\"string\"`), but this field is **never actually used** in the prompt generation logic. This creates unnecessary limitations for custom templates without serving any functional purpose.\n\n## Problem Description\n\nWhen creat"
+  },
+  {
+    "number": 305,
+    "title": "[BUG] Cannot build on linux with amd gpu",
+    "labels": [
+      "bug"
+    ],
+    "comments": 5,
+    "created": "2026-01-15",
+    "body": "## Bug Description\nI cannot get the app to build under linux\n\n## Current Behavior\n\n```\n\u276f ./build-gpu.sh\n\ud83d\ude80 Meetily GPU-Accelerated Build Script\n\n\n\ud83d\udce6 Building Meetily...\n\n\ud83d\udd0d Detecting GPU features...\n\ud83d\udd34 AMD GPU detected with ROCm - using HIPBlas acceleration\n\u2705 Detected GPU feature: hipblas\n\n\ud83e\udd99 Building llama-helper sidecar (release)...\n   Building in /home/marat.bakeev/software/meeting-minutes/frontend/"
+  },
+  {
+    "number": 301,
+    "title": "[FEATURE] Custom OpenAI Compatible API Option for TRANSCRIPTIONS",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 4,
+    "created": "2026-01-06",
+    "body": "## Feature Description\nWant the ability to setup a locally hosted OpenAI Compatible API Server for Transcriptions.\n\n## Problem Statement\nCurrently you can only choose between `Local Whisper` and `Parakeet`\n\n## Proposed Solution\nImplement the ability for users to input their own transcription model, much like how it is currently done with the 'Custom Server (OpenAI)' Option under **Summary** tab.\n\n"
+  },
+  {
+    "number": 300,
+    "title": "Docker pull from GHCR is failing with \"denied\" error",
+    "labels": [],
+    "comments": 0,
+    "created": "2026-01-06",
+    "body": "Hello,\n\nI am trying to pull the Docker image for this project, but it is failing with a \"denied\" error, which suggests the package's public visibility settings are potentially incorrect.\n\nI have tried pulling the following image:\nghcr.io/zackriya-solutions/meeting-minutes:main\n\nThe error message is:\nError response from daemon: Head \"https://ghcr.io/v2/zackriya-solutions/meeting-minutes/manifests/m"
+  },
+  {
+    "number": 298,
+    "title": "[FEATURE] Support HF_ENDPOINT env",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2026-01-02",
+    "body": "Here's the translated GitHub issue in the requested format:\n\n## Feature Description\nAdd support for HF_ENDPOINT environment variable to facilitate downloading TTS/STT models through HF mirror sites like https://hf-mirror.com.\n\n## Problem Statement\nCurrently, users in certain regions may experience slow or unstable downloads from the main Hugging Face repository. Mirror sites like hf-mirror.com pro"
+  },
+  {
+    "number": 285,
+    "title": "[BUG]",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2025-12-23",
+    "body": "## Bug Description\nOn Windows, Meetily does not use GPU for transcription even though CUDA is available.\n\n## Current Behavior\nTranscription runs on CPU only.\n\n## Expected Behavior\nTranscription should use GPU acceleration when CUDA is available.\n\n## Steps to Reproduce\n1. Download and install the Windows application\n2. Select the Parakeet model and start recording\n3. Transcription is significantly "
+  },
+  {
+    "number": 274,
+    "title": "[FEATURE] use custom openai endpoints",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2025-12-12",
+    "body": "## Feature Description\nuse custom openai endpoints such as speaches\n\n## Problem Statement\nThe current openai option is locked to openai only\n\n## Proposed Solution\nadd another spot to input a custom openai api compatible endpoint + model\n\n## User Story\nAs a power user,\nI want to use `speaches`,\nSo that I can get a lot more customization/control over my meeting note summarization\n\n## Acceptance Crit"
+  },
+  {
+    "number": 273,
+    "title": "[BUG] [Linux] System audio capture not available",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2025-12-11",
+    "body": "## Bug Description\nAfter opening there is an error displayed:\n\n```\nSystem Audio Permission Required\n\nSystem audio capture is not available. You can still record with your microphone, but computer audio won't be captured.\n```\n\nUnder `Settings -> Recordings -> Audio Devices -> System Audio` there is a message: `No system audio devices found`.\n\n## Current Behavior\nNo system audio capture\n\n## Expected"
+  },
+  {
+    "number": 271,
+    "title": "[BUG] Default Microphone no sound and cannot be changed in settings",
+    "labels": [
+      "bug"
+    ],
+    "comments": 3,
+    "created": "2025-12-09",
+    "body": "https://github.com/user-attachments/assets/236dff49-54f3-4cad-8918-1d5cdd9526b5"
+  },
+  {
+    "number": 267,
+    "title": "[FEATURE] Google meet / Zoom / MS Teams support?",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-12-04",
+    "body": "## Feature Description\nAble to integrate with Google meet / Zoom / MS Teams\n\n## Problem Statement\nWould love to link with my Google calendar and take notes easily within all of my calls."
+  },
+  {
+    "number": 263,
+    "title": "[FEATURE] Add Support for Private Inference API nilAI by Nillion",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2025-11-27",
+    "body": "## Feature Description\nAdd private inference API nilAI by Nillion for users preferring to use non-local models while keeping their data fully private. Every nilAI model runs in a TEE. This provider is fully [open-source](https://github.com/NillionNetwork/nilAI).\n\n## Problem Statement\nCurrently, the two options for textual tasks (summarization, etc.) are either to use a local model that can be comp"
+  },
+  {
+    "number": 260,
+    "title": "[FEATURE] Requests for hot keys ",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-11-22",
+    "body": "## Feature Description\nHot keys for starting and stopping recording\n\n## Problem Statement\nI enjoy Meetily allot, but often forget to either start or stop a recording. Hot keys would come in handy to use on a stream deck.\n\n## Proposed Solution\nCreate function for hot keys to start and stop a recording."
+  },
+  {
+    "number": 259,
+    "title": "[FEATURE] Add Support for Indonesian Language (Bahasa Indonesia) in Speech Recognition",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-11-22",
+    "body": "## Feature Description\nPlease add support for Indonesian language (Bahasa Indonesia) in Meetly's speech recognition.\n\n## Problem Statement\nMeetly cannot currently transcribe Indonesian speech, making it unusable for millions of Indonesian-speaking users during physical meetings, classes, and discussions.\n\n## Proposed Solution\nAdd Indonesian support through:\n- Whisper multilingual models, or\n- Para"
+  },
+  {
+    "number": 252,
+    "title": "Dedicated Manual Meeting Notes Section Stored as Meeting Metadata",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2025-11-18",
+    "body": "<img width=\"961\" height=\"422\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/fe9aa070-2274-443d-a0c5-02e9410b49b0\" />\n\n**Feature Description**\n\nAdd a dedicated Manual Meeting Notes section/tab within each meeting, where users can type, format, and save their own notes as part of the meeting metadata. These notes should persist across sessions and be accessible alongside transcription "
+  },
+  {
+    "number": 251,
+    "title": "[BUG] Brew Cask Installation Fails with 404 Error Due to Incorrect Asset Filename",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2025-11-14",
+    "body": "## Bug Description\nThe installation of Meetily via Homebrew Cask fails with a 404 error. The command attempts to download a file that does not exist in the GitHub release assets due to a filename mismatch.\n\n## Current Behavior\nWhen running `brew install --cask meetily`, the process fails because it tries to download a file named `dmg_darwin_arch64_0.1.1.1.zip` from the `0.1.1` release. This file d"
+  },
+  {
+    "number": 250,
+    "title": "[FEATURE] Android build",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-11-13",
+    "body": "\nIs there a  wayway to pack this in android app?\n"
+  },
+  {
+    "number": 248,
+    "title": "[BUG] Build failed on Linux : called `Option::unwrap()` on a `None` value",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2025-11-12",
+    "body": "## Bug Description\nCannot make `pnpm run tauri:build` command work\n\n## Current Behavior\n```\npnpm run tauri:build\n\n> meetily@0.1.1 tauri:build /home/jalil/code/open-source/meeting-minutes/frontend\n> node scripts/tauri-auto.js build\n\n\ud83d\udcbb No GPU acceleration available - using CPU-only mode\n\n\ud83d\ude80 Running: tauri build (CPU-only mode)\n\nthread '<unnamed>' panicked at crates/tauri-cli/src/interface/rust.rs:116"
+  },
+  {
+    "number": 247,
+    "title": "[BUG] pnpm run tauri:build fails: static export times out",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2025-11-11",
+    "body": "**Summary**\n\nRunning the desktop build currently fails during `pnpm build` because the static export step never completes. `next build` succeeds, but `node scripts/static-export.js` (invoked from the Tauri build) times out while generating `/404`, so no files are written to `frontend/out` and the overall `tauri build` aborts.\n\n**Steps to Reproduce**\n\n1. Clone the repository\n2. `cd meeting-minutes/"
+  },
+  {
+    "number": 246,
+    "title": "[FEATURE] use llama.cpp for local transcription",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2025-11-11",
+    "body": "## Feature Description\nuse llama.cpp for local transcription\n\n## Problem Statement\nThe current options for local meeting note summarization don't have any room for customization\n\n## Proposed Solution\nUse `llama.cpp` for meeting note summarization\n\n## User Story\nAs a power user,\nI want to use `llama.cpp`,\nSo that I can get a lot more customization/control over my meeting note summarization\n\n## Acce"
+  },
+  {
+    "number": 244,
+    "title": "[BUG] Sidebar animates text with rewrap",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2025-11-11",
+    "body": "## Bug Description\nWhen the sidebar opens, the animation causes text to rewrap rather than simply slide open.\n\n## Current Behavior\nThe sidebar text such as Meeting Notes and Meeting Report breaks on whitespace as the sidebar animates open.\n\n## Expected Behavior\nNo whitespace breaking.\n\n## Steps to Reproduce\n1. Record something, so there is content in the sidebar\n2. Open the sidebar\n3. It looks cho"
+  },
+  {
+    "number": 243,
+    "title": "[FEATURE] Make summary templates configurable",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 7,
+    "created": "2025-11-10",
+    "body": "## Feature Description\nRight now, the summary templates are json files, which are baked into the application. E.g. on MacOS they are inside the .app folder.\n\n## Problem Statement\nYou cannot create your own summary templates. E.g. I would like to adapt the language, so that the output would be German.\nMight also be related to https://github.com/Zackriya-Solutions/meeting-minutes/issues/235\n\n## Prop"
+  },
+  {
+    "number": 241,
+    "title": "[FEATURE] multitrack audio",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-11-07",
+    "body": "## Feature Description  \nEnable the creation of multitrack audio recordings within meeting capture sessions. This feature would record system audio (e.g., speaker output) and microphone input onto separate audio tracks, instead of flattening all inputs into a single mono MP4 file. Recording could support either dual-channel (left/right split in a single stereo track) or separate mono tracks for ea"
+  },
+  {
+    "number": 240,
+    "title": "[BUG] Building fails with message \"/bin/sh: 1: tauri: not found\"",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2025-11-07",
+    "body": "## Bug Description\nBuilding fails with following error message:\n/bin/sh: 1: tauri: not found\n\n## Current Behavior\nBuilding errors out\n\n## Expected Behavior\nBuilding succeeding\n\n## Steps to Reproduce\n1. Clone repository\n2. Open terminal in frontend/\n3. Run ./build-gpu.sh\n\n## Environment\n- OS: Linux Mint 22.2\n\n## Additional Context\nbuild-essential, cmake, git, nvidia-driver-550 and nvidia-cuda-toolk"
+  },
+  {
+    "number": 239,
+    "title": "[BUG] Windows app sometimes crashing while recording",
+    "labels": [
+      "bug"
+    ],
+    "comments": 0,
+    "created": "2025-11-06",
+    "body": "## Bug Description\nSometimes when I press exit button on Meetily while recording it exits fully and is not minimised in the system tray.\n\n## Current Behavior\nCrashing\n\n## Expected Behavior\nNo crashing\n\n## Steps to Reproduce\n1. During meeting exit - only sometimes this happens\n\n## Environment\n- OS: Windows App\n- Browser: N/A\n- Version: 0.1.1\n\n## Screenshots/Videos\nNone\n\n## Error Messages\nNone\n\n## A"
+  },
+  {
+    "number": 235,
+    "title": "[FEATURE] Option to Prompt the Summary style",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-11-05",
+    "body": "## Feature Description\nOption to prompt a custom summary template that is currently auto generated\n\n## Problem Statement\nthe generated summary dilutes the message context\n"
+  },
+  {
+    "number": 233,
+    "title": "[FEATURE] Multi-Language Support for Summaries",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 12,
+    "created": "2025-11-02",
+    "body": "## Feature Description\nAs a user I would like to be abl to set the language for the AI summary (ex. \"German\").\n\n## Problem Statement\nAs of now all Summaries created (also when I add further explanations) are made in english although ollama models are also capable of other languages.\n\n## Proposed Solution\nPreprompt/or Setting where I can set the language.\n\n## User Story\nAs a meeting host,\nI want to"
+  },
+  {
+    "number": 230,
+    "title": "Speaker Diarization / Identification",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 7,
+    "created": "2025-10-30",
+    "body": "## Feature Description\nBeing able to identify the people speaking should be a must. Before starting speaking make a recording of each speakers to have a blueprint of their voice and then teach the AI that there's x amount of people in the conversation.\n\n## Problem Statement\n[Describe the problem this feature would solve] Being able to add amazing new functionalities based on this.\n\n## Proposed Sol"
+  },
+  {
+    "number": 228,
+    "title": "\u3010Bug\u3011application  crash\uff01\uff01\uff01",
+    "labels": [],
+    "comments": 12,
+    "created": "2025-10-29",
+    "body": "Select the downloaded model, and then click 'Start Recording'. The application will crash.\u200b\u200b"
+  },
+  {
+    "number": 227,
+    "title": "[FEATURE] - Ongoing transcription cannot be stopped",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2025-10-28",
+    "body": "## Feature Description\nPossibility to stop ongoing transcription\n\n## Problem Statement\nSometime I forgot to stop recording, or realize the transcription is no more needed. There is apparently no way to stop ongoing transcription (with all CPU resources consumed uselessly\n\n## Proposed Solution\nAllow to stop ongoing transcription\n"
+  },
+  {
+    "number": 226,
+    "title": "[FEATURE] - Identify the speaker in the transcriptions",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-10-28",
+    "body": "## Feature Description\nIdentify the speaker in the transcriptions (like Speaker 1, Speaker 2..) and have it named manually after the transcription \n\n## Problem Statement\nTranscription does not include who said what\n\n## Proposed Solution\nIdentify the speaker in the transcriptions (like Speaker 1, Speaker 2..) and have it named manually after the transcription . Maybe a plugin embedded in Teams woul"
+  },
+  {
+    "number": 225,
+    "title": "[FEATURE] - Transcription managed by separate machine",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 3,
+    "created": "2025-10-28",
+    "body": "## Feature Description\nTranscription task is very demanding and slow task. Would be great to have the option to have it run on another remote machine (similarly with AI summary where remote Ollama is possible)\n\n"
+  },
+  {
+    "number": 224,
+    "title": "there is not way to  make recording language as zh",
+    "labels": [],
+    "comments": 0,
+    "created": "2025-10-27",
+    "body": ""
+  },
+  {
+    "number": 223,
+    "title": "Recording not saved for meeting with whisper model.",
+    "labels": [],
+    "comments": 0,
+    "created": "2025-10-27",
+    "body": "> Will do if I get the time! And thanks for the parakeet, looks promising & completely missed it the last few months!\n> \n> A bit strange: just got it to work, the mp4 is present & no checkpoints folder (only for new recordings, in the old ones they are still missing).\n> \n> Only thing I changed was that I experimented with the model selection, there was a bug which resulted in the app trying to tra"
+  },
+  {
+    "number": 221,
+    "title": "[BUG]",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2025-10-27",
+    "body": "## Bug Description\nCan't change the Data Storage Location on the Mac OS version of Meetily\n\n## Current Behavior\nGIVEN I have the Meetily app open on Mac OS 26.0.1\nWHEN I clicked on Settings -> General -> Data Storage Locations\nTHEN I can't update the Meetings Recording save location (I can only open Meeting Recording folder)\n\n## Expected Behavior\nGIVEN I have the Meetily app open on Mac OS 26.0.1\n"
+  },
+  {
+    "number": 220,
+    "title": "[BUG] Really choppy / bad audio recording. - Background, noise, echo, etc. - Audio Filtering",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2025-10-25",
+    "body": "## Bug Description\nFor our first meeting - I noticed that the transcription was really poor - diagnosing it turned out audio was echo'ing and cutting new words off with old ones. The laptop used to transcribe was using built in microphone and speakers. Therefore, what was happening was the echo was coming from the laptop microphone picking up the speakers output as well. This seemed to be correct "
+  },
+  {
+    "number": 219,
+    "title": "[FEATURE] Calendar integration",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2025-10-25",
+    "body": "## Feature Description\nIntegrate with outlook calendar for easier meeting title, summary, participants and meeting notifications & recording.\n\n## Problem Statement\nSyncing the outlook calendar with meetily to enable streamlined meeting transcriptions and summaries\n\n## Proposed Solution\nIntegrate calendar syncing\n\n## Acceptance Criteria\nSync outlook meetings\n\n## Technical Considerations\nAPI sync?\n\n"
+  },
+  {
+    "number": 218,
+    "title": "[FEATURE] Auto Record - Detect Meeting",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 5,
+    "created": "2025-10-25",
+    "body": "## Feature Description\nA setting to enable auto record / auto detect meeting. Whether MS teams, zoom, etc. if the setting is enabled it will detect & auto start recording a meeting that has started. \n\n## Problem Statement\nNo longer miss recording impromptu or scheduled meetings\n\n## Proposed Solution\nDetection of meeting begun\n\n## User Story\nAs a [type of user],\nI want [goal],\nSo that [benefit]\n\n##"
+  },
+  {
+    "number": 214,
+    "title": "[FEATURE] Use Moshi for transcription?",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-10-24",
+    "body": "Moshi has an efficient Rust implementation: https://github.com/kyutai-labs/moshi\n\nI did a few tests locally based on https://github.com/kyutai-labs/delayed-streams-modeling and the performance looks quite good.\n\nI wonder whether Meetily has plans to support new transcription models in the future?"
+  },
+  {
+    "number": 213,
+    "title": "[FEATURE] Gemini and Perplexity summarization model",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2025-10-24",
+    "body": "Would that be possible to add support for alternative summarization models, such as Gemini and Perplexity?"
+  },
+  {
+    "number": 212,
+    "title": "v0.1.1 Not using CUDA during transcribing and summarizing",
+    "labels": [],
+    "comments": 3,
+    "created": "2025-10-24",
+    "body": "First of all, well done for this new version!!! This is definitely a win for especially us, Windows users :)\n\nIt seems that transcribing is using CPU only making the process extremely slow.\nWith 64GB RAM and a 14 core CPU, it took roughly 20 minutes to transcribe a 01:30 minute test meeting.\n\nThe same applies to the summary as well although there is some indication of GPU usage.\n\nOverall to transc"
+  },
+  {
+    "number": 211,
+    "title": "v0.1.1 blocked in managed environment",
+    "labels": [],
+    "comments": 1,
+    "created": "2025-10-24",
+    "body": "Many thanks for all the work developing a local-only AI notetaker.\n\nIssue:  I am attempting to run the v0.1.1 executable in a managed Windows environment as a non-admin and it is being blocked by IT policy.  No issues running the installer initially (did not need to be unblocked per the troubleshooting note in the install guide).  I also have no issues running the v0.0.5 front and back ends in the"
+  },
+  {
+    "number": 210,
+    "title": "[FEATURE] Offload Summary and Transcription URLs to OpenAI compatible api endpoints",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 5,
+    "created": "2025-10-24",
+    "body": "## Feature Description\nProvide user settable urls for both Transcription and Summary Services - At the moment only Summary service is OpenAI compatible - We have a local inference and transcription machine (MAC m3 ultra) for our 5 employee business and having the ability to set these urls to our local AI machine means we can offload all the GPU based works and can rely on localised transcription w"
+  },
+  {
+    "number": 208,
+    "title": "[BUG]  no matching package named `cidre` found",
+    "labels": [
+      "bug"
+    ],
+    "comments": 7,
+    "created": "2025-10-23",
+    "body": "## Bug Description\nI am trying to build using the documentation instructions, but got the `no matching package named `cidre` found` error.\n\n## Current Behavior\n`no matching package named `cidre` found`\n\n## Expected Behavior\nInstall meeting-minutes on ubuntu 24.04\n\n## Steps to Reproduce\n1. git clone the repository\n2. pnpm install\n3. pnpm run tauri:build\n4. ./build-gpu.sh\n\n## Environment\n- OS:Ubuntu"
+  },
+  {
+    "number": 187,
+    "title": "[BUG] The display is not user-friendly in downloading ggml modal",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2025-10-11",
+    "body": "<img width=\"1312\" height=\"483\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/b8559e5c-c6a0-48ec-91f7-f055f3653640\" />"
+  },
+  {
+    "number": 180,
+    "title": "[BUG] CMAKE error during docker installation",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2025-10-05",
+    "body": "## Bug Description\nAfter following the instructions at https://github.com/Zackriya-Solutions/meeting-minutes/releases/tag/v0.0.5, and executing this command:\n\n`./run-docker.sh start --interactive`\n\ngetting this errors\n\n```\n=> ERROR [whisper-server builder 7/8] RUN cmake -B build     -DCMAKE_BUILD_TYPE=Release     -DWHISPER_BUILD_SERV  0.1s\n\n > [whisper-server builder 7/8] RUN cmake -B build     -D"
+  },
+  {
+    "number": 179,
+    "title": "[BUG] Error compiling Frontend",
+    "labels": [
+      "bug"
+    ],
+    "comments": 3,
+    "created": "2025-10-03",
+    "body": "## Bug Description\nexecuted the clean_build_windows.bat file while having met all requirements. Compiling stopped at \"Linting and checking validity of types\"\n\n## Current Behavior\nCompile process stops with an error\n\n## Expected Behavior\nSuccessful compiling\n\n## Steps to Reproduce\n1. clone the git repository\n2. go to frontend folder\n3. run clean_build_windows.bat\n\n## Environment\n- OS: Windows 10 Pr"
+  },
+  {
+    "number": 171,
+    "title": "Quality of meeting minutes",
+    "labels": [],
+    "comments": 6,
+    "created": "2025-09-15",
+    "body": "The quality of the meeting minutes is really low, am I using it incorrectly, have I not set it up correctly, or it's just the expected quality at the moment?\n\n\n-------------\nAs a comparison, the quality of the notes is much lower than the automatically generated subtitles I can get from zoom platform or similar).\n\nContext:\nI could setup meeting-minutes on MacOs quite effortlessly following the gui"
+  },
+  {
+    "number": 169,
+    "title": "[BUG] Error generating summary with gpt-oss:20b",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2025-09-12",
+    "body": "## Bug Description\nI cannot generate a summary using the `gpt-oss:20b` model from ollama. \n\n## Current Behavior\nWhen I select the model in settings and click \"Generate Note\" after a loading indicator is displayed I see the message \"Error generating summary\".\n\n## Expected Behavior\nI expect to see a summary of my meeting.\n\n## Steps to Reproduce\n1. Download the model with ollama `ollama pull gpt-oss:"
+  },
+  {
+    "number": 162,
+    "title": "[BUG]",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2025-08-29",
+    "body": "## Bug Description\n[Provide a clear and concise description of the bug]\nI got erro when i install  the backend,  it is windows system\n<img width=\"1425\" height=\"300\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/855e1959-843e-4d68-b7c8-b82bebe12cb2\" />\ncould you give some advices about that erro ?"
+  },
+  {
+    "number": 160,
+    "title": "[BUG] there is no meetily-frontend_0.0.5_x64-setup.exe or any setup not in the website of the repo?",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2025-08-25",
+    "body": ""
+  },
+  {
+    "number": 154,
+    "title": "[FEATURE] Support run server with multiple languages",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2025-08-17",
+    "body": "## Feature Description\nI want to be able to run the server with multiple languages - like Hebrew and English together\n\n## Problem Statement\nThe current situation is if I want to record a meeting that run in different language I need to stop the server and rerun it in the new langauge\n\n## Proposed Solution\nBe able to run the server like the following: `meetily-server --language en,he --model medium"
+  },
+  {
+    "number": 152,
+    "title": "[FEATURE] Add integration with AWS Bedrock models",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-08-15",
+    "body": "## Feature Description\nAdd optional integration with AWS Bedrock to allow Meetily users to use Bedrock foundation models for meeting summarization. This gives teams the flexibility to leverage additional cloud-based models while keeping Meetily\u2019s local summarization as the default.\n\n## Problem Statement\nMeetily currently supports local and API-based LLMs for summarization. Some organizations, howe"
+  },
+  {
+    "number": 150,
+    "title": "[FEATURE] Support for Whisper Alternatives",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 2,
+    "created": "2025-08-14",
+    "body": "## Feature Description\nI would like to use other models like Whisper for Indian languages like Hindi, Kannada etc.\n\n## Problem Statement\nI believe the product is tied to Whisper model and there is no way I can use other STT models like ElevenLabs etc. Whisper quality is good but there are better models also available. So I am looking for an config option to use other STT models.\n\n## Proposed Solut"
+  },
+  {
+    "number": 139,
+    "title": "[FEATURE] Enable other Claude models (Sonnet 4 & Opus 4.1)",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 1,
+    "created": "2025-08-06",
+    "body": "## Feature Description\n[Provide a clear and concise description of the feature you'd like to see]\nPlease enable the other Claude models available in the API - or at least let users define their own model names when using the APIs.\n\n## Problem Statement\n[Describe the problem this feature would solve]\nSonnet 3.5 is crap and misses a load of context.\n\n## Proposed Solution\n[Describe how you envision t"
+  },
+  {
+    "number": 135,
+    "title": "[BUG] - Recording + transcribing doesn't work.. (Win11)",
+    "labels": [
+      "bug"
+    ],
+    "comments": 9,
+    "created": "2025-08-03",
+    "body": "## Bug Description\nThe app doesn't work.. \nI have installed the backend like the documentation instructed, I installed the frontend via the .exe\nI can't get the app to work, and transcribe..\n\n## Current Behavior\nI start the backend with `start_with_output.cmd` script\nI start the frontend \nI start a new meeting by hitting record\nI speak to the microphone, as well as play a meeting recording via spe"
+  },
+  {
+    "number": 129,
+    "title": "Docker installation fails: Missing docker-build.bat and deployment issues",
+    "labels": [
+      "documentation"
+    ],
+    "comments": 2,
+    "created": "2025-07-13",
+    "body": "**Description**  \nI\u2019m unable to install the Docker version of Meeting Minutes. The `docker-build.bat` file mentioned in some guides is missing, and manual setup via `docker-compose` fails.  \n\n**Steps I Took**  \n1. Cloned the repo: `git clone https://github.com/Zackriya-Solutions/meeting-minutes.git`  \n2. Tried to run `docker-compose up --build` (no success).  \n3. Manually created `.env` from the t"
+  },
+  {
+    "number": 128,
+    "title": "The precompiled whisper-server binary in `frontend/whisper-server-package/` is macOS-only, making it unusable on Windows systems.",
+    "labels": [],
+    "comments": 0,
+    "created": "2025-07-04",
+    "body": "**Describe the issue**\nThe precompiled whisper-server binary in `frontend/whisper-server-package/` is macOS-only, making it unusable on Windows systems.\n\n**To Reproduce**\n1. Download project on Windows\n2. Try to run `frontend/whisper-server-package/whisper-server`\n3. File is macOS Mach-O format, won't execute\n\n**Expected behavior**\nWindows-compatible precompiled binary or clear documentation about"
+  },
+  {
+    "number": 126,
+    "title": "GPU SUPPORT SOLUTION",
+    "labels": [],
+    "comments": 1,
+    "created": "2025-07-03",
+    "body": "For who interested in using GPU for faster Whisper inference\n\nThe [whisper.cpp](https://github.com/ggml-org/whisper.cpp) project offers a solution for GPU-accelerated Whisper inference. Follow these steps to configure your build:\n\n* **Simply modify `build_whisper.cmd`**:\n    Locate line 55 in the `build_whisper.cmd` file and replace it with the following:\n    ```cmd\n    cmake .. -DBUILD_SHARED_LIB"
+  },
+  {
+    "number": 121,
+    "title": "[BUG] CMake Error at CMakeLists.txt:2",
+    "labels": [
+      "bug"
+    ],
+    "comments": 3,
+    "created": "2025-06-28",
+    "body": "Following the setup instructions on the latest version, I installed git and tried to run the cmake script: `.\\build_whisper.cmd`\n\n```\n=== Starting Whisper.cpp Build Process ===\n\nUpdating git submodules...\nChecking for whisper.cpp directory...\nChanging to whisper.cpp directory...\nChecking for whisper.cpp repository...\n\"List all files in the whisper.cpp examples directory\"\nCMakeLists.txt\nhttplib.h\np"
+  },
+  {
+    "number": 120,
+    "title": "[FEATURE] Integrate parakeet as an alternative to whisper",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-06-27",
+    "body": "## Feature Description\nI'm wondering whether you've considered using nvidia-parakeet-v2 (https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2) as an alternative to whisper? It's a much faster model enabling even lower latency speech-to-text than faster-whisper and would allow for the transcription to be in near real time.\n\n## Problem Statement\nThe current use of whisper relies on whisper late"
+  },
+  {
+    "number": 119,
+    "title": "is there any way i can connect the frontend to another server?",
+    "labels": [],
+    "comments": 10,
+    "created": "2025-06-22",
+    "body": "there is no config file or any settings on the frontend app to connect to another server other then itself."
+  },
+  {
+    "number": 116,
+    "title": "[BUG] API Key error when generating notes through Ollama",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2025-06-17",
+    "body": "## Bug Description\nI tried generating a transcript and generate the notes using Ollama. The application correctly identified my Ollama instance and its models, however I'm not able to generate the summary - I get \"Error generating summary\" every time I try to use Ollama for it.\nI searched among the issues but didn't find any related to this point specifically.\n\n## Current Behavior\nThe front-end gi"
+  },
+  {
+    "number": 115,
+    "title": "[BUG] Application fails to transcribe, connection error 10061",
+    "labels": [
+      "bug"
+    ],
+    "comments": 3,
+    "created": "2025-06-15",
+    "body": "## Bug Description\nThe Meetily application fails to perform audio transcription after recording is started. The user interface indicates that recording is active, but the transcription area remains blank. The application logs show a repeating connection error, indicating the frontend cannot communicate with the local transcription service.\n\n## Current Behavior\nWhen the record button is pressed, th"
+  },
+  {
+    "number": 111,
+    "title": "so many problem in this project",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2025-05-28",
+    "body": "I think this project has a lot of bugs.\n\n1) It is extremely unfriendly to deploy meetily in Windows environment. Although there is an installation video, the front-end and back-end of the teaching video are on the same machine. If the front-end and back-end are deployed separately, the front-end cannot connect to the back-end because the front-end software has been hard-coded and there is no confi"
+  },
+  {
+    "number": 110,
+    "title": "Cmake Error - Windows installation of backend",
+    "labels": [],
+    "comments": 21,
+    "created": "2025-05-27",
+    "body": "Dear Developers,\n\nI wanted to install the backend on a Windows Server 2022.\n\nThe official documentation of the latest release I used:\nhttps://github.com/Zackriya-Solutions/meeting-minutes/releases/tag/v0.0.4\n\nAfter installing the dependencies with the script inside an admin powershell CLI, I closed the powershell and opened a new simple one with my normal user and started the build process.\n\n![Ima"
+  },
+  {
+    "number": 108,
+    "title": "[FEATURE] access to saved audio",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 9,
+    "created": "2025-05-26",
+    "body": "## Feature Description\nAccess to saved audio allows users to view, organize, and manage audio files stored within the application.\n\n## Problem Statement\nCurrently, users face difficulty in managing and locating previously saved meetings. This limitation results in inefficient use of the application as users struggle to retrieve or modify stored audio easily.\n\n## Proposed Solution\nImplement a featu"
+  },
+  {
+    "number": 105,
+    "title": "How can uninstall meeting-minutes backend from Windows",
+    "labels": [],
+    "comments": 0,
+    "created": "2025-05-23",
+    "body": "Hi, is there any way to uninstall this app without using brew from Windows OS ?"
+  },
+  {
+    "number": 104,
+    "title": "[BUG] The get-model-config interface reports an error after recording stops",
+    "labels": [
+      "bug"
+    ],
+    "comments": 2,
+    "created": "2025-05-23",
+    "body": "## Bug Description\nThe get-model-config interface reports an error after recording stops\n\n## Environment\n- Windows 11\n\n## Error Messages\n```cmd\nINFO:     127.0.0.1:63585 - \"GET /get-model-config HTTP/1.1\" 500 Internal Server Error\nERROR:    Exception in ASGI application\nTraceback (most recent call last):\n  File \"C:\\Users\\37271\\Downloads\\meeting-minutes\\backend\\venv\\Lib\\site-packages\\uvicorn\\protoc"
+  },
+  {
+    "number": 102,
+    "title": "[FEATURE] Hope there can be a web version",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 0,
+    "created": "2025-05-17",
+    "body": "Can you ask the author if there is a web version? Because I only see Windows and macOS deployments, and our unit has very few IT personnel who cannot support the installation for everyone. However, this is a very practical tool, and we hope to deploy a web version on the server so that everyone can use it directly."
+  },
+  {
+    "number": 99,
+    "title": "[BUG] error audio permission: frontend",
+    "labels": [
+      "bug"
+    ],
+    "comments": 5,
+    "created": "2025-05-14",
+    "body": "## Bug Description\n Failed to trigger audio permission: A backend-specific error has occurred: The parameter is incorrect. (0x80070057)\n\n## Current Behavior\nWhen i run frontend Meetily, This error pop-up and no sound was transcribe. Backend Meetily already running\n\n## Expected Behavior\nWhen i run both (frontend & backend), at least transcribe function was working\n\n## Steps to Reproduce\n1. Run back"
+  },
+  {
+    "number": 92,
+    "title": "[BUG] Ollama Error \"Failed to fetch\" in Model Settings Window",
+    "labels": [
+      "bug"
+    ],
+    "comments": 4,
+    "created": "2025-05-07",
+    "body": "## Bug Description\nIn the Model Settings Window i get the Error \"Failed to fetch\". Ollama is running. If i go to http://localhost:11434/api/tags\nI get the JSON with all my Models:\n{\"models\":[{\"name\":\"qwen3:8b\",\"model\":\"qwen3:8b\",\"modified_at\":\"2025-05-06T15:19:06.2539829+02:00\",\"size\":5225387923,\"digest\":\"e4b5fd7f8af048d3c02e0357274238a9e93da51936665599ccb957aa42bfe173\",\"details\":{\"parent_model\":\""
+  },
+  {
+    "number": 91,
+    "title": "Frontend executable flagged as potential threat by Trend Micro",
+    "labels": [
+      "bug"
+    ],
+    "comments": 1,
+    "created": "2025-05-05",
+    "body": "Frontend executable flagged as potential threat by Trend Micro\n\nDescription:\n\nThe latest frontend executable (`meetily-frontend_0.0.4_x64-setup.exe`) is being flagged as a potential threat by Trend Micro antivirus software upon download/execution. This prevents users from installing or running the application and may cause concern about the software's safety.\n\nDetails from Antivirus Log:\n\n```\nDate"
+  },
+  {
+    "number": 90,
+    "title": "Docker windows installation",
+    "labels": [],
+    "comments": 4,
+    "created": "2025-05-04",
+    "body": "Has in docs but doesn't have file"
+  },
+  {
+    "number": 82,
+    "title": "Proposal: Refactor for Better Maintainability & Community Contribution",
+    "labels": [],
+    "comments": 0,
+    "created": "2025-04-25",
+    "body": "Explored some stuff to enhance maintainability, onboarding, and community contributions. Since we currently have a small core team and limited bandwidth, these improvements might reduce maintenance burden long-term and speed up our ability to develop and ship.\n\n| # | Change to make | Concrete modification (code / files) | Exact reasoning | Impact on\u2026 |\n| --- | --- | --- | --- | --- |\n| **1** | **S"
+  },
+  {
+    "number": 81,
+    "title": "Suggestions: Whisper GPU Acceleration, File Upload, Summary Customization, App-specific Audio Capture, UI Tweaks",
+    "labels": [],
+    "comments": 2,
+    "created": "2025-04-25",
+    "body": "- **[Windows 11] GPU Support**\n    - Whisper GPU support for RTX 30-series GPUs\n        \n        *(Uncertain if currently working on RTX 40-series, 50-series)*\n        \n- **Video/Audio Transcript Upload**\n    - Option to upload video/audio files for transcript and summary generation.\n    - Include processing queue/batch processing support for multiple files.\n- **Timestamp Toggle**\n    - Allow togg"
+  },
+  {
+    "number": 78,
+    "title": "When I press the recording button, the background displays an audio transmission issue. May I ask what the reason is?",
+    "labels": [],
+    "comments": 3,
+    "created": "2025-04-23",
+    "body": "[2025-04-23T04:04:48Z INFO  meeting_minutes_frontend_app] Starting application...\n[2025-04-23T04:04:49Z INFO  app_lib] Application setup complete\n[2025-04-23T04:06:37Z INFO  app_lib] Attempting to start recording...\n[2025-04-23T04:06:37Z INFO  app_lib] Recording flag set to true\n[2025-04-23T04:06:37Z INFO  app_lib] Initialized audio buffers\n[2025-04-23T04:06:37Z INFO  app_lib::audio::core] Initial"
+  },
+  {
+    "number": 77,
+    "title": "Doesn't support macOS intel?",
+    "labels": [],
+    "comments": 1,
+    "created": "2025-04-23",
+    "body": "## Dev build:\n```\nCMake Error at CMakeLists.txt:2 (project):\n  The CMAKE_C_COMPILER:\n\n    /opt/homebrew/opt/llvm/bin/clang\n\n  is not a full path to an existing compiler tool.\n\n  Tell CMake where to find the compiler by setting either the environment\n  variable \"CC\" or the CMake cache entry CMAKE_C_COMPILER to the full path to\n  the compiler, or to the compiler name if it is in the PATH.\n\n\nCMake Er"
+  },
+  {
+    "number": 74,
+    "title": "Introduce OpenAIProvider, Backend Cleanup, and CLI Testing Script",
+    "labels": [
+      "enhancement",
+      "cleanup",
+      "backend"
+    ],
+    "comments": 3,
+    "created": "2025-04-22",
+    "body": "**Summary:**\n\nThe `OpenAIProvider` has been introduced to the app. The backend has been updated accordingly and includes additional cleanup tasks.\n\n**Branch Information:**\n\n- Changes are available at: [feat/openai-provider-backend-cleanup](https://github.com/Zackriya-Solutions/meeting-minutes/tree/feat/openai-provider-backend-cleanup)\n- Branched from: [cleanup/backend-unused+save-meetings-db-ui-ch"
+  },
+  {
+    "number": 70,
+    "title": "Install of packaged release failed when Teams not installed",
+    "labels": [],
+    "comments": 2,
+    "created": "2025-04-21",
+    "body": "I tried to install the Packaged release, and it failed.  The installer helpfully loaded the Squirrel log, and the primary problem seems to be that I don't have Teams installed.  Ideally this should be a) optional at install time, b) something that can be added later, c) something that is detected later and then automatically (perhaps with user consent) installed. \n\nRelevant log entries:\n2023-08-15"
+  },
+  {
+    "number": 69,
+    "title": "VirusTotal found threats",
+    "labels": [],
+    "comments": 4,
+    "created": "2025-04-18",
+    "body": "![Image](https://github.com/user-attachments/assets/d6336909-57cd-4b01-8f19-ec08aad96d48)\n\nI want to use the tool but VirusTotal found threats.\nIs it real threats or false positiv ? \n"
+  },
+  {
+    "number": 66,
+    "title": "what if support CosyVoice that will better",
+    "labels": [],
+    "comments": 0,
+    "created": "2025-04-15",
+    "body": "CosyVoice 2b model support chinese transcribe."
+  },
+  {
+    "number": 64,
+    "title": "Build fails on macOS ARM when using Homebrew LLVM Clang instead of Apple Clang",
+    "labels": [],
+    "comments": 5,
+    "created": "2025-04-14",
+    "body": "### Summary\n\nOn macOS systems (particularly Apple Silicon), the backend build fails when using the LLVM Clang compiler installed via Homebrew (`/opt/homebrew/opt/llvm/bin/clang++`), due to compatibility issues with Apple's system frameworks.\n\n### Problem\n\nWhen compiling `whisper.cpp`, the build process triggers thousands of warnings and eventually fails with fatal errors, particularly in `ggml-bla"
+  },
+  {
+    "number": 62,
+    "title": "Backend Cleanup Log and Refactoring Summary - v0.0.3",
+    "labels": [
+      "cleanup",
+      "refactoring",
+      "backend"
+    ],
+    "comments": 3,
+    "created": "2025-04-11",
+    "body": "Branch: cleanup/backend-unused (https://github.com/Zackriya-Solutions/meeting-minutes/tree/cleanup/backend-unused)\n\n<html>\n<body>\n<!--StartFragment--><p>This issue documents the changes made focused on removing unused code from v0.0.3.</p>\n<p>The primary goal was to remove code paths and dependencies that are no longer triggered by active API endpoints.</p>\n<p><strong>Cleanup Summary Table:</stron"
+  },
+  {
+    "number": 59,
+    "title": "Errors in the settings screen",
+    "labels": [],
+    "comments": 1,
+    "created": "2025-04-06",
+    "body": "![Image](https://github.com/user-attachments/assets/2fa8aa61-e187-4a6b-8618-2ac62a4c924f)\nWhen I do the setup I can't see any windows, just this warning message, I assume there is a problem with the Ui loading but I can't fix this, help would be appreciated."
+  },
+  {
+    "number": 57,
+    "title": "error sending request for url",
+    "labels": [],
+    "comments": 3,
+    "created": "2025-03-25",
+    "body": "The console shows: Request failed: error sending request for url (http://127.0.0.1:8178/stream): error trying to connect: tcp connect error: "
+  },
+  {
+    "number": 56,
+    "title": "Identify Attendees Based on Voice",
+    "labels": [],
+    "comments": 4,
+    "created": "2025-03-21",
+    "body": "Hi,\n\nThanks so much for all the hard work on this project!\n\nI would like to suggest a feature to identify attendees based on their voice from audio recordings.\n\nThe idea is to:\n\t\u2022\tDetect who is speaking \n\t\u2022\tMatch voices to known attendees \n\t\u2022\tGenerate labeled transcripts based on attendee\n\nPossible Approach\n\nThe [pyannote-whisper](https://github.com/yinruiqing/pyannote-whisper) project looks like "
+  },
+  {
+    "number": 55,
+    "title": "Run with local Ollama",
+    "labels": [],
+    "comments": 5,
+    "created": "2025-03-21",
+    "body": "How do I run the backend with a local Ollama server? I did not found it mentioned in the README. It only talks about GROK and ANTROPHIC, but nothing about ollama. \n\n```\n# Add environment file with API keys\n# On macOS/Linux:\necho -e \"ANTHROPIC_API_KEY=your_api_key\\nGROQ_API_KEY=your_api_key\" | tee .env\n\n# On Windows (PowerShell):\n\"ANTHROPIC_API_KEY=your_api_key`nGROQ_API_KEY=your_api_key\" | Out-Fil"
+  },
+  {
+    "number": 54,
+    "title": "Building whisper backend on Windows ARM",
+    "labels": [],
+    "comments": 1,
+    "created": "2025-03-17",
+    "body": "Not ruling out this is a setup issue with my laptop, not a programmer. This is a Windows Surface Laptop - Snapdragon ARM, had issues trying to get things to build before due to everyone expecting an X64 machine. I've tried launching X64 or X86 VS Build Environments, but I think somewhere in your build it still just queries the device architecture so I cannot override.\n\nThink this is the error but "
+  },
+  {
+    "number": 48,
+    "title": "Add experiment folder",
+    "labels": [
+      "question"
+    ],
+    "comments": 0,
+    "created": "2025-03-04",
+    "body": "Experiment folder does not exist in the repo."
+  },
+  {
+    "number": 43,
+    "title": "Could you please share a video how to deploy the solution through VS",
+    "labels": [
+      "question"
+    ],
+    "comments": 3,
+    "created": "2025-03-03",
+    "body": "Because i faced more than issue like  \"cd experiment\" there is no file named \"experiment\""
+  },
+  {
+    "number": 32,
+    "title": "Linux suport",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 8,
+    "created": "2025-02-21",
+    "body": "## Description\nAdd Linux support to the meeting-minutes application, with a focus on Flatpak distribution. The application is built using Tauri (Rust) framework, making cross-platform support feasible.\n\n## Current Status (from team response)\n- UI and backend already developed in cross-platform framework (Tauri)\n- Main challenge identified: audio capture on Linux\n- Community members interested in c"
+  },
+  {
+    "number": 26,
+    "title": "I hope that future versions will merge the frontend and backend",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 8,
+    "created": "2025-02-17",
+    "body": "I hope that future versions will merge the frontend and backend, allowing for a single client that can set various AI models, all of which can be configured directly on the settings page. Installing the backend is too difficult."
+  },
+  {
+    "number": 25,
+    "title": "No input from microphone & ollama fails to summarize & long conversation fail",
+    "labels": [
+      "enhancement"
+    ],
+    "comments": 11,
+    "created": "2025-02-16",
+    "body": "Hey, tried out the repo and encountered 3 issues:\n1. The app does not transcribe (or use) the audio from my laptop's microphone. It only transcribes system audio (e.g. an audio from videos, podcasts, telegram conversations (other speakers only)). Checked it, the input device was Macbook Microphone.\n2. I have ollama installed, it works with other extensions perfectly (e.g. continue for coding), but"
+  }
+]

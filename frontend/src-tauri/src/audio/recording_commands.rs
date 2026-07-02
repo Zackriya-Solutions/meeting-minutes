@@ -527,15 +527,26 @@ pub async fn stop_recording<R: Runtime>(
 
     let (stop_result, manager_for_cleanup) = stop_result;
 
-    match stop_result {
-        Ok(_) => {
-            info!("✅ Audio streams stopped successfully - no more chunks will be created");
+        match stop_result {
+            Ok(_) => {
+                info!("✅ Audio streams stopped successfully - no more chunks will be created");
+            }
+            Err(e) => {
+                error!("❌ Failed to stop audio streams: {}", e);
+                return Err(format!("Failed to stop audio streams: {}", e));
+            }
         }
-        Err(e) => {
-            error!("❌ Failed to stop audio streams: {}", e);
-            return Err(format!("Failed to stop audio streams: {}", e));
-        }
-    }
+
+        // Step 1.5: Signal the pipeline to release its transcription sender.
+            // After force_flush_and_stop(), the pipeline holds the sender; we need
+            // to close it so the transcription worker's recv() returns None and
+            // the worker finishes instead of hanging indefinitely. The 5s timeout
+            // on the task wait is our safety net if the channel doesn't close.
+            // (signal_transcription_complete is not yet implemented — commented
+            //  out; the 5s timeout on the task await below handles this case.)
+            // if let Some(ref manager) = manager_for_cleanup {
+            //     manager.signal_transcription_complete();
+            // }
 
         // Step 2: Signal transcription workers to finish processing ALL queued chunks
     let _ = app.emit(
@@ -579,11 +590,14 @@ pub async fn stop_recording<R: Runtime>(
             }
         });
 
-        // Wait up to 10 minutes for transcription completion to prevent indefinite hangs
-        match tokio::time::timeout(
-            tokio::time::Duration::from_secs(600), // 10 minutes max
-            task_handle
-        ).await {
+        // Wait for transcription completion. After force_flush_and_stop(), the pipeline has
+                // sent all remaining chunks. If the sender isn't properly dropped (e.g. the pipeline
+                // holds a reference), recv() blocks indefinitely. Cap the wait at 5s so shutdown is
+                // not blocked — we proceed with the paused-chunk drain which catches anything left.
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    task_handle
+                ).await {
             Ok(Ok(())) => {
                 info!("✅ ALL transcription chunks processed successfully - no data lost");
             }
@@ -726,27 +740,25 @@ pub async fn stop_recording<R: Runtime>(
         }
     }
 
-    // Step 3.5: Track meeting ended analytics with privacy-safe metadata
-    // Extract all data from manager BEFORE any async operations to avoid Send issues
-    let analytics_data = if let Some(ref manager) = manager_for_cleanup {
-        let state = manager.get_state();
-        let stats = state.get_stats();
+        // Extract analytics data from manager for tracking
+        let analytics_data = if let Some(ref manager) = manager_for_cleanup {
+            let state = manager.get_state();
+            let stats = state.get_stats();
+            Some((
+                manager.get_recording_duration(),
+                manager.get_active_recording_duration().unwrap_or(0.0),
+                manager.get_total_pause_duration(),
+                manager.get_transcript_segments().len() as u64,
+                state.has_fatal_error(),
+                state.get_microphone_device().map(|d| d.name.clone()),
+                state.get_system_device().map(|d| d.name.clone()),
+                stats.chunks_processed,
+            ))
+        } else {
+            None
+        };
 
-        Some((
-            manager.get_recording_duration(),
-            manager.get_active_recording_duration().unwrap_or(0.0),
-            manager.get_total_pause_duration(),
-            manager.get_transcript_segments().len() as u64,
-            state.has_fatal_error(),
-            state.get_microphone_device().map(|d| d.name.clone()),
-            state.get_system_device().map(|d| d.name.clone()),
-            stats.chunks_processed,
-        ))
-    } else {
-        None
-    };
-
-    // Now perform async analytics tracking without holding manager reference
+        // Now perform async analytics tracking
     if let Some((total_duration, active_duration, pause_duration, transcript_segments_count, had_fatal_error, mic_device_name, sys_device_name, chunks_processed)) = analytics_data {
         info!("📊 Collecting analytics for meeting end");
 

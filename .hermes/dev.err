@@ -1,0 +1,637 @@
+     Running BeforeDevCommand (`pnpm dev`)
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.overrides". See https://pnpm.io/settings for the new home of each setting.
+$ next dev -p 3118
+     Running DevCommand (`cargo  run --no-default-features --features platform-default --color always --`)
+[1m[93mwarning[0m: patch for the non root package will be ignored, specify patch at the workspace root:
+package:   C:\Users\USER\projects\meetily\frontend\src-tauri\Cargo.toml
+workspace: C:\Users\USER\projects\meetily\Cargo.toml
+[1m[93mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   C:\Users\USER\projects\meetily\llama-helper\Cargo.toml
+workspace: C:\Users\USER\projects\meetily\Cargo.toml
+        Info Watching C:\Users\USER\projects\meetily\frontend\src-tauri for changes...
+[1m[93mwarning[0m[1m[97m: unused import: `std::io::Read`[0m
+   [1m[96m--> [0mfrontend\src-tauri\build\ffmpeg.rs:210:9
+    [1m[96m|[0m
+[1m[96m210[0m [1m[96m|[0m     use std::io::Read;
+    [1m[96m|[0m         [1m[93m^^^^^^^^^^^^^[0m
+    [1m[96m|[0m
+    [1m[96m= [0m[1m[97mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[93mwarning[0m: `meetily` (build script) generated 1 warning
+[1m[92m   Compiling[0m meetily v0.4.0 (C:\Users\USER\projects\meetily\frontend\src-tauri)
+[1m[96m    Building[0m [=======================> ] 777/780: meetily…                                                            [1m[93mwarning[0m: meetily@0.4.0: 🚀 Building Meetily for: windows
+[1m[93mwarning[0m: meetily@0.4.0: ⚠️  Windows: Using CPU-only mode (no GPU or BLAS acceleration)
+[1m[93mwarning[0m: meetily@0.4.0: 💡 For NVIDIA GPU: cargo build --release --features cuda
+[1m[93mwarning[0m: meetily@0.4.0: 💡 For AMD/Intel GPU: cargo build --release --features vulkan
+[1m[93mwarning[0m: meetily@0.4.0: 💡 For CPU optimization: cargo build --release --features openblas
+[1m[93mwarning[0m: meetily@0.4.0: 📊 Performance: CPU-only builds are significantly slower than GPU/BLAS builds
+[1m[93mwarning[0m: meetily@0.4.0: 📚 See README.md for GPU/BLAS setup instructions
+[1m[93mwarning[0m: meetily@0.4.0: 🎬 Checking FFmpeg binary for target: x86_64-pc-windows-msvc
+[1m[93mwarning[0m: meetily@0.4.0: 🔍 Found cached FFmpeg binary: ffmpeg-x86_64-pc-windows-msvc.exe
+[1m[93mwarning[0m: meetily@0.4.0: ✅ FFmpeg verification passed: ffmpeg version 8.0.1-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+[1m[93mwarning[0m: meetily@0.4.0: ✅ FFmpeg binary already cached and verified: ffmpeg-x86_64-pc-windows-msvc.exe
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: unused import: `perf_debug`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\lib.rs:32:16
+   [1m[96m|[0m
+[1m[96m32[0m [1m[96m|[0m pub(crate) use perf_debug;
+   [1m[96m|[0m                [1m[93m^^^^^^^^^^[0m
+   [1m[96m|[0m
+   [1m[96m= [0m[1m[97mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: unused import: `perf_trace`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\lib.rs:33:16
+   [1m[96m|[0m
+[1m[96m33[0m [1m[96m|[0m pub(crate) use perf_trace;
+   [1m[96m|[0m                [1m[93m^^^^^^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: unused imports: `RemoteProviderConfig` and `RemoteProvider`[0m
+ [1m[96m--> [0mfrontend\src-tauri\src\api\api.rs:8:51
+  [1m[96m|[0m
+[1m[96m8[0m [1m[96m|[0m     audio::transcription::{TranscriptionProvider, RemoteProvider, RemoteProviderConfig},
+  [1m[96m|[0m                                                   [1m[93m^^^^^^^^^^^^^^[0m  [1m[93m^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: unused import: `warn`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\audio\devices\fallback.rs:22:17
+   [1m[96m|[0m
+[1m[96m22[0m [1m[96m|[0m use log::{info, warn};
+   [1m[96m|[0m                 [1m[93m^^^^[0m
+
+[1m[93mwarning[0m[1m[97m: unused import: `find_builtin_input_device`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\audio\devices\fallback.rs:25:47
+   [1m[96m|[0m
+[1m[96m25[0m [1m[96m|[0m use super::microphone::{default_input_device, find_builtin_input_device};
+   [1m[96m|[0m                                               [1m[93m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[93mwarning[0m[1m[97m: unused import: `crate::audio::device_detection::InputDeviceKind`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\audio\devices\fallback.rs:27:5
+   [1m[96m|[0m
+[1m[96m27[0m [1m[96m|[0m use crate::audio::device_detection::InputDeviceKind;
+   [1m[96m|[0m     [1m[93m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: unused import: `log::warn`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\audio\transcription\groq_provider.rs:16:5
+   [1m[96m|[0m
+[1m[96m16[0m [1m[96m|[0m use log::warn;
+   [1m[96m|[0m     [1m[93m^^^^^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: variable does not need to be mutable[0m
+   [1m[96m--> [0mfrontend\src-tauri\src\audio\recording_preferences.rs:111:16
+    [1m[96m|[0m
+[1m[96m111[0m [1m[96m|[0m             Ok(mut p) => {
+    [1m[96m|[0m                [1m[96m----[0m[1m[93m^[0m
+    [1m[96m|[0m                [1m[96m|[0m
+    [1m[96m|[0m                [1m[96mhelp: remove this `mut`[0m
+    [1m[96m|[0m
+    [1m[96m= [0m[1m[97mnote[0m: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: unused import: `std::os::windows::process::CommandExt`[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\summary\summary_engine\sidecar.rs:16:5
+   [1m[96m|[0m
+[1m[96m16[0m [1m[96m|[0m use std::os::windows::process::CommandExt;
+   [1m[96m|[0m     [1m[93m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: field `recording_sender` is never read[0m
+   [1m[96m--> [0mfrontend\src-tauri\src\audio\pipeline.rs:201:5
+    [1m[96m|[0m
+[1m[96m194[0m [1m[96m|[0m pub struct AudioCapture {
+    [1m[96m|[0m            [1m[96m------------[0m [1m[96mfield in this struct[0m
+[1m[96m...[0m
+[1m[96m201[0m [1m[96m|[0m     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    [1m[96m|[0m     [1m[93m^^^^^^^^^^^^^^^^[0m
+    [1m[96m|[0m
+    [1m[96m= [0m[1m[97mnote[0m: `AudioCapture` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    [1m[96m= [0m[1m[97mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: field `state` is never read[0m
+   [1m[96m--> [0mfrontend\src-tauri\src\audio\pipeline.rs:683:5
+    [1m[96m|[0m
+[1m[96m680[0m [1m[96m|[0m pub struct AudioPipeline {
+    [1m[96m|[0m            [1m[96m-------------[0m [1m[96mfield in this struct[0m
+[1m[96m...[0m
+[1m[96m683[0m [1m[96m|[0m     state: Arc<RecordingState>,
+    [1m[96m|[0m     [1m[93m^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: fields `start` and `end` are never read[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\audio\transcription\remote_provider.rs:66:5
+   [1m[96m|[0m
+[1m[96m65[0m [1m[96m|[0m struct RemoteSegment {
+   [1m[96m|[0m        [1m[96m-------------[0m [1m[96mfields in this struct[0m
+[1m[96m66[0m [1m[96m|[0m     start: f64,
+   [1m[96m|[0m     [1m[93m^^^^^[0m
+[1m[96m67[0m [1m[96m|[0m     end: f64,
+   [1m[96m|[0m     [1m[93m^^^[0m
+   [1m[96m|[0m
+   [1m[96m= [0m[1m[97mnote[0m: `RemoteSegment` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: fields `start` and `end` are never read[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\audio\transcription\groq_provider.rs:37:5
+   [1m[96m|[0m
+[1m[96m34[0m [1m[96m|[0m struct GroqSegment {
+   [1m[96m|[0m        [1m[96m-----------[0m [1m[96mfields in this struct[0m
+[1m[96m...[0m
+[1m[96m37[0m [1m[96m|[0m     start: Option<f64>,
+   [1m[96m|[0m     [1m[93m^^^^^[0m
+[1m[96m38[0m [1m[96m|[0m     #[serde(default)]
+[1m[96m39[0m [1m[96m|[0m     end: Option<f64>,
+   [1m[96m|[0m     [1m[93m^^^[0m
+   [1m[96m|[0m
+   [1m[96m= [0m[1m[97mnote[0m: `GroqSegment` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m[1m[97m: function `get_builtin_templates` is never used[0m
+  [1m[96m--> [0mfrontend\src-tauri\src\summary\templates\defaults.rs:15:8
+   [1m[96m|[0m
+[1m[96m15[0m [1m[96m|[0m pub fn get_builtin_templates() -> Vec<(&'static str, &'static str)> {
+   [1m[96m|[0m        [1m[93m^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[96m    Building[0m [=======================> ] 778/780: meetily                                                             [1m[93mwarning[0m: `meetily` (lib) generated 14 warnings (run `cargo fix --lib -p meetily` to apply 8 suggestions)
+[1m[96m    Building[0m [=======================> ] 779/780: meetily…                                                            [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 23.55s
+[1m[92m     Running[0m `C:\Users\USER\projects\meetily\target\debug\meetily.exe`
+[2026-06-29T13:41:41Z INFO  meetily] Starting application...
+[2026-06-29T13:41:41Z INFO  app_lib::whisper_engine::system_monitor] Initializing system monitor
+[2026-06-29T13:41:42Z INFO  app_lib] Application setup complete
+[2026-06-29T13:41:42Z INFO  app_lib] Initializing notification system...
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::commands] Initializing notification manager...
+[2026-06-29T13:41:42Z INFO  app_lib::whisper_engine::commands] Models directory set to: C:\Users\USER\AppData\Roaming\com.meetily.ai\models
+[2026-06-29T13:41:42Z INFO  app_lib::parakeet_engine::commands] Parakeet models directory set to: C:\Users\USER\AppData\Roaming\com.meetily.ai\models
+[2026-06-29T13:41:42Z INFO  app_lib::whisper_engine::whisper_engine] WhisperEngine using models directory: C:\Users\USER\AppData\Roaming\com.meetily.ai\models
+[2026-06-29T13:41:42Z INFO  app_lib::whisper_engine::whisper_engine] Debug mode: true
+[2026-06-29T13:41:42Z INFO  app_lib::parakeet_engine::parakeet_engine] ParakeetEngine using models directory: C:\Users\USER\AppData\Roaming\com.meetily.ai\models\parakeet
+[2026-06-29T13:41:42Z INFO  app_lib::whisper_engine::whisper_engine] No GPU acceleration features detected - using CPU processing
+[2026-06-29T13:41:42Z INFO  app_lib::whisper_engine::whisper_engine] Hardware acceleration support: disabled
+[2026-06-29T13:41:42Z INFO  app_lib::database::manager] Tauri DB path: C:\Users\USER\AppData\Roaming\com.meetily.ai\meeting_minutes.sqlite
+[2026-06-29T13:41:42Z INFO  app_lib::summary::summary_engine::model_manager] Built-in AI ModelManager using directory: C:\Users\USER\AppData\Roaming\com.meetily.ai\models\summary
+[2026-06-29T13:41:42Z INFO  app_lib::database::manager] Legacy backend DB path: C:\Users\USER\AppData\Roaming\com.meetily.ai\meeting_minutes.db
+[2026-06-29T13:41:42Z INFO  app_lib::summary::summary_engine::model_manager] Starting model scan in directory: C:\Users\USER\AppData\Roaming\com.meetily.ai\models\summary
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Loaded notification settings from disk
+[2026-06-29T13:41:42Z INFO  app_lib::summary::summary_engine::model_manager] Model 'qwen3.5:4b': found 2613 MB (expected 2352-2875 MB)
+[2026-06-29T13:41:42Z INFO  app_lib::summary::summary_engine::model_manager] Model 'qwen3.5:4b': AVAILABLE
+[2026-06-29T13:41:42Z INFO  app_lib::summary::summary_engine::model_manager] Model scan complete: 4 models checked in 822.6µs
+[2026-06-29T13:41:42Z INFO  app_lib::summary::summary_engine::commands] ModelManager initialized at startup
+[2026-06-29T13:41:42Z INFO  app_lib] ModelManager initialized successfully at startup
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Saved notification settings to disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::manager] NotificationManager created successfully
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::manager] Initializing notification system...
+[2026-06-29T13:41:42Z INFO  app_lib::database::manager] Database opened successfully
+[2026-06-29T13:41:42Z INFO  app_lib::database::setup] Database initialized successfully
+[2026-06-29T13:41:42Z INFO  app_lib] Initializing bundled templates directory...
+[2026-06-29T13:41:42Z INFO  app_lib] Setting bundled templates directory to: "\\\\?\\C:\\Users\\USER\\projects\\meetily\\target\\debug\\templates"
+[2026-06-29T13:41:42Z INFO  app_lib::summary::templates::loader] Bundled templates directory set to: "\\\\?\\C:\\Users\\USER\\projects\\meetily\\target\\debug\\templates"
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Loaded notification settings from disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Loaded notification settings from disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::manager] Notification system initialized successfully
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::commands] Notification manager initialized successfully
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Loaded notification settings from disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Saved notification settings to disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Updated notification consent: true
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::manager] User consent set to: true
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::system] Requesting notification permission
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::system] Notification permission granted (automatic for Tauri apps)
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Loaded notification settings from disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Saved notification settings to disk
+[2026-06-29T13:41:42Z INFO  app_lib::notifications::settings] Updated system notification permission: true
+[2026-06-29T13:41:42Z INFO  app_lib] Notification system initialized with default permissions
+[2026-06-29T13:41:42Z INFO  app_lib::tray] Tray: update_tray_menu_async called
+[2026-06-29T13:41:42Z INFO  app_lib::tray] Tray: get_current_recording_state - is_recording: false
+[2026-06-29T13:41:42Z INFO  app_lib::tray] Tray: Recording state is Stopped
+[2026-06-29T13:41:42Z INFO  app_lib::tray] Tray: Current recording state: Stopped
+[2026-06-29T13:41:42Z INFO  app_lib::onboarding] Loaded onboarding status from store - Step: 4, Completed: true
+[2026-06-29T13:41:42Z INFO  app_lib::tray] Tray: can_record: true
+[2026-06-29T13:41:42Z INFO  app_lib::tray] Tray: Menu update result: Ok(())
+[2026-06-29T13:41:47Z INFO  app_lib::onboarding] Loaded onboarding status from store - Step: 4, Completed: true
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_transcript_config called (native)
+[2026-06-29T13:41:47Z INFO  app_lib] Setting language preference to: ar
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_model_config called (native)
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_api_key called (native) for provider 'claude'
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_api_key called (native) for provider 'groq'
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Found transcript config: provider=parakeet, model=parakeet-tdt-0.6b-v3-int8
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_api_key called (native) for provider 'openai'
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved transcript config and API key.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_api_key called (native) for provider 'openrouter'
+[2026-06-29T13:41:47Z INFO  app_lib::audio::recording_preferences] No stored preferences found, using defaults
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved API key for provider 'openrouter'.
+[2026-06-29T13:41:47Z INFO  app_lib::audio::recording_preferences] Loaded recording preferences: save_folder="C:\\Users\\USER\\Music\\meetily-recordings", auto_save=true, format=mp4, mic=None, system=None
+[2026-06-29T13:41:47Z INFO  app_lib::onboarding] Loaded onboarding status from store - Step: 4, Completed: true
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] ✅ Found model config in database: provider=builtin-ai, model=qwen3.5:4b, whisperModel=large-v3, ollamaEndpoint=None
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved model config and API key.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_model_config called (native)
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved API key for provider 'openai'.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_transcript_config called (native)
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved API key for provider 'claude'.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved API key for provider 'groq'.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] ✅ Found model config in database: provider=builtin-ai, model=qwen3.5:4b, whisperModel=large-v3, ollamaEndpoint=None
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved model config and API key.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Found transcript config: provider=parakeet, model=parakeet-tdt-0.6b-v3-int8
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_meetings called with auth_token(native) : false
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved transcript config and API key.
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully got 5 meetings
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] api_get_api_key called (native) for provider 'builtin-ai'
+[2026-06-29T13:41:47Z INFO  app_lib::api::api] Successfully retrieved API key for provider 'builtin-ai'.
+ ⨯ Error: Cannot find module './925.js'
+Require stack:
+- C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+- C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-middleware.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-reloader-webpack.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-utils\setup-dev-bundler.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\start-server.js
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1500:15)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:55:36
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1116:12)
+    at Module._load (node:internal/modules/cjs/loader:1285:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at __webpack_require__.f.require (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:203:28)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:110:67)
+    at Array.map (<anonymous>)
+    at __webpack_require__.X (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:162:22)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js:1:18121
+    at Object.<anonymous> (C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js:1:18188)
+    at Module._compile (node:internal/modules/cjs/loader:1854:14)
+    at Object..js (node:internal/modules/cjs/loader:1985:10)
+    at Module.load (node:internal/modules/cjs/loader:1577:32)
+    at Module._load (node:internal/modules/cjs/loader:1379:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at requirePage (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js:109:84)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:103:84
+    at async loadComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:103:26)
+    at async DevServer.findPageComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\next-server.js:714:36)
+    at async DevServer.findPageComponents (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\next-dev-server.js:577:20)
+    at async DevServer.renderPageComponent (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\base-server.js:1910:24)
+    at async DevServer.renderToResponseImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\base-server.js:1962:32)
+    at async DevServer.pipeImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\base-server.js:922:25)
+    at async NextNodeServer.handleCatchallRenderRequest (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\next-server.js:272:17)
+    at async DevServer.handleRequestImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\base-server.js:818:17)
+    at async C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\next-dev-server.js:339:20
+    at async Span.traceAsyncFn (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\trace\trace.js:154:20)
+    at async DevServer.handleRequest (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\next-dev-server.js:336:24)
+    at async invokeRender (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js:179:21)
+    at async handleRequest (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js:359:24)
+    at async requestHandlerImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js:383:13)
+    at async Server.requestListener (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\start-server.js:141:13) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\webpack-runtime.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\app\\settings\\page.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\require.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\load-components.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\build\\utils.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-middleware.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-reloader-webpack.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-utils\\setup-dev-bundler.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-server.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\start-server.js'
+  ],
+  page: '/settings'
+}
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-label@2.1.8_8915bfc4015ea7714adf8fc777d50ad8.js'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@radix-ui+react-label@2.1.8_8915bfc4015ea7714adf8fc777d50ad8' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-label@2.1.8_8915bfc4015ea7714adf8fc777d50ad8.js', but to 'Error: Can't resolve './vendor-chunks/@radix-ui+react-label@2.1.8_8915bfc4015ea7714adf8fc777d50ad8' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@radix-ui+react-label@2.1.8_8915bfc4015ea7714adf8fc777d50ad8 (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-label@2.1.8_8915bfc4015ea7714adf8fc777d50ad8.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@radix-ui+react-primitive@2_be93e2873c2be441aa6fe1469ec0005c' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-primitive@2_be93e2873c2be441aa6fe1469ec0005c.js', but to 'Error: Can't resolve './vendor-chunks/@radix-ui+react-primitive@2_be93e2873c2be441aa6fe1469ec0005c' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@radix-ui+react-primitive@2_be93e2873c2be441aa6fe1469ec0005c (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-primitive@2_be93e2873c2be441aa6fe1469ec0005c.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@radix-ui+react-collapsible_0836b9883955787a1ca7a4a1484b34da' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-collapsible_0836b9883955787a1ca7a4a1484b34da.js', but to 'Error: Can't resolve './vendor-chunks/@radix-ui+react-collapsible_0836b9883955787a1ca7a4a1484b34da' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@radix-ui+react-collapsible_0836b9883955787a1ca7a4a1484b34da (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-collapsible_0836b9883955787a1ca7a4a1484b34da.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@radix-ui+react-accordion@1_945059ed0de00f830fb66f21d052102c' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-accordion@1_945059ed0de00f830fb66f21d052102c.js', but to 'Error: Can't resolve './vendor-chunks/@radix-ui+react-accordion@1_945059ed0de00f830fb66f21d052102c' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@radix-ui+react-accordion@1_945059ed0de00f830fb66f21d052102c (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-accordion@1_945059ed0de00f830fb66f21d052102c.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@radix-ui+react-scroll-area_5d65e204c827d704c5184e8d17b67f82' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-scroll-area_5d65e204c827d704c5184e8d17b67f82.js', but to 'Error: Can't resolve './vendor-chunks/@radix-ui+react-scroll-area_5d65e204c827d704c5184e8d17b67f82' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@radix-ui+react-scroll-area_5d65e204c827d704c5184e8d17b67f82 (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-scroll-area_5d65e204c827d704c5184e8d17b67f82.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+[2026-06-29T18:34:06Z INFO  app_lib] Main window hidden to tray on close request
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat 'C:\Users\USER\projects\meetily\frontend\.next\server\app\_not-found'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving '../../../../../../../.next/server/app/_not-found/page' in C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\app\_not-found\page.js', but to 'Error: Can't resolve '../../../../../../../.next/server/app/_not-found/page' in 'C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ../../../../../../../.next/server/app/_not-found/page (expected C:\Users\USER\projects\meetily\frontend\.next\server\app\_not-found\page.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat 'C:\Users\USER\projects\meetily\frontend\.next\server'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving '../../../../../../../.next/server/app/settings/page' in C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js', but to 'Error: Can't resolve '../../../../../../../.next/server/app/settings/page' in 'C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ../../../../../../../.next/server/app/settings/page (expected C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving '../../../../../../../.next/server/app/_not-found/page' in C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\app\_not-found\page.js', but to 'Error: Can't resolve '../../../../../../../.next/server/app/_not-found/page' in 'C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ../../../../../../../.next/server/app/_not-found/page (expected C:\Users\USER\projects\meetily\frontend\.next\server\app\_not-found\page.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+ ⨯ Error: Cannot find module './557.js'
+Require stack:
+- C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+- C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-middleware.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-reloader-webpack.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-utils\setup-dev-bundler.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\start-server.js
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1500:15)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:55:36
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1116:12)
+    at Module._load (node:internal/modules/cjs/loader:1285:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at __webpack_require__.f.require (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:203:28)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:110:67)
+    at Array.map (<anonymous>)
+    at __webpack_require__.X (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:162:22)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js:1:335
+    at Object.<anonymous> (C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js:1:375)
+    at Module._compile (node:internal/modules/cjs/loader:1854:14)
+    at Object..js (node:internal/modules/cjs/loader:1985:10)
+    at Module.load (node:internal/modules/cjs/loader:1577:32)
+    at Module._load (node:internal/modules/cjs/loader:1379:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at requirePage (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js:109:84)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:72:65
+    at async Promise.all (index 0)
+    at async loadComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:71:33)
+    at async DevServer.findPageComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\next-server.js:714:36) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\webpack-runtime.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\pages\\_document.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\require.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\load-components.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\build\\utils.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-middleware.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-reloader-webpack.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-utils\\setup-dev-bundler.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-server.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\start-server.js'
+  ]
+}
+ ⨯ Error: Cannot find module './557.js'
+Require stack:
+- C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+- C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-middleware.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-reloader-webpack.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-utils\setup-dev-bundler.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\start-server.js
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1500:15)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:55:36
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1116:12)
+    at Module._load (node:internal/modules/cjs/loader:1285:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at __webpack_require__.f.require (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:203:28)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:110:67)
+    at Array.map (<anonymous>)
+    at __webpack_require__.X (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:162:22)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js:1:335
+    at Object.<anonymous> (C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js:1:375)
+    at Module._compile (node:internal/modules/cjs/loader:1854:14)
+    at Object..js (node:internal/modules/cjs/loader:1985:10)
+    at Module.load (node:internal/modules/cjs/loader:1577:32)
+    at Module._load (node:internal/modules/cjs/loader:1379:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at requirePage (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js:109:84)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:72:65
+    at async Promise.all (index 0)
+    at async loadComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:71:33)
+    at async DevServer.findPageComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\next-server.js:714:36) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\webpack-runtime.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\pages\\_document.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\require.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\load-components.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\build\\utils.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-middleware.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-reloader-webpack.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-utils\\setup-dev-bundler.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-server.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\start-server.js'
+  ]
+}
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@tauri-apps+api@2.11.0.js'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@tauri-apps+api@2.11.0' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@tauri-apps+api@2.11.0.js', but to 'Error: Can't resolve './vendor-chunks/@tauri-apps+api@2.11.0' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@tauri-apps+api@2.11.0 (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@tauri-apps+api@2.11.0.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/@radix-ui+react-select@2.2._f9b05e8db7247fc075715ae52301583d' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-select@2.2._f9b05e8db7247fc075715ae52301583d.js', but to 'Error: Can't resolve './vendor-chunks/@radix-ui+react-select@2.2._f9b05e8db7247fc075715ae52301583d' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/@radix-ui+react-select@2.2._f9b05e8db7247fc075715ae52301583d (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\@radix-ui+react-select@2.2._f9b05e8db7247fc075715ae52301583d.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/sonner@2.0.7_react-dom@18.3.1_react@18.3.1__react@18.3.1' in C:\Users\USER\projects\meetily\frontend\.next\server for build dependencies doesn't lead to expected result 'C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\sonner@2.0.7_react-dom@18.3.1_react@18.3.1__react@18.3.1.js', but to 'Error: Can't resolve './vendor-chunks/sonner@2.0.7_react-dom@18.3.1_react@18.3.1__react@18.3.1' in 'C:\Users\USER\projects\meetily\frontend\.next\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/sonner@2.0.7_react-dom@18.3.1_react@18.3.1__react@18.3.1 (expected C:\Users\USER\projects\meetily\frontend\.next\server\vendor-chunks\sonner@2.0.7_react-dom@18.3.1_react@18.3.1__react@18.3.1.js)
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\.next\server\app\settings\page.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+ ⨯ Error: Cannot find module './557.js'
+Require stack:
+- C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js
+- C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\build\utils.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-middleware.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\dev\hot-reloader-webpack.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-utils\setup-dev-bundler.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\router-server.js
+- C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\lib\start-server.js
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1500:15)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:55:36
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1116:12)
+    at Module._load (node:internal/modules/cjs/loader:1285:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at __webpack_require__.f.require (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:203:28)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:110:67)
+    at Array.map (<anonymous>)
+    at __webpack_require__.X (C:\Users\USER\projects\meetily\frontend\.next\server\webpack-runtime.js:162:22)
+    at C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js:1:335
+    at Object.<anonymous> (C:\Users\USER\projects\meetily\frontend\.next\server\pages\_document.js:1:375)
+    at Module._compile (node:internal/modules/cjs/loader:1854:14)
+    at Object..js (node:internal/modules/cjs/loader:1985:10)
+    at Module.load (node:internal/modules/cjs/loader:1577:32)
+    at Module._load (node:internal/modules/cjs/loader:1379:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1600:12)
+    at mod.require (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at requirePage (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\require.js:109:84)
+    at C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:72:65
+    at async Promise.all (index 0)
+    at async loadComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\load-components.js:71:33)
+    at async DevServer.findPageComponentsImpl (C:\Users\USER\projects\meetily\frontend\node_modules\.pnpm\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\node_modules\next\dist\server\next-server.js:714:36) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\webpack-runtime.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\.next\\server\\pages\\_document.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\require.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\load-components.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\build\\utils.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-middleware.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\dev\\hot-reloader-webpack.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-utils\\setup-dev-bundler.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\router-server.js',
+    'C:\\Users\\USER\\projects\\meetily\\frontend\\node_modules\\.pnpm\\next@14.2.35_@babel+core@7._92bcef98349dde1ff82d3721e79cbb06\\node_modules\\next\\dist\\server\\lib\\start-server.js'
+  ]
+}
+[2026-06-30T08:55:44Z INFO  app_lib] Main window hidden to tray on close request
+[2026-06-30T08:55:48Z INFO  app_lib] Application exiting, cleaning up resources...
+[2026-06-30T08:55:48Z INFO  app_lib] Starting database cleanup...
+[2026-06-30T08:55:48Z INFO  app_lib::database::manager] Starting database cleanup...
+[2026-06-30T08:55:48Z INFO  app_lib::database::manager] WAL checkpoint completed successfully
+[2026-06-30T08:55:48Z INFO  app_lib::database::manager] Database connection pool closed
+[2026-06-30T08:55:48Z INFO  app_lib] Database cleanup completed successfully
+[2026-06-30T08:55:48Z INFO  app_lib] Cleaning up sidecar...
+[2026-06-30T08:55:48Z INFO  app_lib] Application cleanup complete
+[0630/115548.550:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1412

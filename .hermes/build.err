@@ -1,0 +1,316 @@
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `pnpm build`
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.overrides". See https://pnpm.io/settings for the new home of each setting.
+$ next build
+warning: patch for the non root package will be ignored, specify patch at the workspace root:
+package:   C:\Users\USER\projects\meetily\frontend\src-tauri\Cargo.toml
+workspace: C:\Users\USER\projects\meetily\Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   C:\Users\USER\projects\meetily\llama-helper\Cargo.toml
+workspace: C:\Users\USER\projects\meetily\Cargo.toml
+   Compiling whisper-rs-sys v0.11.1
+   Compiling reqwest v0.11.27
+   Compiling rfd v0.16.0
+   Compiling which v6.0.3
+   Compiling tauri-plugin-process v2.3.1
+   Compiling flume v0.11.1
+   Compiling tauri-plugin-updater v2.10.1
+   Compiling tauri-plugin-dialog v2.7.1
+   Compiling sqlx-core v0.8.6
+   Compiling tauri-plugin-notification v2.3.3
+   Compiling rand_chacha v0.9.0
+   Compiling tauri-plugin-store v2.4.3
+   Compiling hyper-tls v0.5.0
+   Compiling libsqlite3-sys v0.30.1
+   Compiling hyper-rustls v0.24.2
+   Compiling hyper-rustls v0.27.9
+   Compiling dasp_signal v0.11.0
+   Compiling ort-sys v2.0.0-rc.10
+   Compiling zip v4.6.1
+   Compiling hashbrown v0.14.5
+   Compiling derive_builder_macro v0.20.2
+   Compiling tower-http v0.6.10
+   Compiling rayon-core v1.13.0
+   Compiling ndarray v0.16.1
+   Compiling futures-lite v2.6.1
+   Compiling winreg v0.50.0
+   Compiling atty v0.2.14
+   Compiling windows-core v0.54.0
+   Compiling http-body-util v0.1.3
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling dasp_slice v0.11.0
+   Compiling webpki-roots v1.0.7
+   Compiling ureq-proto v0.6.0
+   Compiling futures-executor v0.3.32
+   Compiling termcolor v1.4.1
+   Compiling rand_core v0.6.4
+   Compiling atoi v2.0.0
+   Compiling esaxx-rs v0.1.10
+   Compiling utf8-zero v0.8.1
+   Compiling array-init v2.1.0
+   Compiling clap_lex v1.1.0
+   Compiling strsim v0.11.1
+   Compiling textwrap v0.16.2
+   Compiling extended v0.1.0
+   Compiling smallvec v2.0.0-alpha.10
+   Compiling webpki-roots v0.25.4
+   Compiling whisper-rs v0.13.2
+   Compiling ebur128 v0.1.10
+   Compiling sync_wrapper v0.1.2
+   Compiling strsim v0.10.0
+   Compiling cpal v0.15.3
+   Compiling clap v3.2.25
+   Compiling clap_builder v4.6.0
+   Compiling symphonia-format-riff v0.5.5
+   Compiling easyfft v0.4.2
+   Compiling ureq v3.3.0
+   Compiling rand_chacha v0.3.1
+   Compiling ort v2.0.0-rc.10
+   Compiling dasp v0.11.0
+   Compiling windows v0.54.0
+   Compiling reqwest v0.13.3
+   Compiling notify-rust v4.17.0
+   Compiling derive_builder v0.20.2
+   Compiling rayon v1.12.0
+   Compiling meetily v0.4.0 (C:\Users\USER\projects\meetily\frontend\src-tauri)
+   Compiling rand v0.9.4
+   Compiling sqlx-sqlite v0.8.6
+warning: unused import: `std::io::Read`
+   --> frontend\src-tauri\build\ffmpeg.rs:210:9
+    |
+210 |     use std::io::Read;
+    |         ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling windows v0.57.0
+   Compiling sqlx-macros v0.8.6
+warning: `meetily` (build script) generated 1 warning
+   Compiling ntapi v0.4.3
+   Compiling tauri-plugin-fs v2.5.1
+   Compiling tempfile v3.27.0
+   Compiling rubato v0.16.2
+   Compiling dirs-sys v0.4.1
+   Compiling symphonia-format-ogg v0.5.5
+   Compiling symphonia-codec-vorbis v0.5.5
+   Compiling symphonia-bundle-flac v0.5.5
+   Compiling symphonia-format-mkv v0.5.5
+   Compiling symphonia-format-isomp4 v0.5.5
+   Compiling symphonia-bundle-mp3 v0.5.5
+   Compiling symphonia-codec-aac v0.5.5
+   Compiling symphonia-codec-adpcm v0.5.5
+   Compiling symphonia-codec-pcm v0.5.5
+   Compiling env_filter v1.0.1
+   Compiling clap_derive v4.6.1
+   Compiling home v0.5.12
+   Compiling winsafe v0.0.19
+   Compiling jiff v0.2.24
+   Compiling minisign-verify v0.2.5
+   Compiling hound v3.5.1
+   Compiling nnnoiseless v0.5.2
+   Compiling clap v4.6.1
+   Compiling symphonia v0.5.5
+   Compiling env_logger v0.11.10
+   Compiling silero v0.1.0 (https://github.com/emotechlab/silero-rs?rev=26a6460#26a64600)
+   Compiling dirs v5.0.1
+   Compiling sqlx v0.8.6
+   Compiling posthog-rs v0.3.7
+warning: meetily@0.4.0: 🚀 Building Meetily for: windows
+warning: meetily@0.4.0: ⚠️  Windows: Using CPU-only mode (no GPU or BLAS acceleration)
+warning: meetily@0.4.0: 💡 For NVIDIA GPU: cargo build --release --features cuda
+warning: meetily@0.4.0: 💡 For AMD/Intel GPU: cargo build --release --features vulkan
+warning: meetily@0.4.0: 💡 For CPU optimization: cargo build --release --features openblas
+warning: meetily@0.4.0: 📊 Performance: CPU-only builds are significantly slower than GPU/BLAS builds
+warning: meetily@0.4.0: 📚 See README.md for GPU/BLAS setup instructions
+warning: meetily@0.4.0: 🎬 Checking FFmpeg binary for target: x86_64-pc-windows-msvc
+warning: meetily@0.4.0: 🔍 Found cached FFmpeg binary: ffmpeg-x86_64-pc-windows-msvc.exe
+warning: meetily@0.4.0: ✅ FFmpeg verification passed: ffmpeg version 8.0.1-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+warning: meetily@0.4.0: ✅ FFmpeg binary already cached and verified: ffmpeg-x86_64-pc-windows-msvc.exe
+   Compiling ffmpeg-sidecar v2.5.0 (https://github.com/nathanbabcock/ffmpeg-sidecar?branch=main#b0f48a51)
+   Compiling rand v0.8.6
+   Compiling whatlang v0.16.4
+   Compiling dashmap v6.1.0
+   Compiling crossbeam v0.8.4
+   Compiling tauri-plugin-single-instance v2.3.7
+   Compiling rubato v0.15.0
+   Compiling ringbuf v0.4.8
+   Compiling async-trait v0.1.89
+   Compiling sysinfo v0.32.1
+warning: unused import: `perf_debug`
+  --> frontend\src-tauri\src\lib.rs:32:16
+   |
+32 | pub(crate) use perf_debug;
+   |                ^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `perf_trace`
+  --> frontend\src-tauri\src\lib.rs:33:16
+   |
+33 | pub(crate) use perf_trace;
+   |                ^^^^^^^^^^
+
+warning: unused imports: `RemoteProviderConfig` and `RemoteProvider`
+ --> frontend\src-tauri\src\api\api.rs:8:51
+  |
+8 |     audio::transcription::{TranscriptionProvider, RemoteProvider, RemoteProviderConfig},
+  |                                                   ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `warn`
+  --> frontend\src-tauri\src\audio\devices\fallback.rs:22:17
+   |
+22 | use log::{info, warn};
+   |                 ^^^^
+
+warning: unused import: `find_builtin_input_device`
+  --> frontend\src-tauri\src\audio\devices\fallback.rs:25:47
+   |
+25 | use super::microphone::{default_input_device, find_builtin_input_device};
+   |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::audio::device_detection::InputDeviceKind`
+  --> frontend\src-tauri\src\audio\devices\fallback.rs:27:5
+   |
+27 | use crate::audio::device_detection::InputDeviceKind;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> frontend\src-tauri\src\audio\recording_preferences.rs:111:16
+    |
+111 |             Ok(mut p) => {
+    |                ----^
+    |                |
+    |                help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::os::windows::process::CommandExt`
+  --> frontend\src-tauri\src\summary\summary_engine\sidecar.rs:16:5
+   |
+16 | use std::os::windows::process::CommandExt;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `recording_sender` is never read
+   --> frontend\src-tauri\src\audio\pipeline.rs:201:5
+    |
+194 | pub struct AudioCapture {
+    |            ------------ field in this struct
+...
+201 |     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    |     ^^^^^^^^^^^^^^^^
+    |
+    = note: `AudioCapture` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `state` is never read
+   --> frontend\src-tauri\src\audio\pipeline.rs:683:5
+    |
+680 | pub struct AudioPipeline {
+    |            ------------- field in this struct
+...
+683 |     state: Arc<RecordingState>,
+    |     ^^^^^
+
+warning: fields `start` and `end` are never read
+  --> frontend\src-tauri\src\audio\transcription\remote_provider.rs:66:5
+   |
+65 | struct RemoteSegment {
+   |        ------------- fields in this struct
+66 |     start: f64,
+   |     ^^^^^
+67 |     end: f64,
+   |     ^^^
+   |
+   = note: `RemoteSegment` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: function `get_builtin_templates` is never used
+  --> frontend\src-tauri\src\summary\templates\defaults.rs:15:8
+   |
+15 | pub fn get_builtin_templates() -> Vec<(&'static str, &'static str)> {
+   |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: `meetily` (lib) generated 12 warnings (run `cargo fix --lib -p meetily` to apply 7 suggestions)
+    Finished `release` profile [optimized] target(s) in 10m 05s
+       Built application at: C:\Users\USER\projects\meetily\target\release\meetily.exe
+SignTool Error: No signature found.
+     Signing binaries\llama-helper-x86_64-pc-windows-msvc.exe
+     Signing binaries\llama-helper-x86_64-pc-windows-msvc.exe with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+SignTool Error: No signature found.
+     Signing binaries\ffmpeg-x86_64-pc-windows-msvc.exe
+     Signing binaries\ffmpeg-x86_64-pc-windows-msvc.exe with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+        Info Patching C:\Users\USER\projects\meetily\target\release\meetily.exe with bundle type information: msi
+     Signing C:\Users\USER\projects\meetily\target\release\meetily.exe
+     Signing C:\Users\USER\projects\meetily\target\release\meetily.exe with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+        Info Verifying wix package
+ Downloading https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+        Info validating hash
+        Info extracting WIX
+        Info Target: x64
+     Signing C:\Users\USER\projects\meetily\target\release\DirectML.dll
+     Signing C:\Users\USER\projects\meetily\target\release\DirectML.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Signing C:\Users\USER\projects\meetily\target\release\wix\x64\wix\WixUIExtension.dll
+     Signing C:\Users\USER\projects\meetily\target\release\wix\x64\wix\WixUIExtension.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Signing C:\Users\USER\projects\meetily\target\release\wix\x64\wix\WixUtilExtension.dll
+     Signing C:\Users\USER\projects\meetily\target\release\wix\x64\wix\WixUtilExtension.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Running candle for "C:\\Users\\USER\\projects\\meetily\\target\\release\\wix\\x64\\main.wxs"
+     Running light to produce C:\Users\USER\projects\meetily\target\release\bundle\msi\meetily_0.4.0_x64_en-US.msi
+     Signing C:\Users\USER\projects\meetily\target\release\bundle\msi\meetily_0.4.0_x64_en-US.msi
+     Signing C:\Users\USER\projects\meetily\target\release\bundle\msi\meetily_0.4.0_x64_en-US.msi with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+        Info Patching C:\Users\USER\projects\meetily\target\release\meetily.exe with bundle type information: nsis
+     Signing C:\Users\USER\projects\meetily\target\release\meetily.exe
+     Signing C:\Users\USER\projects\meetily\target\release\meetily.exe with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+        Info Verifying NSIS package
+ Downloading https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip
+        Info validating hash
+        Info extracting NSIS
+ Downloading https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll
+        Info validating hash
+        Info Target: x64
+        Info Signing NSIS plugins
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\NSISdl.dll
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\NSISdl.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\StartMenu.dll
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\StartMenu.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\System.dll
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\System.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\nsDialogs.dll
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\nsDialogs.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\additional\nsis_tauri_utils.dll
+     Signing C:\Users\USER\projects\meetily\target\release\nsis\x64\Plugins\x86-unicode\additional\nsis_tauri_utils.dll with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+     Running makensis to produce C:\Users\USER\projects\meetily\target\release\bundle\nsis\meetily_0.4.0_x64-setup.exe
+     Signing C:\Users\USER\projects\meetily\target\release\bundle\nsis\meetily_0.4.0_x64-setup.exe
+     Signing C:\Users\USER\projects\meetily\target\release\bundle\nsis\meetily_0.4.0_x64-setup.exe with a custom signing command
+     Signing Output of signing command:
+Skipping signing - DIGICERT_KEYPAIR_ALIAS not set
+    Finished 2 bundles at:
+        C:\Users\USER\projects\meetily\target\release\bundle\msi\meetily_0.4.0_x64_en-US.msi
+        C:\Users\USER\projects\meetily\target\release\bundle\nsis\meetily_0.4.0_x64-setup.exe
+
+A public key has been found, but no private key. Make sure to set `TAURI_SIGNING_PRIVATE_KEY` environment variable.
+       Error A public key has been found, but no private key. Make sure to set `TAURI_SIGNING_PRIVATE_KEY` environment variable.
