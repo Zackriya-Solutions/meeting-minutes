@@ -138,6 +138,9 @@ impl AudioLevelMonitor {
 
     /// Find a CPAL device by name
     fn find_device_by_name(&self, host: &cpal::Host, device_name: &str) -> Result<cpal::Device> {
+        // System-audio entries carry a " (System Audio)" suffix (platform/linux.rs);
+        // strip it so it matches the real cpal device name.
+        let device_name = device_name.strip_suffix(" (System Audio)").unwrap_or(device_name);
         // Try input devices first
         if let Ok(input_devices) = host.input_devices() {
             for device in input_devices {
