@@ -137,6 +137,10 @@ pub struct MeetingTranscript {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_confidence: Option<f64>,
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -188,6 +192,79 @@ pub struct TranscriptSegment {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_confidence: Option<f64>,
+}
+
+pub fn normalize_transcript_source_fields(
+    audio_source: Option<&str>,
+    source_confidence: Option<f64>,
+) -> (Option<&'static str>, Option<f64>) {
+    let normalized_source = match audio_source
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("microphone") => Some("microphone"),
+        Some("system") => Some("system"),
+        Some("mixed") => Some("mixed"),
+        Some("unknown") => Some("unknown"),
+        _ => None,
+    };
+
+    let normalized_confidence = source_confidence.filter(|confidence| {
+        normalized_source.is_some()
+            && confidence.is_finite()
+            && (0.0..=1.0).contains(confidence)
+    });
+
+    (normalized_source, normalized_confidence)
+}
+
+#[cfg(test)]
+mod transcript_segment_source_tests {
+    use super::{normalize_transcript_source_fields, TranscriptSegment};
+
+    #[test]
+    fn parses_transcript_segment_source_fields_from_frontend_json() {
+        let raw = r#"{
+            "id": "seg_1",
+            "text": "Hello",
+            "timestamp": "12:00:00",
+            "audio_start_time": 0.0,
+            "audio_end_time": 1.2,
+            "duration": 1.2,
+            "audio_source": "microphone",
+            "source_confidence": 0.91
+        }"#;
+
+        let segment: TranscriptSegment = serde_json::from_str(raw).unwrap();
+
+        assert_eq!(segment.audio_source.as_deref(), Some("microphone"));
+        assert_eq!(segment.source_confidence, Some(0.91));
+    }
+
+    #[test]
+    fn normalizes_transcript_source_fields() {
+        assert_eq!(
+            normalize_transcript_source_fields(Some(" Microphone "), Some(0.91)),
+            (Some("microphone"), Some(0.91))
+        );
+        assert_eq!(
+            normalize_transcript_source_fields(Some("bad-source"), Some(0.91)),
+            (None, None)
+        );
+        assert_eq!(
+            normalize_transcript_source_fields(Some("system"), Some(1.2)),
+            (Some("system"), None)
+        );
+        assert_eq!(
+            normalize_transcript_source_fields(Some("mixed"), Some(f64::NAN)),
+            (Some("mixed"), None)
+        );
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -878,6 +955,8 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
+                    audio_source: t.audio_source,
+                    source_confidence: t.source_confidence,
                 })
                 .collect::<Vec<_>>();
 

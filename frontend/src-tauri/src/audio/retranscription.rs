@@ -1,5 +1,6 @@
 // Retranscription module - allows re-processing stored audio with different settings
 
+use crate::api::normalize_transcript_source_fields;
 use crate::audio::decoder::decode_audio_file;
 use crate::audio::vad::get_speech_chunks_with_progress;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
@@ -440,9 +441,17 @@ async fn run_retranscription<R: Runtime>(
         .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
 
     for segment in &segments {
+        let (audio_source, source_confidence) = normalize_transcript_source_fields(
+            segment.audio_source.as_deref(),
+            segment.source_confidence,
+        );
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO transcripts (
+                id, meeting_id, transcript, timestamp,
+                audio_start_time, audio_end_time, duration,
+                audio_source, source_confidence
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&segment.id)
         .bind(&meeting_id)
@@ -451,6 +460,8 @@ async fn run_retranscription<R: Runtime>(
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)
+        .bind(audio_source)
+        .bind(source_confidence)
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;

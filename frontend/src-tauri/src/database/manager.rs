@@ -3,6 +3,12 @@ use std::fs;
 use std::path::Path;
 use tauri::Manager;
 
+fn embedded_migrator() -> sqlx::migrate::Migrator {
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.set_ignore_missing(true);
+    migrator
+}
+
 #[derive(Clone)]
 pub struct DatabaseManager {
     pool: SqlitePool,
@@ -32,7 +38,7 @@ impl DatabaseManager {
 
         let pool = SqlitePool::connect(tauri_db_path).await?;
 
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        embedded_migrator().run(&pool).await?;
 
         Ok(DatabaseManager { pool })
     }
@@ -204,5 +210,15 @@ impl DatabaseManager {
         log::info!("Database connection pool closed");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_migrator_ignores_missing_forward_migrations() {
+        assert!(embedded_migrator().ignore_missing);
     }
 }

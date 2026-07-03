@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import { transcriptSourceLabel } from "@/lib/transcriptSource";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -69,6 +70,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp,
     text,
     confidence,
+    audio_source,
+    source_confidence,
     isStreaming,
     showConfidence,
 }: {
@@ -76,10 +79,16 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp: number;
     text: string;
     confidence?: number;
+    audio_source?: string | null;
+    source_confidence?: number | null;
     isStreaming: boolean;
     showConfidence: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const sourceLabel = transcriptSourceLabel(audio_source, source_confidence);
+    const sourceBadgeClass = sourceLabel === 'Me'
+        ? 'border-blue-200 bg-blue-50 text-blue-700'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-700';
 
     return (
         <div id={`segment-${id}`} className="mb-3">
@@ -96,6 +105,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         )}
                     </TooltipContent>
                 </Tooltip>
+                {sourceLabel && (
+                    <span className={`mt-0.5 min-w-[58px] rounded border px-1.5 py-0.5 text-center text-[11px] font-medium leading-4 ${sourceBadgeClass}`}>
+                        {sourceLabel}
+                    </span>
+                )}
                 <div className="flex-1">
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
@@ -294,6 +308,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        audio_source={segment.audio_source}
+                                        source_confidence={segment.source_confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
@@ -350,6 +366,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        audio_source={segment.audio_source}
+                                        source_confidence={segment.source_confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />

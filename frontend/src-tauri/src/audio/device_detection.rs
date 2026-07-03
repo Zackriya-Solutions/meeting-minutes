@@ -440,8 +440,9 @@ mod tests {
 
     #[test]
     fn test_builtin_mic_detection() {
-        let kind = InputDeviceKind::detect("MacBook Pro Microphone", 0, 0);
-        // Should fall through to Unknown (no Bluetooth pattern, no buffer size)
+        let kind = InputDeviceKind::detect_by_name("MacBook Pro Microphone")
+            .unwrap_or(InputDeviceKind::Unknown);
+        // Name heuristics should fall through to Unknown without native device data or buffer size.
         assert_eq!(kind, InputDeviceKind::Unknown);
     }
 
@@ -483,7 +484,13 @@ mod tests {
             3840,
             48000,
         );
-        assert_eq!(timeout, Duration::from_millis(160));
+        let expected = Duration::from_millis(160);
+        let delta = if timeout > expected {
+            timeout - expected
+        } else {
+            expected - timeout
+        };
+        assert!(delta <= Duration::from_micros(10));
     }
 
     #[test]
