@@ -45,6 +45,7 @@ pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
+pub mod preferences;
 pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
@@ -735,6 +736,11 @@ pub fn run() {
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
             onboarding::complete_onboarding,
+            onboarding::set_product_focus,
+            onboarding::get_product_focus,
+            // App preferences commands
+            preferences::get_default_summary_template,
+            preferences::set_default_summary_template,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,

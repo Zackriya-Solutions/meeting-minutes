@@ -11,7 +11,7 @@ export function useTemplates() {
   }>>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
 
-  // Fetch available templates on mount
+  // Fetch available templates and the persisted default on mount
   useEffect(() => {
     const fetchTemplates = async () => {
       try {
@@ -22,6 +22,11 @@ export function useTemplates() {
         }>;
         console.log('Available templates:', templates);
         setAvailableTemplates(templates);
+
+        const savedDefault = await invokeTauri('get_default_summary_template') as string | null;
+        if (savedDefault && templates.some(t => t.id === savedDefault)) {
+          setSelectedTemplate(savedDefault);
+        }
       } catch (error) {
         console.error('Failed to fetch templates:', error);
       }
@@ -32,6 +37,8 @@ export function useTemplates() {
   // Handle template selection
   const handleTemplateSelection = useCallback((templateId: string, templateName: string) => {
     setSelectedTemplate(templateId);
+    invokeTauri('set_default_summary_template', { templateId })
+      .catch(error => console.error('Failed to persist default template:', error));
     toast.success('Template selected', {
       description: `Using "${templateName}" template for summary generation`,
     });

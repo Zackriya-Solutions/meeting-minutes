@@ -1,4 +1,6 @@
-export type OnboardingStep = 1 | 2 | 3 | 4;
+export type OnboardingStep = 1 | 2 | 3 | 4 | 5;
+
+export type ProductFocus = 'general' | 'clinician';
 
 export type PermissionStatus = 'checking' | 'not_determined' | 'authorized' | 'denied';
 

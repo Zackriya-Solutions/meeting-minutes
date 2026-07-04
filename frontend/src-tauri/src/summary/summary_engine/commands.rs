@@ -12,6 +12,7 @@ const QWEN35_4B_RECOMMENDED_RAM_GB: u64 = 14;
 
 pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     match model_name {
+        "medgemma:4b" => 5,
         "qwen3.5:4b" => 4,
         "qwen3.5:2b" => 3,
         "gemma3:4b" => 2,
@@ -93,6 +94,15 @@ pub async fn builtin_ai_list_models<R: Runtime>(
     };
 
     let models = manager.list_models().await;
+
+    // Focus-gated models (e.g. clinical models) are only listed when the
+    // matching product focus was chosen during onboarding.
+    let focus = crate::onboarding::load_product_focus(&app).await;
+    let models = models
+        .into_iter()
+        .filter(|m| super::models::is_model_visible_for_focus(&m.name, focus.as_deref()))
+        .collect();
+
     Ok(models)
 }
 
@@ -425,6 +435,7 @@ mod tests {
 
     #[test]
     fn available_summary_model_priority_prefers_qwen_over_gemma() {
+        assert!(summary_model_priority("medgemma:4b") > summary_model_priority("qwen3.5:4b"));
         assert!(summary_model_priority("qwen3.5:4b") > summary_model_priority("qwen3.5:2b"));
         assert!(summary_model_priority("qwen3.5:2b") > summary_model_priority("gemma3:4b"));
         assert!(summary_model_priority("gemma3:4b") > summary_model_priority("gemma3:1b"));

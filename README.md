@@ -100,6 +100,25 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
 - **Open Source:** Meetily is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+- **Clinician Focus Mode:** Optional clinical setup with the MedGemma 4B model and a SOAP-style session note template.
+
+## Clinician Focus Mode
+
+During onboarding, Meetily asks whether you want a **General** or **Clinician-focused**
+setup. Choosing the clinician focus:
+
+- Downloads **MedGemma 4B (Clinical)** — a Google [Health AI Developer Foundations](https://developers.google.com/health-ai-developer-foundations) model tuned for clinical text — as the local summary model (a community GGUF build, ~2.3 GiB, running fully on-device).
+- Makes the bundled **Psychiatric Session Note (SOAP + AI Hybrid)** template the default for summaries.
+- Keeps MedGemma available in the summary model settings (it is hidden for general-focus users).
+
+To switch focus later, reset onboarding by deleting `onboarding-status.json` from the
+app data directory and relaunching the app.
+
+> **Disclaimer:** Summaries are AI-generated and may contain errors — always review
+> them before clinical use. Meetily is not a medical device and does not provide
+> medical advice or diagnosis. Use of the MedGemma model is governed by Google's
+> [Health AI Developer Foundations terms](https://developers.google.com/health-ai-developer-foundations/terms).
+> See [MEDGEMMA_NOTICE.md](MEDGEMMA_NOTICE.md) for details.
 
 ## Installation
 

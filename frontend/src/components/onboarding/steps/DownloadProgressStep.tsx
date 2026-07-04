@@ -475,8 +475,8 @@ export function DownloadProgressStep() {
     <OnboardingContainer
       title="Getting things ready"
       description="You can start using Meetily after downloading the Transcription Engine."
-      step={3}
-      totalSteps={isMac ? 4 : 3}
+      step={4}
+      totalSteps={isMac ? 5 : 4}
     >
       <div className="flex flex-col items-center space-y-6">
         {/* Download Cards */}

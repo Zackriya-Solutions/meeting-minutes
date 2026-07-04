@@ -157,6 +157,11 @@ pub struct ModelDef {
 
     /// Short description for UI
     pub description: String,
+
+    /// Product focus required for this model to be visible in the UI
+    /// (e.g., Some("clinician") for clinical models). None = visible to everyone.
+    #[serde(default)]
+    pub requires_focus: Option<String>,
 }
 
 /// Get all available built-in AI models
@@ -175,6 +180,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 24,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "Balanced Qwen 3.5 model for built-in summaries. Higher quality with modest local requirements.".to_string(),
+            requires_focus: None,
         },
         // Qwen 3.5 4B - High quality tier
         ModelDef {
@@ -188,6 +194,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 32,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
+            requires_focus: None,
         },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
         ModelDef {
@@ -201,6 +208,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 35,
             sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Balanced model. Great quality/speed trade-off. Requires ~3.5GB RAM.".to_string(),
+            requires_focus: None,
         },
         // Gemma 3 1B - Visible legacy tier retained for already-shipped users.
         ModelDef {
@@ -214,8 +222,50 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 26,
             sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Fastest model. Runs on any hardware with ~1GB RAM. Good for quick summaries.".to_string(),
+            requires_focus: None,
+        },
+        // MedGemma 4B - Clinical tier, only visible when the clinician product focus is active.
+        // Community GGUF conversion of google/medgemma-4b-it (Gemma 3 4B architecture).
+        // Use is governed by Google's Health AI Developer Foundations terms - see MEDGEMMA_NOTICE.md.
+        ModelDef {
+            name: "medgemma:4b".to_string(),
+            display_name: "MedGemma 4B (Clinical)".to_string(),
+            gguf_file: "medgemma-4b-it-Q4_K_M.gguf".to_string(),
+            template: "gemma3".to_string(),
+            download_url: "https://huggingface.co/unsloth/medgemma-4b-it-GGUF/resolve/main/medgemma-4b-it-Q4_K_M.gguf".to_string(),
+            size_mb: 2374,
+            context_size: 32768,
+            layer_count: 35,
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
+            description: "Google MedGemma model tuned for clinical text. Provided under the Health AI Developer Foundations terms. Requires ~3.5GB RAM.".to_string(),
+            requires_focus: Some("clinician".to_string()),
         },
     ]
+}
+
+/// Check whether a model should be visible for the given product focus.
+/// Models without a `requires_focus` are visible to everyone; focus-gated models
+/// are only visible when the active focus matches. Unknown model names are
+/// treated as visible (filtering only hides registry-gated entries).
+pub fn is_model_visible_for_focus(model_name: &str, focus: Option<&str>) -> bool {
+    match get_model_by_name(model_name) {
+        Some(model) => match model.requires_focus {
+            None => true,
+            Some(required) => focus == Some(required.as_str()),
+        },
+        None => true,
+    }
+}
+
+/// Get the built-in AI models visible for the given product focus.
+pub fn get_available_models_for_focus(focus: Option<&str>) -> Vec<ModelDef> {
+    get_available_models()
+        .into_iter()
+        .filter(|m| match &m.requires_focus {
+            None => true,
+            Some(required) => focus == Some(required.as_str()),
+        })
+        .collect()
 }
 
 /// Get a specific model by name
@@ -390,6 +440,43 @@ mod tests {
         assert_eq!(gemma_4b.sampling.frequency_penalty, 0.0);
         assert_eq!(gemma_4b.sampling.repeat_penalty, 1.0);
         assert_eq!(gemma_4b.sampling.penalty_last_n, 0);
+    }
+
+    #[test]
+    fn medgemma_model_is_registered_with_expected_metadata() {
+        let medgemma = get_model_by_name("medgemma:4b").expect("medgemma 4b model should exist");
+        assert_eq!(medgemma.display_name, "MedGemma 4B (Clinical)");
+        assert_eq!(medgemma.gguf_file, "medgemma-4b-it-Q4_K_M.gguf");
+        assert_eq!(medgemma.template, "gemma3");
+        assert_eq!(
+            medgemma.download_url,
+            "https://huggingface.co/unsloth/medgemma-4b-it-GGUF/resolve/main/medgemma-4b-it-Q4_K_M.gguf"
+        );
+        assert_eq!(medgemma.size_mb, 2374);
+        assert_eq!(medgemma.context_size, 32768);
+        assert_eq!(medgemma.layer_count, 35);
+        assert_eq!(medgemma.sampling, SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(medgemma.requires_focus, Some("clinician".to_string()));
+    }
+
+    #[test]
+    fn focus_filter_hides_medgemma_unless_clinician() {
+        let general_models = get_available_models_for_focus(None);
+        assert!(!general_models.iter().any(|m| m.name == "medgemma:4b"));
+        assert_eq!(general_models.len(), 4);
+
+        let general_focus_models = get_available_models_for_focus(Some("general"));
+        assert!(!general_focus_models.iter().any(|m| m.name == "medgemma:4b"));
+
+        let clinician_models = get_available_models_for_focus(Some("clinician"));
+        assert!(clinician_models.iter().any(|m| m.name == "medgemma:4b"));
+        assert_eq!(clinician_models.len(), 5);
+
+        assert!(!is_model_visible_for_focus("medgemma:4b", None));
+        assert!(!is_model_visible_for_focus("medgemma:4b", Some("general")));
+        assert!(is_model_visible_for_focus("medgemma:4b", Some("clinician")));
+        assert!(is_model_visible_for_focus("qwen3.5:2b", None));
+        assert!(is_model_visible_for_focus("unknown:model", None));
     }
 
     #[test]
