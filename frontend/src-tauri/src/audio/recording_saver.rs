@@ -1,15 +1,17 @@
-use std::sync::{Arc, Mutex};
-use tokio::sync::Mutex as AsyncMutex;
 use anyhow::Result;
-use log::{info, warn, error};
-use tauri::{AppHandle, Runtime, Emitter};
-use tokio::sync::mpsc;
-use serde::{Serialize, Deserialize};
+use log::{error, info, warn};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, Runtime};
+use tokio::sync::mpsc;
+use tokio::sync::Mutex as AsyncMutex;
 
-use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
+use super::recording_preferences::get_default_recordings_folder;
+use super::recording_state::AudioChunk;
 
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,10 +20,27 @@ pub struct TranscriptSegment {
     pub text: String,
     pub audio_start_time: f64, // Seconds from recording start
     pub audio_end_time: f64,   // Seconds from recording start
-    pub duration: f64,          // Segment duration in seconds
-    pub display_time: String,   // Formatted time for display like "[02:15]"
+    pub duration: f64,         // Segment duration in seconds
+    pub display_time: String,  // Formatted time for display like "[02:15]"
     pub confidence: f32,
     pub sequence_id: u64,
+    // Speaker identification label; None when the feature is disabled
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub speaker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub attribution_source: Option<crate::diarization::overlap_detector::AttributionSource>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_region_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_speaker_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_start_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_end_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_status: Option<crate::diarization::overlap_detector::OverlapStatus>,
 }
 
 /// Meeting metadata structure
@@ -37,7 +56,7 @@ pub struct MeetingMetadata {
     pub audio_file: String,
     pub transcript_file: String,
     pub sample_rate: u32,
-    pub status: String,  // "recording", "completed", "error"
+    pub status: String, // "recording", "completed", "error"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +70,7 @@ pub struct RecordingSaver {
     incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
+    base_save_folder: Option<PathBuf>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
@@ -63,11 +83,17 @@ impl RecordingSaver {
             incremental_saver: None,
             meeting_folder: None,
             meeting_name: None,
+            base_save_folder: None,
             metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
         }
+    }
+
+    /// Set the base folder where meeting recordings are stored.
+    pub fn set_save_folder(&mut self, folder: PathBuf) {
+        self.base_save_folder = Some(folder);
     }
 
     /// Set the meeting name for this recording session
@@ -96,18 +122,32 @@ impl RecordingSaver {
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
         if let Ok(mut segments) = self.transcript_segments.lock() {
             // Check if segment with same sequence_id exists (update it)
-            if let Some(existing) = segments.iter_mut().find(|s| s.sequence_id == segment.sequence_id) {
+            if let Some(existing) = segments
+                .iter_mut()
+                .find(|s| s.sequence_id == segment.sequence_id)
+            {
                 *existing = segment.clone();
-                info!("Updated transcript segment {} (seq: {}) - total segments: {}",
-                      segment.id, segment.sequence_id, segments.len());
+                info!(
+                    "Updated transcript segment {} (seq: {}) - total segments: {}",
+                    segment.id,
+                    segment.sequence_id,
+                    segments.len()
+                );
             } else {
                 // New segment, add it
                 segments.push(segment.clone());
-                info!("Added new transcript segment {} (seq: {}) - total segments: {}",
-                      segment.id, segment.sequence_id, segments.len());
+                info!(
+                    "Added new transcript segment {} (seq: {}) - total segments: {}",
+                    segment.id,
+                    segment.sequence_id,
+                    segments.len()
+                );
             }
         } else {
-            error!("Failed to lock transcript segments for adding segment {}", segment.id);
+            error!(
+                "Failed to lock transcript segments for adding segment {}",
+                segment.id
+            );
         }
 
         // NEW: Save incrementally to disk
@@ -129,6 +169,16 @@ impl RecordingSaver {
             display_time: "[00:00]".to_string(),
             confidence: 1.0,
             sequence_id: 0,
+            speaker: None,
+            attribution_source: Some(
+                crate::diarization::overlap_detector::AttributionSource::NormalDiarization,
+            ),
+            overlap_region_id: None,
+            overlap_speaker_ids: None,
+            overlap_start_time: None,
+            overlap_end_time: None,
+            overlap_confidence: None,
+            overlap_status: None,
         };
         self.add_transcript_segment(segment);
     }
@@ -141,7 +191,9 @@ impl RecordingSaver {
         if auto_save {
             info!("Initializing incremental audio saver for recording (auto-save ENABLED)");
         } else {
-            info!("Starting recording without audio saving (auto-save DISABLED - transcripts only)");
+            info!(
+                "Starting recording without audio saving (auto-save DISABLED - transcripts only)"
+            );
         }
 
         // Create channel for receiving audio chunks
@@ -179,7 +231,10 @@ impl RecordingSaver {
 
         if let Some(mut receiver) = self.chunk_receiver.take() {
             tokio::spawn(async move {
-                info!("Recording saver accumulation task started (save_audio: {})", save_audio);
+                info!(
+                    "Recording saver accumulation task started (save_audio: {})",
+                    save_audio
+                );
 
                 while let Some(chunk) = receiver.recv().await {
                     // Check if we should continue
@@ -228,8 +283,10 @@ impl RecordingSaver {
     /// * `meeting_name` - Name of the meeting
     /// * `create_checkpoints` - Whether to create .checkpoints/ directory and IncrementalAudioSaver
     fn initialize_meeting_folder(&mut self, meeting_name: &str, create_checkpoints: bool) -> Result<()> {
-        // Load preferences to get base recordings folder
-        let base_folder = super::recording_preferences::get_default_recordings_folder();
+        let base_folder = self
+            .base_save_folder
+            .clone()
+            .unwrap_or_else(get_default_recordings_folder);
 
         // Create meeting folder structure (with or without .checkpoints/ subdirectory)
         let meeting_folder = create_meeting_folder(&base_folder, meeting_name, create_checkpoints)?;
@@ -238,7 +295,10 @@ impl RecordingSaver {
         if create_checkpoints {
             let incremental_saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000)?;
             self.incremental_saver = Some(Arc::new(AsyncMutex::new(incremental_saver)));
-            info!("✅ Incremental audio saver initialized for meeting: {}", meeting_name);
+            info!(
+                "✅ Incremental audio saver initialized for meeting: {}",
+                meeting_name
+            );
         } else {
             info!("⚠️  Skipped incremental audio saver (auto-save disabled)");
         }
@@ -246,16 +306,20 @@ impl RecordingSaver {
         // Create initial metadata
         let metadata = MeetingMetadata {
             version: "1.0".to_string(),
-            meeting_id: None,  // Will be set by backend
+            meeting_id: None, // Will be set by backend
             meeting_name: Some(meeting_name.to_string()),
             created_at: chrono::Utc::now().to_rfc3339(),
             completed_at: None,
             duration_seconds: None,
             devices: DeviceInfo {
-                microphone: None,  // Could be enhanced to store actual device names
+                microphone: None, // Could be enhanced to store actual device names
                 system_audio: None,
             },
-            audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
+            audio_file: if create_checkpoints {
+                "audio.mp4".to_string()
+            } else {
+                "".to_string()
+            },
             transcript_file: "transcripts.json".to_string(),
             sample_rate: 48000,
             status: "recording".to_string(),
@@ -277,7 +341,7 @@ impl RecordingSaver {
 
         let json_string = serde_json::to_string_pretty(metadata)?;
         std::fs::write(&temp_path, json_string)?;
-        std::fs::rename(&temp_path, &metadata_path)?;  // Atomic
+        std::fs::rename(&temp_path, &metadata_path)?; // Atomic
 
         Ok(())
     }
@@ -292,7 +356,11 @@ impl RecordingSaver {
             return Err(anyhow::anyhow!("Failed to lock transcript segments"));
         };
 
-        info!("Writing {} transcript segments to JSON", segments_clone.len());
+        info!(
+            "Writing {} transcript segments to JSON",
+            segments_clone.len()
+        );
+        let overlap_regions = collect_overlap_regions(&segments_clone);
 
         let transcript_path = folder.join("transcripts.json");
         let temp_path = folder.join(".transcripts.json.tmp");
@@ -301,39 +369,51 @@ impl RecordingSaver {
         let json = serde_json::json!({
             "version": "1.0",
             "segments": segments_clone,
+            "overlap_regions": overlap_regions,
             "last_updated": chrono::Utc::now().to_rfc3339(),
             "total_segments": segments_clone.len()
         });
 
         // Serialize to pretty JSON string
-        let json_string = serde_json::to_string_pretty(&json)
-            .map_err(|e| {
-                error!("Failed to serialize transcripts to JSON: {}", e);
-                anyhow::anyhow!("JSON serialization failed: {}", e)
-            })?;
+        let json_string = serde_json::to_string_pretty(&json).map_err(|e| {
+            error!("Failed to serialize transcripts to JSON: {}", e);
+            anyhow::anyhow!("JSON serialization failed: {}", e)
+        })?;
 
         // Write to temp file with error handling
-        std::fs::write(&temp_path, &json_string)
-            .map_err(|e| {
-                error!("Failed to write transcript temp file to {}: {}", temp_path.display(), e);
-                anyhow::anyhow!("Failed to write temp file: {}", e)
-            })?;
+        std::fs::write(&temp_path, &json_string).map_err(|e| {
+            error!(
+                "Failed to write transcript temp file to {}: {}",
+                temp_path.display(),
+                e
+            );
+            anyhow::anyhow!("Failed to write temp file: {}", e)
+        })?;
 
         // Verify temp file was written correctly
         if !temp_path.exists() {
-            error!("Temp transcript file does not exist after write: {}", temp_path.display());
+            error!(
+                "Temp transcript file does not exist after write: {}",
+                temp_path.display()
+            );
             return Err(anyhow::anyhow!("Temp file verification failed"));
         }
 
         // Atomic rename
-        std::fs::rename(&temp_path, &transcript_path)
-            .map_err(|e| {
-                error!("Failed to rename transcript file from {} to {}: {}",
-                       temp_path.display(), transcript_path.display(), e);
-                anyhow::anyhow!("Failed to rename transcript file: {}", e)
-            })?;
+        std::fs::rename(&temp_path, &transcript_path).map_err(|e| {
+            error!(
+                "Failed to rename transcript file from {} to {}: {}",
+                temp_path.display(),
+                transcript_path.display(),
+                e
+            );
+            anyhow::anyhow!("Failed to rename transcript file: {}", e)
+        })?;
 
-        info!("✅ Successfully wrote transcripts.json with {} segments", segments_clone.len());
+        info!(
+            "✅ Successfully wrote transcripts.json with {} segments",
+            segments_clone.len()
+        );
         Ok(())
     }
 
@@ -358,7 +438,7 @@ impl RecordingSaver {
     pub async fn stop_and_save<R: Runtime>(
         &mut self,
         app: &AppHandle<R>,
-        recording_duration: Option<f64>
+        recording_duration: Option<f64>,
     ) -> Result<Option<String>, String> {
         info!("Stopping recording saver");
 
@@ -407,10 +487,16 @@ impl RecordingSaver {
             // Verify transcripts were written correctly
             let transcript_path = folder.join("transcripts.json");
             if !transcript_path.exists() {
-                error!("❌ Transcript file was not created at: {}", transcript_path.display());
+                error!(
+                    "❌ Transcript file was not created at: {}",
+                    transcript_path.display()
+                );
                 return Err("Transcript file verification failed".to_string());
             }
-            info!("✅ Transcripts saved and verified at: {}", transcript_path.display());
+            info!(
+                "✅ Transcripts saved and verified at: {}",
+                transcript_path.display()
+            );
         }
 
         // Update metadata to completed status with actual recording duration
@@ -433,7 +519,10 @@ impl RecordingSaver {
                 return Err(format!("Failed to update metadata: {}", e));
             }
 
-            info!("✅ Metadata updated with duration: {:?}s", metadata.duration_seconds);
+            info!(
+                "✅ Metadata updated with duration: {:?}s",
+                metadata.duration_seconds
+            );
         }
 
         // Emit save event with audio and transcript paths
@@ -482,4 +571,35 @@ impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn collect_overlap_regions(segments: &[TranscriptSegment]) -> Vec<serde_json::Value> {
+    let mut regions = BTreeMap::new();
+
+    for segment in segments {
+        let Some(region_id) = &segment.overlap_region_id else {
+            continue;
+        };
+
+        regions.entry(region_id.clone()).or_insert_with(|| {
+            serde_json::json!({
+                "id": region_id,
+                "start_ms": segment.overlap_start_time.map(seconds_to_ms),
+                "end_ms": segment.overlap_end_time.map(seconds_to_ms),
+                "speaker_ids": segment.overlap_speaker_ids.clone().unwrap_or_default(),
+                "confidence": segment.overlap_confidence,
+                "estimated_speaker_count": segment.overlap_speaker_ids.as_ref().map_or(0, Vec::len),
+                "status": segment.overlap_status
+                    .as_ref()
+                    .map(|status| status.as_str())
+                    .unwrap_or("MarkedAmbiguous"),
+            })
+        });
+    }
+
+    regions.into_values().collect()
+}
+
+fn seconds_to_ms(seconds: f64) -> u64 {
+    (seconds.max(0.0) * 1000.0).round() as u64
 }

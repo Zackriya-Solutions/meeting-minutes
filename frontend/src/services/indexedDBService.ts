@@ -26,6 +26,13 @@ export interface StoredTranscript {
   audio_start_time?: number;  // Recording-relative start time in seconds
   audio_end_time?: number;    // Recording-relative end time in seconds
   duration?: number;          // Duration in seconds
+  attribution_source?: string;
+  overlap_region_id?: string;
+  overlap_speaker_ids?: string[];
+  overlap_start_time?: number;
+  overlap_end_time?: number;
+  overlap_confidence?: number;
+  overlap_status?: string;
   [key: string]: any;         // Allow additional fields from TranscriptUpdate
 }
 

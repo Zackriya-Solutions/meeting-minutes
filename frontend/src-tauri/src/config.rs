@@ -11,6 +11,10 @@ pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
+/// Default Apple Speech model identifier.
+/// Apple Speech uses the system recognizer — no downloadable model needed.
+pub const DEFAULT_APPLE_SPEECH_MODEL: &str = "default";
+
 /// Whisper model catalog with metadata for all supported models.
 /// Used by both WhisperEngine::discover_models() and discover_models_standalone().
 ///

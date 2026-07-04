@@ -338,7 +338,7 @@ const Sidebar: React.FC = () => {
 
       // Show success toast
       toast.success("Meeting deleted successfully", {
-        description: "All associated data has been removed"
+        description: "Meeting data and recording files have been removed"
       });
 
       // If deleting the active meeting, navigate to home

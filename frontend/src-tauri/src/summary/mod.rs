@@ -40,7 +40,7 @@ pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;
 
-// Re-export Tauri commands (with their generated __cmd__ variants)
+// Re-export Tauri commands (with their generated __cmd__ and __tauri_command_name_ variants)
 pub use commands::{
     __cmd__api_cancel_summary, __cmd__api_detect_transcript_summary_language,
     __cmd__api_get_meeting_detected_summary_language, __cmd__api_get_meeting_summary_language,
@@ -62,16 +62,24 @@ pub use commands::{
 
 // Re-export template commands
 pub use template_commands::{
-    __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
-    __tauri_command_name_api_get_template_details, __tauri_command_name_api_list_templates,
-    __tauri_command_name_api_validate_template,
-    api_get_template_details, api_list_templates, api_validate_template,
+    __cmd__api_get_default_template_json, __cmd__api_get_template_details,
+    __cmd__api_get_template_json, __cmd__api_list_templates, __cmd__api_reset_template,
+    __cmd__api_save_template, __cmd__api_validate_template,
+    __tauri_command_name_api_get_default_template_json,
+    __tauri_command_name_api_get_template_details, __tauri_command_name_api_get_template_json,
+    __tauri_command_name_api_list_templates, __tauri_command_name_api_reset_template,
+    __tauri_command_name_api_save_template, __tauri_command_name_api_validate_template,
+    api_get_default_template_json, api_get_template_details, api_get_template_json,
+    api_list_templates, api_reset_template, api_save_template, api_validate_template,
 };
 
 // Re-export commonly used items
 pub use llm_client::LLMProvider;
 pub use processor::{
     chunk_text, clean_llm_markdown_output, extract_meeting_name_from_markdown,
-    generate_meeting_summary, rough_token_count,
+    generate_meeting_summary, render_summary_system_prompt, rough_token_count,
+    DEFAULT_SUMMARY_CHUNK_PROMPT, DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT,
+    DEFAULT_SUMMARY_COMBINE_PROMPT, DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT,
+    DEFAULT_SUMMARY_SYSTEM_PROMPT,
 };
 pub use service::SummaryService;

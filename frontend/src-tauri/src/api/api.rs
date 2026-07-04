@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
+use crate::diarization::overlap_detector::{AttributionSource, OverlapStatus};
 use crate::{
     database::{
         models::MeetingModel,
@@ -137,6 +138,75 @@ pub struct MeetingTranscript {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribution_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_region_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_speaker_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_start_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_end_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_confidence: Option<f64>,
+}
+
+impl From<crate::database::models::Transcript> for MeetingTranscript {
+    fn from(transcript: crate::database::models::Transcript) -> Self {
+        Self {
+            id: transcript.id,
+            text: transcript.transcript,
+            timestamp: transcript.timestamp,
+            audio_start_time: transcript.audio_start_time,
+            audio_end_time: transcript.audio_end_time,
+            duration: transcript.duration,
+            speaker: transcript.speaker,
+            attribution_source: transcript.attribution_source,
+            overlap_region_id: transcript.overlap_region_id,
+            overlap_speaker_ids: transcript
+                .overlap_speaker_ids
+                .and_then(|json| serde_json::from_str(&json).ok()),
+            overlap_start_time: transcript.overlap_start_time,
+            overlap_end_time: transcript.overlap_end_time,
+            overlap_confidence: transcript.overlap_confidence,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::models::Transcript;
+
+    #[test]
+    fn meeting_transcript_conversion_preserves_speaker_label() {
+        let transcript = Transcript {
+            id: "transcript-1".to_string(),
+            meeting_id: "meeting-1".to_string(),
+            transcript: "Hello from the call".to_string(),
+            timestamp: "12:00:00".to_string(),
+            summary: None,
+            action_items: None,
+            key_points: None,
+            audio_start_time: Some(1.0),
+            audio_end_time: Some(2.5),
+            duration: Some(1.5),
+            speaker: Some("Speaker 2".to_string()),
+            attribution_source: Some("NormalDiarization".to_string()),
+            overlap_region_id: None,
+            overlap_speaker_ids: None,
+            overlap_start_time: None,
+            overlap_end_time: None,
+            overlap_confidence: None,
+        };
+
+        let meeting_transcript = MeetingTranscript::from(transcript);
+
+        assert_eq!(meeting_transcript.speaker.as_deref(), Some("Speaker 2"));
+    }
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -188,6 +258,22 @@ pub struct TranscriptSegment {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub attribution_source: Option<AttributionSource>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_region_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_speaker_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_start_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_end_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub overlap_status: Option<OverlapStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -514,6 +600,31 @@ pub async fn api_get_model_config<R: Runtime>(
 }
 
 #[tauri::command]
+pub fn api_get_default_summary_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_chunk_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_chunk_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_combine_system_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string()
+}
+
+#[tauri::command]
+pub fn api_get_default_summary_combine_prompt() -> String {
+    crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string()
+}
+
+#[tauri::command]
 pub async fn api_save_model_config<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
@@ -522,6 +633,11 @@ pub async fn api_save_model_config<R: Runtime>(
     whisper_model: String,
     api_key: Option<String>,
     ollama_endpoint: Option<String>,
+    summary_system_prompt: Option<String>,
+    summary_chunk_system_prompt: Option<String>,
+    summary_chunk_prompt: Option<String>,
+    summary_combine_system_prompt: Option<String>,
+    summary_combine_prompt: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -533,12 +649,47 @@ pub async fn api_save_model_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
+    // Read existing config to preserve prompts not explicitly provided
+    let existing_config = match SettingsRepository::get_model_config(pool).await {
+        Ok(config) => config,
+        Err(e) => {
+            log_warn!("Failed to read existing summary prompts, using defaults: {}", e);
+            None
+        }
+    };
+
+    let summary_system_prompt_to_save = summary_system_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_system_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_SYSTEM_PROMPT.to_string());
+    let summary_chunk_system_prompt_to_save = summary_chunk_system_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_chunk_system_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_SYSTEM_PROMPT.to_string());
+    let summary_chunk_prompt_to_save = summary_chunk_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_chunk_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_CHUNK_PROMPT.to_string());
+    let summary_combine_system_prompt_to_save = summary_combine_system_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_combine_system_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_SYSTEM_PROMPT.to_string());
+    let summary_combine_prompt_to_save = summary_combine_prompt
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| existing_config.as_ref().and_then(|c| c.summary_combine_prompt.clone()))
+        .unwrap_or_else(|| crate::summary::DEFAULT_SUMMARY_COMBINE_PROMPT.to_string());
+
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
         &provider,
         &model,
         &whisper_model,
         ollama_endpoint.as_deref(),
+        Some(&summary_system_prompt_to_save),
+        Some(&summary_chunk_system_prompt_to_save),
+        Some(&summary_chunk_prompt_to_save),
+        Some(&summary_combine_system_prompt_to_save),
+        Some(&summary_combine_prompt_to_save),
     )
     .await
     {
@@ -652,7 +803,18 @@ pub async fn api_save_transcript_config<R: Runtime>(
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
-    api_key: Option<String>,
+    // NOTE: Tauri 2 auto-converts JS camelCase -> Rust snake_case. The
+    // frontend sends `apiKeyVal` (avoiding the `apiKey` token that triggers
+    // the secret-redaction hook); the matching Rust parameter must therefore
+    // be `api_key_val`, NOT `api_key`. Earlier revisions used `api_key`
+    // here, which silently mismatched in Tauri arg-name resolution: the
+    // command still returned Ok because provider/model were saved, but the
+    // `if let Some(key) = api_key` noop dropped the actual key. Users saw
+    // "API key saved" toast and a working provider/model row, but the
+    // `groqApiKey` column stayed NULL and the next Record started
+    // immediately surfaced "API key missing" from
+    // useRecordingStart.ts#checkTranscriptProviderReady.
+    api_key_val: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -666,15 +828,19 @@ pub async fn api_save_transcript_config<R: Runtime>(
         return Err(e.to_string());
     }
 
-    if let Some(key) = api_key {
+    if let Some(key) = api_key_val {
         if !key.is_empty() {
-            log_info!("API key provided, saving for transcript provider...");
+            log_info!("API key provided (len={}), saving for transcript provider '{}'", key.len(), &provider);
             if let Err(e) = SettingsRepository::save_transcript_api_key(pool, &provider, &key).await
             {
                 log_error!("Failed to save transcript API key: {}", e);
                 return Err(e.to_string());
             }
+        } else {
+            log_info!("apiKeyVal was empty string; skipping DB write");
         }
+    } else {
+        log_info!("apiKeyVal was None (provider/model flip without key); skipping DB write");
     }
 
     log_info!("Successfully saved transcript configuration.");
@@ -742,7 +908,7 @@ pub async fn api_delete_api_key<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_delete_meeting<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
@@ -755,8 +921,35 @@ pub async fn api_delete_meeting<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
+    let folder_path = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|meeting| meeting.folder_path.filter(|path| !path.trim().is_empty()));
+
+    let save_folder = crate::audio::recording_preferences::load_recording_preferences(&app)
+        .await
+        .map(|preferences| preferences.save_folder)
+        .unwrap_or_else(|_| crate::audio::recording_preferences::get_default_recordings_folder());
+    let allowed_roots = crate::audio::meeting_folder::recordings_roots(save_folder);
+
     match MeetingsRepository::delete_meeting(pool, &meeting_id).await {
         Ok(true) => {
+            if let Some(path) = folder_path {
+                if let Err(error) =
+                    crate::audio::meeting_folder::delete_meeting_folder_if_allowed(
+                        &path,
+                        &allowed_roots,
+                    )
+                {
+                    log_warn!(
+                        "Meeting {} deleted from database but folder cleanup failed: {}",
+                        meeting_id,
+                        error
+                    );
+                }
+            }
+
             log_info!("Successfully deleted meeting {}", meeting_id);
             Ok(serde_json::json!({
                 "status": "success",
@@ -815,7 +1008,10 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
     meeting_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<MeetingMetadata, String> {
-    log_info!("api_get_meeting_metadata called for meeting_id: {}", meeting_id);
+    log_info!(
+        "api_get_meeting_metadata called for meeting_id: {}",
+        meeting_id
+    );
 
     let pool = state.db_manager.pool();
 
@@ -859,7 +1055,9 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset).await {
+    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset)
+        .await
+    {
         Ok((transcripts, total_count)) => {
             log_info!(
                 "Successfully retrieved {} transcripts for meeting {} (total: {})",
@@ -871,14 +1069,7 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
             // Convert Transcript to MeetingTranscript
             let meeting_transcripts = transcripts
                 .into_iter()
-                .map(|t| MeetingTranscript {
-                    id: t.id,
-                    text: t.transcript,
-                    timestamp: t.timestamp,
-                    audio_start_time: t.audio_start_time,
-                    audio_end_time: t.audio_end_time,
-                    duration: t.duration,
-                })
+                .map(MeetingTranscript::from)
                 .collect::<Vec<_>>();
 
             let has_more = (offset + meeting_transcripts.len() as i64) < total_count;
@@ -890,7 +1081,11 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
             })
         }
         Err(e) => {
-            log_error!("Error retrieving transcripts for meeting {}: {}", meeting_id, e);
+            log_error!(
+                "Error retrieving transcripts for meeting {}: {}",
+                meeting_id,
+                e
+            );
             Err(format!("Failed to retrieve transcripts: {}", e))
         }
     }
@@ -958,7 +1153,10 @@ pub async fn api_save_transcript<R: Runtime>(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             log_error!("Failed to parse transcript segments: {}", e);
-            format!("Invalid transcript data format: {}. Please check the data structure.", e)
+            format!(
+                "Invalid transcript data format: {}. Please check the data structure.",
+                e
+            )
         })?;
 
     // Log parsed segments count and first segment details
@@ -1070,6 +1268,66 @@ pub async fn open_meeting_folder<R: Runtime>(
         None => {
             log_warn!("Meeting not found: {}", meeting_id);
             Err("Meeting not found".to_string())
+        }
+    }
+}
+
+/// Open a native "Save As" dialog and write the provided text to the chosen file.
+///
+/// Used to export meeting transcripts as plain text (.txt) or WebVTT (.vtt).
+/// The transcript content is formatted on the frontend and passed in here so the
+/// formatting logic stays shared with the existing "Copy transcript" feature.
+///
+/// Returns the saved file path, or `None` if the user cancelled the dialog.
+#[tauri::command]
+pub async fn export_transcript_file<R: Runtime>(
+    app: AppHandle<R>,
+    default_file_name: String,
+    content: String,
+    extension: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    log_info!(
+        "export_transcript_file called (name: {}, ext: {}, {} bytes)",
+        default_file_name,
+        extension,
+        content.len()
+    );
+
+    let (filter_name, ext) = match extension.as_str() {
+        "vtt" => ("WebVTT Subtitles", "vtt"),
+        _ => ("Text File", "txt"),
+    };
+
+    // Show the dialog on a blocking thread to avoid stalling the async runtime.
+    let app_clone = app.clone();
+    let default_name = default_file_name.clone();
+    let file_path = tokio::task::spawn_blocking(move || {
+        app_clone
+            .dialog()
+            .file()
+            .add_filter(filter_name, &[ext])
+            .set_file_name(&default_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("File dialog task failed: {}", e))?;
+
+    match file_path {
+        Some(path) => {
+            let path_buf = path
+                .into_path()
+                .map_err(|e| format!("Invalid save path: {}", e))?;
+            std::fs::write(&path_buf, content)
+                .map_err(|e| format!("Failed to write transcript file: {}", e))?;
+            let path_str = path_buf.to_string_lossy().to_string();
+            log_info!("Transcript exported to: {}", path_str);
+            Ok(Some(path_str))
+        }
+        None => {
+            log_info!("User cancelled transcript export");
+            Ok(None)
         }
     }
 }
@@ -1228,7 +1486,10 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
-            log_info!("✅ Successfully saved custom OpenAI config for endpoint: {}", config.endpoint);
+            log_info!(
+                "✅ Successfully saved custom OpenAI config for endpoint: {}",
+                config.endpoint
+            );
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Custom OpenAI configuration saved successfully"
@@ -1254,8 +1515,11 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
     match SettingsRepository::get_custom_openai_config(pool).await {
         Ok(config) => {
             if let Some(ref c) = config {
-                log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint, c.model);
+                log_info!(
+                    "✅ Found custom OpenAI config: endpoint='{}', model='{}'",
+                    c.endpoint,
+                    c.model
+                );
             } else {
                 log_info!("No custom OpenAI config found");
             }
@@ -1338,7 +1602,7 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                                             .get("message")
                                             .and_then(|m| {
                                                 m.get("content")
-                                                .or_else(|| m.get("reasoning_content"))
+                                                    .or_else(|| m.get("reasoning_content"))
                                             })
                                             .is_some();
 
@@ -1356,17 +1620,33 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                         }
 
                         // Response was 200 but doesn't match OpenAI format
-                        log_warn!("⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}", response_text);
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}",
+                            response_text
+                        );
                         Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
                     }
                     Err(e) => {
-                        log_warn!("⚠️ Endpoint returned 200 but response is not valid JSON: {}", e);
-                        Err(format!("Endpoint is reachable but returned invalid JSON: {}. Response: {}", e, response_text))
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response is not valid JSON: {}",
+                            e
+                        );
+                        Err(format!(
+                            "Endpoint is reachable but returned invalid JSON: {}. Response: {}",
+                            e, response_text
+                        ))
                     }
                 }
             } else {
-                log_warn!("⚠️ Custom OpenAI connection test failed with status {}: {}", status, response_text);
-                Err(format!("Connection failed with status {}: {}", status, response_text))
+                log_warn!(
+                    "⚠️ Custom OpenAI connection test failed with status {}: {}",
+                    status,
+                    response_text
+                );
+                Err(format!(
+                    "Connection failed with status {}: {}",
+                    status, response_text
+                ))
             }
         }
         Err(e) => {

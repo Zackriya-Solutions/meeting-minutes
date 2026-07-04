@@ -16,7 +16,28 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  speaker?: string;           // Speaker identification label ("Speaker 1" or a profile name)
+  attribution_source?: AttributionSource;
+  overlap_region_id?: string;
+  overlap_speaker_ids?: string[];
+  overlap_start_time?: number;
+  overlap_end_time?: number;
+  overlap_confidence?: number;
+  overlap_status?: OverlapStatus;
 }
+
+export type AttributionSource =
+  | 'NormalDiarization'
+  | 'OverlapDetectedAmbiguous'
+  | 'Level5Resolved'
+  | 'UserCorrected';
+
+export type OverlapStatus =
+  | 'Detected'
+  | 'MarkedAmbiguous'
+  | 'Resolved'
+  | 'Failed'
+  | 'Skipped';
 
 export interface TranscriptUpdate {
   text: string;
@@ -30,6 +51,14 @@ export interface TranscriptUpdate {
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
   duration: number;          // Segment duration in seconds
+  speaker?: string;          // Speaker identification label ("Speaker 1" or a profile name)
+  attribution_source?: AttributionSource;
+  overlap_region_id?: string;
+  overlap_speaker_ids?: string[];
+  overlap_start_time?: number;
+  overlap_end_time?: number;
+  overlap_confidence?: number;
+  overlap_status?: OverlapStatus;
 }
 
 export interface Block {
@@ -107,4 +136,12 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  speaker?: string; // Speaker identification label
+  attribution_source?: AttributionSource;
+  overlap_region_id?: string;
+  overlap_speaker_ids?: string[];
+  overlap_start_time?: number;
+  overlap_end_time?: number;
+  overlap_confidence?: number;
+  overlap_status?: OverlapStatus;
 }

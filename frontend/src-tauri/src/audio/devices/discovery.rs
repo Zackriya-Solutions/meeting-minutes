@@ -27,10 +27,18 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
-    // Add any additional devices from the default host
+    // Add any additional devices from the default host.
+    // On Linux, filter raw ALSA PCM permutations the same way configure_linux_audio
+    // does for inputs — otherwise the noise re-enters the list here as fake outputs (#437).
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {
+                #[cfg(target_os = "linux")]
+                {
+                    if !platform::linux::is_meaningful_alsa_pcm(&name) {
+                        continue;
+                    }
+                }
                 if !devices.iter().any(|d| d.name == name) {
                     devices.push(AudioDevice::new(name, DeviceType::Output));
                 }

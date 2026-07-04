@@ -2,6 +2,7 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_store::StoreExt;
 
 use anyhow::Result;
@@ -73,6 +74,20 @@ pub fn get_default_recordings_folder() -> PathBuf {
         dirs::document_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("meetily-recordings")
+    }
+}
+
+/// Resolve the folder where recordings should be saved.
+pub async fn get_recordings_save_folder<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    match load_recording_preferences(app).await {
+        Ok(prefs) => prefs.save_folder,
+        Err(e) => {
+            warn!(
+                "Failed to load recording preferences for save folder, using default: {}",
+                e
+            );
+            get_default_recordings_folder()
+        }
     }
 }
 
@@ -245,13 +260,36 @@ pub async fn open_recordings_folder<R: Runtime>(app: AppHandle<R>) -> Result<(),
 
 #[tauri::command]
 pub async fn select_recording_folder<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
 ) -> Result<Option<String>, String> {
-    // Use Tauri's dialog to select folder
-    // For now, return None - this would need to be implemented with tauri-plugin-dialog
-    // when it's available in the Cargo.toml
-    warn!("Folder selection not yet implemented - using dialog plugin");
-    Ok(None)
+    let current_folder = load_recording_preferences(&app)
+        .await
+        .map(|prefs| prefs.save_folder)
+        .unwrap_or_else(|_| get_default_recordings_folder());
+
+    let app_clone = app.clone();
+    let folder_path = tokio::task::spawn_blocking(move || {
+        app_clone
+            .dialog()
+            .file()
+            .set_title("Select Recordings Folder")
+            .set_directory(&current_folder)
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| format!("Folder dialog task failed: {}", e))?;
+
+    match folder_path {
+        Some(path) => {
+            let path_str = path.to_string();
+            info!("User selected recordings folder: {}", path_str);
+            Ok(Some(path_str))
+        }
+        None => {
+            info!("User cancelled folder selection");
+            Ok(None)
+        }
+    }
 }
 
 // Backend selection commands

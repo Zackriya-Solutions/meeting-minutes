@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, FolderInput } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { useConfig } from '@/contexts/ConfigContext';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -19,6 +20,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const { refreshRecordingsStorageLocation } = useConfig();
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -29,6 +31,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const [showFloatingIndicator, setShowFloatingIndicator] = useState(true);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -68,6 +71,21 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     loadNotificationPref();
   }, []);
 
+  // Load floating recording indicator preference
+  useEffect(() => {
+    const loadFloatingIndicatorPref = async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const show = await store.get<boolean>('show_floating_indicator') ?? true;
+        setShowFloatingIndicator(show);
+      } catch (error) {
+        console.error('Failed to load floating indicator preference:', error);
+      }
+    };
+    loadFloatingIndicatorPref();
+  }, []);
+
   const handleAutoSaveToggle = async (enabled: boolean) => {
     const newPreferences = { ...preferences, auto_save: enabled };
     setPreferences(newPreferences);
@@ -101,6 +119,32 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       await invoke('open_recordings_folder');
     } catch (error) {
       console.error('Failed to open recordings folder:', error);
+      toast.error('Failed to open recordings folder');
+    }
+  };
+
+  const handleChangeFolder = async () => {
+    try {
+      const selectedPath = await invoke<string | null>('select_recording_folder');
+      if (!selectedPath) {
+        return;
+      }
+
+      const newPreferences = { ...preferences, save_folder: selectedPath };
+      setPreferences(newPreferences);
+      await savePreferences(newPreferences, {
+        title: 'Save location updated',
+        description: selectedPath,
+      });
+
+      await Analytics.track('recording_save_location_changed', {
+        path: selectedPath,
+      });
+    } catch (error) {
+      console.error('Failed to change recordings folder:', error);
+      toast.error('Failed to change save location', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -121,21 +165,49 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     }
   };
 
-  const savePreferences = async (prefs: RecordingPreferences) => {
+  const handleFloatingIndicatorToggle = async (enabled: boolean) => {
+    try {
+      setShowFloatingIndicator(enabled);
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set('show_floating_indicator', enabled);
+      await store.save();
+      await invoke('set_floating_indicator_enabled', { enabled });
+      toast.success('Preference saved');
+      await Analytics.track('floating_indicator_preference_changed', {
+        enabled: enabled.toString()
+      });
+    } catch (error) {
+      console.error('Failed to save floating indicator preference:', error);
+      toast.error('Failed to save preference');
+    }
+  };
+
+  const savePreferences = async (
+    prefs: RecordingPreferences,
+    successMessage?: { title: string; description?: string }
+  ) => {
     setSaving(true);
     try {
       await invoke('set_recording_preferences', { preferences: prefs });
+      await refreshRecordingsStorageLocation();
       onSave?.(prefs);
 
-      // Show success toast with device details
-      const micDevice = prefs.preferred_mic_device || 'Default';
-      const systemDevice = prefs.preferred_system_device || 'Default';
-      toast.success("Device preferences saved", {
-        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
-      });
+      if (successMessage) {
+        toast.success(successMessage.title, {
+          description: successMessage.description,
+        });
+      } else {
+        // Show success toast with device details
+        const micDevice = prefs.preferred_mic_device || 'Default';
+        const systemDevice = prefs.preferred_system_device || 'Default';
+        toast.success("Device preferences saved", {
+          description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+        });
+      }
     } catch (error) {
       console.error('Failed to save recording preferences:', error);
-      toast.error("Failed to save device preferences", {
+      toast.error("Failed to save recording preferences", {
         description: error instanceof Error ? error.message : String(error)
       });
     } finally {
@@ -184,13 +256,23 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             <div className="text-sm text-gray-600 mb-3 break-all">
               {preferences.save_folder || 'Default folder'}
             </div>
-            <button
-              onClick={handleOpenFolder}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleChangeFolder}
+                disabled={saving}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                <FolderInput className="w-4 h-4" />
+                Change Location
+              </button>
+              <button
+                onClick={handleOpenFolder}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Open Folder
+              </button>
+            </div>
           </div>
 
           <div className="p-4 border rounded-lg bg-blue-50">
@@ -224,6 +306,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
+        />
+      </div>
+
+      {/* Floating Recording Indicator Toggle */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Floating Recording Indicator</div>
+          <div className="text-sm text-gray-600">
+            Show a small draggable widget with a live mic waveform and stop button when you switch away from Meetily during a recording
+          </div>
+        </div>
+        <Switch
+          checked={showFloatingIndicator}
+          onCheckedChange={handleFloatingIndicatorToggle}
         />
       </div>
 

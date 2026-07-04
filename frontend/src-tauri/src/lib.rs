@@ -36,26 +36,31 @@ pub(crate) use perf_trace;
 
 // Declare audio module
 pub mod analytics;
+pub mod anthropic;
 pub mod api;
 pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod diarization;
+pub mod floating_indicator;
+pub mod groq;
+pub mod local_api;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
-pub mod anthropic;
-pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+#[cfg(target_os = "macos")]
+pub mod apple_speech_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
 
-use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
+use audio::{list_audio_devices, trigger_audio_permission, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
@@ -63,6 +68,48 @@ use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Serialize, Clone)]
+pub struct BuildInfo {
+    pub version: String,
+    pub gpu_backend: String,
+    pub build_profile: String,
+    pub target_os: String,
+    pub target_arch: String,
+}
+
+#[tauri::command]
+fn get_build_info() -> BuildInfo {
+    let gpu_backend = if cfg!(feature = "cuda") {
+        "CUDA"
+    } else if cfg!(feature = "vulkan") {
+        "Vulkan"
+    } else if cfg!(feature = "metal") {
+        "Metal"
+    } else if cfg!(feature = "coreml") {
+        "CoreML"
+    } else if cfg!(feature = "hipblas") {
+        "HipBLAS (AMD ROCm)"
+    } else if cfg!(feature = "openblas") {
+        "OpenBLAS (CPU)"
+    } else {
+        "CPU"
+    };
+
+    let build_profile = if cfg!(debug_assertions) {
+        "Debug"
+    } else {
+        "Release"
+    };
+
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        gpu_backend: gpu_backend.to_string(),
+        build_profile: build_profile.to_string(),
+        target_os: std::env::consts::OS.to_string(),
+        target_arch: std::env::consts::ARCH.to_string(),
+    }
+}
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
@@ -124,10 +171,7 @@ async fn start_recording<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             } else {
                 log_info!("Successfully showed recording started notification");
             }
@@ -185,10 +229,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording stopped notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording stopped notification: {}", e);
             } else {
                 log_info!("Successfully showed recording stopped notification");
             }
@@ -357,10 +398,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             }
 
             Ok(())
@@ -416,7 +454,9 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
-        .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(summary::summary_engine::ModelManagerState(Arc::new(
+            tokio::sync::Mutex::new(None),
+        )))
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -425,12 +465,25 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
+            // Start the floating recording indicator driver
+            floating_indicator::init(_app.handle());
+
+            // Start local HTTP control API (127.0.0.1 only) for external start/stop
+            let app_for_local_api = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                local_api::serve(app_for_local_api).await;
+            });
+
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
             let app_for_notif = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let notif_state = app_for_notif.state::<NotificationManagerState<tauri::Wry>>();
-                match notifications::commands::initialize_notification_manager(app_for_notif.clone()).await {
+                match notifications::commands::initialize_notification_manager(
+                    app_for_notif.clone(),
+                )
+                .await
+                {
                     Ok(manager) => {
                         // Set default consent and permissions on first launch
                         if let Err(e) = manager.set_consent(true).await {
@@ -474,7 +527,11 @@ pub fn run() {
             // Initialize ModelManager for summary engine (async, non-blocking)
             let app_handle_for_model_manager = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match summary::summary_engine::commands::init_model_manager_at_startup(&app_handle_for_model_manager).await {
+                match summary::summary_engine::commands::init_model_manager_at_startup(
+                    &app_handle_for_model_manager,
+                )
+                .await
+                {
                     Ok(_) => log::info!("ModelManager initialized successfully at startup"),
                     Err(e) => {
                         log::warn!("Failed to initialize ModelManager at startup: {}", e);
@@ -503,7 +560,10 @@ pub fn run() {
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
                 let templates_dir = resource_path.join("templates");
-                log::info!("Setting bundled templates directory to: {:?}", templates_dir);
+                log::info!(
+                    "Setting bundled templates directory to: {:?}",
+                    templates_dir
+                );
                 summary::templates::set_bundled_templates_dir(templates_dir);
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
@@ -522,10 +582,19 @@ pub fn run() {
                     }
                 }
             }
+            // Track main window focus to drive the floating recording indicator
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if window.label() == "main" {
+                    floating_indicator::set_main_focused(*focused);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,
+            floating_indicator::stop_recording_from_indicator,
+            floating_indicator::set_indicator_dragging,
+            floating_indicator::set_floating_indicator_enabled,
             is_recording,
             get_transcription_status,
             read_audio_file,
@@ -582,6 +651,14 @@ pub fn run() {
             parakeet_engine::commands::parakeet_cancel_download,
             parakeet_engine::commands::parakeet_delete_corrupted_model,
             parakeet_engine::commands::open_parakeet_models_folder,
+            // Speaker identification (diarization) commands
+            diarization::commands::diarization_get_status,
+            diarization::commands::diarization_set_enabled,
+            diarization::commands::diarization_download_model,
+            diarization::commands::diarization_rename_speaker,
+            diarization::commands::diarization_list_profiles,
+            diarization::commands::diarization_rename_profile,
+            diarization::commands::diarization_delete_profile,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,
@@ -637,6 +714,11 @@ pub fn run() {
             api::api_update_profile,
             api::api_get_model_config,
             api::api_save_model_config,
+            api::api_get_default_summary_system_prompt,
+            api::api_get_default_summary_chunk_system_prompt,
+            api::api_get_default_summary_chunk_prompt,
+            api::api_get_default_summary_combine_system_prompt,
+            api::api_get_default_summary_combine_prompt,
             api::api_get_api_key,
             // api::api_get_auto_generate_setting,
             // api::api_save_auto_generate_setting,
@@ -650,6 +732,7 @@ pub fn run() {
             api::api_save_meeting_title,
             api::api_save_transcript,
             api::open_meeting_folder,
+            api::export_transcript_file,
             api::test_backend_connection,
             api::debug_backend_connection,
             api::open_external_url,
@@ -671,6 +754,10 @@ pub fn run() {
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
             summary::template_commands::api_validate_template,
+            summary::template_commands::api_get_template_json,
+            summary::template_commands::api_get_default_template_json,
+            summary::template_commands::api_save_template,
+            summary::template_commands::api_reset_template,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,
@@ -748,6 +835,7 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            get_build_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -769,7 +857,9 @@ pub fn run() {
                                 log::info!("Database cleanup completed successfully");
                             }
                         } else {
-                            log::warn!("AppState not available for database cleanup (likely first launch)");
+                            log::warn!(
+                                "AppState not available for database cleanup (likely first launch)"
+                            );
                         }
 
                         // Clean up sidecar

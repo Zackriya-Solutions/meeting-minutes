@@ -6,8 +6,16 @@ import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { UpdateDialog } from "./UpdateDialog";
 import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2, Monitor } from 'lucide-react';
 import { toast } from 'sonner';
+
+interface BuildInfo {
+    version: string;
+    gpu_backend: string;
+    build_profile: string;
+    target_os: string;
+    target_arch: string;
+}
 
 
 export function About() {
@@ -15,10 +23,11 @@ export function About() {
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [isChecking, setIsChecking] = useState(false);
     const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+    const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
 
     useEffect(() => {
-        // Get current version on mount
         getVersion().then(setCurrentVersion).catch(console.error);
+        invoke<BuildInfo>('get_build_info').then(setBuildInfo).catch(console.error);
     }, []);
 
     const handleContactClick = async () => {
@@ -144,6 +153,24 @@ export function About() {
                 </p>
             </div>
             <AnalyticsConsentSwitch />
+
+            {/* Build Info */}
+            {buildInfo && (
+                <div className="bg-gray-50 rounded p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
+                        <Monitor className="h-3.5 w-3.5" />
+                        Build Info
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
+                        <span className="text-gray-500">GPU Backend</span>
+                        <span className="font-medium">{buildInfo.gpu_backend}</span>
+                        <span className="text-gray-500">Build Profile</span>
+                        <span className="font-medium">{buildInfo.build_profile}</span>
+                        <span className="text-gray-500">Platform</span>
+                        <span className="font-medium">{buildInfo.target_os}/{buildInfo.target_arch}</span>
+                    </div>
+                </div>
+            )}
 
             {/* Update Dialog */}
             <UpdateDialog

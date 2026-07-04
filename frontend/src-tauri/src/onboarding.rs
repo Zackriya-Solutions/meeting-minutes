@@ -185,6 +185,11 @@ pub async fn complete_onboarding<R: Runtime>(
         &model,
         "large-v3",
         None,
+        None,
+        None,
+        None,
+        None,
+        None,
     ).await {
         error!("Failed to save builtin-ai model config: {}", e);
         return Err(format!("Failed to save builtin-ai model config: {}", e));

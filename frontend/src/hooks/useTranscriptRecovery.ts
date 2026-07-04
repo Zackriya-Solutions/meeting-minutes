@@ -173,6 +173,13 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         audio_start_time: (t as any).audio_start_time,
         audio_end_time: (t as any).audio_end_time,
         duration: (t as any).duration,
+        attribution_source: (t as any).attribution_source,
+        overlap_region_id: (t as any).overlap_region_id,
+        overlap_speaker_ids: (t as any).overlap_speaker_ids,
+        overlap_start_time: (t as any).overlap_start_time,
+        overlap_end_time: (t as any).overlap_end_time,
+        overlap_confidence: (t as any).overlap_confidence,
+        overlap_status: (t as any).overlap_status,
       }));
 
       // 6. Save to backend database using existing save utilities

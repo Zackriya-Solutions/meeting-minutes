@@ -111,6 +111,9 @@ tokio = { version = "1.32.0", features = ["full", "tracing"] }
 tokio-util = "0.7"  # Utilities for tokio including CancellationToken
 async-trait = "0.1"  # Trait abstraction for async methods
 
+# Local HTTP control API (127.0.0.1 start/stop endpoints)
+axum = "0.8"
+
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
 # crossbeam
@@ -172,6 +175,29 @@ core-graphics = "0.23"
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
+
+# Apple Speech Recognition (SFSpeechRecognizer) for native macOS transcription
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSLocale", "NSError", "NSArray", "alloc", "block2"] }
+objc2-speech = { version = "0.3", features = [
+    "SFSpeechRecognizer",
+    "SFSpeechRecognitionRequest",
+    "SFSpeechRecognitionResult",
+    "SFSpeechRecognitionTask",
+    "SFTranscription",
+    "SFTranscriptionSegment",
+    "alloc",
+    "block2",
+    "objc2-avf-audio",
+] }
+objc2-avf-audio = { version = "0.3", features = [
+    "AVAudioBuffer",
+    "AVAudioFormat",
+    "AVAudioTypes",
+    "AVAudioChannelLayout",
+    "alloc",
+] }
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
