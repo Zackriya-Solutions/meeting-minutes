@@ -28,6 +28,11 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+
+  // Recording playback: makes timestamps clickable when provided
+  onSeekToTimestamp?: (seconds: number) => void;
+  // Segment currently being played back (highlighted)
+  activeSegmentId?: string | null;
 }
 
 export function TranscriptPanel({
@@ -48,6 +53,8 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  onSeekToTimestamp,
+  activeSegmentId,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -94,6 +101,8 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          onSeekToTimestamp={onSeekToTimestamp}
+          activeSegmentId={activeSegmentId}
         />
       </div>
 
