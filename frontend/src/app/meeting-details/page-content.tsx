@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -7,7 +7,8 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
-import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { SummaryPanel, SummaryPanelTab } from '@/components/MeetingDetails/SummaryPanel';
+import { RecordingPanelRef } from '@/components/MeetingDetails/RecordingPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
@@ -16,6 +17,7 @@ import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGenerati
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
+import { useMeetingAudio } from '@/hooks/meeting-details/useMeetingAudio';
 import { useConfig } from '@/contexts/ConfigContext';
 
 export default function PageContent({
@@ -57,9 +59,19 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const [summaryPanelTab, setSummaryPanelTab] = useState<SummaryPanelTab>('summary');
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
+
+  // Ref to control the recording player (seek from transcript timestamps)
+  const recordingPanelRef = useRef<RecordingPanelRef>(null);
+
+  // Locate the stored recording for playback (null when none exists)
+  const { audioSrc } = useMeetingAudio({
+    meetingId: meeting.id,
+    meetingFolderPath: meeting.folder_path,
+  });
 
   // Sidebar context
   const { serverAddress } = useSidebar();
@@ -139,6 +151,18 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
+  // Reset to the summary tab when switching meetings
+  useEffect(() => {
+    setSummaryPanelTab('summary');
+  }, [meeting.id]);
+
+  // Jump the recording player to a transcript timestamp
+  const handleSeekToTimestamp = useCallback((seconds: number) => {
+    Analytics.trackButtonClick('transcript_timestamp_seek', 'meeting_details');
+    setSummaryPanelTab('recording');
+    recordingPanelRef.current?.seekTo(seconds);
+  }, []);
+
   // Auto-generate summary when flag is set
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +215,8 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          // Recording playback (timestamps clickable only when a recording exists)
+          onSeekToTimestamp={audioSrc ? handleSeekToTimestamp : undefined}
         />
         <SummaryPanel
           meeting={meeting}
@@ -226,6 +252,10 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          audioSrc={audioSrc}
+          activeTab={summaryPanelTab}
+          onTabChange={setSummaryPanelTab}
+          recordingPanelRef={recordingPanelRef}
         />
       </div>
     </motion.div>
