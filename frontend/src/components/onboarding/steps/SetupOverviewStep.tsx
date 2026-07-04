@@ -48,7 +48,7 @@ export function SetupOverviewStep() {
       title="Setup Overview"
       description="Meetily requires that you download the Transcription & Summarization AI models for the software to work."
       step={2}
-      totalSteps={isMac ? 4 : 3}
+      totalSteps={isMac ? 5 : 4}
     >
       <div className="flex flex-col items-center space-y-10">
         {/* Steps Card */}

@@ -14,6 +14,7 @@ const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
   'qwen3.5:4b': 2614,
   'gemma3:1b': 1019,
   'gemma3:4b': 2374,
+  'medgemma:4b': 2374,
 };
 
 export function resolveOnboardingSummaryModelStatus({

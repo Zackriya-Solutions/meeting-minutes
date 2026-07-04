@@ -14,6 +14,9 @@ pub struct OnboardingStatus {
     pub completed: bool,
     pub current_step: u8,
     pub model_status: ModelStatus,
+    /// Product focus chosen during onboarding: "general" | "clinician"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product_focus: Option<String>,
     pub last_updated: String,
 }
 
@@ -36,6 +39,7 @@ impl Default for OnboardingStatus {
                 summary: "not_downloaded".to_string(),  // Changed from gemma
                 selected_summary_model: None,
             },
+            product_focus: None,
             last_updated: chrono::Utc::now().to_rfc3339(),
         }
     }
@@ -107,6 +111,15 @@ pub async fn save_onboarding_status<R: Runtime>(
     Ok(())
 }
 
+/// Load the persisted product focus ("general" | "clinician"), if any.
+/// Used to gate focus-specific models (e.g. clinical models) in the UI.
+pub async fn load_product_focus<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    load_onboarding_status(app)
+        .await
+        .ok()
+        .and_then(|status| status.product_focus)
+}
+
 /// Reset onboarding status (delete from store)
 pub async fn reset_onboarding_status<R: Runtime>(
     app: &AppHandle<R>,
@@ -167,6 +180,35 @@ pub async fn reset_onboarding_status_cmd<R: Runtime>(
         .map_err(|e| format!("Failed to reset onboarding status: {}", e))
 }
 
+/// Persist the product focus immediately (not subject to the frontend's
+/// debounced auto-save, so a following step can rely on it).
+#[tauri::command]
+pub async fn set_product_focus<R: Runtime>(
+    app: AppHandle<R>,
+    focus: String,
+) -> Result<(), String> {
+    if focus != "general" && focus != "clinician" {
+        return Err(format!("Invalid product focus: {}", focus));
+    }
+
+    let mut status = load_onboarding_status(&app)
+        .await
+        .map_err(|e| format!("Failed to load onboarding status: {}", e))?;
+
+    status.product_focus = Some(focus);
+
+    save_onboarding_status(&app, &status)
+        .await
+        .map_err(|e| format!("Failed to save product focus: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_product_focus<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<String>, String> {
+    Ok(load_product_focus(&app).await)
+}
+
 #[tauri::command]
 pub async fn complete_onboarding<R: Runtime>(
     app: AppHandle<R>,
@@ -208,7 +250,7 @@ pub async fn complete_onboarding<R: Runtime>(
         .map_err(|e| format!("Failed to load onboarding status: {}", e))?;
 
     status.completed = true;
-    status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
+    status.current_step = 5; // Max step (5 on macOS with permissions, 4 on other platforms)
     status.model_status.parakeet = "downloaded".to_string();
     status.model_status.summary = "downloaded".to_string();
     status.model_status.selected_summary_model = Some(model.clone());
@@ -242,5 +284,18 @@ mod tests {
         .expect("old onboarding status should remain compatible");
 
         assert_eq!(status.model_status.selected_summary_model, None);
+        assert_eq!(status.product_focus, None);
+    }
+
+    #[test]
+    fn onboarding_status_round_trips_product_focus() {
+        let mut status = OnboardingStatus::default();
+        status.product_focus = Some("clinician".to_string());
+
+        let json = serde_json::to_string(&status).expect("status should serialize");
+        let restored: OnboardingStatus =
+            serde_json::from_str(&json).expect("status should deserialize");
+
+        assert_eq!(restored.product_focus, Some("clinician".to_string()));
     }
 }
