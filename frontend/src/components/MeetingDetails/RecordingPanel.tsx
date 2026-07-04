@@ -44,28 +44,32 @@ function formatPlaybackTime(seconds: number): string {
 
 export const RecordingPanel = forwardRef<RecordingPanelRef, RecordingPanelProps>(
   function RecordingPanel({ audioSrc, meetingTitle }, ref) {
-    const audioRef = useRef<HTMLAudioElement>(null);
-    // Seek requested before audio metadata finished loading
+    // A <video> element plays audio-only files too; when the recording has a
+    // video track (e.g. an imported screen recording) we show the picture,
+    // otherwise we keep the audio-player layout.
+    const mediaRef = useRef<HTMLVideoElement>(null);
+    // Seek requested before media metadata finished loading
     const pendingSeekRef = useRef<number | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [playbackRate, setPlaybackRate] = useState(1);
+    const [hasVideo, setHasVideo] = useState(false);
     const [loadError, setLoadError] = useState(false);
 
     const playFrom = useCallback((seconds: number) => {
-      const audio = audioRef.current;
-      if (!audio) return;
+      const media = mediaRef.current;
+      if (!media) return;
 
-      if (audio.readyState === 0) {
+      if (media.readyState === 0) {
         // Metadata not loaded yet - apply once it is
         pendingSeekRef.current = seconds;
         return;
       }
 
-      audio.currentTime = Math.max(0, Math.min(seconds, audio.duration || seconds));
-      audio.play().catch((error) => {
+      media.currentTime = Math.max(0, Math.min(seconds, media.duration || seconds));
+      media.play().catch((error) => {
         console.error('Failed to start playback:', error);
       });
     }, []);
@@ -81,15 +85,17 @@ export const RecordingPanel = forwardRef<RecordingPanelRef, RecordingPanelProps>
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
+      setHasVideo(false);
       setLoadError(false);
       pendingSeekRef.current = null;
     }, [audioSrc]);
 
     const handleLoadedMetadata = () => {
-      const audio = audioRef.current;
-      if (!audio) return;
+      const media = mediaRef.current;
+      if (!media) return;
 
-      setDuration(audio.duration);
+      setDuration(media.duration);
+      setHasVideo(media.videoWidth > 0 && media.videoHeight > 0);
       setLoadError(false);
 
       if (pendingSeekRef.current !== null) {
@@ -100,39 +106,39 @@ export const RecordingPanel = forwardRef<RecordingPanelRef, RecordingPanelProps>
     };
 
     const handleTogglePlayback = () => {
-      const audio = audioRef.current;
-      if (!audio) return;
+      const media = mediaRef.current;
+      if (!media) return;
 
-      if (audio.paused) {
+      if (media.paused) {
         Analytics.trackButtonClick('play_recording', 'meeting_details');
-        audio.play().catch((error) => {
+        media.play().catch((error) => {
           console.error('Failed to start playback:', error);
         });
       } else {
-        audio.pause();
+        media.pause();
       }
     };
 
     const handleSkip = (offsetSeconds: number) => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      audio.currentTime = Math.max(0, Math.min(audio.currentTime + offsetSeconds, audio.duration || 0));
+      const media = mediaRef.current;
+      if (!media) return;
+      media.currentTime = Math.max(0, Math.min(media.currentTime + offsetSeconds, media.duration || 0));
     };
 
     const handleSeekInput = (value: number) => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      audio.currentTime = value;
+      const media = mediaRef.current;
+      if (!media) return;
+      media.currentTime = value;
       setCurrentTime(value);
     };
 
     const handleCyclePlaybackRate = () => {
-      const audio = audioRef.current;
-      if (!audio) return;
+      const media = mediaRef.current;
+      if (!media) return;
 
       const currentIndex = PLAYBACK_RATES.indexOf(playbackRate);
       const nextRate = PLAYBACK_RATES[(currentIndex + 1) % PLAYBACK_RATES.length];
-      audio.playbackRate = nextRate;
+      media.playbackRate = nextRate;
       setPlaybackRate(nextRate);
     };
 
@@ -155,31 +161,39 @@ export const RecordingPanel = forwardRef<RecordingPanelRef, RecordingPanelProps>
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
-        className="flex flex-1 flex-col items-center justify-center p-6"
+        className="flex flex-1 min-h-0 flex-col items-center justify-center p-6"
       >
-        <audio
-          ref={audioRef}
+        {/* Also the playback element for audio-only recordings (hidden then) */}
+        <video
+          ref={mediaRef}
           src={audioSrc}
           preload="metadata"
+          playsInline
+          onClick={hasVideo ? handleTogglePlayback : undefined}
           onLoadedMetadata={handleLoadedMetadata}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
-          onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
+          onTimeUpdate={() => setCurrentTime(mediaRef.current?.currentTime ?? 0)}
           onError={() => setLoadError(true)}
+          className={hasVideo
+            ? 'w-full max-w-3xl flex-1 min-h-0 rounded-lg bg-black object-contain mb-6 cursor-pointer'
+            : 'hidden'}
         />
 
         <div className="w-full max-w-md">
-          {/* Recording header */}
-          <div className="flex flex-col items-center mb-8">
-            <div className={`flex items-center justify-center w-16 h-16 rounded-full mb-4 ${isPlaying ? 'bg-blue-100' : 'bg-gray-100'}`}>
-              <AudioLines className={`h-8 w-8 ${isPlaying ? 'text-blue-500' : 'text-gray-400'}`} />
+          {/* Recording header - only for audio-only recordings */}
+          {!hasVideo && (
+            <div className="flex flex-col items-center mb-8">
+              <div className={`flex items-center justify-center w-16 h-16 rounded-full mb-4 ${isPlaying ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                <AudioLines className={`h-8 w-8 ${isPlaying ? 'text-blue-500' : 'text-gray-400'}`} />
+              </div>
+              <p className="text-sm font-medium text-gray-800 text-center break-words max-w-full">
+                {meetingTitle}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">Meeting recording</p>
             </div>
-            <p className="text-sm font-medium text-gray-800 text-center break-words max-w-full">
-              {meetingTitle}
-            </p>
-            <p className="text-xs text-gray-400 mt-1">Meeting recording</p>
-          </div>
+          )}
 
           {/* Seek bar */}
           <div className="mb-6">
