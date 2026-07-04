@@ -25,6 +25,8 @@ interface RecordingPanelProps {
   /** Playable URL of the meeting recording (asset protocol). */
   audioSrc: string;
   meetingTitle: string;
+  /** Reports the playback position so the transcript can follow along */
+  onTimeUpdate?: (seconds: number) => void;
 }
 
 // Format seconds as M:SS (or H:MM:SS for recordings over an hour)
@@ -43,7 +45,7 @@ function formatPlaybackTime(seconds: number): string {
 }
 
 export const RecordingPanel = forwardRef<RecordingPanelRef, RecordingPanelProps>(
-  function RecordingPanel({ audioSrc, meetingTitle }, ref) {
+  function RecordingPanel({ audioSrc, meetingTitle, onTimeUpdate }, ref) {
     // A <video> element plays audio-only files too; when the recording has a
     // video track (e.g. an imported screen recording) we show the picture,
     // otherwise we keep the audio-player layout.
@@ -174,7 +176,11 @@ export const RecordingPanel = forwardRef<RecordingPanelRef, RecordingPanelProps>
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
-          onTimeUpdate={() => setCurrentTime(mediaRef.current?.currentTime ?? 0)}
+          onTimeUpdate={() => {
+            const seconds = mediaRef.current?.currentTime ?? 0;
+            setCurrentTime(seconds);
+            onTimeUpdate?.(seconds);
+          }}
           onError={() => setLoadError(true)}
           className={hasVideo
             ? 'w-full max-w-3xl flex-1 min-h-0 rounded-lg bg-black object-contain mb-6 cursor-pointer'

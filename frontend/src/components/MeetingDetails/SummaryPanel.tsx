@@ -69,6 +69,7 @@ interface SummaryPanelProps {
   activeTab?: SummaryPanelTab;
   onTabChange?: (tab: SummaryPanelTab) => void;
   recordingPanelRef?: RefObject<RecordingPanelRef>;
+  onPlaybackTimeUpdate?: (seconds: number) => void;
 }
 
 export function SummaryPanel({
@@ -109,6 +110,7 @@ export function SummaryPanel({
   activeTab = 'summary',
   onTabChange,
   recordingPanelRef,
+  onPlaybackTimeUpdate,
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
@@ -494,6 +496,7 @@ export function SummaryPanel({
               ref={recordingPanelRef}
               audioSrc={audioSrc}
               meetingTitle={meetingTitle}
+              onTimeUpdate={onPlaybackTimeUpdate}
             />
           </TabsContent>
         )}

@@ -60,6 +60,7 @@ export default function PageContent({
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
   const [summaryPanelTab, setSummaryPanelTab] = useState<SummaryPanelTab>('summary');
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -151,9 +152,10 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
-  // Reset to the summary tab when switching meetings
+  // Reset playback-related state when switching meetings
   useEffect(() => {
     setSummaryPanelTab('summary');
+    setActiveSegmentId(null);
   }, [meeting.id]);
 
   // Jump the recording player to a transcript timestamp
@@ -162,6 +164,23 @@ export default function PageContent({
     setSummaryPanelTab('recording');
     recordingPanelRef.current?.seekTo(seconds);
   }, []);
+
+  // Follow playback in the transcript: highlight the segment being spoken.
+  // Only the id is stored, so timeupdate ticks inside the same segment are
+  // no-op renders.
+  const handlePlaybackTimeUpdate = useCallback((seconds: number) => {
+    const segs = segments ?? [];
+    let currentId: string | null = null;
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i].timestamp > seconds) break;
+      const end = segs[i].endTime ?? segs[i + 1]?.timestamp ?? Infinity;
+      if (seconds < end) {
+        currentId = segs[i].id;
+        break;
+      }
+    }
+    setActiveSegmentId((prev) => (prev === currentId ? prev : currentId));
+  }, [segments]);
 
   // Auto-generate summary when flag is set
   useEffect(() => {
@@ -217,6 +236,7 @@ export default function PageContent({
           onRefetchTranscripts={onRefetchTranscripts}
           // Recording playback (timestamps clickable only when a recording exists)
           onSeekToTimestamp={audioSrc ? handleSeekToTimestamp : undefined}
+          activeSegmentId={activeSegmentId}
         />
         <SummaryPanel
           meeting={meeting}
@@ -256,6 +276,7 @@ export default function PageContent({
           activeTab={summaryPanelTab}
           onTabChange={setSummaryPanelTab}
           recordingPanelRef={recordingPanelRef}
+          onPlaybackTimeUpdate={handlePlaybackTimeUpdate}
         />
       </div>
     </motion.div>

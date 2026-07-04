@@ -37,6 +37,8 @@ export interface VirtualizedTranscriptViewProps {
 
     /** When provided, timestamps become clickable and seek the meeting recording */
     onSeekToTimestamp?: (seconds: number) => void;
+    /** Segment currently being played back - rendered highlighted */
+    activeSegmentId?: string | null;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -75,6 +77,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming,
     showConfidence,
     onSeek,
+    isActive = false,
 }: {
     id: string;
     timestamp: number;
@@ -83,11 +86,15 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming: boolean;
     showConfidence: boolean;
     onSeek?: (seconds: number) => void;
+    isActive?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div
+            id={`segment-${id}`}
+            className={`mb-3 -mx-2 rounded-md px-2 py-1 transition-colors duration-300 ${isActive ? 'bg-blue-50' : ''}`}
+        >
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger
@@ -137,6 +144,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     loadedCount = 0,
     onLoadMore,
     onSeekToTimestamp,
+    activeSegmentId = null,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -310,6 +318,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         onSeek={onSeekToTimestamp}
+                                        isActive={segment.id === activeSegmentId}
                                     />
                                 </div>
                             );
@@ -367,6 +376,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         onSeek={onSeekToTimestamp}
+                                        isActive={segment.id === activeSegmentId}
                                     />
                                 </motion.div>
                             );
