@@ -7,8 +7,9 @@ use super::provider::TranscriptionError;
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 
 // Sequence counter for transcript updates
@@ -29,7 +30,7 @@ pub fn reset_speech_detected_flag() {
 static TRANSCRIPTION_PAUSED: AtomicBool = AtomicBool::new(false);
 
 // Buffered chunks during pause - transcribe when resumed or at recording end
-static PAUSED_CHUNKS: Mutex<Vec<AudioChunk>> = Mutex::new(Vec::new());
+static PAUSED_CHUNKS: Mutex<VecDeque<AudioChunk>> = Mutex::new(VecDeque::new());
 
 /// Set the transcription-paused flag. When true, the worker buffers incoming
 /// chunks instead of transcribing them. When set to false, buffered chunks
@@ -61,7 +62,7 @@ pub fn reset_transcription_paused_flag() {
 
 /// Drain and return all buffered paused chunks for processing
 pub fn drain_paused_chunks() -> Vec<AudioChunk> {
-    PAUSED_CHUNKS.lock().map(|mut c| std::mem::take(&mut *c)).unwrap_or_default()
+    PAUSED_CHUNKS.lock().map(|mut c| std::mem::take(&mut *c).into()).unwrap_or_default()
 }
 
 /// Drain any chunks buffered during a transcription pause and transcribe them
@@ -71,11 +72,6 @@ pub fn drain_paused_chunks() -> Vec<AudioChunk> {
 ///
 /// Returns the number of chunks actually transcribed (0 means nothing was
 /// buffered or the provider is unavailable).
-///
-/// The dispatch is inlined (rather than re-using `transcribe_chunk_with_provider`)
-/// because that helper is intentionally module-private — wiring it through here
-/// would expand the API surface for a single caller. The Match arms below mirror
-/// it 1:1.
 pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
     app: &AppHandle<R>,
 ) -> usize {
@@ -85,7 +81,7 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
     }
 
     info!(
-        "\u{23f8} drain_and_transcribe_paused_chunks: flushing {} buffered chunks at recording end",
+        "⏸ drain_and_transcribe_paused_chunks: flushing {} buffered chunks at recording end",
         buffered.len()
     );
 
@@ -114,45 +110,11 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
     let mut transcribed = 0usize;
     for chunk in buffered {
         let chunk_id = chunk.chunk_id;
+        let chunk_timestamp = chunk.timestamp;
         let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
-        // Mirror transcribe_chunk_with_provider's behaviour: skip empty audio,
-        // dispatch on engine variant, emit transcript-update on success.
-        let res: std::result::Result<(String, Option<f32>, bool), TranscriptionError> = (|| async {
-            let speech_samples = if chunk.sample_rate != 16000 {
-                crate::audio::audio_processing::resample_audio(&chunk.data, chunk.sample_rate, 16000)
-            } else {
-                chunk.data
-            };
-            if speech_samples.is_empty() {
-                return Err(TranscriptionError::AudioTooShort { samples: 0, minimum: 1600 });
-            }
-            match &engine {
-                TranscriptionEngine::Whisper(w) => {
-                    let language = crate::get_language_preference_internal();
-                    match w.transcribe_audio_with_confidence(speech_samples, language).await {
-                        Ok((text, confidence, is_partial)) => {
-                            Ok((text.trim().to_string(), Some(confidence), is_partial))
-                        }
-                        Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
-                    }
-                }
-                TranscriptionEngine::Parakeet(p) => match p.transcribe_audio(speech_samples).await {
-                    Ok(text) => Ok((text.trim().to_string(), None, false)),
-                    Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
-                },
-                TranscriptionEngine::Provider(provider) => {
-                    let language = crate::get_language_preference_internal();
-                    match provider.transcribe(speech_samples, language).await {
-                        Ok(result) => Ok((
-                            result.text.trim().to_string(),
-                            result.confidence,
-                            result.is_partial,
-                        )),
-                        Err(e) => Err(e),
-                    }
-                }
-            }
-        })().await;
+
+        // Re-use transcribe_chunk_with_provider instead of inlining provider dispatch
+        let res = transcribe_chunk_with_provider(&engine, chunk, app).await;
 
         match res {
             Ok((text, confidence_opt, is_partial)) => {
@@ -164,30 +126,8 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
                 if text.trim().is_empty() || !meets_threshold {
                     continue;
                 }
-                let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
-                let update = TranscriptUpdate {
-                    text,
-                    timestamp: format_current_timestamp(),
-                    source: "Audio".to_string(),
-                    sequence_id,
-                    chunk_start_time: chunk.timestamp,
-                    is_partial,
-                    confidence: confidence_opt.unwrap_or(0.85),
-                    audio_start_time: chunk.timestamp,
-                    audio_end_time: chunk.timestamp + chunk_duration,
-                    duration: chunk_duration,
-                };
-                if let Err(e) = app.emit("transcript-update", &update) {
-                    error!(
-                        "drain_and_transcribe_paused_chunks: failed to emit transcript-update for chunk {}: {}",
-                        chunk_id, e
-                    );
-                } else {
+                if emit_transcript_update(app, text, confidence_opt, is_partial, chunk_id, chunk_timestamp, chunk_duration).await {
                     transcribed += 1;
-                    info!(
-                        "\u{2705} drain_and_transcribe_paused_chunks: emitted buffered chunk {} ({} seq)",
-                        chunk_id, sequence_id
-                    );
                 }
             }
             Err(e) => {
@@ -199,10 +139,55 @@ pub async fn drain_and_transcribe_paused_chunks<R: Runtime>(
         }
     }
     info!(
-        "\u{1f389} drain_and_transcribe_paused_chunks: drained and processed {} buffered paused chunks",
+        "🎉 drain_and_transcribe_paused_chunks: drained and processed {} buffered paused chunks",
         transcribed
     );
     transcribed
+}
+
+/// Build and emit a TranscriptUpdate event for a transcription result, including
+/// sequence counter increment and audio_start_time-based timestamps.
+///
+/// Both the worker loop and `drain_and_transcribe_paused_chunks` use this to
+/// avoid duplicating TranscriptUpdate construction and the emit call.
+///
+/// Returns `true` if the event was emitted successfully, `false` on error.
+async fn emit_transcript_update<R: Runtime>(
+    app: &AppHandle<R>,
+    text: String,
+    confidence_opt: Option<f32>,
+    is_partial: bool,
+    chunk_id: u64,
+    audio_start_time: f64,
+    chunk_duration: f64,
+) -> bool {
+    let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let audio_end_time = audio_start_time + chunk_duration;
+    let update = TranscriptUpdate {
+        text,
+        timestamp: format_current_timestamp(),
+        source: "Audio".to_string(),
+        sequence_id,
+        chunk_start_time: audio_start_time,
+        is_partial,
+        confidence: confidence_opt.unwrap_or(0.85),
+        audio_start_time,
+        audio_end_time,
+        duration: chunk_duration,
+    };
+    if let Err(e) = app.emit("transcript-update", &update) {
+        error!(
+            "emit_transcript_update: failed to emit transcript-update for chunk {}: {}",
+            chunk_id, e
+        );
+        false
+    } else {
+        info!(
+            "✅ emit_transcript_update: emitted chunk {} ({} seq)",
+            chunk_id, sequence_id
+        );
+        true
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -324,6 +309,7 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                            let chunk_id_for_emit = chunk.chunk_id;
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -373,39 +359,11 @@ pub fn start_transcription_task<R: Runtime>(
                                             info!("🔍 Speech already detected in this session, not re-emitting");
                                         }
 
-                                        // Generate sequence ID and calculate timestamps FIRST
-                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
-                                        let audio_start_time = chunk_timestamp; // Already in seconds from recording start
-                                        let audio_end_time = chunk_timestamp + chunk_duration;
-
-                                        // Save structured transcript segment to recording manager (only final results)
-                                        // Save ALL segments (partial and final) to ensure complete JSON
-                                        // Create structured segment with full timestamp data
-                                        // NOTE: This is now handled via the transcript-update event emission below
-                                        // The recording_commands module listens to these events and saves them
-                                        // This decouples the transcription worker from direct RECORDING_MANAGER access
-
-                                        // Emit transcript update with NEW recording-relative timestamps
-
-                                        let update = TranscriptUpdate {
-                                            text: transcript,
-                                            timestamp: format_current_timestamp(), // Wall-clock for reference
-                                            source: "Audio".to_string(),
-                                            sequence_id,
-                                            chunk_start_time: chunk_timestamp, // Legacy compatibility
-                                            is_partial,
-                                            confidence: confidence_opt.unwrap_or(0.85), // Default for providers without confidence
-                                            // NEW: Recording-relative timestamps for sync
-                                            audio_start_time,
-                                            audio_end_time,
-                                            duration: chunk_duration,
-                                        };
-
-                                        if let Err(e) = app_clone.emit("transcript-update", &update)
-                                        {
+                                        // Emit transcript update via shared helper (dedupes TranscriptUpdate construction)
+                                        if !emit_transcript_update(&app_clone, transcript, confidence_opt, is_partial, chunk_id_for_emit, chunk_timestamp, chunk_duration).await {
                                             error!(
-                                                "Worker {}: Failed to emit transcript update: {}",
-                                                worker_id, e
+                                                "Worker {}: Failed to emit transcript update for chunk {}",
+                                                worker_id, chunk_id_for_emit
                                             );
                                         }
                                         // PERFORMANCE: Removed verbose logging of every emission
@@ -775,4 +733,61 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transcript_update_roundtrip() {
+        let update = TranscriptUpdate {
+            text: "hello world".into(),
+            timestamp: "14:30:05".into(),
+            source: "Audio".into(),
+            sequence_id: 42,
+            chunk_start_time: 10.0,
+            is_partial: false,
+            confidence: 0.85,
+            audio_start_time: 10.0,
+            audio_end_time: 13.5,
+            duration: 3.5,
+        };
+
+        let json = serde_json::to_string(&update).expect("serialize");
+        let deserialized: TranscriptUpdate = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.text, "hello world");
+        assert_eq!(deserialized.sequence_id, 42);
+        assert!(!deserialized.is_partial);
+    }
+
+    #[test]
+    fn test_format_current_timestamp() {
+        let ts = format_current_timestamp();
+        assert_eq!(ts.len(), 8);
+        assert_eq!(ts.chars().nth(2).unwrap(), ':');
+        assert_eq!(ts.chars().nth(5).unwrap(), ':');
+    }
+
+    #[test]
+    fn test_format_recording_time() {
+        assert_eq!(format_recording_time(0.0), "[00:00]");
+        assert_eq!(format_recording_time(65.0), "[01:05]");
+        assert_eq!(format_recording_time(3661.0), "[61:01]");
+    }
+
+    #[test]
+    fn test_paused_chunks_empty_by_default() {
+        reset_transcription_paused_flag();
+        let chunks = drain_paused_chunks();
+        assert!(chunks.is_empty(), "expected no paused chunks on fresh reset");
+    }
+
+    #[test]
+    fn test_transcription_paused_flag_reset() {
+        set_transcription_paused(true);
+        assert!(is_transcription_paused());
+        reset_transcription_paused_flag();
+        assert!(!is_transcription_paused());
+    }
 }
