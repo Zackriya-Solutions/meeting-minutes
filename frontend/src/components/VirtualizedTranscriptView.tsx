@@ -64,6 +64,16 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(/\s+/g, ' ').trim();
 }
 
+type VisibleDiarizationStatus = Exclude<DiarizationStatus, 'none'>;
+
+const DIARIZATION_STATUS_BADGES: Record<VisibleDiarizationStatus, { label: string; toneClassName: string }> = {
+    provisional: { label: 'Provisional', toneClassName: 'bg-amber-100 text-amber-800' },
+    final: { label: 'Final', toneClassName: 'bg-green-100 text-green-800' },
+    needs_review: { label: 'Needs review', toneClassName: 'bg-purple-100 text-purple-800' },
+    fallback_to_live: { label: 'Live fallback', toneClassName: 'bg-orange-100 text-orange-800' },
+    failed: { label: 'Failed', toneClassName: 'bg-destructive/15 text-destructive' },
+};
+
 // Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
@@ -89,6 +99,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const visibleSpeakerLabel = isOverlap ? 'Multiple speakers' : speakerLabel?.trim();
+    const statusBadge =
+        diarizationStatus && diarizationStatus !== 'none'
+            ? DIARIZATION_STATUS_BADGES[diarizationStatus]
+            : null;
 
     return (
         <div id={`segment-${id}`} className="mb-3">
@@ -106,27 +121,19 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
-                    {(speakerLabel || isOverlap || diarizationStatus) && (
+                    {(visibleSpeakerLabel || statusBadge) && (
                         <div className="mb-1 flex items-center gap-2 text-xs">
-                            <span
-                                className="font-medium"
-                                style={{ color: speakerColor || (isOverlap ? '#f97316' : '#475569') }}
-                            >
-                                {isOverlap ? 'Multiple speakers' : speakerLabel}
-                            </span>
-                            {diarizationStatus === 'provisional' && (
-                                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
-                                    Provisional
+                            {visibleSpeakerLabel && (
+                                <span
+                                    className="font-medium"
+                                    style={{ color: speakerColor || (isOverlap ? '#f97316' : undefined) }}
+                                >
+                                    {visibleSpeakerLabel}
                                 </span>
                             )}
-                            {diarizationStatus === 'final' && (
-                                <span className="rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800">
-                                    Final
-                                </span>
-                            )}
-                            {diarizationStatus === 'needs_review' && (
-                                <span className="rounded-full bg-purple-100 px-2 py-0.5 font-medium text-purple-800">
-                                    Needs review
+                            {statusBadge && (
+                                <span className={`rounded-full px-2 py-0.5 font-medium ${statusBadge.toneClassName}`}>
+                                    {statusBadge.label}
                                 </span>
                             )}
                         </div>
