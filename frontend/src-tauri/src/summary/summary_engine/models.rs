@@ -204,7 +204,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             size_mb: 2963,
             context_size: 32768,
             layer_count: 35,
-            sampling: SamplingParams::gemma4_instruct(vec!["<end_of_turn>".to_string()]),
+            sampling: SamplingParams::gemma4_instruct(vec!["<turn|>".to_string()]),
             description: "Enhanced Gemma 4 model for built-in summaries. Strong quality with moderate local requirements.".to_string(),
         },
         // Gemma 4 E4B - High quality Gemma tier with pinned model artifact.
@@ -217,7 +217,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             size_mb: 5088,
             context_size: 32768,
             layer_count: 42,
-            sampling: SamplingParams::gemma4_instruct(vec!["<end_of_turn>".to_string()]),
+            sampling: SamplingParams::gemma4_instruct(vec!["<turn|>".to_string()]),
             description: "High-quality Gemma 4 model for built-in summaries. Best Gemma option in the current lineup.".to_string(),
         },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
@@ -293,11 +293,11 @@ pub const GEMMA3_TEMPLATE: &str = "\
 
 /// Gemma 4 chat template format with native system-role support.
 pub const GEMMA4_TEMPLATE: &str = "\
-<start_of_turn>system
-{system_prompt}<end_of_turn>
-<start_of_turn>user
-{user_prompt}<end_of_turn>
-<start_of_turn>model
+<|turn>system
+{system_prompt}<turn|>
+<|turn>user
+{user_prompt}<turn|>
+<|turn>model
 ";
 
 /// Qwen 3.5 non-thinking chat template format.
@@ -319,6 +319,14 @@ fn escape_user_prompt_control_markers(user_prompt: &str) -> String {
     user_prompt
         .replace("<|im_start|>", "< |im_start| >")
         .replace("<|im_end|>", "< |im_end| >")
+        .replace("<|turn>", "< |turn >")
+        .replace("<turn|>", "< turn| >")
+        .replace("<|tool_call>", "< |tool_call >")
+        .replace("<tool_call|>", "< tool_call| >")
+        .replace("<|tool_response>", "< |tool_response >")
+        .replace("<tool_response|>", "< tool_response| >")
+        .replace("<|channel>", "< |channel >")
+        .replace("<channel|>", "< channel| >")
         .replace("<start_of_turn>", "< start_of_turn >")
         .replace("<end_of_turn>", "< end_of_turn >")
         .replace("<think>", "< think >")
@@ -447,7 +455,7 @@ mod tests {
         assert_eq!(gemma_e2b.size_mb, 2963);
         assert_eq!(gemma_e2b.context_size, 32768);
         assert_eq!(gemma_e2b.layer_count, 35);
-        assert_eq!(gemma_e2b.sampling.stop_tokens, vec!["<end_of_turn>".to_string()]);
+        assert_eq!(gemma_e2b.sampling.stop_tokens, vec!["<turn|>".to_string()]);
 
         let gemma_e4b = get_model_by_name("gemma4:e4b").expect("gemma 4 e4b model should exist");
         assert_eq!(gemma_e4b.display_name, "Gemma 4 E4B (High Quality)");
@@ -461,7 +469,7 @@ mod tests {
         assert_eq!(gemma_e4b.size_mb, 5088);
         assert_eq!(gemma_e4b.context_size, 32768);
         assert_eq!(gemma_e4b.layer_count, 42);
-        assert_eq!(gemma_e4b.sampling.stop_tokens, vec!["<end_of_turn>".to_string()]);
+        assert_eq!(gemma_e4b.sampling.stop_tokens, vec!["<turn|>".to_string()]);
     }
 
     #[test]
@@ -511,17 +519,17 @@ mod tests {
         let formatted = format_prompt(
             "gemma4",
             "system rules",
-            "literal <start_of_turn> and <end_of_turn> plus <|im_start|> and <|im_end|>",
+            "literal <|turn> and <turn|> plus <start_of_turn> and <end_of_turn> plus <|im_start|> and <|im_end|>",
         )
         .unwrap();
 
-        assert!(formatted.contains("<start_of_turn>system\nsystem rules<end_of_turn>"));
+        assert!(formatted.contains("<|turn>system\nsystem rules<turn|>"));
         assert!(formatted.contains(
-            "literal < start_of_turn > and < end_of_turn > plus < |im_start| > and < |im_end| >"
+            "literal < |turn > and < turn| > plus < start_of_turn > and < end_of_turn > plus < |im_start| > and < |im_end| >"
         ));
-        assert_eq!(formatted.matches("<start_of_turn>").count(), 3);
-        assert_eq!(formatted.matches("<end_of_turn>").count(), 2);
-        assert!(formatted.ends_with("<start_of_turn>model\n"));
+        assert_eq!(formatted.matches("<|turn>").count(), 3);
+        assert_eq!(formatted.matches("<turn|>").count(), 2);
+        assert!(formatted.ends_with("<|turn>model\n"));
     }
 
     #[test]

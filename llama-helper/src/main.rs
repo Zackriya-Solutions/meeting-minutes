@@ -13,6 +13,8 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel};
+use llama_cpp_2::token::{logit_bias::LlamaLogitBias, LlamaToken};
+use llama_cpp_2::token_type::LlamaTokenAttr;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -147,7 +149,7 @@ fn detect_vram_gb() -> f32 {
         }
     }
 
-    /// TODO: Vulkan VRAM detection
+    // TODO: Vulkan VRAM detection
 
     eprintln!("VRAM detection not available, using conservative estimate");
     4.0 // Conservative fallback
@@ -274,6 +276,26 @@ fn get_default_gpu_layers(model_path: &PathBuf, context_size: u32) -> u32 {
     calculate_gpu_layers(model_path, estimated_layers, vram, context_size)
 }
 
+fn parse_gpu_layers_override(raw: &str) -> Option<u32> {
+    raw.trim().parse::<u32>().ok()
+}
+
+fn get_configured_gpu_layers(model_path: &PathBuf, context_size: u32) -> u32 {
+    if let Ok(raw) = std::env::var("LLAMA_GPU_LAYERS") {
+        if let Some(layers) = parse_gpu_layers_override(&raw) {
+            eprintln!("🛠️ LLAMA_GPU_LAYERS override: {}", layers);
+            return layers;
+        }
+
+        eprintln!(
+            "⚠️ Ignoring invalid LLAMA_GPU_LAYERS value '{}', using automatic GPU layer detection",
+            raw
+        );
+    }
+
+    get_default_gpu_layers(model_path, context_size)
+}
+
 // ============================================================================
 // Model State Management
 // ============================================================================
@@ -283,6 +305,7 @@ struct ModelState {
     model: Option<LlamaModel>,
     model_path: Option<PathBuf>,
     context_size: u32,
+    suppressed_token_biases: Vec<LlamaLogitBias>,
     last_activity: Arc<AtomicU64>,
 }
 
@@ -294,6 +317,7 @@ impl ModelState {
             model: None,
             model_path: None,
             context_size: 2048,
+            suppressed_token_biases: Vec::new(),
             last_activity: Arc::new(AtomicU64::new(Self::current_timestamp())),
         })
     }
@@ -327,14 +351,27 @@ impl ModelState {
         eprintln!("📥 Loading model: {}", model_path.display());
 
         // Detect GPU layers
-        let gpu_layers = get_default_gpu_layers(&model_path, context_size);
+        let gpu_layers = get_configured_gpu_layers(&model_path, context_size);
 
         // Configure model parameters with GPU offload
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
+        let mut model_params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
+        if gpu_layers == 0 {
+            model_params = model_params
+                .with_devices(&[])
+                .context("failed to configure CPU-only llama devices")?;
+        }
         let model_params = pin!(model_params);
 
         let model = LlamaModel::load_from_file(&self.backend, model_path.clone(), &model_params)
             .with_context(|| format!("unable to load model at {:?}", model_path))?;
+
+        self.suppressed_token_biases = build_suppressed_token_biases(&model);
+        if !self.suppressed_token_biases.is_empty() {
+            eprintln!(
+                "🚫 Suppressing {} non-generative special/control tokens",
+                self.suppressed_token_biases.len()
+            );
+        }
 
         self.model = Some(model);
         self.model_path = Some(model_path);
@@ -410,41 +447,33 @@ impl ModelState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u32;
-        let sampler = if sampling.temperature <= 0.0 {
-            if sampling.uses_penalties() {
-                LlamaSampler::chain_simple([
-                    LlamaSampler::penalties(
-                        sampling.penalty_last_n,
-                        sampling.repeat_penalty,
-                        sampling.frequency_penalty,
-                        sampling.presence_penalty,
-                    ),
-                    LlamaSampler::greedy(),
-                ])
-            } else {
-                LlamaSampler::chain_simple([LlamaSampler::greedy()])
-            }
-        } else if sampling.uses_penalties() {
-            LlamaSampler::chain_simple([
-                LlamaSampler::penalties(
-                    sampling.penalty_last_n,
-                    sampling.repeat_penalty,
-                    sampling.frequency_penalty,
-                    sampling.presence_penalty,
-                ),
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
+        let mut sampler_chain = Vec::new();
+        if !self.suppressed_token_biases.is_empty() {
+            sampler_chain.push(LlamaSampler::logit_bias(
+                model.n_vocab(),
+                &self.suppressed_token_biases,
+            ));
+        }
+
+        if sampling.uses_penalties() {
+            sampler_chain.push(LlamaSampler::penalties(
+                sampling.penalty_last_n,
+                sampling.repeat_penalty,
+                sampling.frequency_penalty,
+                sampling.presence_penalty,
+            ));
+        }
+
+        if sampling.temperature <= 0.0 {
+            sampler_chain.push(LlamaSampler::greedy());
         } else {
-            LlamaSampler::chain_simple([
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
-        };
+            sampler_chain.push(LlamaSampler::top_k(sampling.top_k));
+            sampler_chain.push(LlamaSampler::top_p(sampling.top_p, 1));
+            sampler_chain.push(LlamaSampler::temp(sampling.temperature));
+            sampler_chain.push(LlamaSampler::dist(seed));
+        }
+
+        let sampler = LlamaSampler::chain_simple(sampler_chain);
         let mut sampler = pin!(sampler);
 
         loop {
@@ -532,6 +561,23 @@ impl ModelState {
         self.update_activity();
         Ok(output)
     }
+}
+
+fn build_suppressed_token_biases(model: &LlamaModel) -> Vec<LlamaLogitBias> {
+    (0..model.n_vocab())
+        .map(LlamaToken::new)
+        .filter(|token| {
+            if model.is_eog_token(*token) {
+                return false;
+            }
+
+            let attrs = model.token_attr(*token);
+            attrs.contains(LlamaTokenAttr::Control)
+                || attrs.contains(LlamaTokenAttr::Unknown)
+                || attrs.contains(LlamaTokenAttr::Unused)
+        })
+        .map(|token| LlamaLogitBias::new(token, -1.0e9))
+        .collect()
 }
 
 // ============================================================================
@@ -746,5 +792,18 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.05);
         assert_eq!(sampling.penalty_last_n, 256);
         assert!(sampling.uses_penalties());
+    }
+
+    #[test]
+    fn gpu_layers_override_accepts_zero_for_cpu_only() {
+        assert_eq!(parse_gpu_layers_override("0"), Some(0));
+        assert_eq!(parse_gpu_layers_override(" 7 "), Some(7));
+    }
+
+    #[test]
+    fn gpu_layers_override_rejects_invalid_values() {
+        assert_eq!(parse_gpu_layers_override("-1"), None);
+        assert_eq!(parse_gpu_layers_override("auto"), None);
+        assert_eq!(parse_gpu_layers_override(""), None);
     }
 }

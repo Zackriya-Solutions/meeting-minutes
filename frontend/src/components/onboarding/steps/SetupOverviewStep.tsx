@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Info } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { Check, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { cn } from '@/lib/utils';
+import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
 import {
   Tooltip,
   TooltipContent,
@@ -10,9 +13,28 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+interface SummaryModelOption {
+  name: string;
+  display_name: string;
+  status: {
+    type: 'not_downloaded' | 'downloading' | 'available' | 'corrupted' | 'error';
+  };
+  size_mb: number;
+  context_size: number;
+  description: string;
+}
+
 export function SetupOverviewStep() {
-  const { goNext } = useOnboarding();
+  const {
+    goNext,
+    selectedSummaryModel,
+    recommendedSummaryModel,
+    setSelectedSummaryModel,
+    setSummaryModelDownloaded,
+  } = useOnboarding();
   const [isMac, setIsMac] = useState(false);
+  const [summaryModels, setSummaryModels] = useState<SummaryModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   useEffect(() => {
     const checkPlatform = async () => {
@@ -24,6 +46,22 @@ export function SetupOverviewStep() {
       }
     };
     checkPlatform();
+  }, []);
+
+  useEffect(() => {
+    const loadSummaryModels = async () => {
+      setModelsLoading(true);
+      try {
+        const models = await invoke<SummaryModelOption[]>('builtin_ai_list_models');
+        setSummaryModels(models);
+      } catch (error) {
+        console.error('[SetupOverviewStep] Failed to load summary models:', error);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+
+    loadSummaryModels();
   }, []);
 
   const steps = [
@@ -41,6 +79,11 @@ export function SetupOverviewStep() {
 
   const handleContinue = () => {
     goNext();
+  };
+
+  const handleSummaryModelSelect = (model: SummaryModelOption) => {
+    setSelectedSummaryModel(model.name);
+    setSummaryModelDownloaded(model.status.type === 'available');
   };
 
   return (
@@ -87,6 +130,77 @@ export function SetupOverviewStep() {
           </div>
         </div>
 
+        <div className="w-full max-w-md space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">Summary model</h3>
+            {recommendedSummaryModel && (
+              <span className="text-xs text-muted-foreground">Recommended: {recommendedSummaryModel}</span>
+            )}
+          </div>
+
+          <div className="grid gap-2">
+            {summaryModels.map((model) => {
+              const isSelected = selectedSummaryModel === model.name;
+              const isRecommended = recommendedSummaryModel === model.name;
+              const isAvailable = model.status.type === 'available';
+
+              return (
+                <button
+                  key={model.name}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => handleSummaryModelSelect(model)}
+                  className={cn(
+                    'w-full rounded-lg border bg-card p-3 text-left transition-colors',
+                    isSelected
+                      ? 'border-primary ring-2 ring-ring'
+                      : 'border-border hover:border-primary/70'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="break-words text-sm font-semibold text-foreground">
+                          {model.display_name || model.name}
+                        </span>
+                        {isRecommended && (
+                          <span className="rounded bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
+                            Recommended
+                          </span>
+                        )}
+                      </div>
+                      {model.description && (
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {model.description}
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span
+                        className={cn(
+                          'text-xs font-medium',
+                          isAvailable ? 'text-success' : 'text-muted-foreground'
+                        )}
+                      >
+                        {isAvailable ? 'Ready' : 'Download'}
+                      </span>
+                      {isSelected && <Check className="h-4 w-4 text-primary" />}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+
+            {modelsLoading && (
+              <div className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+                Loading summary models...
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* CTA Section */}
         <div className="w-full max-w-xs space-y-4">
