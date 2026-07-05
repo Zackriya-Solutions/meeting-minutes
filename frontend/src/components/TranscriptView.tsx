@@ -14,6 +14,7 @@ interface TranscriptViewProps {
   isProcessing?: boolean; // Is processing/finalizing transcription (hides "Listening..." indicator)
   isStopping?: boolean; // Is recording being stopped (provides immediate UI feedback)
   enableStreaming?: boolean; // Enable streaming effect for live transcription UX
+  modelLabel?: string; // Transcription model currently being used
 }
 
 interface SpeechDetectedEvent {
@@ -104,7 +105,7 @@ function cleanStopWords(text: string): string {
   return cleanedText;
 }
 
-export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
+export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false, modelLabel }) => {
   const [speechDetected, setSpeechDetected] = useState(false);
 
   // Debug: Log the props to understand what's happening
@@ -255,7 +256,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       <AnimatePresence>
         {isRecording && (
           <div className="sticky top-4 z-10 bg-white pb-2">
-            <RecordingStatusBar isPaused={isPaused} />
+            <RecordingStatusBar isPaused={isPaused} modelLabel={modelLabel} />
           </div>
         )}
       </AnimatePresence>

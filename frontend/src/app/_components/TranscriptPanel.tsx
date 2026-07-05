@@ -10,6 +10,7 @@ import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useMemo } from 'react';
+import { formatTranscriptionModelLabel } from '@/lib/transcription-model-display';
 
 /**
  * TranscriptPanel Component
@@ -36,6 +37,10 @@ export function TranscriptPanel({
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
+  const transcriptionModelLabel = useMemo(
+    () => formatTranscriptionModelLabel(transcriptModelConfig),
+    [transcriptModelConfig]
+  );
 
   // Convert transcripts to segments for virtualized view
   const segments = useMemo(() =>
@@ -113,6 +118,7 @@ export function TranscriptPanel({
               isStopping={isStopping}
               enableStreaming={isRecording}
               showConfidence={true}
+              modelLabel={transcriptionModelLabel}
             />
           </div>
         </div>

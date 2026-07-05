@@ -25,6 +25,8 @@ export interface VirtualizedTranscriptViewProps {
     enableStreaming?: boolean;
     /** Show confidence indicators */
     showConfidence?: boolean;
+    /** Transcription model currently being used */
+    modelLabel?: string;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
 
@@ -118,6 +120,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isStopping = false,
     enableStreaming = false,
     showConfidence = true,
+    modelLabel,
     disableAutoScroll = false,
     hasMore = false,
     isLoadingMore = false,
@@ -229,7 +232,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             <AnimatePresence>
                 {isRecording && (
                     <div className="sticky top-0 z-10 bg-white pb-2">
-                        <RecordingStatusBar isPaused={isPaused} />
+                        <RecordingStatusBar isPaused={isPaused} modelLabel={modelLabel} />
                     </div>
                 )}
             </AnimatePresence>
