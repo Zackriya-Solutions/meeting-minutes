@@ -1,5 +1,5 @@
 [package]
-name = "meetily"
+name = "meetilyheb"
 version = "0.4.0"
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
@@ -132,6 +132,7 @@ realfft = "3.4.0"
 regex = "1.11.0"
 ndarray = "0.16"
 bytes = { version = "1.9.0", features = ["serde"] }
+base64 = "0.22"
 
 esaxx-rs = "0.1.10"
 symphonia = { version = "0.5.4", features = ["aac", "isomp4", "mp3", "flac", "ogg", "vorbis", "pcm", "wav", "opt-simd"] }

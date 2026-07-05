@@ -24,7 +24,7 @@ pub struct SaveTranscriptConfigRequest {
 
 pub struct SettingsRepository;
 
-// Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
+// Transcript providers: localWhisper, parakeet, deepgram, elevenLabs, groq, openai, gemini
 // Summary providers: openai, claude, ollama, groq, added openrouter
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
 
@@ -147,7 +147,6 @@ impl SettingsRepository {
                 .fetch_optional(pool)
                 .await?;
         Ok(setting)
-
     }
 
     pub async fn save_transcript_config(
@@ -184,6 +183,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "gemini" => "geminiApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -198,7 +198,9 @@ impl SettingsRepository {
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,
-            api_key_column, crate::config::DEFAULT_PARAKEET_MODEL, api_key_column
+            api_key_column,
+            crate::config::DEFAULT_PARAKEET_MODEL,
+            api_key_column
         );
         sqlx::query(&query).bind(api_key).execute(pool).await?;
 
@@ -216,6 +218,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "gemini" => "geminiApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -285,7 +288,7 @@ impl SettingsRepository {
             FROM settings
             WHERE id = '1'
             LIMIT 1
-            "#
+            "#,
         )
         .fetch_optional(pool)
         .await?;
@@ -296,10 +299,11 @@ impl SettingsRepository {
 
                 if let Some(json) = config_json {
                     // Parse JSON into CustomOpenAIConfig
-                    let config: CustomOpenAIConfig = serde_json::from_str(&json)
-                        .map_err(|e| sqlx::Error::Protocol(
-                            format!("Invalid JSON in customOpenAIConfig: {}", e).into()
-                        ))?;
+                    let config: CustomOpenAIConfig = serde_json::from_str(&json).map_err(|e| {
+                        sqlx::Error::Protocol(
+                            format!("Invalid JSON in customOpenAIConfig: {}", e).into(),
+                        )
+                    })?;
 
                     Ok(Some(config))
                 } else {
@@ -324,10 +328,9 @@ impl SettingsRepository {
         config: &CustomOpenAIConfig,
     ) -> std::result::Result<(), sqlx::Error> {
         // Serialize config to JSON
-        let config_json = serde_json::to_string(config)
-            .map_err(|e| sqlx::Error::Protocol(
-                format!("Failed to serialize config to JSON: {}", e).into()
-            ))?;
+        let config_json = serde_json::to_string(config).map_err(|e| {
+            sqlx::Error::Protocol(format!("Failed to serialize config to JSON: {}", e).into())
+        })?;
 
         // Upsert into settings table
         sqlx::query(

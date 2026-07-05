@@ -7,10 +7,14 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import {
+    DEFAULT_GEMINI_TRANSCRIPTION_MODEL,
+    DEFAULT_OPENAI_TRANSCRIPTION_MODEL,
+} from '@/constants/modelDefaults';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'gemini';
     model: string;
     apiKey?: string | null;
 }
@@ -45,6 +49,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             const data = await invoke('api_get_transcript_api_key', { provider }) as string;
 
             setApiKey(data || '');
+            setTranscriptModelConfig({
+                ...transcriptModelConfig,
+                provider: provider as TranscriptModelProps['provider'],
+                model: defaultModelForProvider(provider as TranscriptModelProps['provider']),
+                apiKey: data || null,
+            });
         } catch (err) {
             console.error('Error fetching API key:', err);
             setApiKey(null);
@@ -56,9 +66,18 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
-        openai: ['gpt-4o'],
+        openai: [DEFAULT_OPENAI_TRANSCRIPTION_MODEL, 'gpt-4o-mini-transcribe'],
+        gemini: [DEFAULT_GEMINI_TRANSCRIPTION_MODEL, 'gemini-2.5-pro'],
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = uiProvider === 'deepgram' || uiProvider === 'elevenLabs' || uiProvider === 'openai' || uiProvider === 'groq' || uiProvider === 'gemini';
+    const defaultModelForProvider = (provider: TranscriptModelProps['provider']) => {
+        if (provider === 'openai') return DEFAULT_OPENAI_TRANSCRIPTION_MODEL;
+        if (provider === 'gemini') return DEFAULT_GEMINI_TRANSCRIPTION_MODEL;
+        if (provider === 'groq') return 'llama-3.3-70b-versatile';
+        if (provider === 'deepgram') return 'nova-2-phonecall';
+        if (provider === 'elevenLabs') return 'eleven_multilingual_v2';
+        return transcriptModelConfig.model;
+    };
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -114,6 +133,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     setUiProvider(provider);
                                     if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
+                                        setTranscriptModelConfig({
+                                            ...transcriptModelConfig,
+                                            provider,
+                                            model: defaultModelForProvider(provider),
+                                        });
                                     }
                                 }}
                             >
@@ -123,10 +147,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
-                                    <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
-                                    <SelectItem value="groq">☁️ Groq</SelectItem>
-                                    <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
+                                    <SelectItem value="openai">☁️ OpenAI</SelectItem>
+                                    <SelectItem value="gemini">☁️ Gemini</SelectItem>
                                 </SelectContent>
                             </Select>
 
@@ -184,7 +206,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''
                                         }`}
                                     value={apiKey || ''}
-                                    onChange={(e) => setApiKey(e.target.value)}
+                                    onChange={(e) => {
+                                        const nextApiKey = e.target.value;
+                                        setApiKey(nextApiKey);
+                                        setTranscriptModelConfig({
+                                            ...transcriptModelConfig,
+                                            provider: uiProvider,
+                                            model: transcriptModelConfig.model || defaultModelForProvider(uiProvider),
+                                            apiKey: nextApiKey,
+                                        });
+                                    }}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
                                     placeholder="Enter your API key"
@@ -224,8 +255,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
-
 
 
 

@@ -13,20 +13,21 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
     <Dialog aria-describedby={undefined}>
       {isCollapsed ? (
         <DialogTrigger asChild>
-          <button ref={ref} className="flex items-center justify-start mb-2 cursor-pointer bg-transparent border-none p-0 hover:opacity-80 transition-opacity">
-            <Image src="/logo-collapsed.png" alt="Logo" width={40} height={32} />
+          <button ref={ref} className="flex items-center justify-center mb-2 cursor-pointer bg-transparent border-none p-0 hover:opacity-80 transition-opacity">
+            <Image src="/meetilyheb-icon.png" alt="MeetilyHeb" width={40} height={40} className="rounded-lg" />
           </button>
         </DialogTrigger>
       ) : (
         <DialogTrigger asChild>
-          <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center cursor-pointer hover:opacity-80 transition-opacity">
-            <span>Meetily</span>
+          <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 flex items-center justify-center gap-2 cursor-pointer hover:opacity-80 transition-opacity px-3 py-1">
+            <Image src="/meetilyheb-icon.png" alt="" width={24} height={24} className="rounded-md" />
+            <span>MeetilyHeb</span>
           </span>
         </DialogTrigger>
       )}
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>About Meetily</DialogTitle>
+          <DialogTitle>About MeetilyHeb</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>

@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
+import { useConfig } from '@/contexts/ConfigContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
@@ -58,6 +60,7 @@ export function useRecordingStop(
     meetingTitle,
     markMeetingAsSaved,
   } = useTranscripts();
+  const { transcriptModelConfig, selectedLanguage } = useConfig();
 
   const {
     refetchMeetings,
@@ -265,6 +268,44 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
+          let transcriptTextsForPostProcessing = freshTranscripts.map(t => t.text);
+          const isHostedBatchProvider =
+            transcriptModelConfig.provider === 'openai' ||
+            transcriptModelConfig.provider === 'gemini';
+
+          if (isHostedBatchProvider && folderPath) {
+            setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, `Transcribing with ${transcriptModelConfig.provider}...`);
+            toast.info('Transcribing recorded meeting...', {
+              description: `Using ${transcriptModelConfig.provider}/${transcriptModelConfig.model}`,
+              duration: 5000,
+            });
+
+            const hostedResult = await invoke<{
+              meeting_id: string;
+              segments_count: number;
+              provider: string;
+              model: string;
+            }>('start_hosted_batch_transcription_command', {
+              meetingId,
+              meetingFolderPath: folderPath,
+              provider: transcriptModelConfig.provider,
+              model: transcriptModelConfig.model,
+              language: selectedLanguage === 'auto' ? null : selectedLanguage,
+            });
+
+            console.log('✅ Hosted transcription completed:', hostedResult);
+
+            const paged = await invoke<{
+              transcripts: Array<{ text: string }>;
+              total_count: number;
+            }>('api_get_meeting_transcripts', {
+              meetingId,
+              limit: 10000,
+              offset: 0,
+            });
+            transcriptTextsForPostProcessing = paged.transcripts.map(t => t.text);
+          }
+
           let shouldDetectSummaryLanguage = false;
           try {
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
@@ -279,7 +320,7 @@ export function useRecordingStop(
             try {
               await detectAndCacheSummaryLanguage(
                 meetingId,
-                freshTranscripts.map(t => t.text)
+                transcriptTextsForPostProcessing
               );
             } catch (error) {
               console.warn('Failed to detect summary language for new meeting:', error);
@@ -290,7 +331,7 @@ export function useRecordingStop(
           }
 
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
-          console.log('   Transcripts:', freshTranscripts.length);
+          console.log('   Transcripts:', transcriptTextsForPostProcessing.length);
           console.log('   folder_path:', folderPath);
 
           // Mark meeting as saved in IndexedDB (for recovery system)
@@ -324,7 +365,7 @@ export function useRecordingStop(
 
           // Show success toast with navigation option
           toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+            description: `${transcriptTextsForPostProcessing.length} transcript segments saved.`,
             action: {
               label: 'View Meeting',
               onClick: () => {
@@ -435,6 +476,8 @@ export function useRecordingStop(
     meetings,
     setIsMeetingActive,
     router,
+    transcriptModelConfig,
+    selectedLanguage,
   ]);
 
   // Expose handleRecordingStop function to window for Rust callbacks
