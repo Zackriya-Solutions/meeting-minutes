@@ -752,6 +752,29 @@ mod tests {
     }
 
     #[test]
+    fn summary_system_prompt_appends_user_defined_instructions() {
+        let prompt = append_summary_system_prompt(
+            "Base summary instructions.",
+            "  Always call out unresolved blockers.  ",
+        );
+
+        assert!(prompt.contains("Base summary instructions."));
+        assert!(prompt.contains("ADDITIONAL USER-DEFINED SYSTEM INSTRUCTIONS"));
+        assert!(prompt.contains("Always call out unresolved blockers."));
+        assert!(!prompt.contains("  Always call out unresolved blockers.  "));
+    }
+
+    #[test]
+    fn blank_summary_system_prompt_leaves_base_prompt_unchanged() {
+        let base_prompt = "Base summary instructions.";
+
+        assert_eq!(
+            append_summary_system_prompt(base_prompt, " \n\t "),
+            base_prompt
+        );
+    }
+
+    #[test]
     fn english_base_instruction_marks_non_english_prose_invalid_without_bloat() {
         assert!(ENGLISH_BASE_SUMMARY_INSTRUCTION.contains("non-English prose is invalid"));
         assert!(ENGLISH_BASE_SUMMARY_INSTRUCTION.len() <= 120);
