@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
+use super::source_attribution::TranscriptAudioSource;
 
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +23,8 @@ pub struct TranscriptSegment {
     pub display_time: String,   // Formatted time for display like "[02:15]"
     pub confidence: f32,
     pub sequence_id: u64,
+    pub audio_source: TranscriptAudioSource,
+    pub source_confidence: f32,
 }
 
 /// Meeting metadata structure
@@ -129,6 +132,8 @@ impl RecordingSaver {
             display_time: "[00:00]".to_string(),
             confidence: 1.0,
             sequence_id: 0,
+            audio_source: TranscriptAudioSource::Unknown,
+            source_confidence: 0.0,
         };
         self.add_transcript_segment(segment);
     }

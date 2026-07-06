@@ -6,6 +6,7 @@ use anyhow::Result;
 
 use super::devices::AudioDevice;
 use super::buffer_pool::AudioBufferPool;
+use super::source_attribution::SourceAttribution;
 
 /// Device type for audio chunks
 #[derive(Debug, Clone, PartialEq)]
@@ -18,10 +19,12 @@ pub enum DeviceType {
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
     pub data: Vec<f32>,
+    pub source_attribution_data: Option<Vec<f32>>,
     pub sample_rate: u32,
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    pub source_attribution: Option<SourceAttribution>,
 }
 
 /// Processed audio chunk (post-VAD) for recording

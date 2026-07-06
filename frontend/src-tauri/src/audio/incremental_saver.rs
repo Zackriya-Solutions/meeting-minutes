@@ -436,10 +436,12 @@ mod tests {
         for i in 0..120 {  // 120 chunks of 0.5s each
             let chunk = AudioChunk {
                 data: vec![0.5f32; 24000],  // 0.5s at 48kHz
+                source_attribution_data: None,
                 sample_rate: 48000,
                 timestamp: i as f64 * 0.5,  // timestamp in seconds
                 chunk_id: i as u64,
                 device_type: DeviceType::Microphone,
+                source_attribution: None,
             };
             saver.add_chunk(chunk).unwrap();
         }

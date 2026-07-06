@@ -35,6 +35,7 @@ pub mod system_detector;
 pub mod system_audio_commands;
 pub mod device_monitor;  // NEW: Device disconnect/reconnect monitoring
 pub mod playback_monitor; // NEW: Playback device detection for BT warnings
+pub mod source_attribution;
 
 // Transcription module (provider abstraction, engine management, worker pool)
 pub mod transcription;
@@ -118,4 +119,3 @@ pub use decoder::{decode_audio_file, DecodedAudio};
 
 // Export audio constants
 pub use constants::AUDIO_EXTENSIONS;
-

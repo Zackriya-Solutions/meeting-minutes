@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
+import { formatTranscriptLine } from '@/lib/transcriptSource';
 import {
   detectAndCacheSummaryLanguage,
   readMeetingSummaryLanguage,
@@ -446,7 +447,7 @@ export function useSummaryGeneration({
 
     return {
       transcriptText: allTranscripts
-        .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
+        .map(t => formatTranscriptLine(t, formatTime(t.audio_start_time, t.timestamp)))
         .join('\n'),
       transcriptTexts: allTranscripts.map(t => t.text),
     };

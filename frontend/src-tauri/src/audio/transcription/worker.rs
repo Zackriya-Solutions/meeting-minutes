@@ -5,6 +5,7 @@
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
 use crate::audio::AudioChunk;
+use crate::audio::source_attribution::{display_label, unknown, TranscriptAudioSource};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -28,6 +29,8 @@ pub struct TranscriptUpdate {
     pub text: String,
     pub timestamp: String, // Wall-clock time for reference (e.g., "14:30:05")
     pub source: String,
+    pub audio_source: TranscriptAudioSource,
+    pub source_confidence: f32,
     pub sequence_id: u64,
     pub chunk_start_time: f64, // Legacy field, kept for compatibility
     pub is_partial: bool,
@@ -36,6 +39,35 @@ pub struct TranscriptUpdate {
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+}
+
+#[cfg(test)]
+mod source_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn transcript_update_serializes_source_metadata() {
+        let update = TranscriptUpdate {
+            text: "hello".to_string(),
+            timestamp: "12:00:00".to_string(),
+            source: "Me".to_string(),
+            audio_source: TranscriptAudioSource::Microphone,
+            source_confidence: 0.91,
+            sequence_id: 1,
+            chunk_start_time: 0.0,
+            is_partial: false,
+            confidence: 0.8,
+            audio_start_time: 0.0,
+            audio_end_time: 1.0,
+            duration: 1.0,
+        };
+
+        let json = serde_json::to_value(update).unwrap();
+
+        assert_eq!(json["audio_source"], "microphone");
+        let confidence = json["source_confidence"].as_f64().unwrap();
+        assert!((confidence - 0.91).abs() < 0.0001);
+    }
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
@@ -142,6 +174,7 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                            let chunk_source_attribution = chunk.source_attribution;
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -204,11 +237,18 @@ pub fn start_transcription_task<R: Runtime>(
                                         // This decouples the transcription worker from direct RECORDING_MANAGER access
 
                                         // Emit transcript update with NEW recording-relative timestamps
+                                        let attribution = chunk_source_attribution.unwrap_or_else(unknown);
+                                        let source_label = display_label(
+                                            attribution.audio_source,
+                                            attribution.source_confidence,
+                                        );
 
                                         let update = TranscriptUpdate {
                                             text: transcript,
                                             timestamp: format_current_timestamp(), // Wall-clock for reference
-                                            source: "Audio".to_string(),
+                                            source: source_label.to_string(),
+                                            audio_source: attribution.audio_source,
+                                            source_confidence: attribution.source_confidence,
                                             sequence_id,
                                             chunk_start_time: chunk_timestamp, // Legacy compatibility
                                             is_partial,

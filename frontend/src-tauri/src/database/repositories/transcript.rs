@@ -1,4 +1,6 @@
-use crate::api::{TranscriptSearchResult, TranscriptSegment};
+use crate::api::{
+    normalize_transcript_source_fields, TranscriptSearchResult, TranscriptSegment,
+};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
 use tracing::{error, info};
@@ -46,9 +48,17 @@ impl TranscriptsRepository {
         // 2. Save each transcript segment with audio timing fields
         for segment in transcripts {
             let transcript_id = format!("transcript-{}", Uuid::new_v4());
+            let (audio_source, source_confidence) = normalize_transcript_source_fields(
+                segment.audio_source.as_deref(),
+                segment.source_confidence,
+            );
             let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO transcripts (
+                    id, meeting_id, transcript, timestamp,
+                    audio_start_time, audio_end_time, duration,
+                    audio_source, source_confidence
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(&transcript_id)
             .bind(&meeting_id)
@@ -57,6 +67,8 @@ impl TranscriptsRepository {
             .bind(segment.audio_start_time)
             .bind(segment.audio_end_time)
             .bind(segment.duration)
+            .bind(audio_source)
+            .bind(source_confidence)
             .execute(&mut *transaction)
             .await;
 

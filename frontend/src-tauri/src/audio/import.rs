@@ -1,6 +1,6 @@
 // Audio file import module - allows importing external audio files as new meetings
 
-use crate::api::TranscriptSegment;
+use crate::api::{normalize_transcript_source_fields, TranscriptSegment};
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
 use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
@@ -718,9 +718,17 @@ async fn create_meeting_with_transcripts(
 
     // Insert transcripts
     for segment in segments {
+        let (audio_source, source_confidence) = normalize_transcript_source_fields(
+            segment.audio_source.as_deref(),
+            segment.source_confidence,
+        );
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transcripts (
+                id, meeting_id, transcript, timestamp,
+                audio_start_time, audio_end_time, duration,
+                audio_source, source_confidence
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&segment.id)
         .bind(&meeting_id)
@@ -729,6 +737,8 @@ async fn create_meeting_with_transcripts(
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)
+        .bind(audio_source)
+        .bind(source_confidence)
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
@@ -1181,6 +1191,8 @@ mod tests {
                 audio_start_time: Some(0.0),
                 audio_end_time: Some(1.5),
                 duration: Some(1.5),
+                audio_source: Some("microphone".to_string()),
+                source_confidence: Some(0.91),
             },
             TranscriptSegment {
                 id: "t-2".to_string(),
@@ -1189,6 +1201,8 @@ mod tests {
                 audio_start_time: Some(2.0),
                 audio_end_time: Some(3.5),
                 duration: Some(1.5),
+                audio_source: None,
+                source_confidence: None,
             },
         ];
 

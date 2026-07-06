@@ -92,6 +92,8 @@ impl MeetingsRepository {
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
+                    audio_source: t.audio_source,
+                    source_confidence: t.source_confidence,
                 })
                 .collect::<Vec<_>>();
 

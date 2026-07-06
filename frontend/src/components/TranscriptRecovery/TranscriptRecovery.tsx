@@ -21,6 +21,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { cn } from '@/lib/utils';
+import { transcriptSourceLabel } from '@/lib/transcriptSource';
 
 interface TranscriptRecoveryProps {
   isOpen: boolean;
@@ -234,10 +235,19 @@ export function TranscriptRecovery({
                               return '--:--';
                             }
                           };
+                          const sourceLabel = transcriptSourceLabel(
+                            transcript.audio_source,
+                            transcript.source_confidence,
+                          );
 
                           return (
                             <div key={index} className="text-sm">
                               <span className="text-muted-foreground">[{getTimestamp()}]</span>{' '}
+                              {sourceLabel && (
+                                <span className="text-muted-foreground">
+                                  {sourceLabel}:{' '}
+                                </span>
+                              )}
                               <span>{transcript.text}</span>
                             </div>
                           );
