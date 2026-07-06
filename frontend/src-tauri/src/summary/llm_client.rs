@@ -22,6 +22,8 @@ pub struct ChatRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
@@ -88,6 +90,136 @@ impl LLMProvider {
             "custom-openai" => Ok(Self::CustomOpenAI),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
+    }
+}
+
+fn model_matches_family(model: &str, family: &str) -> bool {
+    model == family
+        || model
+            .strip_prefix(family)
+            .is_some_and(|suffix| suffix.starts_with('-'))
+}
+
+fn uses_max_completion_tokens(model_name: &str) -> bool {
+    let model = model_name.trim().to_ascii_lowercase();
+
+    let newer_gpt_chat_model = ["gpt-5.1", "gpt-5.2", "gpt-4.1", "gpt-4.2"]
+        .iter()
+        .any(|family| model_matches_family(&model, family));
+
+    let gpt5_reasoning_model = model == "gpt-5"
+        || ["gpt-5-mini", "gpt-5-nano", "gpt-5-pro"]
+            .iter()
+            .any(|family| model_matches_family(&model, family));
+
+    let reasoning_model = ["o1", "o3", "o4"]
+        .iter()
+        .any(|prefix| model_matches_family(&model, prefix));
+
+    newer_gpt_chat_model || gpt5_reasoning_model || reasoning_model
+}
+
+pub(crate) fn build_openai_chat_request(
+    model_name: &str,
+    messages: Vec<ChatMessage>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+) -> ChatRequest {
+    let (max_tokens, max_completion_tokens) =
+        if max_tokens.is_some() && uses_max_completion_tokens(model_name) {
+            (None, max_tokens)
+        } else {
+            (max_tokens, None)
+        };
+
+    ChatRequest {
+        model: model_name.to_string(),
+        messages,
+        max_tokens,
+        max_completion_tokens,
+        temperature,
+        top_p,
+    }
+}
+
+pub(crate) fn build_openai_chat_request_with_max_completion_tokens(
+    model_name: &str,
+    messages: Vec<ChatMessage>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+) -> ChatRequest {
+    ChatRequest {
+        model: model_name.to_string(),
+        messages,
+        max_tokens: None,
+        max_completion_tokens: max_tokens,
+        temperature,
+        top_p,
+    }
+}
+
+pub(crate) fn is_max_tokens_unsupported_error(error_body: &str) -> bool {
+    let error = error_body.to_ascii_lowercase();
+
+    error.contains("max_tokens")
+        && (error.contains("unsupported_parameter")
+            || error.contains("unsupported parameter")
+            || error.contains("not supported")
+            || error.contains("unsupported"))
+}
+
+fn openai_chat_messages(system_prompt: &str, user_prompt: &str) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: user_prompt.to_string(),
+        },
+    ]
+}
+
+async fn send_chat_request(
+    client: &Client,
+    api_url: &str,
+    headers: &header::HeaderMap,
+    request_body: &serde_json::Value,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<reqwest::Response, String> {
+    let request_future = client
+        .post(api_url)
+        .headers(headers.clone())
+        .json(request_body)
+        .timeout(REQUEST_TIMEOUT_DURATION)
+        .send();
+
+    if let Some(token) = cancellation_token {
+        tokio::select! {
+            result = request_future => {
+                result.map_err(|e| {
+                    if e.is_timeout() {
+                        format!("LLM request timed out after 60 seconds")
+                    } else {
+                        format!("Failed to send request to LLM: {}", e)
+                    }
+                })
+            }
+            _ = token.cancelled() => {
+                Err("Summary generation was cancelled".to_string())
+            }
+        }
+    } else {
+        request_future.await.map_err(|e| {
+            if e.is_timeout() {
+                format!("LLM request timed out after 60 seconds")
+            } else {
+                format!("Failed to send request to LLM: {}", e)
+            }
+        })
     }
 }
 
@@ -216,31 +348,22 @@ pub async fn generate_summary(
             .map_err(|_| "Invalid content type".to_string())?,
     );
 
+    // For CustomOpenAI, apply optional parameters if provided
+    let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+        (max_tokens, temperature, top_p)
+    } else {
+        (None, None, None)
+    };
+
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
-        // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
-
-        serde_json::json!(ChatRequest {
-            model: model_name.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                }
-            ],
-            max_tokens: max_tokens_val,
-            temperature: temperature_val,
-            top_p: top_p_val,
-        })
+        serde_json::json!(build_openai_chat_request(
+            model_name,
+            openai_chat_messages(system_prompt, user_prompt),
+            max_tokens_val,
+            temperature_val,
+            top_p_val,
+        ))
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
@@ -255,46 +378,50 @@ pub async fn generate_summary(
 
     info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
 
-    // Send request with timeout and cancellation support
-    let request_future = client
-        .post(api_url)
-        .headers(headers)
-        .json(&request_body)
-        .timeout(REQUEST_TIMEOUT_DURATION)
-        .send();
-
-    // Use tokio::select to race between cancellation and request completion
-    let response = if let Some(token) = cancellation_token {
-        tokio::select! {
-            result = request_future => {
-                result.map_err(|e| {
-                    if e.is_timeout() {
-                        format!("LLM request timed out after 60 seconds")
-                    } else {
-                        format!("Failed to send request to LLM: {}", e)
-                    }
-                })?
-            }
-            _ = token.cancelled() => {
-                return Err("Summary generation was cancelled".to_string());
-            }
-        }
-    } else {
-        request_future.await.map_err(|e| {
-            if e.is_timeout() {
-                format!("LLM request timed out after 60 seconds")
-            } else {
-                format!("Failed to send request to LLM: {}", e)
-            }
-        })?
-    };
+    let mut response = send_chat_request(
+        client,
+        &api_url,
+        &headers,
+        &request_body,
+        cancellation_token,
+    )
+    .await?;
 
     if !response.status().is_success() {
         let error_body = response
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("LLM API request failed: {}", error_body));
+
+        if provider == &LLMProvider::CustomOpenAI
+            && request_body.get("max_tokens").is_some()
+            && is_max_tokens_unsupported_error(&error_body)
+        {
+            info!("Retrying Custom OpenAI request with max_completion_tokens");
+
+            let retry_body =
+                serde_json::json!(build_openai_chat_request_with_max_completion_tokens(
+                    model_name,
+                    openai_chat_messages(system_prompt, user_prompt),
+                    max_tokens_val,
+                    temperature_val,
+                    top_p_val,
+                ));
+
+            response =
+                send_chat_request(client, &api_url, &headers, &retry_body, cancellation_token)
+                    .await?;
+
+            if !response.status().is_success() {
+                let retry_error_body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(format!("LLM API request failed: {}", retry_error_body));
+            }
+        } else {
+            return Err(format!("LLM API request failed: {}", error_body));
+        }
     }
 
     // Parse response based on provider
@@ -342,5 +469,104 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_json_for_model(model: &str, max_tokens: Option<u32>) -> serde_json::Value {
+        serde_json::to_value(build_openai_chat_request(
+            model,
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            max_tokens,
+            None,
+            None,
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn newer_azure_chat_models_use_max_completion_tokens() {
+        for model in [
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1-chat",
+            "gpt-5.2-chat",
+            "gpt-4.1-mini",
+            "o3-mini",
+        ] {
+            let payload = request_json_for_model(model, Some(512));
+
+            assert_eq!(payload["max_completion_tokens"], 512);
+            assert!(
+                payload.get("max_tokens").is_none(),
+                "{model} still used max_tokens"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_custom_models_keep_max_tokens() {
+        for model in [
+            "gpt-5-chat",
+            "llama-3.1-local",
+            "custom-summary-deployment",
+            "legacy-gpt-5.1-shim",
+            "gpt-4.10-deployment",
+        ] {
+            let payload = request_json_for_model(model, Some(512));
+
+            assert_eq!(payload["max_tokens"], 512);
+            assert!(
+                payload.get("max_completion_tokens").is_none(),
+                "{model} unexpectedly used max_completion_tokens"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_token_limit_omits_both_token_fields() {
+        let payload = request_json_for_model("gpt-5.1-chat", None);
+
+        assert!(payload.get("max_tokens").is_none());
+        assert!(payload.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn forced_completion_token_payload_handles_arbitrary_deployment_names() {
+        let payload = serde_json::to_value(build_openai_chat_request_with_max_completion_tokens(
+            "prod-summary-deployment",
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            Some(512),
+            None,
+            None,
+        ))
+        .unwrap();
+
+        assert_eq!(payload["max_completion_tokens"], 512);
+        assert!(payload.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn detects_max_tokens_unsupported_errors() {
+        assert!(is_max_tokens_unsupported_error(
+            r#"{"error":{"code":"unsupported_parameter","param":"max_tokens"}}"#
+        ));
+        assert!(is_max_tokens_unsupported_error(
+            "The max_tokens parameter is not supported by this model"
+        ));
+        assert!(!is_max_tokens_unsupported_error(
+            r#"{"error":{"code":"invalid_api_key"}}"#
+        ));
     }
 }

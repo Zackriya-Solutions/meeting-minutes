@@ -1292,36 +1292,78 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
 
     // Create a minimal test request
-    let test_request = serde_json::json!({
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": "Hi"
-            }
-        ],
-        "max_tokens": 5
-    });
+    let test_request = crate::summary::llm_client::build_openai_chat_request(
+        &model,
+        vec![crate::summary::llm_client::ChatMessage {
+            role: "user".to_string(),
+            content: "Hi".to_string(),
+        }],
+        Some(5),
+        None,
+        None,
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let mut request = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&test_request);
+    let send_test_request = |body: &crate::summary::llm_client::ChatRequest| {
+        let mut request = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(body);
 
-    // Add authorization if API key provided
-    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
-        request = request.header("Authorization", format!("Bearer {}", key));
-    }
+        // Add authorization if API key provided
+        if let Some(key) = api_key.as_deref().filter(|k| !k.trim().is_empty()) {
+            request = request.header("Authorization", format!("Bearer {}", key));
+        }
 
-    match request.send().await {
+        request.send()
+    };
+
+    match send_test_request(&test_request).await {
         Ok(response) => {
-            let status = response.status();
-            let response_text = response.text().await.unwrap_or_default();
+            let mut status = response.status();
+            let mut response_text = response.text().await.unwrap_or_default();
+
+            if !status.is_success()
+                && test_request.max_tokens.is_some()
+                && crate::summary::llm_client::is_max_tokens_unsupported_error(&response_text)
+            {
+                log_info!("Retrying Custom OpenAI connection test with max_completion_tokens");
+
+                let retry_request =
+                    crate::summary::llm_client::build_openai_chat_request_with_max_completion_tokens(
+                        &model,
+                        vec![crate::summary::llm_client::ChatMessage {
+                            role: "user".to_string(),
+                            content: "Hi".to_string(),
+                        }],
+                        Some(5),
+                        None,
+                        None,
+                    );
+
+                match send_test_request(&retry_request).await {
+                    Ok(retry_response) => {
+                        status = retry_response.status();
+                        response_text = retry_response.text().await.unwrap_or_default();
+                    }
+                    Err(e) => {
+                        log_error!("❌ Custom OpenAI connection retry failed: {}", e);
+                        if e.is_timeout() {
+                            return Err(
+                                "Connection timed out. Please check the endpoint URL.".to_string()
+                            );
+                        } else if e.is_connect() {
+                            return Err("Could not connect to endpoint. Please verify the URL is correct and the server is running.".to_string());
+                        } else {
+                            return Err(format!("Connection failed: {}", e));
+                        }
+                    }
+                }
+            }
 
             if status.is_success() {
                 // Parse response as JSON to verify it's a valid OpenAI-compatible response
