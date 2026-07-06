@@ -5,6 +5,7 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
+    audio::source_attribution::TranscriptAudioSource,
     database::{
         models::MeetingModel,
         repositories::{
@@ -198,21 +199,21 @@ pub struct TranscriptSegment {
     pub source_confidence: Option<f64>,
 }
 
+/// Normalize untrusted transcript source fields at the persistence boundary.
+///
+/// `audio_source` arrives as a free-form string (frontend IPC or an imported
+/// file), so it is parsed through [`TranscriptAudioSource::from_wire`] — the
+/// single source of truth for the canonical strings — and re-emitted in canonical
+/// lowercase form, or `None` if unrecognized. `source_confidence` is kept only
+/// when a valid source is present and the value is finite within `0.0..=1.0`,
+/// matching the DB `CHECK` constraint so invalid input can never reach the table.
 pub fn normalize_transcript_source_fields(
     audio_source: Option<&str>,
     source_confidence: Option<f64>,
 ) -> (Option<&'static str>, Option<f64>) {
-    let normalized_source = match audio_source
-        .map(str::trim)
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("microphone") => Some("microphone"),
-        Some("system") => Some("system"),
-        Some("mixed") => Some("mixed"),
-        Some("unknown") => Some("unknown"),
-        _ => None,
-    };
+    let normalized_source = audio_source
+        .and_then(TranscriptAudioSource::from_wire)
+        .map(TranscriptAudioSource::as_wire);
 
     let normalized_confidence = source_confidence.filter(|confidence| {
         normalized_source.is_some()

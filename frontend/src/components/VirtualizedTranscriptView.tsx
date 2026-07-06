@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
-import { transcriptSourceLabel } from "@/lib/transcriptSource";
+import { transcriptSourceLabel, transcriptSourceTooltip } from "@/lib/transcriptSource";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -86,6 +86,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
     const sourceLabel = transcriptSourceLabel(audio_source, source_confidence);
+    const sourceTooltip = transcriptSourceTooltip(audio_source, source_confidence);
     const sourceBadgeClass = sourceLabel === 'Me'
         ? 'border-blue-200 bg-blue-50 text-blue-700'
         : 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -106,7 +107,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     </TooltipContent>
                 </Tooltip>
                 {sourceLabel && (
-                    <span className={`mt-0.5 min-w-[58px] rounded border px-1.5 py-0.5 text-center text-[11px] font-medium leading-4 ${sourceBadgeClass}`}>
+                    <span
+                        title={sourceTooltip ?? undefined}
+                        className={`mt-0.5 min-w-[58px] rounded border px-1.5 py-0.5 text-center text-[11px] font-medium leading-4 ${sourceBadgeClass}`}
+                    >
                         {sourceLabel}
                     </span>
                 )}

@@ -1,18 +1,93 @@
+//! Per-segment audio **source attribution** — deciding which capture stream
+//! (the local microphone vs. the system/loopback output) dominated a given
+//! transcript segment. This is **not speaker diarization**: it never identifies
+//! *who* spoke, only *which device* the audio came from, and it never writes
+//! `transcripts.speaker`.
+//!
+//! # How it works
+//! Attribution is computed **live during recording**. As the pipeline mixes the
+//! two streams it appends the *pre-normalization* mic energy and the raw system
+//! energy for each 100 ms frame to a [`SourceAttributionTimeline`]. When VAD
+//! emits a speech segment, [`SourceAttributionTimeline::classify_segment`]
+//! compares the accumulated per-stream energy over that segment's time span.
+//!
+//! # Why historical segments cannot be backfilled
+//! Attribution requires the **separate** mic and system energy, which only
+//! exists while the two streams are live. Only the *mixed* audio is persisted to
+//! disk (see `pipeline.rs`), so segments produced before this feature, imported
+//! from an external file, or re-transcribed from the saved mix have no per-stream
+//! signal to attribute. Recovering source from a finished mix is source
+//! separation / diarization, which is deliberately out of scope. Those segments
+//! carry `audio_source = NULL` and render with **no** source label (see the
+//! frontend `transcriptSource.ts` and the migration notes).
+//!
+//! # Single-stream recordings
+//! - **Microphone only** (no meeting audio playing): system energy stays near
+//!   the silence floor (`ENERGY_FLOOR`), so segments classify as `Microphone` → "Me".
+//! - **System only** (user silent / muted): mic energy stays near the floor, so
+//!   segments classify as `System` → "Speaker".
+//! - **Both below the floor** (silence): `Unknown`, which also displays as the
+//!   safe "Speaker" fallback.
+//!
+//! # Presentation vs. stored attribution
+//! [`display_label`] intentionally collapses the four raw states into a **binary**
+//! "Me" / "Speaker" label (see its docs). The raw `audio_source` and
+//! `source_confidence` are preserved end-to-end in the DB and API for any
+//! downstream consumer that wants the full four-state signal.
+//!
+//! # Thresholds
+//! The constants below are heuristics tuned for this pipeline's energy profile
+//! (mic normalized to −23 LUFS at capture, system left raw — attribution uses the
+//! *pre-normalization* mic so the comparison is like-for-like). They are
+//! documented here rather than exposed as configuration because the app has no
+//! calibration/telemetry surface to tune them against; adding knobs nobody can
+//! meaningfully set would be premature (YAGNI). Revisit if such a surface exists.
+
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
+/// Granularity of energy analysis. 100 ms ≈ syllable scale: fine enough to catch
+/// turn-taking *within* a single VAD segment, coarse enough that per-frame energy
+/// is statistically stable.
 const ATTRIBUTION_FRAME_MS: f64 = 100.0;
+/// Mean-square energy (≈ a −80 dBFS / 1e-4 RMS signal) below which a stream is
+/// treated as silent. Also guards the divisions and `log10` in [`classify_energy`].
 const ENERGY_FLOOR: f64 = 1.0e-8;
+/// Fraction of total segment energy a single stream must hold to be declared the
+/// sole source. 0.72 (≈ +4 dB over the other stream) requires *clear* dominance,
+/// not a slim majority, so crosstalk is not confidently mislabeled as one source.
 const DOMINANCE_RATIO: f64 = 0.72;
+/// Additional guard alongside [`DOMINANCE_RATIO`]: the dominant stream must also
+/// exceed the other by ≥ 4 dB (~2.5× power). Blocks a confident single-source
+/// call when a loud-but-close second source is present.
 const MIN_DB_MARGIN: f64 = 4.0;
+/// Lower edge of the "both streams meaningfully active" band. Derived from
+/// [`DOMINANCE_RATIO`] so the Mixed band and the dominance thresholds are exact
+/// complements — there is no unclassifiable gap between them.
 const MIXED_RATIO_LOW: f64 = 1.0 - DOMINANCE_RATIO;
+/// Upper edge of the Mixed band (symmetric with [`MIXED_RATIO_LOW`]).
 const MIXED_RATIO_HIGH: f64 = DOMINANCE_RATIO;
+/// Retain at least this much timeline behind the most recently classified segment
+/// so late-arriving or overlapping VAD segments still find their frames before
+/// pruning removes them.
 const PRUNE_SAFETY_MARGIN_MS: f64 = 3000.0;
+/// Hard cap on how far back frames are kept, to bound memory on very long
+/// recordings (30 minutes of 100 ms frames ≈ 18k frames).
 const MAX_TIMELINE_RETENTION_MS: f64 = 30.0 * 60.0 * 1000.0;
+/// For a segment to be called Mixed via *alternation* (each source dominating in
+/// turn), each source must dominate for at least this many milliseconds…
 const MIN_ALTERNATING_SOURCE_MS: f64 = 200.0;
+/// …and for at least this fraction of the segment's covered time. Together these
+/// require genuine back-and-forth, not a single brief blip from the other stream.
 const MIN_ALTERNATING_SOURCE_RATIO: f64 = 0.20;
+/// Confidence below which the attribution is too weak to surface as a distinct
+/// label; [`display_label`] falls back to the safe "Speaker". Mirrored on the
+/// frontend as `DISPLAY_CONFIDENCE_THRESHOLD` in `transcriptSource.ts`.
 const MIN_DISPLAY_CONFIDENCE: f32 = 0.55;
 
+/// Which capture stream a transcript segment was attributed to. Serialized as
+/// snake_case (`"microphone"`, `"system"`, `"mixed"`, `"unknown"`) on the wire
+/// and stored as that same TEXT in the `transcripts.audio_source` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptAudioSource {
@@ -20,6 +95,35 @@ pub enum TranscriptAudioSource {
     System,
     Mixed,
     Unknown,
+}
+
+impl TranscriptAudioSource {
+    /// The canonical lowercase wire/DB string for this source — the canonical
+    /// Rust-side mapping. The DB `CHECK` constraint (see the migration) and the
+    /// frontend `transcriptSource.ts` hold parallel copies of these literals and
+    /// must be updated together whenever a variant is added or renamed.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            TranscriptAudioSource::Microphone => "microphone",
+            TranscriptAudioSource::System => "system",
+            TranscriptAudioSource::Mixed => "mixed",
+            TranscriptAudioSource::Unknown => "unknown",
+        }
+    }
+
+    /// Parse an untrusted wire/DB string (from frontend IPC or an imported file)
+    /// into a source, tolerating surrounding whitespace and any casing. Returns
+    /// `None` for anything outside the known set so the persistence boundary can
+    /// reject invalid input instead of storing it.
+    pub fn from_wire(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "microphone" => Some(TranscriptAudioSource::Microphone),
+            "system" => Some(TranscriptAudioSource::System),
+            "mixed" => Some(TranscriptAudioSource::Mixed),
+            "unknown" => Some(TranscriptAudioSource::Unknown),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -138,6 +242,19 @@ impl SourceAttributionTimeline {
     }
 }
 
+/// Map a raw attribution to the **binary presentation label** shown to users.
+///
+/// This is deliberately lossy: only a confident `Microphone` becomes "Me"; every
+/// other case — `System`, `Mixed`, `Unknown`, or any source below
+/// `MIN_DISPLAY_CONFIDENCE` — becomes "Speaker". The design goal is to never
+/// assert a false "Me" (attributing the remote party's words to the user is worse
+/// than the conservative default), so "Speaker" doubles as the safe fallback.
+///
+/// This collapses `System`/`Mixed`/`Unknown`/low-confidence into one visible
+/// label **on purpose**. Callers that need to distinguish those states must read
+/// the raw `audio_source` / `source_confidence` fields (preserved in the DB and
+/// API), e.g. the UI badge tooltip — do not infer the underlying state from this
+/// string.
 pub fn display_label(source: TranscriptAudioSource, confidence: f32) -> &'static str {
     if confidence < MIN_DISPLAY_CONFIDENCE {
         return "Speaker";
@@ -334,5 +451,24 @@ mod tests {
         );
         assert_eq!(display_label(TranscriptAudioSource::Mixed, 0.90), "Speaker");
         assert_eq!(display_label(TranscriptAudioSource::Unknown, 0.0), "Speaker");
+    }
+
+    #[test]
+    fn wire_mapping_round_trips_and_rejects_unknown_strings() {
+        for source in [
+            TranscriptAudioSource::Microphone,
+            TranscriptAudioSource::System,
+            TranscriptAudioSource::Mixed,
+            TranscriptAudioSource::Unknown,
+        ] {
+            assert_eq!(TranscriptAudioSource::from_wire(source.as_wire()), Some(source));
+        }
+
+        assert_eq!(
+            TranscriptAudioSource::from_wire("  Microphone "),
+            Some(TranscriptAudioSource::Microphone)
+        );
+        assert_eq!(TranscriptAudioSource::from_wire("speaker"), None);
+        assert_eq!(TranscriptAudioSource::from_wire(""), None);
     }
 }

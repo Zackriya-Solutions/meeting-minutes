@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { formatTranscriptLine, transcriptSourceLabel } from "../../src/lib/transcriptSource";
+import {
+  formatTranscriptLine,
+  transcriptSourceLabel,
+  transcriptSourceTooltip,
+} from "../../src/lib/transcriptSource";
 
 describe("transcript source labels", () => {
   test("labels confident microphone and system audio sources", () => {
@@ -49,5 +53,30 @@ describe("transcript source labels", () => {
         "[00:01]",
       ),
     ).toBe("[00:01] Speaker: hello");
+  });
+});
+
+describe("transcript source tooltip", () => {
+  test("exposes the raw four-state source and confidence behind the binary badge", () => {
+    expect(transcriptSourceTooltip("microphone", 0.91)).toBe(
+      "Source: Microphone (91% confidence)",
+    );
+    // "Speaker" badge, but the tooltip reveals it was actually mixed audio.
+    expect(transcriptSourceTooltip("mixed", 0.63)).toBe(
+      "Source: Mixed (63% confidence)",
+    );
+    expect(transcriptSourceTooltip("system", 0.88)).toBe(
+      "Source: System (88% confidence)",
+    );
+  });
+
+  test("omits the confidence when it is missing or non-finite", () => {
+    expect(transcriptSourceTooltip("unknown", null)).toBe("Source: Unknown");
+    expect(transcriptSourceTooltip("microphone", undefined)).toBe("Source: Microphone");
+  });
+
+  test("returns null when there is no attribution", () => {
+    expect(transcriptSourceTooltip(null, null)).toBeNull();
+    expect(transcriptSourceTooltip(undefined, 0.9)).toBeNull();
   });
 });
