@@ -31,6 +31,11 @@ else
   exit 1
 fi
 
+# Resolve FFMPEG_PATH before this script changes directories
+if [ -n "${FFMPEG_PATH:-}" ] && [[ "$FFMPEG_PATH" != /* ]]; then
+  FFMPEG_PATH="$(pwd -P)/$FFMPEG_PATH"
+fi
+
 # Function to check if command exists
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -63,6 +68,16 @@ elif command_exists npm; then
 else
   echo -e "${RED}❌ Neither npm nor pnpm found${NC}"
   exit 1
+fi
+
+# Allow distro/package-manager builds to provide FFmpeg and skip build-time download
+if [ -n "${FFMPEG_PATH:-}" ]; then
+  if [ ! -f "$FFMPEG_PATH" ]; then
+    echo -e "${RED}❌ FFMPEG_PATH does not point to a file: $FFMPEG_PATH${NC}"
+    exit 1
+  fi
+  export FFMPEG_PATH
+  echo -e "${GREEN}✅ Using FFmpeg from FFMPEG_PATH: $FFMPEG_PATH${NC}"
 fi
 
 # Detect GPU feature if not already set

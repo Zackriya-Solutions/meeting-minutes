@@ -6,6 +6,8 @@
 /// Download and bundle FFmpeg binary for current target platform
 /// Checks cache first, downloads only if missing or corrupted
 pub fn ensure_ffmpeg_binary() {
+    println!("cargo:rerun-if-env-changed=FFMPEG_PATH");
+
     let target = std::env::var("TARGET")
         .or_else(|_| std::env::var("HOST"))
         .expect("Neither TARGET nor HOST environment variable set");
@@ -22,6 +24,17 @@ pub fn ensure_ffmpeg_binary() {
         .expect("CARGO_MANIFEST_DIR environment variable not set");
     let binaries_dir = std::path::PathBuf::from(&manifest_dir).join("binaries");
     let binary_path = binaries_dir.join(&binary_name);
+
+    if let Some(ffmpeg_path) = configured_ffmpeg_path() {
+        println!(
+            "cargo:warning=📦 Using FFmpeg from FFMPEG_PATH: {}",
+            ffmpeg_path.display()
+        );
+        copy_configured_ffmpeg(&ffmpeg_path, &binary_path)
+            .unwrap_or_else(|e| panic!("⚠️  Failed to use FFMPEG_PATH: {}", e));
+        println!("cargo:warning=✅ FFmpeg copied from FFMPEG_PATH: {}", binary_name);
+        return;
+    }
 
     // Cache check: Skip download if binary exists and works
     if binary_path.exists() {
@@ -56,6 +69,56 @@ pub fn ensure_ffmpeg_binary() {
         Err(e) => {
             panic!("⚠️  Failed to download FFmpeg: {}", e);
         }
+    }
+}
+
+fn configured_ffmpeg_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("FFMPEG_PATH")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+fn copy_configured_ffmpeg(
+    source_path: &std::path::Path,
+    output_path: &std::path::Path,
+) -> Result<(), String> {
+    if !source_path.is_file() {
+        return Err(format!("{} is not a file", source_path.display()));
+    }
+
+    if !verify_ffmpeg_binary(source_path) {
+        return Err(format!(
+            "{} is not a working FFmpeg binary",
+            source_path.display()
+        ));
+    }
+
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create binaries directory: {}", e))?;
+    }
+
+    std::fs::copy(source_path, output_path)
+        .map_err(|e| format!("Failed to copy FFmpeg binary: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(output_path)
+            .map_err(|e| format!("Failed to get copied FFmpeg metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(output_path, perms)
+            .map_err(|e| format!("Failed to set executable permissions: {}", e))?;
+    }
+
+    if verify_ffmpeg_binary(output_path) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Copied FFmpeg binary failed verification: {}",
+            output_path.display()
+        ))
     }
 }
 
@@ -330,7 +393,7 @@ fn find_ffmpeg_in_extracted_dir(
 }
 
 /// Verify FFmpeg binary is functional (runs -version successfully)
-fn verify_ffmpeg_binary(path: &std::path::PathBuf) -> bool {
+fn verify_ffmpeg_binary(path: &std::path::Path) -> bool {
     match std::process::Command::new(path)
         .arg("-version")
         .output()
