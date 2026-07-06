@@ -41,7 +41,10 @@
     "auto": "自動",
     "confirm": "確認",
     "warning": "警告",
-    "info": "情報"
+    "info": "情報",
+    "default": "デフォルト",
+    "recheck": "再確認",
+    "loadMore": "さらに読み込み中..."
   },
   "app": {
     "name": "Meetily"
@@ -87,7 +90,11 @@
     "dontShowAgain": "今後表示しない",
     "paused": "録音一時停止中",
     "clickResume": "クリックして録音を再開",
-    "speakToSee": "話しかけるとリアルタイム転記が表示されます"
+    "speakToSee": "話しかけるとリアルタイム転記が表示されます",
+    "stopped": "録音が停止しました",
+    "pauseLabel": "一時停止",
+    "recordingLabel": "録音中",
+    "systemAudioNotAvailableShort": "システムオーディオをキャプチャできません。以下を確認してください："
   },
   "recordingSettings": {
     "title": "録音設定",
@@ -107,7 +114,9 @@
     "devicePrefsSaved": "デバイス設定を保存しました",
     "preferenceSaved": "設定を保存しました",
     "failedToSavePrefs": "設定の保存に失敗しました",
-    "openFolder": "フォルダを開く"
+    "openFolder": "フォルダを開く",
+    "filesLabel": "ファイル",
+    "savedWithTimestamp": "録音はタイムスタンプ付きで保存されます:"
   },
   "statusOverlays": {
     "processingTranscripts": "転記テキストを処理中...",
@@ -198,7 +207,23 @@
     "maxTokens": "最大トークン数",
     "temperature": "温度 (0.0-2.0)",
     "topP": "Top P (0.0-1.0)",
-    "customServer": "カスタムサーバー (OpenAI)"
+    "customServer": "カスタムサーバー (OpenAI)",
+    "modelReady": "{{name}} の準備ができました！",
+    "modelReadyDesc": "モデルがダウンロードされ、使用できる状態です",
+    "failedToDownload": "{{name}} のダウンロードに失敗しました",
+    "downloadingModel": "{{name}} をダウンロード中...",
+    "mayTakeFewMinutes": "数分かかる場合があります",
+    "modelDeleted": "{{name}} を削除しました",
+    "modelRemovedDesc": "スペースを解放するためにモデルが削除されました",
+    "failedToDeleteModel": "{{name}} の削除に失敗しました",
+    "aiModelConfiguration": "AI モデル設定",
+    "builtInAi": "内蔵 AI",
+    "accuracy": "精度",
+    "processingLabel": "処理",
+    "ready": "準備完了",
+    "size": "サイズ:",
+    "modified": "更新日時:",
+    "ollamaNotRunningShort": "Ollama がインストールされていないか、実行されていません"
   },
   "transcriptSettings": {
     "title": "転記設定",
@@ -241,7 +266,27 @@
     "greenYellowRed": "緑=良好、黄=大きい、赤=大きすぎる",
     "testMic": "マイクテスト",
     "clickTestMic": "「マイクテスト」をクリックして動作確認",
-    "notDeviceNames": "互換性向上に役立ちますが、実際のデバイス名ではありません"
+    "notDeviceNames": "互換性向上に役立ちますが、実際のデバイス名ではありません",
+    "languageSelectionNotSupported": "Parakeet では言語選択はサポートされていません。常に自動検出が使用されます。",
+    "devicesSelected": "デバイスが選択されました",
+    "devicesSelectedDesc": "マイク: {{mic}}、システムオーディオ: {{system}}",
+    "showConfidenceIndicators": "信頼度インジケーターを表示",
+    "showConfidenceIndicatorsDesc": "文字起こしの信頼度の品質を示す色付きドットを表示",
+    "specificLanguageHint": "最高の精度を得るために、特定の言語（例：英語、スペイン語など）を選択してください",
+    "autoTranslateHint": "すべてのオーディオは自動的に英語に翻訳されます。英語の出力が必要な多言語会議に最適です。",
+    "confidenceLabel": "信頼度",
+    "transcriptionConfidence": "文字起こしの信頼度: {{percent}}%",
+    "confidenceHigh": "高信頼度",
+    "confidenceGood": "良好な信頼度",
+    "confidenceMedium": "中程度の信頼度",
+    "confidenceLow": "低信頼度",
+    "parakeetNotSupportedShort": "Parakeet では言語選択はサポートされていません",
+    "parakeetAutoDetectDesc": "Parakeet は現在自動言語検出のみをサポートしています。手動での言語選択は利用できません。特定の言語を指定する必要がある場合は Whisper を使用してください。",
+    "languageSelectionShort": "最高の精度を得るために、特定の言語を選択してください",
+    "chunksCompleted": "{{completed}}/{{total}} チャンク完了",
+    "recentChunks": "最近のチャンク ({{shown}}/{{total}})",
+    "allChunksTranscribed": "すべての {{total}} 個のチャンクの文字起こしが完了しました。",
+    "chunks": "チャンク"
   },
   "summarySettings": {
     "title": "AI要約",
@@ -269,7 +314,27 @@
     "usingAutoUntilMetadata": "会議メタデータが読み取れるまで自動を使用。",
     "template": "テンプレート",
     "templateSelected": "テンプレートを選択",
-    "chatWithTeam": "Zackriyaチームとチャット"
+    "chatWithTeam": "Zackriyaチームとチャット",
+    "addSection": "新しいセクションを追加",
+    "regenerateSummary": "要約を再生成",
+    "findInSummary": "要約内を検索",
+    "summaryLangSavedOnDevice": "要約言語がこのデバイスに保存されました",
+    "summaryLangSavedOnDeviceDesc": "この会議には録音フォルダがないため、設定を会議メタデータに書き込めません。",
+    "checkModelConfig": "モデル設定と API キーを確認するか、もう一度お試しください。",
+    "noContent": "要約コンテンツがありません。",
+    "tryGenerating": "新しい要約を生成してみてください。",
+    "addLanguage": "＋ 言語を追加",
+    "copyBlocks": "{{count}} 個のブロックをコピー",
+    "copyBlock": "ブロックをコピー",
+    "deleteBlocks": "{{count}} 個のブロックを削除",
+    "deleteBlock": "ブロックを削除",
+    "pinAsDefault": "{{name}} をデフォルトに設定",
+    "unpinAsDefault": "{{name}} のデフォルト設定を解除",
+    "removeLanguage": "{{name}} を削除",
+    "clickToSetDefault": "クリックしてデフォルトに設定",
+    "clickToUnsetDefault": "クリックしてデフォルトを解除",
+    "pinnedDefaultHint": "メモ: {{name}} - もう一度クリックで解除。最大5つのクイック切替オプション。",
+    "dominantLangQuickSwitch": "主要な文字起こし言語を使用。最大5つのクイック切替オプション。"
   },
   "preferences": {
     "title": "環境設定",
@@ -319,7 +384,8 @@
     "updateFailed": "アップデートに失敗：{{error}}",
     "cancelled": "キャンセルされました",
     "noLongerAvailable": "アップデートはもう利用できません",
-    "downloadingUpdate": "アップデートをダウンロード中"
+    "downloadingUpdate": "アップデートをダウンロード中",
+    "releaseDate": "リリース日:"
   },
   "tabs": {
     "transcript": "転記",
@@ -386,13 +452,16 @@
     "helpsOptimizePerformance": "パフォーマンスの最適化と使用パターンの理解に役立ちます",
     "helpsPrioritizePlatform": "プラットフォームサポートの優先順位決定に役立ちます",
     "helpsUnderstandModels": "ユーザーが好むモデルの理解に役立ちます",
-    "viewPrivacyPolicy": "プライバシーポリシーを見る"
+    "viewPrivacyPolicy": "プライバシーポリシーを見る",
+    "userId": "ユーザー ID",
+    "copyUserId": "ユーザー ID をコピー"
   },
   "confirmationModal": {
     "confirmDelete": "削除の確認",
     "deleteMeetingTitle": "会議を削除",
     "deleteMeetingMsg": "この会議を削除してもよろしいですか？この操作は取り消せません。",
-    "deleting": "削除中..."
+    "deleting": "削除中...",
+    "deleteMeetingConfirm": "この会議を削除してもよろしいですか"
   },
   "languagePicker": {
     "selectLanguage": "言語を選択",
@@ -418,7 +487,8 @@
     "waitingForTranscriptComplete": "転記の完了を待機中...",
     "updating": "更新中...",
     "weekly": "毎週",
-    "windows": "Windows"
+    "windows": "Windows",
+    "waitingForTranscription": "文字起こしを待機中"
   },
   "home": {
     "welcome": "Meetlyへようこそ！",
@@ -437,7 +507,8 @@
     "noModelsFound": "モデルが見つかりません。内蔵AIを使用するにはモデルをダウンロードしてください。",
     "highQuality": "高品質",
     "fast": "高速",
-    "balanced": "バランス"
+    "balanced": "バランス",
+    "cancelDownload": "ダウンロードをキャンセル"
   },
   "beta": {
     "importAudioRetranscribe": "オーディオインポート＆再転記",
@@ -453,6 +524,14 @@
     "modelNotFound": "モデルが見つかりません",
     "modelStateError": "モデルがエラー状態です",
     "retranscribeFailed": "再文字起こしに失敗しました",
-    "summaryLangSaveFailed": "要約言語の保存に失敗しました"
+    "summaryLangSaveFailed": "要約言語の保存に失敗しました",
+    "modelNotAvailable": "モデルは利用できません",
+    "modelNotReadyDesc": "選択されたモデルは使用できる状態ではありません"
+  },
+  "bluetoothPlaybackWarning": {
+    "detected": "Bluetooth再生が検出されました",
+    "useProperAudio": "正確なレビューのため、<strong>コンピュータのスピーカー</strong>または<strong>有線ヘッドホン</strong>を使用してください。",
+    "deviceDetected": "Bluetoothデバイス {{name}} が検出されました",
+    "learnWhy": "詳しくはこちら →"
   }
 }

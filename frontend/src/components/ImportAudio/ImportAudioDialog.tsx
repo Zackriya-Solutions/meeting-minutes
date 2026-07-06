@@ -371,7 +371,7 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">{t("transcriptSettings.transcriptionLanguage")}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                            {t('transcriptSettings.languageSelectionNotSupported')}
                           </p>
                         </div>
                       )}
@@ -466,7 +466,7 @@ export function ImportAudioDialog({
                 {t('common.close')}
               </Button>
               <Button onClick={reset} variant="outline">
-                Try Again
+                {t('common.retry')}
               </Button>
             </>
           )}

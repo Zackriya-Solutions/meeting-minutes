@@ -99,7 +99,7 @@ export function ChunkProgressDisplay({
           </h3>
           {isPaused && (
             <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
-              {t('recording.pause').replace(' recording', '')}
+              {t('recording.pauseLabel')}
             </span>
           )}
         </div>
@@ -111,7 +111,7 @@ export function ChunkProgressDisplay({
               className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-sm transition-colors"
               disabled={progress.processing_chunks === 0 && progress.completed_chunks === progress.total_chunks}
             >
-              {t('recording.pause').replace(' recording', '')}
+              {t('recording.pauseLabel')}
             </button>
           ) : (
             <button
@@ -135,7 +135,7 @@ export function ChunkProgressDisplay({
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-gray-700">
-            {progress.completed_chunks}/{progress.total_chunks} chunks completed
+            {t('transcriptSettings.chunksCompleted', { completed: progress.completed_chunks, total: progress.total_chunks })}
           </span>
           <span className="text-sm font-medium text-gray-700">
             {completionPercentage}%
@@ -187,7 +187,7 @@ export function ChunkProgressDisplay({
           <div className="flex items-center space-x-2">
             <span className="text-blue-600">⏱️</span>
             <span className="text-sm text-blue-800">
-              {t('misc.waitingForTranscriptComplete').replace('to complete', '')}: {formatTimeRemaining(progress.estimated_remaining_ms)}
+              {t('misc.waitingForTranscription')}: {formatTimeRemaining(progress.estimated_remaining_ms)}
             </span>
           </div>
         </div>
@@ -196,7 +196,7 @@ export function ChunkProgressDisplay({
       {/* Recent Chunks Grid */}
       <div className="space-y-2">
         <h4 className="text-sm font-medium text-gray-700 mb-2">
-          Recent Chunks ({Math.min(progress.chunks.length, 10)}/{progress.total_chunks})
+          {t('transcriptSettings.recentChunks', { shown: Math.min(progress.chunks.length, 10), total: progress.total_chunks })}
         </h4>
 
         <div className="max-h-48 overflow-y-auto space-y-1">
@@ -250,7 +250,7 @@ export function ChunkProgressDisplay({
           <div className="flex items-center space-x-2">
             <span className="text-green-600">🎉</span>
             <span className="text-sm font-medium text-green-800">
-              {t('statusOverlays.processingTranscripts')}! All {progress.total_chunks} chunks have been transcribed.
+              {t('transcriptSettings.allChunksTranscribed', { total: progress.total_chunks })}
             </span>
           </div>
         </div>
@@ -285,7 +285,7 @@ export function ChunkProgressMini({ progress, className = '' }: { progress: Proc
       </div>
 
       <div className="text-xs text-gray-600">
-        {progress.completed_chunks} / {progress.total_chunks} chunks
+        {progress.completed_chunks} / {progress.total_chunks} {t('transcriptSettings.chunks')}
         {progress.processing_chunks > 0 && (
           <span className="ml-2 text-blue-600">
             ({progress.processing_chunks} {t('statusOverlays.saving').toLowerCase()})

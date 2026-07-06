@@ -197,10 +197,10 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
           <div className="p-4 border rounded-lg bg-blue-50">
             <div className="text-sm text-blue-800">
-              <strong>{t('recordingSettings.fileFormat')}:</strong> {preferences.file_format.toUpperCase()} files
+              <strong>{t('recordingSettings.fileFormat')}:</strong> {preferences.file_format.toUpperCase()} {t('recordingSettings.filesLabel')}
             </div>
             <div className="text-xs text-blue-600 mt-1">
-              Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.{preferences.file_format}
+              {t('recordingSettings.savedWithTimestamp')} recording_YYYYMMDD_HHMMSS.{preferences.file_format}
             </div>
           </div>
         </div>

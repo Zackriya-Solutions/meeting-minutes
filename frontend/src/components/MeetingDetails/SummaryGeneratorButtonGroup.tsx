@@ -165,8 +165,8 @@ export function SummaryGeneratorButtonGroup({
       }
 
       // Fallback
-      toast.error('Model not available', {
-        description: 'The selected model is not ready for use',
+      toast.error(t('errors.modelNotAvailable'), {
+        description: t('errors.modelNotReadyDesc'),
         duration: 5000,
       });
       setSettingsDialogOpen(true);
@@ -219,7 +219,7 @@ export function SummaryGeneratorButtonGroup({
       if (isOllamaNotInstalledError(errorMessage)) {
         // Ollama is not installed - show specific message with download link
         toast.error(
-          t('modelSettings.ollamaNotRunning').split(':')[0].trim(),
+          t('modelSettings.ollamaNotRunningShort'),
           {
             description: t('modelSettings.afterInstallingOllama'),
             duration: 7000,

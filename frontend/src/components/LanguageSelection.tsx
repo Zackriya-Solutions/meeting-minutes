@@ -158,7 +158,7 @@ export function LanguageSelection({
       // Show success toast
       const languageName = selectedLang?.name || languageCode;
       toast.success(t('recordingSettings.preferenceSaved'), {
-        description: `t('transcriptSettings.transcriptionLanguage')`
+        description: t('transcriptSettings.transcriptionLanguage')
       });
     } catch (error) {
       console.error('Failed to save language preference:', error);
@@ -202,8 +202,8 @@ export function LanguageSelection({
         {/* Parakeet language limitation warning */}
         {isParakeet && (
           <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
-            <p className="font-medium">ℹ️ {t('transcriptSettings.parakeetLangNotSupported').split('.')[0]}</p>
-            <p className="mt-1 text-xs">Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.</p>
+            <p className="font-medium">ℹ️ {t('transcriptSettings.parakeetNotSupportedShort')}</p>
+            <p className="mt-1 text-xs">{t('transcriptSettings.parakeetAutoDetectDesc')}</p>
           </div>
         )}
 
@@ -214,14 +214,14 @@ export function LanguageSelection({
           </p>
           {selectedLanguage === 'auto' && (
             <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">
-              <p className="font-medium">⚠️ {t('transcriptSettings.languageSelectionDesc').split('.')[0]}</p>
-              <p className="mt-1">For best accuracy, select your specific language (e.g., English, Spanish, etc.)</p>
+              <p className="font-medium">⚠️ {t('transcriptSettings.languageSelectionShort')}</p>
+              <p className="mt-1">{t('transcriptSettings.specificLanguageHint')}</p>
             </div>
           )}
           {selectedLanguage === 'auto-translate' && (
             <div className="p-2 bg-blue-50 border border-blue-200 rounded text-blue-800">
               <p className="font-medium">🌐 {t('tabs.transcript')}</p>
-              <p className="mt-1">All audio will be automatically translated to English. Best for multilingual meetings where you need English output.</p>
+              <p className="mt-1">{t('transcriptSettings.autoTranslateHint')}</p>
             </div>
           )}
           {selectedLanguage !== 'auto' && selectedLanguage !== 'auto-translate' && (

@@ -63,7 +63,7 @@ export function PermissionWarning({
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? t('permissionWarning.title') : !hasMicrophone ? t('recording.permissionRequired') : t('recording.systemAudioNotAvailable').split(':')[0]}
+              {!hasMicrophone && !hasSystemAudio ? t('permissionWarning.title') : !hasMicrophone ? t('recording.permissionRequired') : t('recording.systemAudioNotAvailable')}
             </div>
           </AlertTitle>
           {/* Action Buttons */}
@@ -74,7 +74,7 @@ export function PermissionWarning({
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
               >
                 <Mic className="h-4 w-4" />
-                Open Microphone Settings
+                {t('onboarding.openMicSettings')}
               </button>
             )}
             {isMacOS && !hasSystemAudio && (
@@ -83,7 +83,7 @@ export function PermissionWarning({
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
               >
                 <Speaker className="h-4 w-4" />
-                Open Screen Recording Settings
+                {t('onboarding.openScreenRecordingSettings')}
               </button>
             )}
             <button
@@ -92,7 +92,7 @@ export function PermissionWarning({
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
-              Recheck
+              {t('common.recheck')}
             </button>
           </div>
           <AlertDescription className="text-amber-800 mt-2">
@@ -100,7 +100,7 @@ export function PermissionWarning({
             {!hasMicrophone && (
               <>
                 <p className="mb-3">
-                  Meetily needs access to your microphone to record meetings. No microphone devices were detected.
+                  {t('onboarding.microphonePermissionDesc')}
                 </p>
                 <div className="space-y-2 text-sm mb-4">
                   <p className="font-medium">{t('permissionWarning.completeSetupFirst')}</p>
@@ -118,8 +118,8 @@ export function PermissionWarning({
               <>
                 <p className="mb-3">
                   {hasMicrophone
-                    ? t('recording.systemAudioNotAvailableMsg').split('\n')[0]
-                    : t('recording.systemAudioNotAvailableMsg').split('\n')[0]}
+                    ? t('recording.systemAudioNotAvailableShort')
+                    : t('recording.systemAudioNotAvailableShort')}
                 </p>
                 {isMacOS && (
                   <div className="space-y-2 text-sm mb-4">

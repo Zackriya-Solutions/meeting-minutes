@@ -41,7 +41,10 @@
     "auto": "自动",
     "confirm": "确认",
     "warning": "警告",
-    "info": "信息"
+    "info": "信息",
+    "default": "默认",
+    "recheck": "重新检查",
+    "loadMore": "加载更多..."
   },
   "app": {
     "name": "Meetily"
@@ -87,7 +90,11 @@
     "failedToInit": "录音初始化失败，请查看控制台了解详情。",
     "started": "录音已开始",
     "informParticipants": "请通知所有参会者此会议正在录音。",
-    "dontShowAgain": "不再显示"
+    "dontShowAgain": "不再显示",
+    "stopped": "录音已停止",
+    "pauseLabel": "暂停",
+    "recordingLabel": "录制中",
+    "systemAudioNotAvailableShort": "无法捕获系统音频。请检查："
   },
   "recordingSettings": {
     "title": "录音设置",
@@ -107,7 +114,9 @@
     "devicePrefsSaved": "设备偏好已保存",
     "preferenceSaved": "偏好已保存",
     "failedToSavePrefs": "保存偏好失败",
-    "openFolder": "打开文件夹"
+    "openFolder": "打开文件夹",
+    "filesLabel": "文件",
+    "savedWithTimestamp": "录音以时间戳保存："
   },
   "statusOverlays": {
     "processingTranscripts": "正在处理转录文本...",
@@ -198,7 +207,23 @@
     "maxTokens": "最大 Token 数",
     "temperature": "温度 (0.0-2.0)",
     "topP": "Top P (0.0-1.0)",
-    "customServer": "自定义服务器 (OpenAI)"
+    "customServer": "自定义服务器 (OpenAI)",
+    "modelReady": "{{name}} 已就绪！",
+    "modelReadyDesc": "模型已下载，可以使用",
+    "failedToDownload": "下载 {{name}} 失败",
+    "downloadingModel": "正在下载 {{name}}...",
+    "mayTakeFewMinutes": "这可能需要几分钟",
+    "modelDeleted": "{{name}} 已删除",
+    "modelRemovedDesc": "已移除模型以释放空间",
+    "failedToDeleteModel": "删除 {{name}} 失败",
+    "aiModelConfiguration": "AI 模型配置",
+    "builtInAi": "内置 AI",
+    "accuracy": "准确率",
+    "processingLabel": "处理",
+    "ready": "就绪",
+    "size": "大小:",
+    "modified": "修改时间:",
+    "ollamaNotRunningShort": "Ollama 未安装或未运行"
   },
   "transcriptSettings": {
     "title": "转录设置",
@@ -241,7 +266,27 @@
     "greenYellowRed": "绿色=良好，黄色=偏大，红色=过大",
     "testMic": "测试麦克风",
     "clickTestMic": "点击「测试麦克风」检查您的麦克风是否工作正常",
-    "notDeviceNames": "有助于提升兼容性，并非实际设备名称"
+    "notDeviceNames": "有助于提升兼容性，并非实际设备名称",
+    "languageSelectionNotSupported": "Parakeet 不支持语言选择。它始终使用自动检测。",
+    "devicesSelected": "设备已选择",
+    "devicesSelectedDesc": "麦克风：{{mic}}，系统音频：{{system}}",
+    "showConfidenceIndicators": "显示置信度指示器",
+    "showConfidenceIndicatorsDesc": "显示彩色圆点表示转录置信度质量",
+    "specificLanguageHint": "为获得最佳准确率，请选择您的具体语言（如英语、西班牙语等）",
+    "autoTranslateHint": "所有音频将自动翻译为英语。最适合需要英语输出的多语言会议。",
+    "confidenceLabel": "置信度",
+    "transcriptionConfidence": "转写置信度: {{percent}}%",
+    "confidenceHigh": "高置信度",
+    "confidenceGood": "良好置信度",
+    "confidenceMedium": "中等置信度",
+    "confidenceLow": "低置信度",
+    "parakeetNotSupportedShort": "Parakeet 不支持语言选择",
+    "parakeetAutoDetectDesc": "Parakeet 目前仅支持自动语言检测。不支持手动语言选择。如果需要指定特定语言，请使用 Whisper。",
+    "languageSelectionShort": "为获得最佳准确率，请选择您的具体语言",
+    "chunksCompleted": "{{completed}}/{{total}} 个区块已完成",
+    "recentChunks": "最近区块 ({{shown}}/{{total}})",
+    "allChunksTranscribed": "全部 {{total}} 个区块已转写完成。",
+    "chunks": "区块"
   },
   "summarySettings": {
     "title": "AI 摘要",
@@ -269,7 +314,27 @@
     "usingAutoUntilMetadata": "在读取会议元数据前使用自动检测。",
     "template": "模板",
     "templateSelected": "已选模板",
-    "chatWithTeam": "与 Zackriya 团队交流"
+    "chatWithTeam": "与 Zackriya 团队交流",
+    "addSection": "添加新章节",
+    "regenerateSummary": "重新生成摘要",
+    "findInSummary": "在摘要中查找",
+    "summaryLangSavedOnDevice": "摘要语言已保存在此设备",
+    "summaryLangSavedOnDeviceDesc": "此会议没有录音文件夹，因此无法将偏好写入会议元数据。",
+    "checkModelConfig": "请检查您的模型配置和 API 密钥，或重试。",
+    "noContent": "暂无摘要内容。",
+    "tryGenerating": "尝试生成新摘要。",
+    "addLanguage": "＋ 添加语言",
+    "copyBlocks": "复制 {{count}} 个区块",
+    "copyBlock": "复制区块",
+    "deleteBlocks": "删除 {{count}} 个区块",
+    "deleteBlock": "删除区块",
+    "pinAsDefault": "将 {{name}} 置为默认",
+    "unpinAsDefault": "取消 {{name}} 默认置顶",
+    "removeLanguage": "移除 {{name}}",
+    "clickToSetDefault": "点击设为默认",
+    "clickToUnsetDefault": "点击取消默认",
+    "pinnedDefaultHint": "注意：{{name}} - 再次点击取消设置。最多 5 个快速切换选项。",
+    "dominantLangQuickSwitch": "使用主要转写语言。最多 5 个快速切换选项。"
   },
   "preferences": {
     "title": "偏好设置",
@@ -319,7 +384,8 @@
     "updateFailed": "更新失败：{{error}}",
     "cancelled": "更新已取消",
     "noLongerAvailable": "更新不再可用",
-    "downloadingUpdate": "正在下载更新"
+    "downloadingUpdate": "正在下载更新",
+    "releaseDate": "发布日期："
   },
   "tabs": {
     "transcript": "转录",
@@ -386,13 +452,16 @@
     "helpsOptimizePerformance": "帮助我们优化性能并了解使用模式",
     "helpsPrioritizePlatform": "帮助我们确定平台支持优先级",
     "helpsUnderstandModels": "帮助我们了解用户偏好的模型",
-    "viewPrivacyPolicy": "查看隐私政策"
+    "viewPrivacyPolicy": "查看隐私政策",
+    "userId": "用户 ID",
+    "copyUserId": "复制用户 ID"
   },
   "confirmationModal": {
     "confirmDelete": "确认删除",
     "deleteMeetingTitle": "删除会议",
     "deleteMeetingMsg": "确定要删除此会议吗？此操作无法撤销。",
-    "deleting": "删除中..."
+    "deleting": "删除中...",
+    "deleteMeetingConfirm": "确定要删除此会议吗"
   },
   "languagePicker": {
     "selectLanguage": "选择语言",
@@ -418,7 +487,8 @@
     "waitingForTranscriptComplete": "等待转录完成...",
     "updating": "更新中...",
     "weekly": "每周",
-    "windows": "Windows"
+    "windows": "Windows",
+    "waitingForTranscription": "等待转写"
   },
   "home": {
     "welcome": "欢迎使用 Meetily！",
@@ -437,7 +507,8 @@
     "noModelsFound": "未找到模型。请下载一个模型以开始使用内置 AI。",
     "highQuality": "高质量",
     "fast": "快速",
-    "balanced": "均衡"
+    "balanced": "均衡",
+    "cancelDownload": "取消下载"
   },
   "beta": {
     "importAudioRetranscribe": "导入音频 & 重新转录",
@@ -453,6 +524,14 @@
     "modelNotFound": "未找到模型",
     "modelStateError": "模型处于错误状态",
     "retranscribeFailed": "重新转录失败",
-    "summaryLangSaveFailed": "保存摘要语言失败"
+    "summaryLangSaveFailed": "保存摘要语言失败",
+    "modelNotAvailable": "模型不可用",
+    "modelNotReadyDesc": "所选模型尚未就绪"
+  },
+  "bluetoothPlaybackWarning": {
+    "detected": "检测到蓝牙播放",
+    "useProperAudio": "为了准确审阅，请使用<strong>电脑扬声器</strong>或<strong>有线耳机</strong>。",
+    "deviceDetected": "检测到蓝牙设备 {{name}}",
+    "learnWhy": "了解发生此情况 →"
   }
 }

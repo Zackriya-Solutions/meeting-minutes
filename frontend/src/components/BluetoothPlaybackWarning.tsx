@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Speaker, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useTranslation } from 'react-i18next';
+import { useTranslation, Trans } from 'react-i18next';
 
 interface AudioOutputInfo {
   device_name: string;
@@ -74,21 +74,19 @@ export function BluetoothPlaybackWarning({
       <div className="flex items-start justify-between w-full">
         <div className="flex-1">
           <AlertTitle className="text-yellow-900 font-semibold">
-            Bluetooth Playback Detected
+            {t('bluetoothPlaybackWarning.detected')}
           </AlertTitle>
           <AlertDescription className="text-yellow-800 mt-1">
-            {t('importAudio.dropAudioFileOnly').split(' ')[0]} <strong>{deviceName}</strong>...
-            {t('transcriptRecovery.unknownError')}
-            For accurate review, please use <strong>computer speakers</strong> or{' '}
-            <strong>wired headphones</strong>.
+            {t('bluetoothPlaybackWarning.deviceDetected', { name: deviceName })}
+            <Trans i18nKey="bluetoothPlaybackWarning.useProperAudio" components={{ strong: <strong /> }} />
             <br />
             <a
-              href="https://github.com/your-org/meetily/blob/main/BLUETOOTH_PLAYBACK_NOTICE.md"
+              href="https://github.com/Zackriya-Solutions/meetily/blob/main/BLUETOOTH_PLAYBACK_NOTICE.md"
               target="_blank"
               rel="noopener noreferrer"
               className="underline hover:text-yellow-900 font-medium mt-2 inline-block"
             >
-              Learn why this happens →
+              {t('bluetoothPlaybackWarning.learnWhy')}
             </a>
           </AlertDescription>
         </div>

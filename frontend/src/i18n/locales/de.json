@@ -41,7 +41,10 @@
     "auto": "Automatisch",
     "confirm": "Bestätigen",
     "warning": "Warnung",
-    "info": "Info"
+    "info": "Info",
+    "default": "Standard",
+    "recheck": "Erneut prüfen",
+    "loadMore": "Mehr wird geladen..."
   },
   "app": {
     "name": "Meetily"
@@ -87,7 +90,11 @@
     "dontShowAgain": "Nicht mehr anzeigen",
     "paused": "Aufnahme pausiert",
     "clickResume": "Klicken zum Fortsetzen der Aufnahme",
-    "speakToSee": "Sprechen Sie, um die Live-Transkription zu sehen"
+    "speakToSee": "Sprechen Sie, um die Live-Transkription zu sehen",
+    "stopped": "Aufnahme gestoppt",
+    "pauseLabel": "Pause",
+    "recordingLabel": "Aufnahme",
+    "systemAudioNotAvailableShort": "System-Audio konnte nicht aufgenommen werden. Bitte prüfen Sie:"
   },
   "recordingSettings": {
     "title": "Aufnahmeeinstellungen",
@@ -107,7 +114,9 @@
     "devicePrefsSaved": "Geräteeinstellungen gespeichert",
     "preferenceSaved": "Einstellung gespeichert",
     "failedToSavePrefs": "Einstellung konnte nicht gespeichert werden",
-    "openFolder": "Ordner öffnen"
+    "openFolder": "Ordner öffnen",
+    "filesLabel": "Dateien",
+    "savedWithTimestamp": "Aufnahmen werden mit Zeitstempel gespeichert:"
   },
   "statusOverlays": {
     "processingTranscripts": "Transkripte werden verarbeitet...",
@@ -198,7 +207,23 @@
     "maxTokens": "Max. Tokens",
     "temperature": "Temperatur (0.0-2.0)",
     "topP": "Top P (0.0-1.0)",
-    "customServer": "Benutzerdefinierter Server (OpenAI)"
+    "customServer": "Benutzerdefinierter Server (OpenAI)",
+    "modelReady": "{{name}} bereit!",
+    "modelReadyDesc": "Modell heruntergeladen und einsatzbereit",
+    "failedToDownload": "Download von {{name}} fehlgeschlagen",
+    "downloadingModel": "{{name}} wird heruntergeladen...",
+    "mayTakeFewMinutes": "Dies kann einige Minuten dauern",
+    "modelDeleted": "{{name}} gelöscht",
+    "modelRemovedDesc": "Modell entfernt, um Speicherplatz freizugeben",
+    "failedToDeleteModel": "{{name}} konnte nicht gelöscht werden",
+    "aiModelConfiguration": "KI-Modellkonfiguration",
+    "builtInAi": "Eingebaute KI",
+    "accuracy": "Genauigkeit",
+    "processingLabel": "Verarbeitung",
+    "ready": "Bereit",
+    "size": "Größe:",
+    "modified": "Geändert:",
+    "ollamaNotRunningShort": "Ollama ist nicht installiert oder wird nicht ausgeführt"
   },
   "transcriptSettings": {
     "title": "Transkriptionseinstellungen",
@@ -241,7 +266,27 @@
     "greenYellowRed": "Grün=gut, Gelb=laut, Rot=zu laut",
     "testMic": "Mikrofon testen",
     "clickTestMic": "Klicken Sie „Mikrofon testen“, ob es funktioniert",
-    "notDeviceNames": "Hilft bei Kompatibilität, NICHT die tatsächlichen Gerätenamen"
+    "notDeviceNames": "Hilft bei Kompatibilität, NICHT die tatsächlichen Gerätenamen",
+    "languageSelectionNotSupported": "Sprachauswahl wird für Parakeet nicht unterstützt. Es wird immer die automatische Erkennung verwendet.",
+    "devicesSelected": "Geräte ausgewählt",
+    "devicesSelectedDesc": "Mikrofon: {{mic}}, System-Audio: {{system}}",
+    "showConfidenceIndicators": "Konfidenzindikatoren anzeigen",
+    "showConfidenceIndicatorsDesc": "Farbige Punkte anzeigen, die die Qualität der Transkriptionskonfidenz zeigen",
+    "specificLanguageHint": "Wählen Sie für beste Genauigkeit Ihre spezifische Sprache (z. B. Englisch, Spanisch usw.)",
+    "autoTranslateHint": "Alle Audiodaten werden automatisch ins Englische übersetzt. Ideal für mehrsprachige Besprechungen, bei denen Sie englische Ausgabe benötigen.",
+    "confidenceLabel": "Konfidenz",
+    "transcriptionConfidence": "Transkriptionskonfidenz: {{percent}}%",
+    "confidenceHigh": "Hohe Konfidenz",
+    "confidenceGood": "Gute Konfidenz",
+    "confidenceMedium": "Mittlere Konfidenz",
+    "confidenceLow": "Niedrige Konfidenz",
+    "parakeetNotSupportedShort": "Sprachauswahl wird für Parakeet nicht unterstützt",
+    "parakeetAutoDetectDesc": "Parakeet unterstützt derzeit nur die automatische Spracherkennung. Eine manuelle Sprachauswahl ist nicht verfügbar. Verwenden Sie Whisper, wenn Sie eine bestimmte Sprache festlegen möchten.",
+    "languageSelectionShort": "Wählen Sie für beste Genauigkeit Ihre spezifische Sprache",
+    "chunksCompleted": "{{completed}}/{{total}} Chunks abgeschlossen",
+    "recentChunks": "Letzte Chunks ({{shown}}/{{total}})",
+    "allChunksTranscribed": "Alle {{total}} Chunks wurden transkribiert.",
+    "chunks": "Chunks"
   },
   "summarySettings": {
     "title": "KI-Zusammenfassung",
@@ -269,7 +314,27 @@
     "usingAutoUntilMetadata": "Auto bis Besprechungsmetadaten gelesen werden können.",
     "template": "Vorlage",
     "templateSelected": "Vorlage ausgewählt",
-    "chatWithTeam": "Mit dem Zackriya-Team chatten"
+    "chatWithTeam": "Mit dem Zackriya-Team chatten",
+    "addSection": "Neuen Abschnitt hinzufügen",
+    "regenerateSummary": "Zusammenfassung neu generieren",
+    "findInSummary": "In Zusammenfassung suchen",
+    "summaryLangSavedOnDevice": "Zusammenfassungssprache auf diesem Gerät gespeichert",
+    "summaryLangSavedOnDeviceDesc": "Diese Besprechung hat keinen Aufnahmeordner, daher kann die Einstellung nicht in die Besprechungsmetadaten geschrieben werden.",
+    "checkModelConfig": "Bitte überprüfen Sie Ihre Modellkonfiguration und API-Schlüssel oder versuchen Sie es erneut.",
+    "noContent": "Kein Zusammenfassungsinhalt verfügbar.",
+    "tryGenerating": "Versuchen Sie, eine neue Zusammenfassung zu generieren.",
+    "addLanguage": "＋ Sprache hinzufügen",
+    "copyBlocks": "{{count}} Blöcke kopieren",
+    "copyBlock": "Block kopieren",
+    "deleteBlocks": "{{count}} Blöcke löschen",
+    "deleteBlock": "Block löschen",
+    "pinAsDefault": "{{name}} als Standard festlegen",
+    "unpinAsDefault": "{{name}} als Standard aufheben",
+    "removeLanguage": "{{name}} entfernen",
+    "clickToSetDefault": "Klicken, um als Standard festzulegen",
+    "clickToUnsetDefault": "Klicken, um Standard aufzuheben",
+    "pinnedDefaultHint": "Hinweis: {{name}} - erneut klicken zum Aufheben. Max. 5 Schnellwechsel-Optionen.",
+    "dominantLangQuickSwitch": "Verwendet dominante Transkriptsprache. Max. 5 Schnellwechsel-Optionen."
   },
   "preferences": {
     "title": "Einstellungen",
@@ -319,7 +384,8 @@
     "updateFailed": "Update fehlgeschlagen: {{error}}",
     "cancelled": "Abgebrochen",
     "noLongerAvailable": "Update nicht mehr verfügbar",
-    "downloadingUpdate": "Update wird heruntergeladen"
+    "downloadingUpdate": "Update wird heruntergeladen",
+    "releaseDate": "Veröffentlichungsdatum:"
   },
   "tabs": {
     "transcript": "Transkription",
@@ -386,13 +452,16 @@
     "helpsOptimizePerformance": "Hilft, Leistung zu optimieren und Nutzungsmuster zu verstehen",
     "helpsPrioritizePlatform": "Hilft, Plattform-Unterstützung zu priorisieren",
     "helpsUnderstandModels": "Hilft zu verstehen, welche Benutzer Modelle bevorzugen",
-    "viewPrivacyPolicy": "Datenschutzrichtlinie anzeigen"
+    "viewPrivacyPolicy": "Datenschutzrichtlinie anzeigen",
+    "userId": "Benutzer-ID",
+    "copyUserId": "Benutzer-ID kopieren"
   },
   "confirmationModal": {
     "confirmDelete": "Löschen bestätigen",
     "deleteMeetingTitle": "Besprechung löschen",
     "deleteMeetingMsg": "Sind Sie sicher, dass Sie diese Besprechung löschen möchten? Dies kann nicht rückgängig gemacht werden.",
-    "deleting": "Wird gelöscht..."
+    "deleting": "Wird gelöscht...",
+    "deleteMeetingConfirm": "Möchten Sie dieses Meeting wirklich löschen"
   },
   "languagePicker": {
     "selectLanguage": "Sprache auswählen",
@@ -418,7 +487,8 @@
     "waitingForTranscriptComplete": "Warte auf Abschluss der Transkription...",
     "updating": "Wird aktualisiert...",
     "weekly": "Wöchentlich",
-    "windows": "Windows"
+    "windows": "Windows",
+    "waitingForTranscription": "Warte auf Transkription"
   },
   "home": {
     "welcome": "Willkommen bei Meetily!",
@@ -437,7 +507,8 @@
     "noModelsFound": "Keine Modelle gefunden. Laden Sie ein Modell herunter, um Integrierte KI zu verwenden.",
     "highQuality": "Hohe Qualität",
     "fast": "Schnell",
-    "balanced": "Ausgewogen"
+    "balanced": "Ausgewogen",
+    "cancelDownload": "Download abbrechen"
   },
   "beta": {
     "importAudioRetranscribe": "Audio importieren & Neu transkribieren",
@@ -453,6 +524,14 @@
     "modelNotFound": "Modell nicht gefunden",
     "modelStateError": "Modell befindet sich im Fehlerzustand",
     "retranscribeFailed": "Erneute Transkription fehlgeschlagen",
-    "summaryLangSaveFailed": "Zusammenfassungssprache konnte nicht gespeichert werden"
+    "summaryLangSaveFailed": "Zusammenfassungssprache konnte nicht gespeichert werden",
+    "modelNotAvailable": "Modell nicht verfügbar",
+    "modelNotReadyDesc": "Das ausgewählte Modell ist noch nicht einsatzbereit"
+  },
+  "bluetoothPlaybackWarning": {
+    "detected": "Bluetooth-Wiedergabe erkannt",
+    "useProperAudio": "Verwenden Sie für eine genaue Überprüfung <strong>Computerlautsprecher</strong> oder <strong>kabelgebundene Kopfhörer</strong>.",
+    "deviceDetected": "Bluetooth-Gerät {{name}} erkannt",
+    "learnWhy": "Erfahren Sie, warum das passiert →"
   }
 }

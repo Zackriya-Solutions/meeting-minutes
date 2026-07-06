@@ -41,7 +41,10 @@
     "auto": "Auto",
     "confirm": "Confirm",
     "warning": "Warning",
-    "info": "Info"
+    "info": "Info",
+    "default": "Default",
+    "recheck": "Recheck",
+    "loadMore": "Loading more..."
   },
   "app": {
     "name": "Meetily"
@@ -87,7 +90,11 @@
     "failedToInit": "Failed to initialize recording. Please check the console for details.",
     "started": "Recording Started",
     "informParticipants": "Inform all participants this meeting is being recorded.",
-    "dontShowAgain": "Don't show this again"
+    "dontShowAgain": "Don't show this again",
+    "stopped": "Recording Stopped",
+    "pauseLabel": "Pause",
+    "recordingLabel": "Recording",
+    "systemAudioNotAvailableShort": "Unable to capture system audio. Please check that:"
   },
   "recordingSettings": {
     "title": "Recording Settings",
@@ -107,7 +114,9 @@
     "devicePrefsSaved": "Device preferences saved",
     "preferenceSaved": "Preference saved",
     "failedToSavePrefs": "Failed to save preference",
-    "openFolder": "Open Folder"
+    "openFolder": "Open Folder",
+    "filesLabel": "files",
+    "savedWithTimestamp": "Recordings are saved with timestamp:"
   },
   "statusOverlays": {
     "processingTranscripts": "Processing transcripts...",
@@ -198,7 +207,23 @@
     "maxTokens": "Max Tokens",
     "temperature": "Temperature (0.0-2.0)",
     "topP": "Top P (0.0-1.0)",
-    "customServer": "Custom Server (OpenAI)"
+    "customServer": "Custom Server (OpenAI)",
+    "modelReady": "{{name}} ready!",
+    "modelReadyDesc": "Model downloaded and ready to use",
+    "failedToDownload": "Failed to download {{name}}",
+    "downloadingModel": "Downloading {{name}}...",
+    "mayTakeFewMinutes": "This may take a few minutes",
+    "modelDeleted": "{{name}} deleted",
+    "modelRemovedDesc": "Model removed to free up space",
+    "failedToDeleteModel": "Failed to delete {{name}}",
+    "aiModelConfiguration": "AI Model Configuration",
+    "builtInAi": "Built-in AI",
+    "accuracy": "accuracy",
+    "processingLabel": "processing",
+    "ready": "Ready",
+    "size": "Size:",
+    "modified": "Modified:",
+    "ollamaNotRunningShort": "Ollama is not installed or not running"
   },
   "transcriptSettings": {
     "title": "Transcript Settings",
@@ -241,7 +266,27 @@
     "greenYellowRed": "Green = good, Yellow = loud, Red = too loud",
     "testMic": "Test Mic",
     "clickTestMic": "Click Test Mic to check if your microphone is working",
-    "notDeviceNames": "Helps us improve compatibility, NOT the actual device names"
+    "notDeviceNames": "Helps us improve compatibility, NOT the actual device names",
+    "languageSelectionNotSupported": "Language selection isn't supported for Parakeet. It always uses automatic detection.",
+    "devicesSelected": "Devices selected",
+    "devicesSelectedDesc": "Microphone: {{mic}}, System Audio: {{system}}",
+    "showConfidenceIndicators": "Show Confidence Indicators",
+    "showConfidenceIndicatorsDesc": "Display colored dots showing transcription confidence quality",
+    "specificLanguageHint": "For best accuracy, select your specific language (e.g., English, Spanish, etc.)",
+    "autoTranslateHint": "All audio will be automatically translated to English. Best for multilingual meetings where you need English output.",
+    "confidenceLabel": "confidence",
+    "transcriptionConfidence": "Transcription confidence: {{percent}}%",
+    "confidenceHigh": "High confidence",
+    "confidenceGood": "Good confidence",
+    "confidenceMedium": "Medium confidence",
+    "confidenceLow": "Low confidence",
+    "parakeetNotSupportedShort": "Language selection is not supported for Parakeet",
+    "parakeetAutoDetectDesc": "Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.",
+    "languageSelectionShort": "For best accuracy, select your specific language",
+    "chunksCompleted": "{{completed}}/{{total}} chunks completed",
+    "recentChunks": "Recent Chunks ({{shown}}/{{total}})",
+    "allChunksTranscribed": "All {{total}} chunks have been transcribed.",
+    "chunks": "chunks"
   },
   "summarySettings": {
     "title": "AI Summary",
@@ -269,7 +314,27 @@
     "usingAutoUntilMetadata": "Using Auto until meeting metadata can be read.",
     "template": "Template",
     "templateSelected": "Template selected",
-    "chatWithTeam": "Chat with the Zackriya team"
+    "chatWithTeam": "Chat with the Zackriya team",
+    "addSection": "Add new section",
+    "regenerateSummary": "Regenerate Summary",
+    "findInSummary": "Find in Summary",
+    "summaryLangSavedOnDevice": "Summary language saved on this device",
+    "summaryLangSavedOnDeviceDesc": "This meeting has no recording folder, so the preference cannot be written to meeting metadata.",
+    "checkModelConfig": "Please check your model configuration and API keys, or try again.",
+    "noContent": "No summary content available.",
+    "tryGenerating": "Try generating a new summary.",
+    "addLanguage": "＋ Add language",
+    "copyBlocks": "Copy {{count}} blocks",
+    "copyBlock": "Copy block",
+    "deleteBlocks": "Delete {{count}} blocks",
+    "deleteBlock": "Delete block",
+    "pinAsDefault": "Pin {{name}} as default",
+    "unpinAsDefault": "Unpin {{name}} as default",
+    "removeLanguage": "Remove {{name}}",
+    "clickToSetDefault": "Click to set as default",
+    "clickToUnsetDefault": "Click to unset as default",
+    "pinnedDefaultHint": "Note: {{name}} - click it again to unset. Max 5 quick-switch options.",
+    "dominantLangQuickSwitch": "Uses dominant transcript language. Max 5 quick-switch options."
   },
   "preferences": {
     "title": "Preferences",
@@ -319,7 +384,8 @@
     "updateFailed": "Update failed: {{error}}",
     "cancelled": "Update cancelled",
     "noLongerAvailable": "Update no longer available",
-    "downloadingUpdate": "Downloading Update"
+    "downloadingUpdate": "Downloading Update",
+    "releaseDate": "Release Date:"
   },
   "tabs": {
     "transcript": "Transcript",
@@ -386,13 +452,16 @@
     "helpsOptimizePerformance": "Helps us optimize performance and understand usage patterns",
     "helpsPrioritizePlatform": "Helps us prioritize platform support",
     "helpsUnderstandModels": "Helps us understand which models users prefer",
-    "viewPrivacyPolicy": "View Privacy Policy"
+    "viewPrivacyPolicy": "View Privacy Policy",
+    "userId": "User ID",
+    "copyUserId": "Copy User ID"
   },
   "confirmationModal": {
     "confirmDelete": "Confirm Delete",
     "deleteMeetingTitle": "Delete Meeting",
     "deleteMeetingMsg": "Are you sure you want to delete this meeting? This action cannot be undone.",
-    "deleting": "Deleting..."
+    "deleting": "Deleting...",
+    "deleteMeetingConfirm": "Are you sure you want to delete this meeting"
   },
   "languagePicker": {
     "selectLanguage": "Select Language",
@@ -418,7 +487,8 @@
     "waitingForTranscriptComplete": "Waiting for transcription to complete...",
     "updating": "Updating...",
     "weekly": "Weekly",
-    "windows": "Windows"
+    "windows": "Windows",
+    "waitingForTranscription": "Waiting for transcription"
   },
   "home": {
     "welcome": "Welcome to Meetily!",
@@ -437,7 +507,8 @@
     "noModelsFound": "No models found. Download a model to get started with Built-in AI.",
     "highQuality": "High Quality",
     "fast": "Fast",
-    "balanced": "Balanced"
+    "balanced": "Balanced",
+    "cancelDownload": "Cancel download"
   },
   "beta": {
     "importAudioRetranscribe": "Import Audio & Retranscribe",
@@ -453,6 +524,14 @@
     "modelNotFound": "Model not found",
     "modelStateError": "Model is in an error state",
     "retranscribeFailed": "Retranscription failed",
-    "summaryLangSaveFailed": "Failed to save summary language"
+    "summaryLangSaveFailed": "Failed to save summary language",
+    "modelNotAvailable": "Model not available",
+    "modelNotReadyDesc": "The selected model is not ready for use"
+  },
+  "bluetoothPlaybackWarning": {
+    "detected": "Bluetooth Playback Detected",
+    "useProperAudio": "For accurate review, please use <strong>computer speakers</strong> or <strong>wired headphones</strong>.",
+    "deviceDetected": "Bluetooth device {{name}} detected",
+    "learnWhy": "Learn why this happens →"
   }
 }

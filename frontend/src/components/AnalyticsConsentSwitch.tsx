@@ -189,7 +189,7 @@ export default function AnalyticsConsentSwitch() {
           <div className="p-4 border rounded-lg bg-gray-50">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-800 mb-1">{t('about.versionLabel').replace(t('common.title'), 'User ID')}</div>
+                <div className="font-medium text-gray-800 mb-1">{t('analytics.userId')}</div>
                 <p className="text-xs text-gray-600 mb-2">
                   {t('compliance.dataNeverLeaves')}
                 </p>
@@ -202,7 +202,7 @@ export default function AnalyticsConsentSwitch() {
                     variant="outline"
                     size="sm"
                     className="flex-shrink-0"
-                    title={t("common.copy") + " User ID"}
+                    title={t('analytics.copyUserId')}
                   >
                     {isCopied ? (
                       <>

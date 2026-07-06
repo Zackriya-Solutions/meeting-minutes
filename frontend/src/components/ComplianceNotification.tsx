@@ -118,7 +118,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             className="text-xs px-2 py-0.5 h-6 bg-green-600 hover:bg-green-700 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
-            Done
+            {t('common.done')}
           </Button>
         </div>
       </div>

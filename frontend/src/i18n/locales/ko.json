@@ -41,7 +41,10 @@
     "auto": "자동",
     "confirm": "확인",
     "warning": "경고",
-    "info": "정보"
+    "info": "정보",
+    "default": "기본값",
+    "recheck": "다시 확인",
+    "loadMore": "더 불러오는 중..."
   },
   "app": {
     "name": "Meetily"
@@ -87,7 +90,11 @@
     "dontShowAgain": "다시 표시하지 않음",
     "paused": "녹음 일시 정지됨",
     "clickResume": "클릭하여 녹음 계속",
-    "speakToSee": "말하면 실시간 전사가 표시됩니다"
+    "speakToSee": "말하면 실시간 전사가 표시됩니다",
+    "stopped": "녹음이 중지되었습니다",
+    "pauseLabel": "일시정지",
+    "recordingLabel": "녹음 중",
+    "systemAudioNotAvailableShort": "시스템 오디오를 캡처할 수 없습니다. 다음을 확인하세요:"
   },
   "recordingSettings": {
     "title": "녹음 설정",
@@ -107,7 +114,9 @@
     "devicePrefsSaved": "장치 설정 저장됨",
     "preferenceSaved": "설정 저장됨",
     "failedToSavePrefs": "설정 저장 실패",
-    "openFolder": "폴더 열기"
+    "openFolder": "폴더 열기",
+    "filesLabel": "파일",
+    "savedWithTimestamp": "녹음은 타임스탬프와 함께 저장됩니다:"
   },
   "statusOverlays": {
     "processingTranscripts": "전사 처리 중...",
@@ -198,7 +207,23 @@
     "maxTokens": "최대 토큰 수",
     "temperature": "온도 (0.0-2.0)",
     "topP": "Top P (0.0-1.0)",
-    "customServer": "사용자 지정 서버(OpenAI)"
+    "customServer": "사용자 지정 서버(OpenAI)",
+    "modelReady": "{{name}} 준비 완료!",
+    "modelReadyDesc": "모델이 다운로드되어 사용할 준비가 되었습니다",
+    "failedToDownload": "{{name}} 다운로드 실패",
+    "downloadingModel": "{{name}} 다운로드 중...",
+    "mayTakeFewMinutes": "몇 분 정도 걸릴 수 있습니다",
+    "modelDeleted": "{{name}} 삭제됨",
+    "modelRemovedDesc": "공간 확보를 위해 모델이 제거되었습니다",
+    "failedToDeleteModel": "{{name}} 삭제 실패",
+    "aiModelConfiguration": "AI 모델 설정",
+    "builtInAi": "내장 AI",
+    "accuracy": "정확도",
+    "processingLabel": "처리",
+    "ready": "준비됨",
+    "size": "크기:",
+    "modified": "수정됨:",
+    "ollamaNotRunningShort": "Ollama가 설치되지 않았거나 실행되고 있지 않습니다"
   },
   "transcriptSettings": {
     "title": "전사 설정",
@@ -241,7 +266,27 @@
     "greenYellowRed": "초록=양호, 노랑=큼, 빨강=너무 큼",
     "testMic": "마이크 테스트",
     "clickTestMic": "\"마이크 테스트\"를 클릭하여 작동 확인",
-    "notDeviceNames": "호환성 향상에 도움이 됩니다, 실제 장치 이름은 아닙니다"
+    "notDeviceNames": "호환성 향상에 도움이 됩니다, 실제 장치 이름은 아닙니다",
+    "languageSelectionNotSupported": "Parakeet은 언어 선택을 지원하지 않습니다. 항상 자동 감지를 사용합니다.",
+    "devicesSelected": "기기가 선택되었습니다",
+    "devicesSelectedDesc": "마이크: {{mic}}, 시스템 오디오: {{system}}",
+    "showConfidenceIndicators": "신뢰도 표시기 표시",
+    "showConfidenceIndicatorsDesc": "전사 신뢰도 품질을 나타내는 색상 점 표시",
+    "specificLanguageHint": "최고의 정확도를 위해 특정 언어(예: 영어, 스페인어 등)를 선택하세요",
+    "autoTranslateHint": "모든 오디오가 자동으로 영어로 번역됩니다. 영어 출력이 필요한 다국어 회의에 가장 적합합니다.",
+    "confidenceLabel": "신뢰도",
+    "transcriptionConfidence": "전사 신뢰도: {{percent}}%",
+    "confidenceHigh": "높은 신뢰도",
+    "confidenceGood": "양호한 신뢰도",
+    "confidenceMedium": "중간 신뢰도",
+    "confidenceLow": "낮은 신뢰도",
+    "parakeetNotSupportedShort": "Parakeet은 언어 선택을 지원하지 않습니다",
+    "parakeetAutoDetectDesc": "Parakeet은 현재 자동 언어 감지만 지원합니다. 수동 언어 선택은 불가능합니다. 특정 언어를 지정하려면 Whisper를 사용하세요.",
+    "languageSelectionShort": "최고의 정확도를 위해 특정 언어를 선택하세요",
+    "chunksCompleted": "{{completed}}/{{total}}개 청크 완료",
+    "recentChunks": "최근 청크 ({{shown}}/{{total}})",
+    "allChunksTranscribed": "모든 {{total}}개 청크 전사 완료.",
+    "chunks": "청크"
   },
   "summarySettings": {
     "title": "AI 요약",
@@ -269,7 +314,27 @@
     "usingAutoUntilMetadata": "회의 메타데이터를 읽을 때까지 자동 사용.",
     "template": "템플릿",
     "templateSelected": "템플릿 선택됨",
-    "chatWithTeam": "Zackriya 팀과 채팅"
+    "chatWithTeam": "Zackriya 팀과 채팅",
+    "addSection": "새 섹션 추가",
+    "regenerateSummary": "요약 다시 생성",
+    "findInSummary": "요약에서 찾기",
+    "summaryLangSavedOnDevice": "요약 언어가 이 기기에 저장되었습니다",
+    "summaryLangSavedOnDeviceDesc": "이 회의에는 녹음 폴더가 없어 설정을 회의 메타데이터에 저장할 수 없습니다.",
+    "checkModelConfig": "모델 설정과 API 키를 확인하거나 다시 시도해 주세요.",
+    "noContent": "요약 콘텐츠가 없습니다.",
+    "tryGenerating": "새 요약을 생성해 보세요.",
+    "addLanguage": "＋ 언어 추가",
+    "copyBlocks": "{{count}}개 블록 복사",
+    "copyBlock": "블록 복사",
+    "deleteBlocks": "{{count}}개 블록 삭제",
+    "deleteBlock": "블록 삭제",
+    "pinAsDefault": "{{name}}을 기본값으로 설정",
+    "unpinAsDefault": "{{name}} 기본값 설정 해제",
+    "removeLanguage": "{{name}} 제거",
+    "clickToSetDefault": "클릭하여 기본값으로 설정",
+    "clickToUnsetDefault": "클릭하여 기본값 해제",
+    "pinnedDefaultHint": "참고: {{name}} - 다시 클릭하여 해제. 최대 5개 빠른 전환 옵션.",
+    "dominantLangQuickSwitch": "주 전사 언어 사용. 최대 5개 빠른 전환 옵션."
   },
   "preferences": {
     "title": "환경 설정",
@@ -319,7 +384,8 @@
     "updateFailed": "업데이트 실패: {{error}}",
     "cancelled": "취소됨",
     "noLongerAvailable": "업데이트를 더 이상 사용할 수 없음",
-    "downloadingUpdate": "업데이트 다운로드 중"
+    "downloadingUpdate": "업데이트 다운로드 중",
+    "releaseDate": "출시일:"
   },
   "tabs": {
     "transcript": "전사",
@@ -386,13 +452,16 @@
     "helpsOptimizePerformance": "성능 최적화 및 사용 패턴 이해에 도움이 됩니다",
     "helpsPrioritizePlatform": "플랫폼 지원 우선순위 결정에 도움이 됩니다",
     "helpsUnderstandModels": "사용자가 선호하는 모델 이해에 도움이 됩니다",
-    "viewPrivacyPolicy": "개인정보 처리방침 보기"
+    "viewPrivacyPolicy": "개인정보 처리방침 보기",
+    "userId": "사용자 ID",
+    "copyUserId": "사용자 ID 복사"
   },
   "confirmationModal": {
     "confirmDelete": "삭제 확인",
     "deleteMeetingTitle": "회의 삭제",
     "deleteMeetingMsg": "이 회의를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-    "deleting": "삭제 중..."
+    "deleting": "삭제 중...",
+    "deleteMeetingConfirm": "이 회의를 삭제하시겠습니까"
   },
   "languagePicker": {
     "selectLanguage": "언어 선택",
@@ -418,7 +487,8 @@
     "waitingForTranscriptComplete": "전사 완료 대기 중...",
     "updating": "업데이트 중...",
     "weekly": "매주",
-    "windows": "Windows"
+    "windows": "Windows",
+    "waitingForTranscription": "전사 대기 중"
   },
   "home": {
     "welcome": "Meetly에 오신 것을 환영합니다!",
@@ -437,7 +507,8 @@
     "noModelsFound": "모델을 찾을 수 없습니다. 내장 AI를 사용하려면 모델을 다운로드하세요.",
     "highQuality": "고품질",
     "fast": "고속",
-    "balanced": "균형"
+    "balanced": "균형",
+    "cancelDownload": "다운로드 취소"
   },
   "beta": {
     "importAudioRetranscribe": "오디오 가져오기 & 재전사",
@@ -453,6 +524,14 @@
     "modelNotFound": "모델을 찾을 수 없습니다",
     "modelStateError": "모델이 오류 상태입니다",
     "retranscribeFailed": "재전사 실패",
-    "summaryLangSaveFailed": "요약 언어 저장 실패"
+    "summaryLangSaveFailed": "요약 언어 저장 실패",
+    "modelNotAvailable": "모델을 사용할 수 없습니다",
+    "modelNotReadyDesc": "선택한 모델을 아직 사용할 수 없습니다"
+  },
+  "bluetoothPlaybackWarning": {
+    "detected": "블루투스 재생 감지됨",
+    "useProperAudio": "정확한 검토를 위해 <strong>컴퓨터 스피커</strong> 또는 <strong>유선 헤드폰</strong>을 사용하세요.",
+    "deviceDetected": "블루투스 기기 {{name}} 감지됨",
+    "learnWhy": "자세히 알아보기 →"
   }
 }

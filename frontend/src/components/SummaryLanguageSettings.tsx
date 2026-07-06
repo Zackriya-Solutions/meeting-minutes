@@ -41,9 +41,9 @@ export function SummaryLanguageSettings() {
             >
               <button
                 type="button"
-                aria-label={isPinned ? `Unpin ${labelForCode(code)} as default` : `Pin ${labelForCode(code)} as default`}
+                aria-label={isPinned ? t('summarySettings.unpinAsDefault', { name: labelForCode(code) }) : t('summarySettings.pinAsDefault', { name: labelForCode(code) })}
                 aria-pressed={isPinned}
-                title={isPinned ? t('summarySettings.usesDominantLanguage') : t('summarySettings.usesDominantLanguage')}
+                title={isPinned ? t('summarySettings.clickToUnsetDefault') : t('summarySettings.clickToSetDefault')}
                 onClick={() => togglePin(code)}
                 className={`flex items-center gap-1.5 pl-3 pr-2 py-1 hover:brightness-95 active:brightness-90 ${
                   isPinned ? 'text-blue-800' : 'text-gray-800'
@@ -58,7 +58,7 @@ export function SummaryLanguageSettings() {
               </button>
               <button
                 type="button"
-                aria-label={`Remove ${labelForCode(code)}`}
+                aria-label={t('summarySettings.removeLanguage', { name: labelForCode(code) })}
                 onClick={() => removeRecent(code)}
                 className={`pr-2.5 pl-0.5 py-1 leading-none ${isPinned ? 'text-blue-400 hover:text-blue-700' : 'text-gray-400 hover:text-gray-700'}`}
               >
@@ -75,7 +75,7 @@ export function SummaryLanguageSettings() {
               disabled={recents.length >= 5}
               className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-3 py-1 text-sm text-gray-600 hover:border-gray-400 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              ＋ Add language
+              {t('summarySettings.addLanguage')}
             </button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-auto p-0 border-0 shadow-none bg-transparent">
@@ -94,8 +94,8 @@ export function SummaryLanguageSettings() {
 
       <p className="text-xs text-gray-400 mt-3">
         {pinned
-          ? `${t('common.note')}: ${labelForCode(pinned)} - click it again to unset. Max 5 quick-switch options.`
-          : t('summarySettings.usesDominantLanguage') + '. Max 5 quick-switch options.'}
+          ? t('summarySettings.pinnedDefaultHint', { name: labelForCode(pinned) })
+          : t('summarySettings.dominantLangQuickSwitch')}
       </p>
     </div>
   );

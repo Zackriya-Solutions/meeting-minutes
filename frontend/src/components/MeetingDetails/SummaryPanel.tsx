@@ -171,8 +171,8 @@ export function SummaryPanel({
             setSummaryLang(saved.language);
             setSummaryLangStorage(saved.storage);
             if (saved.storage === 'local_fallback') {
-              toast.info('Summary language saved on this device', {
-                description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
+              toast.info(t('summarySettings.summaryLangSavedOnDevice'), {
+                description: t('summarySettings.summaryLangSavedOnDeviceDesc'),
               });
             }
             if (request.language) {
