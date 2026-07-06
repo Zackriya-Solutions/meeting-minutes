@@ -7,6 +7,15 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import {
+  applyEffectiveTheme,
+  parseThemeMode,
+  resolveEffectiveTheme,
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+} from '@/lib/theme';
+
+export type { ThemeMode } from '@/lib/theme';
 
 export interface OllamaModel {
   name: string;
@@ -62,6 +71,9 @@ interface ConfigContextType {
   // UI preferences
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  isDarkTheme: boolean;
 
   // Beta features
   betaFeatures: BetaFeatures;
@@ -95,6 +107,15 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
+function getStoredThemeMode(): ThemeMode {
+  if (typeof window === 'undefined') return 'system';
+
+  try {
+    return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return 'system';
+  }
+}
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
@@ -102,7 +123,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
   });
 
   // Transcript model configuration state
@@ -153,6 +174,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     return true;
   });
+
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
+  const [isDarkTheme, setIsDarkTheme] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('dark'),
+  );
 
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
@@ -382,6 +410,55 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
 
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const effectiveTheme = resolveEffectiveTheme(themeMode, media.matches);
+      applyEffectiveTheme(effectiveTheme);
+      setIsDarkTheme(effectiveTheme === 'dark');
+    };
+
+    applyTheme();
+
+    if (themeMode !== 'system') return;
+
+    media.addEventListener('change', applyTheme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, [themeMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyNativeTheme = async () => {
+      try {
+        const { setTheme } = await import('@tauri-apps/api/app');
+        if (cancelled) return;
+        await setTheme(themeMode === 'system' ? null : themeMode);
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[ConfigContext] Tauri app theme sync skipped:', error);
+        }
+      }
+    };
+
+    applyNativeTheme();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [themeMode]);
+
   const toggleIsAutoSummary = useCallback((checked: boolean) => {
     setisAutoSummary(checked);
     if (typeof window !== 'undefined') {
@@ -497,6 +574,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themeMode,
+    setThemeMode,
+    isDarkTheme,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -519,6 +599,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themeMode,
+    setThemeMode,
+    isDarkTheme,
     betaFeatures,
     toggleBetaFeature,
     models,

@@ -2,6 +2,10 @@ const path = require('path');
 const tiptapPmResolveBase = path.dirname(require.resolve('@tiptap/pm/model'));
 const resolveFromTiptapPm = (pkg) =>
   require.resolve(pkg, { paths: [tiptapPmResolveBase] });
+const tauriBrowserMocksFile =
+  process.env.NEXT_PUBLIC_E2E_TESTING === '1'
+    ? 'src/testing/tauri-browser-mocks.ts'
+    : 'src/testing/tauri-browser-mocks.noop.ts';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -16,6 +20,11 @@ const nextConfig = {
 
   // Add webpack configuration for Tauri
   webpack: (config, { isServer }) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      './tauri-browser-mocks': path.resolve(__dirname, tauriBrowserMocksFile),
+    };
+
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,

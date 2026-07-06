@@ -1,22 +1,17 @@
 'use client';
 
 import React from 'react';
-import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 
 interface MainContentProps {
   children: React.ReactNode;
 }
 
 const MainContent: React.FC<MainContentProps> = ({ children }) => {
-  const { isCollapsed } = useSidebar();
-
   return (
     <main 
-      className={`flex-1 transition-all duration-300 ${
-        isCollapsed ? 'ml-16' : 'ml-64'
-      }`}
+      className="min-h-screen min-w-0 flex-1 overflow-hidden bg-background text-foreground transition-all duration-300"
     >
-      <div className="pl-8">
+      <div className="min-w-0 pl-4 sm:pl-8">
         {children}
       </div>
     </main>

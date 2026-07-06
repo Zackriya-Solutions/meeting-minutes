@@ -4,13 +4,20 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground [&>svg~*]:pl-7",
+  "relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg~*]:pl-7",
   {
     variants: {
       variant: {
-        default: "bg-background text-foreground",
+        default:
+          "border-border bg-background text-foreground [&>svg]:text-foreground",
+        info:
+          "border-foreground/50 border-l-4 border-l-info-foreground bg-info/10 text-foreground [&>svg]:text-info-foreground dark:border-l-info dark:[&>svg]:text-info",
+        success:
+          "border-foreground/50 border-l-4 border-l-success-foreground bg-success/10 text-foreground [&>svg]:text-success-foreground dark:border-l-success dark:[&>svg]:text-success",
+        warning:
+          "border-foreground/50 border-l-4 border-l-warning-foreground bg-warning/10 text-foreground [&>svg]:text-warning-foreground dark:border-l-warning dark:[&>svg]:text-warning",
         destructive:
-          "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
+          "border-foreground/50 border-l-4 border-l-destructive bg-destructive/10 text-foreground [&>svg]:text-destructive",
       },
     },
     defaultVariants: {
