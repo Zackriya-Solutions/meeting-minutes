@@ -18,9 +18,9 @@ export function ImportDropOverlay({ visible }: ImportDropOverlayProps) {
       <div className="border-2 border-dashed border-info/50 rounded-2xl
                       p-12 text-center bg-info/20 shadow-2xl
                       transform scale-100 transition-transform">
-        <Upload className="h-16 w-16 text-info mx-auto mb-4" />
+        <Upload className="h-16 w-16 text-info-text mx-auto mb-4" />
         <p className="text-xl font-medium text-overlay-foreground">Drop audio file to import</p>
-        <p className="text-sm text-info mt-2">{getAudioFormatsDisplayList()}</p>
+        <p className="text-sm text-info-text mt-2">{getAudioFormatsDisplayList()}</p>
       </div>
     </div>
   );

@@ -26,8 +26,8 @@
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
-        "test:e2e": "playwright test",
-        "test:e2e:update": "playwright test --update-snapshots",
+        "test:e2e": "tsc -p tsconfig.tests.json && playwright test",
+        "test:e2e:update": "tsc -p tsconfig.tests.json && playwright test --update-snapshots",
         "test:theme-audit": "node scripts/check-theme-tokens.mjs"
     },
     "dependencies": {

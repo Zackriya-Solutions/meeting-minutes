@@ -100,6 +100,15 @@
     --success-foreground: 144 61% 8%;
     --warning: 45 93% 47%;
     --warning-foreground: 26 83% 14%;
+    --warning-strong: 25 95% 53%;
+    --warning-strong-foreground: 15 75% 15%;
+    /* Accessible ink for status text/icons on light app surfaces.
+       The fill tokens above are mid-tones for backgrounds and fail AA as
+       text on white (info 3.6:1, success 2.3:1, warning 2.0:1); these
+       darker tones clear 4.5:1. Use text-{info,success,warning}-text. */
+    --info-text: 217 91% 45%;
+    --success-text: 142 71% 27%;
+    --warning-text: 35 95% 32%;
     --recording: 0 84% 60%;
     --recording-foreground: 0 63% 12%;
     --overlay: 0 0% 0%;
@@ -138,6 +147,12 @@
     --success-foreground: 144 61% 8%;
     --warning: 48 96% 65%;
     --warning-foreground: 26 83% 14%;
+    --warning-strong: 27 96% 61%;
+    --warning-strong-foreground: 15 75% 15%;
+    /* Accessible ink for status text/icons on dark app surfaces. */
+    --info-text: 217 91% 70%;
+    --success-text: 142 65% 62%;
+    --warning-text: 45 95% 62%;
     --recording: 0 91% 71%;
     --recording-foreground: 0 63% 12%;
     --overlay: 0 0% 0%;

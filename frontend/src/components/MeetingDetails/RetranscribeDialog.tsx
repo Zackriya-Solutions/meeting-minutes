@@ -275,7 +275,7 @@ export function RetranscribeDialog({
           <DialogTitle className="flex items-center gap-2">
             {isProcessing ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin text-info" />
+                <Loader2 className="h-5 w-5 animate-spin text-info-text" />
                 Retranscribing...
               </>
             ) : error ? (
@@ -285,7 +285,7 @@ export function RetranscribeDialog({
               </>
             ) : (
               <>
-                <RefreshCw className="h-5 w-5 text-info" />
+                <RefreshCw className="h-5 w-5 text-info-text" />
                 Retranscribe Meeting
               </>
             )}

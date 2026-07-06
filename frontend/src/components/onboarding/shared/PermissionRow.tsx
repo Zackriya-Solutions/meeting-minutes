@@ -40,7 +40,7 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
           <div className="font-medium truncate text-foreground">{title}</div>
           <div className="text-sm text-muted-foreground">
             {isAuthorized ? (
-              <span className="text-success flex items-center gap-1">
+              <span className="text-success-text flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 Access Granted
               </span>
@@ -72,7 +72,7 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
         )}
         {isAuthorized && (
           <div className="flex size-8 items-center justify-center rounded-full bg-success/15">
-            <CheckCircle2 className="w-4 h-4 text-success" />
+            <CheckCircle2 className="w-4 h-4 text-success-text" />
           </div>
         )}
       </div>

@@ -149,7 +149,7 @@ export function AudioBackendSelector({
                 checked={currentBackend === backend.id}
                 onChange={() => handleBackendChange(backend.id)}
                 disabled={isDisabled}
-                className="mt-1 h-4 w-4 text-info focus:ring-info border-border"
+                className="mt-1 h-4 w-4 text-info-text focus:ring-info border-border"
               />
               <div className="ml-3 flex-1">
                 <div className="flex items-center justify-between">
@@ -157,7 +157,7 @@ export function AudioBackendSelector({
                     {backend.name}
                   </span>
                   {currentBackend === backend.id && (
-                    <span className="text-xs font-medium text-info bg-info/15 px-2 py-0.5 rounded">
+                    <span className="text-xs font-medium text-info-text bg-info/15 px-2 py-0.5 rounded">
                       Active
                     </span>
                   )}

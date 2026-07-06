@@ -86,7 +86,7 @@ export function About() {
                         )}
                     </Button>
                     {updateInfo?.available && (
-                        <div className="mt-2 text-xs text-info">
+                        <div className="mt-2 text-xs text-info-text">
                             Update available: v{updateInfo.version}
                         </div>
                     )}
@@ -118,7 +118,7 @@ export function About() {
 
             {/* Coming Soon - Compact */}
             <div className="bg-info/10 rounded p-3">
-                <p className="text-s text-info">
+                <p className="text-s text-info-text">
                     <span className="font-bold">Coming soon:</span> A library of on-device AI agents-automating follow-ups, action tracking, and more.
                 </p>
             </div>

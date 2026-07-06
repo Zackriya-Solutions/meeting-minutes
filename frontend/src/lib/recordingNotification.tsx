@@ -31,7 +31,7 @@ export async function showRecordingNotification(): Promise<void> {
                 onChange={(e) => {
                   dontShowAgain = e.target.checked;
                 }}
-                className="rounded border-border text-info focus:ring-info focus:ring-2"
+                className="rounded border-border text-info-text focus:ring-info focus:ring-2"
               />
               <span className="select-none text-foreground">Don't show this again</span>
             </label>

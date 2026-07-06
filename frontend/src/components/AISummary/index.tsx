@@ -621,10 +621,10 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       <div className="flex items-center space-x-3">
         <div className="animate-spin rounded-full h-5 w-5 border-2 border-info border-t-transparent"></div>
         <div>
-          <h3 className="text-info font-medium">
+          <h3 className="text-info-text font-medium">
             {status === 'processing' ? 'Processing Transcript' : 'Generating Summary'}
           </h3>
-          <p className="text-info text-sm">
+          <p className="text-info-text text-sm">
             {status === 'processing' 
               ? 'Analyzing your transcript...' 
               : 'Creating a detailed summary of your meeting...'}

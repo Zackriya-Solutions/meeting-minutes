@@ -280,7 +280,7 @@ export function SettingsModals({
                   onChange={(e) => toggleConfidenceIndicator(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-info rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-card after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-info"></div>
+                <div className="w-11 h-6 bg-muted-foreground/30 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-info rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-background after:border-muted-foreground/40 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-info peer-checked:after:border-background"></div>
               </label>
               <div>
                 <p className="text-sm font-medium text-foreground">Show Confidence Indicators</p>
@@ -290,7 +290,7 @@ export function SettingsModals({
 
             <button
               onClick={() => onClose('modelSelector')}
-              className="px-4 py-2 text-sm font-medium text-foreground bg-muted rounded-md hover:bg-muted focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
+              className="px-4 py-2 text-sm font-medium text-foreground bg-muted rounded-md hover:bg-muted-foreground/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
             >
               {messages.modelSelector ? 'Cancel' : 'Done'}
             </button>
@@ -308,7 +308,7 @@ export function SettingsModals({
             {messages.errorAlert}
             <button
               onClick={() => onClose('errorAlert')}
-              className="ml-2 text-destructive hover:text-destructive underline"
+              className="ml-2 text-destructive hover:text-destructive/80 underline"
             >
               Dismiss
             </button>
@@ -321,12 +321,12 @@ export function SettingsModals({
     {modals.chunkDropWarning && (
       <div className="fixed inset-0 bg-overlay/50 flex items-center justify-center z-50">
         <Alert className="max-w-lg mx-4 border-warning/30 bg-card shadow-xl">
-          <AlertTitle className="text-warning">Transcription Performance Warning</AlertTitle>
-          <AlertDescription className="text-warning">
+          <AlertTitle className="text-warning-text">Transcription Performance Warning</AlertTitle>
+          <AlertDescription className="text-warning-text">
             {messages.chunkDropWarning}
             <button
               onClick={() => onClose('chunkDropWarning')}
-              className="ml-2 text-warning hover:text-warning underline"
+              className="ml-2 text-warning-text hover:text-warning-text/80 underline"
             >
               Dismiss
             </button>

@@ -9,7 +9,7 @@ import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 import {
   applyEffectiveTheme,
-  parseThemeMode,
+  readStoredThemeMode,
   resolveEffectiveTheme,
   THEME_STORAGE_KEY,
   type ThemeMode,
@@ -73,7 +73,6 @@ interface ConfigContextType {
   toggleConfidenceIndicator: (checked: boolean) => void;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
-  isDarkTheme: boolean;
 
   // Beta features
   betaFeatures: BetaFeatures;
@@ -106,16 +105,6 @@ interface ConfigContextType {
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
-
-function getStoredThemeMode(): ThemeMode {
-  if (typeof window === 'undefined') return 'system';
-
-  try {
-    return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
-  } catch {
-    return 'system';
-  }
-}
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
@@ -175,12 +164,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return true;
   });
 
-  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
-  const [isDarkTheme, setIsDarkTheme] = useState(
-    () =>
-      typeof document !== 'undefined' &&
-      document.documentElement.classList.contains('dark'),
-  );
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => readStoredThemeMode());
 
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
@@ -424,9 +408,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const applyTheme = () => {
-      const effectiveTheme = resolveEffectiveTheme(themeMode, media.matches);
-      applyEffectiveTheme(effectiveTheme);
-      setIsDarkTheme(effectiveTheme === 'dark');
+      applyEffectiveTheme(resolveEffectiveTheme(themeMode, media.matches));
     };
 
     applyTheme();
@@ -437,26 +419,35 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return () => media.removeEventListener('change', applyTheme);
   }, [themeMode]);
 
+  const ownsNativeThemeRef = useRef(false);
+  const nativeThemeSeqRef = useRef(0);
+
   useEffect(() => {
-    let cancelled = false;
+    // 'system' is Tauri's default; skip the initial no-op IPC call until we've
+    // taken ownership by applying an explicit theme at least once. Ownership is
+    // claimed synchronously here (not after the async setTheme resolves) so a
+    // switch back to System while a previous explicit call is still in flight
+    // is never skipped — otherwise the stale call would strand native chrome
+    // on the old theme while the webview follows System.
+    if (!ownsNativeThemeRef.current && themeMode === 'system') return;
+    ownsNativeThemeRef.current = true;
+
+    const seq = ++nativeThemeSeqRef.current;
 
     const applyNativeTheme = async () => {
       try {
         const { setTheme } = await import('@tauri-apps/api/app');
-        if (cancelled) return;
+        // A newer theme change has superseded this one; don't issue a stale IPC.
+        if (seq !== nativeThemeSeqRef.current) return;
         await setTheme(themeMode === 'system' ? null : themeMode);
       } catch (error) {
-        if (process.env.NODE_ENV === 'development') {
-          console.debug('[ConfigContext] Tauri app theme sync skipped:', error);
-        }
+        // Surface in production too: a silent failure here leaves native
+        // window chrome permanently mismatched with the webview theme.
+        console.warn('[ConfigContext] Failed to sync native window theme:', error);
       }
     };
 
     applyNativeTheme();
-
-    return () => {
-      cancelled = true;
-    };
   }, [themeMode]);
 
   const toggleIsAutoSummary = useCallback((checked: boolean) => {
@@ -576,7 +567,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleConfidenceIndicator,
     themeMode,
     setThemeMode,
-    isDarkTheme,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -601,7 +591,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleConfidenceIndicator,
     themeMode,
     setThemeMode,
-    isDarkTheme,
     betaFeatures,
     toggleBetaFeature,
     models,

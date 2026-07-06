@@ -189,7 +189,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           <DialogTitle className="flex items-center gap-2">
             {isDownloading ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin text-info" />
+                <Loader2 className="h-5 w-5 animate-spin text-info-text" />
                 Downloading Update
               </>
             ) : error ? (
@@ -199,7 +199,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               </>
             ) : (
               <>
-                <Download className="h-5 w-5 text-info" />
+                <Download className="h-5 w-5 text-info-text" />
                 Update Available
               </>
             )}
@@ -223,7 +223,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">New Version:</span>
-                  <span className="font-medium text-info">{updateInfo.version}</span>
+                  <span className="font-medium text-info-text">{updateInfo.version}</span>
                 </div>
                 {updateInfo.date && (
                   <div className="flex justify-between text-sm">

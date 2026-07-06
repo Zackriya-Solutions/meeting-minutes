@@ -2,10 +2,6 @@ const path = require('path');
 const tiptapPmResolveBase = path.dirname(require.resolve('@tiptap/pm/model'));
 const resolveFromTiptapPm = (pkg) =>
   require.resolve(pkg, { paths: [tiptapPmResolveBase] });
-const tauriBrowserMocksFile =
-  process.env.NEXT_PUBLIC_E2E_TESTING === '1'
-    ? 'src/testing/tauri-browser-mocks.ts'
-    : 'src/testing/tauri-browser-mocks.noop.ts';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -19,11 +15,17 @@ const nextConfig = {
   assetPrefix: '/',
 
   // Add webpack configuration for Tauri
-  webpack: (config, { isServer }) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      './tauri-browser-mocks': path.resolve(__dirname, tauriBrowserMocksFile),
-    };
+  webpack: (config, { isServer, webpack }) => {
+    // Outside E2E builds, swap the E2E bootstrap for a noop component so the
+    // Tauri browser mocks never reach the production bundle.
+    if (process.env.NEXT_PUBLIC_E2E_TESTING !== '1') {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(
+          /^@\/testing\/E2EBootstrap$/,
+          path.resolve(__dirname, 'src/testing/E2ENoop.tsx'),
+        ),
+      );
+    }
 
     if (!isServer) {
       config.resolve.fallback = {

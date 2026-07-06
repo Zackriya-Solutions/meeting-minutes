@@ -9,6 +9,16 @@ export function parseThemeMode(value: string | null | undefined): ThemeMode {
     : 'system';
 }
 
+export function readStoredThemeMode(): ThemeMode {
+  if (typeof window === 'undefined') return 'system';
+
+  try {
+    return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return 'system';
+  }
+}
+
 export function resolveEffectiveTheme(
   mode: ThemeMode,
   prefersDark: boolean,

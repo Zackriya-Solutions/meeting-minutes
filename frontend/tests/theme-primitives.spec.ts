@@ -1,7 +1,7 @@
-import { expect, test } from './fixtures/tauri-fixtures';
+import { expect, setStoredTheme, test } from './fixtures/tauri-fixtures';
 import type { Page } from '@playwright/test';
 
-import { Alert } from '../src/components/ui/alert';
+import { alertVariants } from '../src/components/ui/alert';
 
 type RGB = [number, number, number];
 type RGBA = [number, number, number, number];
@@ -17,14 +17,7 @@ const alertStatuses: AlertStatus[] = [
 ];
 
 function getAlertClassName(variant: AlertStatus) {
-  const alertRender = Alert as unknown as {
-    render: (
-      props: { variant: AlertStatus },
-      ref: null,
-    ) => { props: { className: string } };
-  };
-
-  return alertRender.render({ variant }, null).props.className;
+  return alertVariants({ variant });
 }
 
 function luminance([red, green, blue]: RGB) {
@@ -72,9 +65,7 @@ function compositeColor(foreground: RGBA, background: RGB): RGB {
 }
 
 async function openSettings(page: Page, mode: ThemeMode) {
-  await page.addInitScript((value) => {
-    localStorage.setItem('themeMode', value);
-  }, mode);
+  await setStoredTheme(page, mode);
   await page.goto('/settings');
 }
 
@@ -110,6 +101,42 @@ for (const mode of ['light', 'dark'] as const) {
       expect(
         contrastRatio(pair.background as RGB, pair.foreground as RGB),
         `${pair.status} foreground contrast in ${mode} mode`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test(`status text tokens meet text contrast on the page background in ${mode} mode`, async ({
+    page,
+  }) => {
+    await openSettings(page, mode);
+
+    const measurements = await page.evaluate((statuses) => {
+      const probe = document.createElement('div');
+      document.body.appendChild(probe);
+
+      const readToken = (token: string) => {
+        probe.style.color = `hsl(var(--${token}))`;
+        const color = getComputedStyle(probe).color.match(/\d+/g);
+        return color?.slice(0, 3).map(Number) ?? [];
+      };
+
+      const result = statuses.map((status) => ({
+        status,
+        text: readToken(`${status}-text`),
+      }));
+      const background = getComputedStyle(document.body).backgroundColor;
+
+      probe.remove();
+      return { result, background };
+    }, ['info', 'success', 'warning'] as const);
+
+    const backgroundRgb = parseColor(measurements.background).slice(0, 3) as RGB;
+
+    for (const { status, text } of measurements.result) {
+      expect(text, `${status}-text token`).toHaveLength(3);
+      expect(
+        contrastRatio(text as RGB, backgroundRgb),
+        `${status}-text contrast on page background in ${mode} mode`,
       ).toBeGreaterThanOrEqual(4.5);
     }
   });

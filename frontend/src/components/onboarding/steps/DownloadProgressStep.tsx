@@ -414,7 +414,7 @@ export function DownloadProgressStep() {
           )}
           {state.status === 'completed' && (
             <div className="w-6 h-6 rounded-full bg-success/15 flex items-center justify-center">
-              <Check className="w-4 h-4 text-success" />
+              <Check className="w-4 h-4 text-success-text" />
             </div>
           )}
           {state.status === 'error' && (

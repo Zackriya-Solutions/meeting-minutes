@@ -30,7 +30,6 @@ const newOnboardingStatus = {
 const browserStore = new Map<string, unknown>();
 
 const knownNoopCommands = new Set([
-  'plugin:app|set_app_theme',
   'set_audio_backend',
   'set_language_preference',
   'set_notification_settings',
@@ -62,6 +61,10 @@ const knownNoopCommands = new Set([
 ]);
 
 const commandFixtures: Record<string, unknown> = {
+  // Startup update check (useUpdateCheck fires ~2s after mount): keep it
+  // deterministic so long-lived E2E pages don't hit the fixture-missing throw.
+  'plugin:app|version': '0.0.0-e2e',
+  'plugin:updater|check': null,
   get_onboarding_status: completedOnboardingStatus,
   get_recording_state: { is_recording: false, is_paused: false },
   is_recording: false,
@@ -123,6 +126,14 @@ const commandFixtures: Record<string, unknown> = {
     preferred_system_device: null,
   },
   get_audio_devices: [],
+  get_audio_backend_info: [
+    {
+      id: 'screencapturekit',
+      name: 'ScreenCaptureKit',
+      description: 'Native macOS system audio capture.',
+    },
+  ],
+  get_current_audio_backend: 'screencapturekit',
   get_ollama_models: [],
   is_analytics_enabled: false,
   builtin_ai_list_models: [

@@ -503,7 +503,7 @@ function ModelCard({
           <div className="ml-4 flex items-center gap-2">
             {isAvailable && (
               <>
-                <div className="flex items-center gap-1.5 text-success">
+                <div className="flex items-center gap-1.5 text-success-text">
                   <div className="w-2 h-2 bg-success rounded-full"></div>
                   <span className="text-xs font-medium">Ready</span>
                 </div>
@@ -589,8 +589,8 @@ function ModelCard({
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-info">Downloading...</span>
-                <span className="text-sm font-semibold text-info">{Math.round(downloadProgress)}%</span>
+                <span className="text-sm font-medium text-info-text">Downloading...</span>
+                <span className="text-sm font-semibold text-info-text">{Math.round(downloadProgress)}%</span>
               </div>
               <button
                 onClick={(e) => {

@@ -92,26 +92,26 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
   return (
     <div className="mb-4 p-4 bg-info/10 border-2 border-info/40 rounded-lg">
       <div className="flex items-start gap-3">
-        <Database className="h-6 w-6 text-info mt-0.5 flex-shrink-0" />
+        <Database className="h-6 w-6 text-info-text mt-0.5 flex-shrink-0" />
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <AlertCircle className="h-4 w-4 text-info" />
-            <h3 className="text-sm font-semibold text-info">
+            <AlertCircle className="h-4 w-4 text-info-text" />
+            <h3 className="text-sm font-semibold text-info-text">
               Previous Meetily Installation Detected!
             </h3>
           </div>
-          <p className="text-sm text-info mb-2">
+          <p className="text-sm text-info-text mb-2">
             We found an existing database from your previous Meetily installation (Python backend version).
           </p>
           <div className="bg-card/50 rounded p-2 mb-3">
-            <p className="text-xs text-info font-mono break-all">
+            <p className="text-xs text-info-text font-mono break-all">
               {detectedPath}
             </p>
-            <p className="text-xs text-info mt-1">
+            <p className="text-xs text-info-text mt-1">
               Size: {formatFileSize(dbSize)}
             </p>
           </div>
-          <p className="text-sm text-info mb-3">
+          <p className="text-sm text-info-text mb-3">
             Would you like to import your previous meetings, transcripts, and summaries?
           </p>
           
@@ -138,7 +138,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
             <button
               onClick={handleNo}
               disabled={isImporting}
-              className="flex-1 px-4 py-2 border-2 border-info/50 text-info rounded-lg hover:bg-info/15 disabled:bg-muted disabled:cursor-not-allowed transition-colors"
+              className="flex-1 px-4 py-2 border-2 border-info/50 text-info-text rounded-lg hover:bg-info/15 disabled:bg-muted disabled:cursor-not-allowed transition-colors"
             >
               No, Browse Manually
             </button>

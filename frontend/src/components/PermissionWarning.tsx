@@ -56,8 +56,8 @@ export function PermissionWarning({
       {/* Combined Permission Warning - Show when either permission is missing */}
       {(!hasMicrophone || !hasSystemAudio) && (
         <Alert variant="destructive" className="border-warning/30 bg-warning/10">
-          <AlertTriangle className="h-5 w-5 text-warning" />
-          <AlertTitle className="text-warning font-semibold">
+          <AlertTriangle className="h-5 w-5 text-warning-text" />
+          <AlertTitle className="text-warning-text font-semibold">
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
@@ -87,13 +87,13 @@ export function PermissionWarning({
             <button
               onClick={onRecheck}
               disabled={isRechecking}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-warning bg-warning/15 hover:bg-warning/20 rounded-md transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-warning-text bg-warning/15 hover:bg-warning/20 rounded-md transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
               Recheck
             </button>
           </div>
-          <AlertDescription className="text-warning mt-2">
+          <AlertDescription className="text-warning-text mt-2">
             {/* Microphone Warning */}
             {!hasMicrophone && (
               <>

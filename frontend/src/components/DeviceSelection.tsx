@@ -235,7 +235,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           {/*   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${ */}
           {/*     isMonitoring */}
           {/*       ? 'bg-destructive/15 text-destructive hover:bg-destructive/15' */}
-          {/*       : 'bg-success/15 text-success hover:bg-success/20' */}
+          {/*       : 'bg-success/15 text-success-text hover:bg-success/20' */}
           {/*   } disabled:pointer-events-none disabled:opacity-50`} */}
           {/*   title={inputDevices.length === 0 ? 'No microphones available to test' : ''} */}
           {/* > */}

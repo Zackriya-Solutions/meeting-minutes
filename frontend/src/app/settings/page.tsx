@@ -93,7 +93,7 @@ export default function SettingsPage() {
                     key={tab.value}
                     value={tab.value}
                     ref={el => { tabRefs.current[index] = el }}
-                    className="flex shrink-0 items-center gap-2 px-4 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-info data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10 sm:px-6"
+                    className="flex shrink-0 items-center gap-2 px-4 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-info-text data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10 sm:px-6"
                   >
                     <Icon className="w-4 h-4" />
                     {tab.label}

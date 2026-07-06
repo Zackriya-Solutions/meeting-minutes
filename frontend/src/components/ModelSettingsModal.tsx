@@ -1153,7 +1153,7 @@ export function ModelSettingsModal({
                       )}
                     />
                     {endpointValidationState === 'valid' && (
-                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-success" />
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-success-text" />
                     )}
                     {endpointValidationState === 'invalid' && (
                       <XCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-destructive" />
@@ -1182,7 +1182,7 @@ export function ModelSettingsModal({
                 </div>
                 {ollamaEndpointChanged && !error && (
                   <Alert className="mt-3 border-warning bg-warning/10">
-                    <AlertDescription className="text-warning">
+                    <AlertDescription className="text-warning-text">
                       Endpoint changed. Please click "Fetch Models" to load models from the new endpoint before saving.
                     </AlertDescription>
                   </Alert>
@@ -1226,7 +1226,7 @@ export function ModelSettingsModal({
                   /* Show Ollama download link when not installed */
                   <div className="space-y-4">
                     <Alert className="border-warning bg-warning/10">
-                      <AlertDescription className="text-warning">
+                      <AlertDescription className="text-warning-text">
                         Ollama is not installed or not running. Please download and install Ollama to use local models.
                       </AlertDescription>
                     </Alert>
@@ -1279,8 +1279,8 @@ export function ModelSettingsModal({
                         {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
                           <div className="bg-card rounded-md border p-3">
                             <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium text-info">Downloading gemma3:1b</span>
-                              <span className="text-sm font-semibold text-info">
+                              <span className="text-sm font-medium text-info-text">Downloading gemma3:1b</span>
+                              <span className="text-sm font-semibold text-info-text">
                                 {Math.round(getProgress('gemma3:1b')!)}%
                               </span>
                             </div>
@@ -1337,8 +1337,8 @@ export function ModelSettingsModal({
                           {modelIsDownloading && progress !== undefined && (
                             <div className="mt-3 pt-3 border-t border-border">
                               <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-info">Downloading...</span>
-                                <span className="text-sm font-semibold text-info">{Math.round(progress)}%</span>
+                                <span className="text-sm font-medium text-info-text">Downloading...</span>
+                                <span className="text-sm font-semibold text-info-text">{Math.round(progress)}%</span>
                               </div>
                               <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                                 <div

@@ -498,7 +498,7 @@ const Sidebar: React.FC = () => {
                 <button
                   onClick={() => openImportDialog()}
                   aria-label="Import Audio"
-                  className="rounded-lg bg-info/15 p-2 text-info transition-colors duration-150 hover:bg-info/25"
+                  className="rounded-lg bg-info/15 p-2 text-info-text transition-colors duration-150 hover:bg-info/25"
                 >
                   <Upload className="h-5 w-5" />
                 </button>
@@ -573,7 +573,7 @@ const Sidebar: React.FC = () => {
         <div
           className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
             ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-info/15 text-info font-medium' :
+            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-info/15 text-info-text font-medium' :
               hasTranscriptMatch ? 'bg-warning/15' : 'hover:bg-accent'
             } cursor-pointer`
             }`}
@@ -605,7 +605,7 @@ const Sidebar: React.FC = () => {
                 )}
               </div>
               {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-info animate-pulse">Searching...</span>
+                <span className="ml-2 text-xs text-info-text animate-pulse">Searching...</span>
               )}
             </>
           ) : (
@@ -617,7 +617,7 @@ const Sidebar: React.FC = () => {
                   </div>
                 ) : (
                   <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-info/15">
-                    <Plus className="w-3.5 h-3.5 text-info" />
+                    <Plus className="w-3.5 h-3.5 text-info-text" />
                   </div>
                 )}
                 <span className="flex-1 break-words">{item.title}</span>
@@ -628,7 +628,7 @@ const Sidebar: React.FC = () => {
                         e.stopPropagation();
                         handleEditStart(item.id, item.title);
                       }}
-                      className="flex-shrink-0 rounded-md p-1 hover:bg-info/10 hover:text-info"
+                      className="flex-shrink-0 rounded-md p-1 hover:bg-info/10 hover:text-info-text"
                       aria-label="Edit meeting title"
                     >
                       <Pencil className="w-4 h-4" />
@@ -650,7 +650,7 @@ const Sidebar: React.FC = () => {
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
                 <div className="mt-1 ml-8 line-clamp-2 rounded border border-warning/30 bg-warning/10 p-1.5 text-xs text-muted-foreground">
-                  <span className="font-medium text-warning">Match:</span> {matchingResult.matchContext}
+                  <span className="font-medium text-warning-text">Match:</span> {matchingResult.matchContext}
                 </div>
               )}
             </div>
@@ -751,7 +751,7 @@ const Sidebar: React.FC = () => {
                       <NotebookPen className="mr-2 h-4 w-4 text-muted-foreground" />
                       <span className="text-foreground">{item.title}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-info animate-pulse">Searching...</span>
+                        <span className="ml-2 text-xs text-info-text animate-pulse">Searching...</span>
                       )}
                     </div>
                   </div>

@@ -322,12 +322,12 @@ export function BuiltInModelManager({
                     <span className="min-w-0 break-words text-base font-bold leading-snug text-foreground">{model.display_name || model.name}</span>
                     {isAvailable && (
                       <>
-                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success">
+                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success-text">
                           <span className="h-2 w-2 rounded-full bg-success"></span>
                           Ready
                         </span>
                         {selectedModel === model.name && (
-                          <span className="shrink-0 rounded bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
+                          <span className="shrink-0 rounded bg-info/15 px-2 py-0.5 text-xs font-medium text-info-text">
                             Selected
                           </span>
                         )}

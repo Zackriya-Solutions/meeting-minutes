@@ -204,8 +204,8 @@ export default function AnalyticsConsentSwitch() {
                   >
                     {isCopied ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-success" />
-                        <span className="text-success">Copied!</span>
+                        <Check className="w-3.5 h-3.5 text-success-text" />
+                        <span className="text-success-text">Copied!</span>
                       </>
                     ) : (
                       <>
@@ -221,14 +221,14 @@ export default function AnalyticsConsentSwitch() {
         )}
 
         <div className="flex items-start gap-2 p-2 bg-info/10 rounded border border-info/30">
-          <Info className="w-4 h-4 text-info mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-info">
+          <Info className="w-4 h-4 text-info-text mt-0.5 flex-shrink-0" />
+          <div className="text-xs text-info-text">
             <p className="mb-1">
               Your meetings, transcripts, and recordings remain completely private and local.
             </p>
             <button
               onClick={handlePrivacyPolicyClick}
-              className="text-info hover:text-info underline hover:no-underline"
+              className="text-info-text hover:text-info-text underline hover:no-underline"
             >
               View Privacy Policy
             </button>

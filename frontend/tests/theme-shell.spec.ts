@@ -1,6 +1,7 @@
 import {
   expect,
   expectNoHorizontalOverflow,
+  setStoredTheme,
   test,
 } from './fixtures/tauri-fixtures';
 
@@ -8,9 +9,7 @@ for (const mode of ['light', 'dark'] as const) {
   test(`home shell renders semantic surfaces in ${mode} mode`, async ({
     page,
   }) => {
-    await page.addInitScript((value) => {
-      localStorage.setItem('themeMode', value);
-    }, mode);
+    await setStoredTheme(page, mode);
 
     await page.goto('/');
     const toggle = page.getByRole('button', { name: 'Expand sidebar' });

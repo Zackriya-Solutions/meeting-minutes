@@ -55,15 +55,22 @@ module.exports = {
   			},
       info: {
         DEFAULT: 'hsl(var(--info))',
-        foreground: 'hsl(var(--info-foreground))'
+        foreground: 'hsl(var(--info-foreground))',
+        text: 'hsl(var(--info-text))'
       },
       success: {
         DEFAULT: 'hsl(var(--success))',
-        foreground: 'hsl(var(--success-foreground))'
+        foreground: 'hsl(var(--success-foreground))',
+        text: 'hsl(var(--success-text))'
       },
       warning: {
         DEFAULT: 'hsl(var(--warning))',
-        foreground: 'hsl(var(--warning-foreground))'
+        foreground: 'hsl(var(--warning-foreground))',
+        text: 'hsl(var(--warning-text))'
+      },
+      'warning-strong': {
+        DEFAULT: 'hsl(var(--warning-strong))',
+        foreground: 'hsl(var(--warning-strong-foreground))'
       },
       recording: {
         DEFAULT: 'hsl(var(--recording))',

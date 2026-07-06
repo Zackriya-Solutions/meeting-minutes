@@ -67,7 +67,7 @@ function DownloadToastContent({
       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isComplete ? 'bg-success/15' : hasError ? 'bg-destructive/15' : isCancelled ? 'bg-muted' : 'bg-muted'
         }`}>
         {isComplete ? (
-          <Check className="w-4 h-4 text-success" />
+          <Check className="w-4 h-4 text-success-text" />
         ) : hasError ? (
           <X className="w-4 h-4 text-destructive" />
         ) : isCancelled ? (
@@ -88,7 +88,7 @@ function DownloadToastContent({
         {hasError ? (
           <p className="text-xs text-destructive">{download.error || 'Download failed'}</p>
         ) : isComplete ? (
-          <p className="text-xs text-success">Download complete</p>
+          <p className="text-xs text-success-text">Download complete</p>
         ) : isCancelled ? (
           <p className="text-xs text-muted-foreground">Download cancelled</p>
         ) : (

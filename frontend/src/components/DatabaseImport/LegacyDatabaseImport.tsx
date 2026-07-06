@@ -161,10 +161,10 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
           {detectedPath && (
             <div className="p-3 bg-success/10 border border-success/30 rounded-lg">
               <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-5 w-5 text-success mt-0.5 flex-shrink-0" />
+                <CheckCircle2 className="h-5 w-5 text-success-text mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-success">Database found!</p>
-                  <p className="text-xs text-success mt-1 break-all">{detectedPath}</p>
+                  <p className="text-sm font-medium text-success-text">Database found!</p>
+                  <p className="text-xs text-success-text mt-1 break-all">{detectedPath}</p>
                 </div>
               </div>
             </div>

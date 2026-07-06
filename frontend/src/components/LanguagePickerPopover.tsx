@@ -110,14 +110,14 @@ export function LanguagePickerPopover({
                 aria-pressed={value === opt.code}
                 onClick={() => onChange(opt.code)}
                 className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/40 text-left ${
-                  value === opt.code ? "text-info font-medium" : "text-foreground"
+                  value === opt.code ? "text-info-text font-medium" : "text-foreground"
                 }`}
               >
                 <span>
                   {opt.label}{" "}
                   <span className="text-xs text-muted-foreground">({opt.code})</span>
                 </span>
-                {value === opt.code && <span className="text-info" aria-hidden="true">✓</span>}
+                {value === opt.code && <span className="text-info-text" aria-hidden="true">✓</span>}
               </button>
             ))}
             <div className="my-1 h-px bg-muted" />
@@ -130,7 +130,7 @@ export function LanguagePickerPopover({
             aria-pressed={value === null}
             onClick={() => onChange(null)}
             className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/40 text-left ${
-              value === null ? "text-info font-medium" : "text-foreground"
+              value === null ? "text-info-text font-medium" : "text-foreground"
             }`}
           >
             <span className="flex flex-col">
@@ -139,7 +139,7 @@ export function LanguagePickerPopover({
                 <span className="text-xs font-normal text-muted-foreground">{autoSubtitle}</span>
               )}
             </span>
-            {value === null && <span className="text-info" aria-hidden="true">✓</span>}
+            {value === null && <span className="text-info-text" aria-hidden="true">✓</span>}
           </button>
         )}
 
@@ -156,14 +156,14 @@ export function LanguagePickerPopover({
             aria-pressed={value === opt.code}
             onClick={() => onChange(opt.code)}
             className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/40 text-left ${
-              value === opt.code ? "text-info font-medium" : "text-foreground"
+              value === opt.code ? "text-info-text font-medium" : "text-foreground"
             }`}
           >
             <span>
               {opt.label}{" "}
               <span className="text-xs text-muted-foreground">({opt.code})</span>
             </span>
-            {value === opt.code && <span className="text-info" aria-hidden="true">✓</span>}
+            {value === opt.code && <span className="text-info-text" aria-hidden="true">✓</span>}
           </button>
         ))}
 

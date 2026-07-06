@@ -18,7 +18,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-3">
-            <Shield className="w-6 h-6 text-info" />
+            <Shield className="w-6 h-6 text-info-text" />
             <h2 className="text-xl font-semibold text-foreground">What Analytics Collects</h2>
           </div>
           <button
@@ -34,8 +34,8 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
           {/* Privacy Notice */}
           <div className="bg-success/10 border border-success/30 rounded-lg p-4">
             <div className="flex items-start gap-3">
-              <Info className="w-5 h-5 text-success mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-success">
+              <Info className="w-5 h-5 text-success-text mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-success-text">
                 <p className="font-semibold mb-1">Your Privacy is Protected</p>
                 <p>Analytics is off by default. If you enable it, we collect <strong>anonymous usage data only</strong>. No meeting content, names, file paths, or personal information is ever collected.</p>
               </div>

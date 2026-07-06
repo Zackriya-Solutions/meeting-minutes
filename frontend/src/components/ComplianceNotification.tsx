@@ -75,7 +75,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
         {/* Header with close button */}
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center gap-1">
-            <AlertTriangle className="h-3 w-3 text-warning flex-shrink-0" />
+            <AlertTriangle className="h-3 w-3 text-warning-text flex-shrink-0" />
             <h3 className="text-xs font-semibold text-foreground">
               Recording Notice
             </h3>
@@ -94,7 +94,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             Inform participants about recording.
           </p>
           <div className="bg-warning/10 border border-warning/30 rounded p-1">
-            <p className="text-xs text-warning font-medium">
+            <p className="text-xs text-warning-text font-medium">
               US compliance required
             </p>
           </div>

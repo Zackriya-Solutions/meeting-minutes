@@ -347,7 +347,7 @@ export function SummaryGeneratorButtonGroup({
               >
                 <span>{template.name}</span>
                 {selectedTemplate === template.id && (
-                  <Check className="h-4 w-4 text-success" />
+                  <Check className="h-4 w-4 text-success-text" />
                 )}
               </DropdownMenuItem>
             ))}

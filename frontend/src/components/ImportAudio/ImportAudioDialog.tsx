@@ -235,7 +235,7 @@ export function ImportAudioDialog({
           <DialogTitle className="flex items-center gap-2">
             {isProcessing ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin text-info" />
+                <Loader2 className="h-5 w-5 animate-spin text-info-text" />
                 Importing Audio...
               </>
             ) : error ? (
@@ -245,12 +245,12 @@ export function ImportAudioDialog({
               </>
             ) : status === 'complete' ? (
               <>
-                <CheckCircle2 className="h-5 w-5 text-success" />
+                <CheckCircle2 className="h-5 w-5 text-success-text" />
                 Import Complete
               </>
             ) : (
               <>
-                <Upload className="h-5 w-5 text-info" />
+                <Upload className="h-5 w-5 text-info-text" />
                 Import Audio File
               </>
             )}
@@ -271,7 +271,7 @@ export function ImportAudioDialog({
               {fileInfo ? (
                 <div className="bg-muted/40 rounded-lg p-4 space-y-3">
                   <div className="flex items-start gap-3">
-                    <FileAudio className="h-8 w-8 text-info flex-shrink-0" />
+                    <FileAudio className="h-8 w-8 text-info-text flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-foreground truncate">{fileInfo.filename}</p>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
@@ -283,7 +283,7 @@ export function ImportAudioDialog({
                           <HardDrive className="h-3.5 w-3.5" />
                           {formatFileSize(fileInfo.size_bytes)}
                         </span>
-                        <span className="text-info font-medium">{fileInfo.format}</span>
+                        <span className="text-info-text font-medium">{fileInfo.format}</span>
                       </div>
                     </div>
                   </div>

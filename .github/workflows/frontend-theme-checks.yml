@@ -1,0 +1,58 @@
+name: "Frontend Theme Checks"
+
+# Lightweight guard for the semantic theme system: fails PRs that reintroduce
+# hardcoded light-only colors and typechecks the Playwright theme suite.
+# No app build or browser install — runs in well under a minute.
+
+on:
+  pull_request:
+    paths:
+      - "frontend/src/**"
+      - "frontend/tests/**"
+      - "frontend/scripts/check-theme-tokens.mjs"
+      - "frontend/tailwind.config.js"
+      - "frontend/tsconfig*.json"
+      - ".github/workflows/frontend-theme-checks.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  theme-checks:
+    name: Theme audit + test typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # pnpm 9 is the one major that reads BOTH the v9.0 lockfile and the
+          # package.json `pnpm.overrides` field, so --frozen-lockfile matches
+          # cleanly. pnpm 8 can't read a v9 lockfile; pnpm 10+ ignore
+          # pnpm.overrides and fail with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+          # Overrides stay in package.json so the pnpm 8 build workflows keep
+          # working.
+          version: 9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Theme token audit
+        working-directory: frontend
+        run: pnpm run test:theme-audit
+
+      - name: Typecheck Playwright theme suite
+        working-directory: frontend
+        run: pnpm exec tsc -p tsconfig.tests.json

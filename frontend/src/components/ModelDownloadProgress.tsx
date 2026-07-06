@@ -21,7 +21,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-info"></div>
-          <span className="text-sm font-medium text-info">
+          <span className="text-sm font-medium text-info-text">
             {isCompleted ? 'Finalizing...' : `Downloading ${modelName}`}
           </span>
         </div>
@@ -34,7 +34,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
             style={{ width: `${Math.min(progress, 100)}%` }}
           />
         </div>
-        <div className="flex justify-between text-xs text-info mt-1">
+        <div className="flex justify-between text-xs text-info-text mt-1">
           <span>{Math.round(progress)}% complete</span>
           {!isCompleted && (
             <span className="animate-pulse">Downloading...</span>
@@ -43,7 +43,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
       </div>
       
       {isCompleted && (
-        <div className="mt-2 text-xs text-success">
+        <div className="mt-2 text-xs text-success-text">
           ✓ Download completed, loading model...
         </div>
       )}
@@ -91,7 +91,7 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           className="transition-all duration-300 ease-in-out"
         />
       </svg>
-      <span className="absolute text-xs font-medium text-info">
+      <span className="absolute text-xs font-medium text-info-text">
         {Math.round(progress)}%
       </span>
     </div>
@@ -121,7 +121,7 @@ export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: 
         </span>
       </div>
       {downloadedModels > 0 && (
-        <div className="mt-1 text-xs text-success">
+        <div className="mt-1 text-xs text-success-text">
           ✓ Models run locally - no internet required for transcription
         </div>
       )}
