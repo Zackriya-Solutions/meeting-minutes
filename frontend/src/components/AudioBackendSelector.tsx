@@ -47,7 +47,7 @@ export function AudioBackendSelector({
         }
       } catch (err) {
         console.error('Failed to load audio backends:', err);
-        setError(t('recordingSettings.failedToSavePrefs'));
+        setError(t('errors.backendLoadFailed'));
       } finally {
         setLoading(false);
       }
@@ -71,7 +71,7 @@ export function AudioBackendSelector({
       console.log(`Audio backend changed to: ${backendId}`);
     } catch (err) {
       console.error('Failed to set audio backend:', err);
-      setError(t('recordingSettings.failedToSavePrefs'));
+      setError(t('errors.backendSwitchFailed'));
     }
   };
 

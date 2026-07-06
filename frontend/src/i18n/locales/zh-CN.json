@@ -347,7 +347,8 @@
     "supportedFormats": "MP4、WAV、MP3、FLAC、OGG、MKV、WebM、WMA",
     "betaFeatureDisabled": "Beta 功能已禁用",
     "betaFeatureDisabledDesc": "请在 设置 > Beta 中启用「导入音频和重新转录」功能以使用此功能。",
-    "dropAudioFileOnly": "请拖放音频文件"
+    "dropAudioFileOnly": "请拖放音频文件",
+    "importComplete": "导入完成！已创建 {{count}} 个片段。"
   },
   "transcriptRecovery": {
     "title": "恢复的会议",
@@ -441,5 +442,17 @@
   "beta": {
     "importAudioRetranscribe": "导入音频 & 重新转录",
     "importAudioDesc": "导入音频文件进行转录，或用不同语言设置重新转录现有会议。"
+  },
+  "errors": {
+    "modelConfigSaveFailed": "保存模型配置失败",
+    "backendLoadFailed": "加载音频后端失败",
+    "backendSwitchFailed": "切换音频后端失败",
+    "modelCheckFailed": "检查模型状态失败",
+    "languagePrefSaveFailed": "保存语言偏好失败",
+    "notifPrefSaveFailed": "保存通知偏好失败",
+    "modelNotFound": "未找到模型",
+    "modelStateError": "模型处于错误状态",
+    "retranscribeFailed": "重新转录失败",
+    "summaryLangSaveFailed": "保存摘要语言失败"
   }
 }

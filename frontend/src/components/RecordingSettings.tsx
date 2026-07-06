@@ -119,7 +119,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       });
     } catch (error) {
       console.error('Failed to save notification preference:', error);
-      toast.error(t('recordingSettings.failedToSavePrefs'));
+      toast.error(t('errors.notifPrefSaveFailed'));
     }
   };
 

@@ -118,7 +118,7 @@ export function SummaryGeneratorButtonGroup({
       });
 
       if (!modelInfo) {
-        toast.error(t('summarySettings.errorGenerating'), {
+        toast.error(t('errors.modelNotFound'), {
           description: `${t('modelSettings.modelNameDesc')} ${selectedModel}`,
           duration: 5000,
         });
@@ -157,7 +157,7 @@ export function SummaryGeneratorButtonGroup({
 
       if (status.type === 'error') {
         toast.error(t('common.error'), {
-          description: status.Error || t('summarySettings.errorGenerating'),
+          description: status.Error || t('errors.modelStateError'),
           duration: 5000,
         });
         setSettingsDialogOpen(true);
@@ -173,7 +173,7 @@ export function SummaryGeneratorButtonGroup({
 
     } catch (error) {
       console.error('Error checking built-in AI models:', error);
-      toast.error(t('recordingSettings.failedToSavePrefs'), {
+      toast.error(t('errors.modelCheckFailed'), {
         description: error instanceof Error ? error.message : String(error),
         duration: 5000,
       });

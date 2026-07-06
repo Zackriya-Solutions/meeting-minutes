@@ -120,7 +120,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       toast.success(t('recordingSettings.preferenceSaved'));
     } catch (error) {
       console.error('Error saving model config:', error);
-      toast.error(t('recordingSettings.failedToSavePrefs'));
+      toast.error(t('errors.modelConfigSaveFailed'));
     }
   };
 

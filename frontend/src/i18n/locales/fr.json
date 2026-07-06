@@ -347,7 +347,8 @@
     "supportedFormats": "MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA",
     "betaFeatureDisabled": "Fonctionnalité bêta désactivée",
     "betaFeatureDisabledDesc": "Activez « Importer audio et Retranscrire » dans Paramètres > Bêta pour utiliser cette fonction.",
-    "dropAudioFileOnly": "Veuillez déposer un fichier audio"
+    "dropAudioFileOnly": "Veuillez déposer un fichier audio",
+    "importComplete": "Import terminé ! {{count}} segments créés."
   },
   "transcriptRecovery": {
     "title": "Réunions récupérées",
@@ -441,5 +442,17 @@
   "beta": {
     "importAudioRetranscribe": "Importer audio & Retranscrire",
     "importAudioDesc": "Importer des fichiers audio pour transcrire ou retranscrire des réunions existantes avec d'autres paramètres de langue."
+  },
+  "errors": {
+    "modelConfigSaveFailed": "Échec de la sauvegarde de la configuration du modèle",
+    "backendLoadFailed": "Échec du chargement des backends audio",
+    "backendSwitchFailed": "Échec du changement de backend audio",
+    "modelCheckFailed": "Échec de la vérification de l'état du modèle",
+    "languagePrefSaveFailed": "Échec de la sauvegarde de la préférence de langue",
+    "notifPrefSaveFailed": "Échec de la sauvegarde de la préférence de notification",
+    "modelNotFound": "Modèle introuvable",
+    "modelStateError": "Le modèle est dans un état d'erreur",
+    "retranscribeFailed": "Échec de la retranscription",
+    "summaryLangSaveFailed": "Échec de la sauvegarde de la langue du résumé"
   }
 }

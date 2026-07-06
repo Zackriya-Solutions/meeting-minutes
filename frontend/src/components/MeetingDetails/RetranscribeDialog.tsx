@@ -283,7 +283,7 @@ export function RetranscribeDialog({
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                {t('summarySettings.errorGenerating')}
+                {t('errors.retranscribeFailed')}
               </>
             ) : (
               <>
@@ -296,7 +296,7 @@ export function RetranscribeDialog({
             {isProcessing
               ? progress?.message || t('importAudio.importingAudio')
               : error
-                ? t('summarySettings.errorGenerating')
+                ? t('errors.retranscribeFailed')
                 : t('meetingDetails.chooseDifferentFile')}
           </DialogDescription>
         </DialogHeader>

@@ -347,7 +347,8 @@
     "supportedFormats": "MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA",
     "betaFeatureDisabled": "Beta-Funktion deaktiviert",
     "betaFeatureDisabledDesc": "Aktivieren Sie „Audio importieren & Neu transkribieren“ in Einstellungen > Beta, um diese Funktion zu nutzen.",
-    "dropAudioFileOnly": "Bitte eine Audiodatei ablegen"
+    "dropAudioFileOnly": "Bitte eine Audiodatei ablegen",
+    "importComplete": "Import abgeschlossen! {{count}} Segmente erstellt."
   },
   "transcriptRecovery": {
     "title": "Wiederhergestellte Besprechungen",
@@ -441,5 +442,17 @@
   "beta": {
     "importAudioRetranscribe": "Audio importieren & Neu transkribieren",
     "importAudioDesc": "Audiodateien importieren zum Transkribieren oder bestehende Besprechungen mit anderen Spracheinstellungen neu transkribieren."
+  },
+  "errors": {
+    "modelConfigSaveFailed": "Modellkonfiguration konnte nicht gespeichert werden",
+    "backendLoadFailed": "Audio-Backends konnten nicht geladen werden",
+    "backendSwitchFailed": "Audio-Backend konnte nicht gewechselt werden",
+    "modelCheckFailed": "Modellstatus konnte nicht überprüft werden",
+    "languagePrefSaveFailed": "Spracheinstellung konnte nicht gespeichert werden",
+    "notifPrefSaveFailed": "Benachrichtigungseinstellung konnte nicht gespeichert werden",
+    "modelNotFound": "Modell nicht gefunden",
+    "modelStateError": "Modell befindet sich im Fehlerzustand",
+    "retranscribeFailed": "Erneute Transkription fehlgeschlagen",
+    "summaryLangSaveFailed": "Zusammenfassungssprache konnte nicht gespeichert werden"
   }
 }

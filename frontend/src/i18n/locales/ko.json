@@ -347,7 +347,8 @@
     "supportedFormats": "MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA",
     "betaFeatureDisabled": "베타 기능 비활성화",
     "betaFeatureDisabledDesc": "이 기능을 사용하려면 설정 > 베타에서 \"오디오 가져오기 및 재전사\"를 활성화하세요.",
-    "dropAudioFileOnly": "오디오 파일을 드롭해 주세요"
+    "dropAudioFileOnly": "오디오 파일을 드롭해 주세요",
+    "importComplete": "가져오기 완료! {{count}}개 세그먼트가 생성되었습니다."
   },
   "transcriptRecovery": {
     "title": "복구된 회의",
@@ -441,5 +442,17 @@
   "beta": {
     "importAudioRetranscribe": "오디오 가져오기 & 재전사",
     "importAudioDesc": "오디오 파일을 가져와서 전사하거나 다른 언어 설정으로 기존 회의를 재전사합니다."
+  },
+  "errors": {
+    "modelConfigSaveFailed": "모델 설정 저장 실패",
+    "backendLoadFailed": "오디오 백엔드 로드 실패",
+    "backendSwitchFailed": "오디오 백엔드 전환 실패",
+    "modelCheckFailed": "모델 상태 확인 실패",
+    "languagePrefSaveFailed": "언어 설정 저장 실패",
+    "notifPrefSaveFailed": "알림 설정 저장 실패",
+    "modelNotFound": "모델을 찾을 수 없습니다",
+    "modelStateError": "모델이 오류 상태입니다",
+    "retranscribeFailed": "재전사 실패",
+    "summaryLangSaveFailed": "요약 언어 저장 실패"
   }
 }

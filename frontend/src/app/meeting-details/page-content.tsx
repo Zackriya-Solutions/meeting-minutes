@@ -108,7 +108,7 @@ export default function PageContent({
       toast.success(t('recordingSettings.preferenceSaved'));
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error(t('recordingSettings.failedToSavePrefs'));
+      toast.error(t('errors.modelConfigSaveFailed'));
     }
   };
 

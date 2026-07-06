@@ -162,7 +162,7 @@ export function LanguageSelection({
       });
     } catch (error) {
       console.error('Failed to save language preference:', error);
-      toast.error(t('recordingSettings.failedToSavePrefs'), {
+      toast.error(t('errors.languagePrefSaveFailed'), {
         description: error instanceof Error ? error.message : String(error)
       });
     } finally {

@@ -189,7 +189,7 @@ export function SummaryPanel({
             activeMeetingIdRef.current === request.meetingId
           ) {
             console.error('Failed to persist summary language:', err);
-            toast.error(t('summarySettings.errorGenerating'));
+            toast.error(t('errors.summaryLangSaveFailed'));
             setSummaryLang(request.rollback.language);
             setSummaryLangStorage(request.rollback.storage);
             return;

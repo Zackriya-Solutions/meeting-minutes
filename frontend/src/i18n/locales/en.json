@@ -347,7 +347,8 @@
     "supportedFormats": "MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA",
     "betaFeatureDisabled": "Beta feature disabled",
     "betaFeatureDisabledDesc": "Enable Import Audio & Retranscribe in Settings > Beta to use this feature.",
-    "dropAudioFileOnly": "Please drop an audio file"
+    "dropAudioFileOnly": "Please drop an audio file",
+    "importComplete": "Import complete! {{count}} segments created."
   },
   "transcriptRecovery": {
     "title": "Recovered Meetings",
@@ -441,5 +442,17 @@
   "beta": {
     "importAudioRetranscribe": "Import Audio & Retranscribe",
     "importAudioDesc": "Import audio files to transcribe or retranscribe existing meetings with different language settings."
+  },
+  "errors": {
+    "modelConfigSaveFailed": "Failed to save model configuration",
+    "backendLoadFailed": "Failed to load audio backends",
+    "backendSwitchFailed": "Failed to switch audio backend",
+    "modelCheckFailed": "Failed to check model status",
+    "languagePrefSaveFailed": "Failed to save language preference",
+    "notifPrefSaveFailed": "Failed to save notification preference",
+    "modelNotFound": "Model not found",
+    "modelStateError": "Model is in an error state",
+    "retranscribeFailed": "Retranscription failed",
+    "summaryLangSaveFailed": "Failed to save summary language"
   }
 }

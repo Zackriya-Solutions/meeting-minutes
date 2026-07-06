@@ -347,7 +347,8 @@
     "supportedFormats": "MP4、WAV、MP3、FLAC、OGG、MKV、WebM、WMA",
     "betaFeatureDisabled": "ベータ機能が無効です",
     "betaFeatureDisabledDesc": "この機能を使用するには、設定 > ベータで「オーディオインポートと再転記」を有効にしてください。",
-    "dropAudioFileOnly": "オーディオファイルをドロップしてください"
+    "dropAudioFileOnly": "オーディオファイルをドロップしてください",
+    "importComplete": "インポート完了！{{count}} 個のセグメントを作成しました。"
   },
   "transcriptRecovery": {
     "title": "復元された会議",
@@ -441,5 +442,17 @@
   "beta": {
     "importAudioRetranscribe": "オーディオインポート＆再転記",
     "importAudioDesc": "オーディオファイルをインポートして転記するか、異なる言語設定で既存の会議を再転記します。"
+  },
+  "errors": {
+    "modelConfigSaveFailed": "モデル設定の保存に失敗しました",
+    "backendLoadFailed": "オーディオバックエンドの読み込みに失敗しました",
+    "backendSwitchFailed": "オーディオバックエンドの切り替えに失敗しました",
+    "modelCheckFailed": "モデル状態の確認に失敗しました",
+    "languagePrefSaveFailed": "言語設定の保存に失敗しました",
+    "notifPrefSaveFailed": "通知設定の保存に失敗しました",
+    "modelNotFound": "モデルが見つかりません",
+    "modelStateError": "モデルがエラー状態です",
+    "retranscribeFailed": "再文字起こしに失敗しました",
+    "summaryLangSaveFailed": "要約言語の保存に失敗しました"
   }
 }
