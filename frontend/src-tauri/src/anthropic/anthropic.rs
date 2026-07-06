@@ -1,7 +1,8 @@
+use crate::model_config::load_provider_models;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use tauri::command;
+use tauri::{AppHandle, Runtime};
 
 /// Anthropic (Claude) model information returned to frontend
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -37,21 +38,14 @@ static MODELS_CACHE: RwLock<Option<CacheEntry>> = RwLock::new(None);
 /// Cache TTL in seconds
 const CACHE_TTL_SECS: u64 = 300;
 
-/// Fallback models when API fetch fails (matches frontend hardcoded values)
-const FALLBACK_MODELS: &[(&str, &str)] = &[
-    ("claude-sonnet-4-5-20250929", "Claude 4.5 Sonnet"),
-    ("claude-haiku-4-5-20251001", "Claude 4.5 Haiku"),
-    ("claude-opus-4-1-20250805", "Claude 4.1 Opus"),
-    ("claude-sonnet-4-20250514", "Claude 4 Sonnet"),
-];
-
-/// Get fallback models as AnthropicModel vec
-fn get_fallback_models() -> Vec<AnthropicModel> {
-    FALLBACK_MODELS
-        .iter()
-        .map(|(id, name)| AnthropicModel {
-            id: id.to_string(),
-            display_name: Some(name.to_string()),
+/// Get configured fallback models as AnthropicModel vec.
+fn get_fallback_models<R: Runtime>(app: &AppHandle<R>) -> Vec<AnthropicModel> {
+    load_provider_models(Some(app), "anthropic")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|model| AnthropicModel {
+            id: model.id,
+            display_name: model.display_name,
         })
         .collect()
 }
@@ -70,14 +64,17 @@ fn is_chat_model(model_id: &str) -> bool {
 ///
 /// # Returns
 /// Vector of available models, or fallback models on error
-#[command]
-pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<AnthropicModel>, String> {
+#[tauri::command]
+pub async fn get_anthropic_models<R: Runtime>(
+    app: AppHandle<R>,
+    api_key: Option<String>,
+) -> Result<Vec<AnthropicModel>, String> {
     // Return fallback if no API key provided
     let api_key = match api_key {
         Some(key) if !key.trim().is_empty() => key.trim().to_string(),
         _ => {
             log::info!("No Anthropic API key provided, returning fallback models");
-            return Ok(get_fallback_models());
+            return Ok(get_fallback_models(&app));
         }
     };
 
@@ -110,7 +107,7 @@ pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<Anthrop
         Ok(resp) => resp,
         Err(e) => {
             log::warn!("Failed to fetch Anthropic models: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
+            return Ok(get_fallback_models(&app));
         }
     };
 
@@ -120,14 +117,14 @@ pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<Anthrop
             "Anthropic API returned status {}. Using fallback models.",
             status
         );
-        return Ok(get_fallback_models());
+        return Ok(get_fallback_models(&app));
     }
 
     let api_response: AnthropicApiResponse = match response.json().await {
         Ok(data) => data,
         Err(e) => {
             log::warn!("Failed to parse Anthropic response: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
+            return Ok(get_fallback_models(&app));
         }
     };
 
@@ -145,7 +142,7 @@ pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<Anthrop
     // If no models returned, use fallback
     if models.is_empty() {
         log::warn!("No chat models returned from Anthropic API. Using fallback.");
-        return Ok(get_fallback_models());
+        return Ok(get_fallback_models(&app));
     }
 
     log::info!("Fetched {} Anthropic models from API", models.len());

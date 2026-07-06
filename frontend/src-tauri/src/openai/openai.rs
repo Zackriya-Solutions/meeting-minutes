@@ -1,7 +1,8 @@
+use crate::model_config::load_provider_models;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use tauri::command;
+use tauri::{AppHandle, Runtime};
 
 /// OpenAI model information returned to frontend
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -37,38 +38,12 @@ static MODELS_CACHE: RwLock<Option<CacheEntry>> = RwLock::new(None);
 /// Cache TTL in seconds
 const CACHE_TTL_SECS: u64 = 300;
 
-/// Fallback models when API fetch fails (matches frontend hardcoded values)
-const FALLBACK_MODELS: &[&str] = &[
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
-    "gpt-4o-2024-11-20",
-    "gpt-4o-2024-08-06",
-    "gpt-4o-mini-2024-07-18",
-    "gpt-4.1-2025-04-14",
-    "gpt-4.1-nano-2025-04-14",
-    "gpt-4.1-mini-2025-04-14",
-    "o4-mini-2025-04-16",
-    "o3-2025-04-16",
-    "o3-mini-2025-01-31",
-    "o1-2024-12-17",
-    "o1-mini-2024-09-12",
-    "gpt-4-turbo-2024-04-09",
-    "gpt-4-0125-Preview",
-    "gpt-4-vision-preview",
-    "gpt-4-1106-Preview",
-    "gpt-3.5-turbo-0125",
-    "gpt-3.5-turbo-1106",
-];
-
-/// Get fallback models as OpenAIModel vec
-fn get_fallback_models() -> Vec<OpenAIModel> {
-    FALLBACK_MODELS
-        .iter()
-        .map(|id| OpenAIModel { id: id.to_string() })
+/// Get configured fallback models as OpenAIModel vec.
+fn get_fallback_models<R: Runtime>(app: &AppHandle<R>) -> Vec<OpenAIModel> {
+    load_provider_models(Some(app), "openai")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|model| OpenAIModel { id: model.id })
         .collect()
 }
 
@@ -100,14 +75,17 @@ fn is_chat_model(model_id: &str) -> bool {
 ///
 /// # Returns
 /// Vector of available models, or fallback models on error
-#[command]
-pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIModel>, String> {
+#[tauri::command]
+pub async fn get_openai_models<R: Runtime>(
+    app: AppHandle<R>,
+    api_key: Option<String>,
+) -> Result<Vec<OpenAIModel>, String> {
     // Return fallback if no API key provided
     let api_key = match api_key {
         Some(key) if !key.trim().is_empty() => key.trim().to_string(),
         _ => {
             log::info!("No OpenAI API key provided, returning fallback models");
-            return Ok(get_fallback_models());
+            return Ok(get_fallback_models(&app));
         }
     };
 
@@ -136,7 +114,7 @@ pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIMode
         Ok(resp) => resp,
         Err(e) => {
             log::warn!("Failed to fetch OpenAI models: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
+            return Ok(get_fallback_models(&app));
         }
     };
 
@@ -146,14 +124,14 @@ pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIMode
             "OpenAI API returned status {}. Using fallback models.",
             status
         );
-        return Ok(get_fallback_models());
+        return Ok(get_fallback_models(&app));
     }
 
     let api_response: OpenAIApiResponse = match response.json().await {
         Ok(data) => data,
         Err(e) => {
             log::warn!("Failed to parse OpenAI response: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
+            return Ok(get_fallback_models(&app));
         }
     };
 
@@ -168,7 +146,7 @@ pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIMode
     // If no models returned (e.g., restricted API key), use fallback
     if models.is_empty() {
         log::warn!("No chat models returned from OpenAI API. Using fallback.");
-        return Ok(get_fallback_models());
+        return Ok(get_fallback_models(&app));
     }
 
     log::info!("Fetched {} OpenAI models from API", models.len());
