@@ -160,14 +160,39 @@ pub(crate) fn build_openai_chat_request_with_max_completion_tokens(
     }
 }
 
-pub(crate) fn is_max_tokens_unsupported_error(error_body: &str) -> bool {
+pub(crate) fn build_openai_chat_request_with_max_tokens(
+    model_name: &str,
+    messages: Vec<ChatMessage>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+) -> ChatRequest {
+    ChatRequest {
+        model: model_name.to_string(),
+        messages,
+        max_tokens,
+        max_completion_tokens: None,
+        temperature,
+        top_p,
+    }
+}
+
+fn is_unsupported_parameter_error(error_body: &str, parameter: &str) -> bool {
     let error = error_body.to_ascii_lowercase();
 
-    error.contains("max_tokens")
+    error.contains(parameter)
         && (error.contains("unsupported_parameter")
             || error.contains("unsupported parameter")
             || error.contains("not supported")
             || error.contains("unsupported"))
+}
+
+pub(crate) fn is_max_tokens_unsupported_error(error_body: &str) -> bool {
+    is_unsupported_parameter_error(error_body, "max_tokens")
+}
+
+pub(crate) fn is_max_completion_tokens_unsupported_error(error_body: &str) -> bool {
+    is_unsupported_parameter_error(error_body, "max_completion_tokens")
 }
 
 fn openai_chat_messages(system_prompt: &str, user_prompt: &str) -> Vec<ChatMessage> {
@@ -419,6 +444,31 @@ pub async fn generate_summary(
                     .unwrap_or_else(|_| "Unknown error".to_string());
                 return Err(format!("LLM API request failed: {}", retry_error_body));
             }
+        } else if provider == &LLMProvider::CustomOpenAI
+            && request_body.get("max_completion_tokens").is_some()
+            && is_max_completion_tokens_unsupported_error(&error_body)
+        {
+            info!("Retrying Custom OpenAI request with max_tokens");
+
+            let retry_body = serde_json::json!(build_openai_chat_request_with_max_tokens(
+                model_name,
+                openai_chat_messages(system_prompt, user_prompt),
+                max_tokens_val,
+                temperature_val,
+                top_p_val,
+            ));
+
+            response =
+                send_chat_request(client, &api_url, &headers, &retry_body, cancellation_token)
+                    .await?;
+
+            if !response.status().is_success() {
+                let retry_error_body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(format!("LLM API request failed: {}", retry_error_body));
+            }
         } else {
             return Err(format!("LLM API request failed: {}", error_body));
         }
@@ -558,6 +608,24 @@ mod tests {
     }
 
     #[test]
+    fn forced_max_tokens_payload_handles_legacy_compatible_endpoints() {
+        let payload = serde_json::to_value(build_openai_chat_request_with_max_tokens(
+            "gpt-4.1-mini",
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            Some(512),
+            None,
+            None,
+        ))
+        .unwrap();
+
+        assert_eq!(payload["max_tokens"], 512);
+        assert!(payload.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
     fn detects_max_tokens_unsupported_errors() {
         assert!(is_max_tokens_unsupported_error(
             r#"{"error":{"code":"unsupported_parameter","param":"max_tokens"}}"#
@@ -567,6 +635,19 @@ mod tests {
         ));
         assert!(!is_max_tokens_unsupported_error(
             r#"{"error":{"code":"invalid_api_key"}}"#
+        ));
+    }
+
+    #[test]
+    fn detects_max_completion_tokens_unsupported_errors() {
+        assert!(is_max_completion_tokens_unsupported_error(
+            r#"{"error":{"code":"unsupported_parameter","param":"max_completion_tokens"}}"#
+        ));
+        assert!(is_max_completion_tokens_unsupported_error(
+            "The max_completion_tokens parameter is not supported by this endpoint"
+        ));
+        assert!(!is_max_completion_tokens_unsupported_error(
+            r#"{"error":{"code":"unsupported_parameter","param":"max_tokens"}}"#
         ));
     }
 }

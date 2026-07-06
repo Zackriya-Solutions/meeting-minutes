@@ -1363,6 +1363,44 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                         }
                     }
                 }
+            } else if !status.is_success()
+                && test_request.max_completion_tokens.is_some()
+                && crate::summary::llm_client::is_max_completion_tokens_unsupported_error(
+                    &response_text,
+                )
+            {
+                log_info!("Retrying Custom OpenAI connection test with max_tokens");
+
+                let retry_request =
+                    crate::summary::llm_client::build_openai_chat_request_with_max_tokens(
+                        &model,
+                        vec![crate::summary::llm_client::ChatMessage {
+                            role: "user".to_string(),
+                            content: "Hi".to_string(),
+                        }],
+                        Some(5),
+                        None,
+                        None,
+                    );
+
+                match send_test_request(&retry_request).await {
+                    Ok(retry_response) => {
+                        status = retry_response.status();
+                        response_text = retry_response.text().await.unwrap_or_default();
+                    }
+                    Err(e) => {
+                        log_error!("❌ Custom OpenAI connection retry failed: {}", e);
+                        if e.is_timeout() {
+                            return Err(
+                                "Connection timed out. Please check the endpoint URL.".to_string()
+                            );
+                        } else if e.is_connect() {
+                            return Err("Could not connect to endpoint. Please verify the URL is correct and the server is running.".to_string());
+                        } else {
+                            return Err(format!("Connection failed: {}", e));
+                        }
+                    }
+                }
             }
 
             if status.is_success() {
