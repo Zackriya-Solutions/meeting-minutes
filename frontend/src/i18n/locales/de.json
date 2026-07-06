@@ -315,7 +315,7 @@
     "installing": "Wird installiert...",
     "restartAfterInstall": "Die App startet nach der Installation automatisch neu",
     "dismissForNow": "Jetzt schließen",
-    "installedSuccessful": "Update erfolgreich installiert. App wird neu gestartet...",
+    "installedSuccessfully": "Update erfolgreich installiert. App wird neu gestartet...",
     "updateFailed": "Update fehlgeschlagen: {{error}}",
     "cancelled": "Abgebrochen",
     "noLongerAvailable": "Update nicht mehr verfügbar",
@@ -360,7 +360,7 @@
   },
   "emptyState": {
     "noMeetings": "Noch keine Besprechungen",
-    "startRating": "Starten Sie Ihre erste Besprechung, um sie hier zu sehen"
+    "startRecording": "Starten Sie Ihre erste Besprechung, um sie hier zu sehen"
   },
   "permissionWarning": {
     "title": "Berechtigung erforderlich",
@@ -421,7 +421,7 @@
   },
   "home": {
     "welcome": "Willkommen bei Meetily!",
-    "startRatingHint": "Starten Sie die Aufnahme, um Live-Transkription zu sehen"
+    "startRecordingHint": "Starten Sie die Aufnahme, um Live-Transkription zu sehen"
   },
   "modelCard": {
     "download": "Herunterladen",
