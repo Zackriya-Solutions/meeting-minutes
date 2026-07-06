@@ -25,6 +25,13 @@ export interface TranscriptSettingsProps {
     onModelSelect?: () => void;
 }
 
+const ProviderOption = ({ iconSrc, label }: { iconSrc: string; label: string }) => (
+    <span className="flex items-center gap-2">
+        <img src={iconSrc} alt="" aria-hidden="true" className="h-4 w-4 shrink-0" />
+        <span>{label}</span>
+    </span>
+);
+
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onModelSelect }: TranscriptSettingsProps) {
     const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
@@ -147,8 +154,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    <SelectItem value="openai">☁️ OpenAI</SelectItem>
-                                    <SelectItem value="gemini">☁️ Gemini</SelectItem>
+                                    <SelectItem value="openai">
+                                        <ProviderOption iconSrc="/provider-icons/openai.svg" label="OpenAI" />
+                                    </SelectItem>
+                                    <SelectItem value="gemini">
+                                        <ProviderOption iconSrc="/provider-icons/gemini.svg" label="Gemini" />
+                                    </SelectItem>
                                 </SelectContent>
                             </Select>
 
@@ -255,7 +266,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
 
 
 
