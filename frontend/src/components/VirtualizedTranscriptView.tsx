@@ -8,7 +8,8 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData } from "@/types";
+import { TranscriptSegmentData, resolveSpeakerLabel } from "@/types";
+import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -38,6 +39,11 @@ export interface VirtualizedTranscriptViewProps {
     /** When set (seconds), scroll to and briefly highlight the segment at this time.
      *  Powers jump-to-timestamp from search results / RAG citations. */
     scrollToTimestamp?: number | null;
+
+    /** Diarized speaker names (id → display_name); takes precedence over channel tags in labels. */
+    speakersById?: Map<number, string> | null;
+    /** When provided, diarized speaker labels become clickable to rename them. */
+    onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -76,6 +82,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming,
     showConfidence,
     highlight = false,
+    speakerLabel = null,
+    speakerId = null,
+    speakerRenamable = false,
+    onSpeakerClick,
 }: {
     id: string;
     timestamp: number;
@@ -84,6 +94,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isStreaming: boolean;
     showConfidence: boolean;
     highlight?: boolean;
+    speakerLabel?: string | null;
+    speakerId?: number | null;
+    speakerRenamable?: boolean;
+    onSpeakerClick?: (speakerId: number) => void;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
@@ -93,18 +107,36 @@ const TranscriptSegment = memo(function TranscriptSegment({
             className={`mb-3 rounded-lg transition-colors duration-500 ${highlight ? 'bg-yellow-100 ring-2 ring-yellow-300 -mx-2 px-2 py-1' : ''}`}
         >
             <div className="flex items-start gap-2">
-                <Tooltip>
-                    <TooltipTrigger>
-                        <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
-                            {formatRecordingTime(timestamp)}
-                        </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                        {confidence !== undefined && showConfidence && (
-                            <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
-                        )}
-                    </TooltipContent>
-                </Tooltip>
+                <div className="flex flex-col items-start flex-shrink-0 min-w-[50px] mt-1">
+                    {speakerLabel && (
+                        speakerRenamable && speakerId != null && onSpeakerClick ? (
+                            <button
+                                type="button"
+                                onClick={() => onSpeakerClick(speakerId)}
+                                title="Rename speaker"
+                                className="text-[10px] font-medium uppercase tracking-wide text-gray-400 hover:text-blue-600 leading-tight text-left focus:outline-none"
+                            >
+                                {speakerLabel}
+                            </button>
+                        ) : (
+                            <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 leading-tight">
+                                {speakerLabel}
+                            </span>
+                        )
+                    )}
+                    <Tooltip>
+                        <TooltipTrigger>
+                            <span className="text-xs text-gray-400">
+                                {formatRecordingTime(timestamp)}
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            {confidence !== undefined && showConfidence && (
+                                <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
+                            )}
+                        </TooltipContent>
+                    </Tooltip>
+                </div>
                 <div className="flex-1">
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
@@ -134,11 +166,20 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     loadedCount = 0,
     onLoadMore,
     scrollToTimestamp = null,
+    speakersById = null,
+    onRenameSpeaker,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Segment id to briefly highlight after a jump-to-timestamp.
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
+    // Diarized speaker being renamed (null when the rename dialog is closed).
+    const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string } | null>(null);
+
+    // Stable so memoized segments don't re-render on every parent render.
+    const handleSpeakerClick = useCallback((speakerId: number) => {
+        setRenamingSpeaker({ id: speakerId, name: speakersById?.get(speakerId) ?? '' });
+    }, [speakersById]);
     // Ensures a given jump target is consumed only once (not re-triggered on paginate).
     const seekConsumedRef = useRef<number | null>(null);
     // Ref for infinite scroll trigger element
@@ -348,6 +389,14 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
+                                        speakerLabel={resolveSpeakerLabel(segment, speakersById)}
+                                        speakerId={segment.speaker_id}
+                                        speakerRenamable={
+                                            !!onRenameSpeaker &&
+                                            segment.speaker_id != null &&
+                                            !!speakersById?.has(segment.speaker_id)
+                                        }
+                                        onSpeakerClick={handleSpeakerClick}
                                     />
                                 </div>
                             );
@@ -405,6 +454,14 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
+                                        speakerLabel={resolveSpeakerLabel(segment, speakersById)}
+                                        speakerId={segment.speaker_id}
+                                        speakerRenamable={
+                                            !!onRenameSpeaker &&
+                                            segment.speaker_id != null &&
+                                            !!speakersById?.has(segment.speaker_id)
+                                        }
+                                        onSpeakerClick={handleSpeakerClick}
                                     />
                                 </motion.div>
                             );
@@ -442,6 +499,16 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 </>
             )}
             </div>
+
+            {/* Rename affordance for diarized speakers (saved meetings only). */}
+            {onRenameSpeaker && renamingSpeaker && (
+                <SpeakerRenameDialog
+                    open={true}
+                    currentName={renamingSpeaker.name}
+                    onOpenChange={(o) => { if (!o) setRenamingSpeaker(null); }}
+                    onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
+                />
+            )}
         </div>
     );
 };

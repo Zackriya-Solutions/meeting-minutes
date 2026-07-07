@@ -500,6 +500,10 @@ pub fn run() {
             //     });
             // }
 
+            // Store the process-wide app handle for the background job runner (which owns
+            // no AppHandle). Must precede DB init, since that spawns the job runner.
+            pipeline::diarization_commands::set_app_handle(_app.handle().clone());
+
             // Initialize database (handles first launch detection and conditional setup)
             tauri::async_runtime::block_on(async {
                 database::setup::initialize_database_on_startup(&_app.handle()).await
@@ -552,6 +556,11 @@ pub fn run() {
             search::commands::rag_ask,
             pipeline::commands::embedder_status,
             pipeline::commands::embedder_download_model,
+            pipeline::diarization_commands::diarization_status,
+            pipeline::diarization_commands::download_diarization_models,
+            pipeline::diarization_commands::diarize_meeting,
+            pipeline::diarization_commands::get_meeting_speakers,
+            pipeline::diarization_commands::rename_speaker,
             gigaam_engine::commands::gigaam_status,
             gigaam_engine::commands::gigaam_download_model,
             gigaam_engine::commands::gigaam_transcribe_audio,

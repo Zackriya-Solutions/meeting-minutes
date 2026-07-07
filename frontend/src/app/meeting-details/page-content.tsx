@@ -33,6 +33,9 @@ export default function PageContent({
   loadedCount,
   onLoadMore,
   seekToSeconds = null,
+  speakersById = null,
+  onRenameSpeaker,
+  onSpeakersDetected,
 }: {
   meeting: any;
   summaryData: Summary | null;
@@ -49,6 +52,10 @@ export default function PageContent({
   onLoadMore?: () => void;
   /** Jump-to-timestamp (seconds) from search/RAG deep links (?t=). */
   seekToSeconds?: number | null;
+  // Speaker diarization props
+  speakersById?: Map<number, string> | null;
+  onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+  onSpeakersDetected?: () => Promise<void> | void;
 }) {
   console.log('📄 PAGE CONTENT: Initializing with data:', {
     meetingId: meeting.id,
@@ -196,6 +203,10 @@ export default function PageContent({
           onRefetchTranscripts={onRefetchTranscripts}
           // Jump-to-timestamp deep link (?t= from search/RAG)
           scrollToTimestamp={seekToSeconds}
+          // Speaker diarization props
+          speakersById={speakersById}
+          onRenameSpeaker={onRenameSpeaker}
+          onSpeakersDetected={onSpeakersDetected}
         />
         <SummaryPanel
           meeting={meeting}

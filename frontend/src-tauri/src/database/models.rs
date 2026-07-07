@@ -35,6 +35,10 @@ pub struct Transcript {
     pub audio_start_time: Option<f64>,
     pub audio_end_time: Option<f64>,
     pub duration: Option<f64>,
+    // Audio-channel source: 'mic' (local user) | 'system' (remote participants) | NULL
+    pub speaker: Option<String>,
+    // Resolved diarized speaker profile id (distinct from `speaker`); NULL when unattributed
+    pub speaker_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
