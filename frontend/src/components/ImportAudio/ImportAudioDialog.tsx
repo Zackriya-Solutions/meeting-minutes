@@ -170,12 +170,15 @@ export function ImportAudioDialog({
     return availableModels.find((m) => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
   const isParakeetModel = selectedModel?.provider === 'parakeet';
+  const isGigaamModel = selectedModel?.provider === 'gigaam';
+  // GigaAM (Russian e2e) and Parakeet don't take a language hint — they always auto-detect.
+  const languageAutoOnly = isParakeetModel || isGigaamModel;
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
+    if (languageAutoOnly && selectedLang !== 'auto') {
       setSelectedLang('auto');
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [languageAutoOnly, selectedLang]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -190,7 +193,7 @@ export function ImportAudioDialog({
     await startImport(
       fileInfo.path,
       title || fileInfo.filename,
-      isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
+      languageAutoOnly ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
       selectedModel?.provider || null
     );
@@ -343,7 +346,7 @@ export function ImportAudioDialog({
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
                       {/* Language selector */}
-                      {!isParakeetModel ? (
+                      {!languageAutoOnly ? (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
@@ -369,7 +372,9 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">Language</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                            {isGigaamModel
+                              ? 'GigaAM transcribes Russian and always auto-detects — no language selection needed.'
+                              : "Language selection isn't supported for Parakeet. It always uses automatic detection."}
                           </p>
                         </div>
                       )}
