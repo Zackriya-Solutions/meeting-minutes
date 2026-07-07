@@ -27,7 +27,6 @@ const LANGUAGES: Language[] = [
   { code: 'ca', name: 'Catalan' },
   { code: 'nl', name: 'Dutch' },
   { code: 'ar', name: 'Arabic' },
-  { code: 'fa', name: 'Persian' },
   { code: 'sv', name: 'Swedish' },
   { code: 'it', name: 'Italian' },
   { code: 'id', name: 'Indonesian' },
