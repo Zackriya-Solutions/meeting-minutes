@@ -483,11 +483,12 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         refresh: true,
       });
       setSummaryModelDownloaded(selectedModelReady);
-      if (!selectedModelReady) {
-        requestSummaryModelDownload(modelToSave);
-      }
+      // Do NOT auto-download the local summary model — it's optional. Users who want
+      // local summaries download it from Settings → Summary; cloud users configure
+      // GigaChat/DeepSeek instead. (Onboarding no longer forces this download.)
 
-      // Onboarding always uses builtin-ai with selected model
+      // Persist a default config (builtin-ai model name); the provider can be changed in
+      // Settings → Summary. This only records config — it does not download anything.
       await invoke('complete_onboarding', {
         model: modelToSave,
       });

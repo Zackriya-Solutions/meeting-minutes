@@ -69,18 +69,18 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             config
         }
         Ok(None) => {
-            info!("📝 No transcript config found, defaulting to parakeet");
+            info!("📝 No transcript config found, defaulting to gigaam");
             crate::api::api::TranscriptConfig {
-                provider: "parakeet".to_string(),
-                model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                provider: "gigaam".to_string(),
+                model: "gigaam-v3-e2e-ctc".to_string(),
                 api_key: None,
             }
         }
         Err(e) => {
-            warn!("⚠️ Failed to get transcript config: {}, defaulting to parakeet", e);
+            warn!("⚠️ Failed to get transcript config: {}, defaulting to gigaam", e);
             crate::api::api::TranscriptConfig {
-                provider: "parakeet".to_string(),
-                model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                provider: "gigaam".to_string(),
+                model: "gigaam-v3-e2e-ctc".to_string(),
                 api_key: None,
             }
         }
@@ -135,10 +135,19 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "gigaam" => {
+            info!("🔍 Validating GigaAM model...");
+            if crate::gigaam_engine::is_loaded() {
+                info!("✅ GigaAM model is ready");
+                Ok(())
+            } else {
+                Err("GigaAM model is not downloaded. Open Settings → Transcription and download the GigaAM model.".to_string())
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper', 'parakeet', or 'gigaam'.",
                 other
             ))
         }
@@ -165,18 +174,18 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             config
         }
         Ok(None) => {
-            info!("📝 No transcript config found, defaulting to parakeet");
+            info!("📝 No transcript config found, defaulting to gigaam");
             crate::api::api::TranscriptConfig {
-                provider: "parakeet".to_string(),
-                model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                provider: "gigaam".to_string(),
+                model: "gigaam-v3-e2e-ctc".to_string(),
                 api_key: None,
             }
         }
         Err(e) => {
-            warn!("⚠️ Failed to get transcript config: {}, defaulting to parakeet", e);
+            warn!("⚠️ Failed to get transcript config: {}, defaulting to gigaam", e);
             crate::api::api::TranscriptConfig {
-                provider: "parakeet".to_string(),
-                model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                provider: "gigaam".to_string(),
+                model: "gigaam-v3-e2e-ctc".to_string(),
                 api_key: None,
             }
         }
@@ -210,6 +219,16 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 None => {
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
+            }
+        }
+        "gigaam" => {
+            info!("🧠 Initializing GigaAM transcription engine");
+            if crate::gigaam_engine::is_loaded() {
+                Ok(TranscriptionEngine::Provider(std::sync::Arc::new(
+                    super::gigaam_provider::GigaamProvider,
+                )))
+            } else {
+                Err("GigaAM model not loaded. Download it in Settings → Transcription.".to_string())
             }
         }
         "localWhisper" | _ => {

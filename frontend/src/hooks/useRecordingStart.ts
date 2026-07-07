@@ -7,6 +7,7 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
+import { isConfiguredTranscriptionModelReady } from '@/lib/transcriptionReadiness';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
@@ -49,14 +50,13 @@ export function useRecordingStart(
     return `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
   }, []);
 
-  // Check if Parakeet transcription model is ready
+  // Check whether the CONFIGURED transcription model is ready (provider-aware).
+  // Delegates to the unit-tested helper; name kept for call-site stability.
   const checkParakeetReady = useCallback(async (): Promise<boolean> => {
     try {
-      await invoke('parakeet_init');
-      const hasModels = await invoke<boolean>('parakeet_has_available_models');
-      return hasModels;
+      return await isConfiguredTranscriptionModelReady();
     } catch (error) {
-      console.error('Failed to check Parakeet status:', error);
+      console.error('Failed to check transcription model status:', error);
       return false;
     }
   }, []);

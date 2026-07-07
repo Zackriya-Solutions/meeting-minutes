@@ -51,6 +51,7 @@ pub mod openai;
 pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
+pub mod gigaam_engine;
 pub mod parakeet_engine;
 pub mod pipeline;
 pub mod search;
@@ -514,6 +515,14 @@ pub fn run() {
                 });
             }
 
+            // Load the GigaAM transcription model in the background if downloaded.
+            {
+                let app_handle = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
+                });
+            }
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -543,6 +552,9 @@ pub fn run() {
             search::commands::rag_ask,
             pipeline::commands::embedder_status,
             pipeline::commands::embedder_download_model,
+            gigaam_engine::commands::gigaam_status,
+            gigaam_engine::commands::gigaam_download_model,
+            gigaam_engine::commands::gigaam_transcribe_audio,
             collections::commands::create_collection,
             collections::commands::add_meeting_to_collection,
             collections::commands::list_collections,
@@ -550,6 +562,7 @@ pub fn run() {
             collections::commands::suggest_meeting_series,
             collections::commands::run_backfill,
             collections::commands::set_app_setting,
+            collections::commands::get_app_settings,
             start_recording,
             stop_recording,
             is_recording,

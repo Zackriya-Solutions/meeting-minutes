@@ -5,6 +5,7 @@
 pub mod provider;
 pub mod whisper_provider;
 pub mod parakeet_provider;
+pub mod gigaam_provider;
 pub mod engine;
 pub mod worker;
 

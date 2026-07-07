@@ -182,6 +182,7 @@ async fn run_retranscription<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_gigaam = provider.as_deref() == Some("gigaam");
 
     info!(
         "Starting retranscription for meeting {} with language {:?}, model {:?}, provider {:?}",
@@ -299,7 +300,7 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet {
+    let whisper_engine = if !use_parakeet && !use_gigaam {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -309,6 +310,11 @@ async fn run_retranscription<R: Runtime>(
     } else {
         None
     };
+    if use_gigaam && !crate::gigaam_engine::is_loaded() {
+        return Err(anyhow!(
+            "GigaAM model is not loaded. Download it in Settings → Transcription first."
+        ));
+    }
 
     // Split very long segments at silence boundaries for better transcription quality.
     // Hard cuts at arbitrary sample positions lose words at boundaries. Instead, scan
@@ -368,7 +374,13 @@ async fn run_retranscription<R: Runtime>(
         }
 
         // Transcribe this segment
-        let (text, conf) = if use_parakeet {
+        let (text, conf) = if use_gigaam {
+            match crate::gigaam_engine::transcribe(segment.samples.clone()).await {
+                Some(Ok(text)) => (text, 0.9f32),
+                Some(Err(e)) => return Err(anyhow!("GigaAM transcription failed on segment {}: {}", i, e)),
+                None => return Err(anyhow!("GigaAM model not loaded")),
+            }
+        } else if use_parakeet {
             let engine = parakeet_engine.as_ref().unwrap();
             let text = engine
                 .transcribe_audio(segment.samples.clone())

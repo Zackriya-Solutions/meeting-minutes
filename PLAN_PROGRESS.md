@@ -139,6 +139,12 @@ vector branch — one-line change, marked with a TODO).
   storage.
 - **Sidebar nav** — "Search meetings" and "Chat with archive" entries added to both the
   collapsed icon rail and the expanded footer (`src/components/Sidebar/index.tsx`).
+- **Provider-credentials UI** — Settings → new **"Providers"** tab
+  (`src/components/ProviderSettings.tsx`): GigaChat (Authorization key or login/password) +
+  DeepSeek (API key) + optional model overrides, with configured badges. Secrets are
+  write-only (never rendered back). Saves via `set_app_setting`; reads via new
+  `get_app_settings` command. Takes effect immediately (providers resolve from
+  `app_settings_kv` per call — no restart).
 - **Embedding-model download UI** — Settings → new **"Search"** tab
   (`src/components/EmbeddingModelSettings.tsx`): shows model status, a Download button
   (`embedder_download_model`) with a live progress bar (listens to

@@ -139,6 +139,21 @@ pub async fn run_backfill(state: tauri::State<'_, AppState>) -> Result<i64, Stri
         .map_err(|e| e.to_string())
 }
 
+/// Read app settings. Returns `app_settings_kv` as a `{key: value}` map. Used by the
+/// settings UI to show configured state (secret values are never rendered in plaintext by
+/// the frontend — it uses presence only).
+#[tauri::command]
+pub async fn get_app_settings(
+    state: tauri::State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let pool = state.db_manager.pool();
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM app_settings_kv")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().collect())
+}
+
 /// Set a privacy/config value (PLAN.md Phase 5/§8). Enforced at the LLM provider layer
 /// via `crate::llm::PrivacyConfig::load`.
 #[tauri::command]

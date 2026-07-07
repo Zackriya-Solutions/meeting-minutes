@@ -330,6 +330,7 @@ async fn run_import<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_gigaam = provider.as_deref() == Some("gigaam");
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -508,7 +509,7 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
-    let whisper_engine = if !use_parakeet && total_segments > 0 {
+    let whisper_engine = if !use_parakeet && !use_gigaam && total_segments > 0 {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -518,6 +519,13 @@ async fn run_import<R: Runtime>(
     } else {
         None
     };
+    // GigaAM uses a process-global model (no per-batch engine object) — just ensure it's
+    // loaded (downloaded via Settings → Transcription and loaded at startup).
+    if use_gigaam && total_segments > 0 && !crate::gigaam_engine::is_loaded() {
+        return Err(anyhow!(
+            "GigaAM model is not loaded. Download it in Settings → Transcription first."
+        ));
+    }
 
     // Split very long segments at silence boundaries for better transcription quality.
     // Hard cuts at arbitrary sample positions lose words at boundaries. Instead, scan
@@ -579,7 +587,13 @@ async fn run_import<R: Runtime>(
         }
 
         // Transcribe
-        let (text, conf) = if use_parakeet {
+        let (text, conf) = if use_gigaam {
+            match crate::gigaam_engine::transcribe(segment.samples.clone()).await {
+                Some(Ok(text)) => (text, 0.9f32),
+                Some(Err(e)) => return Err(anyhow!("GigaAM transcription failed on segment {}: {}", i, e)),
+                None => return Err(anyhow!("GigaAM model not loaded")),
+            }
+        } else if use_parakeet {
             let engine = parakeet_engine.as_ref().unwrap();
             let text = engine
                 .transcribe_audio(segment.samples.clone())
