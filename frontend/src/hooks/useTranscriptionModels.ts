@@ -8,10 +8,16 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'gigaam';
   name: string;
   displayName: string;
   size_mb: number;
+}
+
+interface GigaamStatus {
+  model: string;
+  model_present: boolean;
+  loaded: boolean;
 }
 
 interface TranscriptModelConfig {
@@ -44,6 +50,21 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
   const fetchModels = useCallback(async () => {
     setLoadingModels(true);
     const allModels: ModelOption[] = [];
+
+    // Fetch GigaAM (the primary/default local engine) first so it's the default choice.
+    try {
+      const gigaam = await invoke<GigaamStatus>('gigaam_status');
+      if (gigaam?.model_present) {
+        allModels.push({
+          provider: 'gigaam' as const,
+          name: gigaam.model || 'gigaam-v3-e2e-ctc',
+          displayName: '🇷🇺 GigaAM v3 (Russian)',
+          size_mb: 224,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch GigaAM status:', err);
+    }
 
     // Fetch Whisper models
     try {
@@ -83,12 +104,14 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredProvider = transcriptModelConfig?.provider || '';
     const configuredModel = transcriptModelConfig?.model || '';
 
-    // Try to match the configured model
-    // Note: 'localWhisper' in config maps to 'whisper' provider in model list
+    // Try to match the configured model.
+    // Note: 'localWhisper' in config maps to 'whisper' provider in the model list;
+    // GigaAM has a single model, so it matches on provider alone.
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'gigaam' && m.provider === 'gigaam')
     );
 
     // Only set default model if user hasn't manually selected one

@@ -93,12 +93,15 @@ export function RetranscribeDialog({
     return availableModels.find(m => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
   const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
+  const isGigaamModel = selectedModelDetails?.provider === 'gigaam';
+  // GigaAM (Russian e2e) and Parakeet don't take a language hint — they always auto-detect.
+  const languageAutoOnly = isParakeetModel || isGigaamModel;
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
+    if (languageAutoOnly && selectedLang !== 'auto') {
       setSelectedLang('auto');
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [languageAutoOnly, selectedLang]);
 
   // Reset state only when dialog transitions from closed to open
   // This prevents re-initialization when config changes while dialog is already open
@@ -207,9 +210,9 @@ export function RetranscribeDialog({
     setProgress(null);
 
     try {
-      const languageToSend = isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang;
+      const languageToSend = languageAutoOnly ? null : selectedLang === 'auto' ? null : selectedLang;
       await Analytics.track('enhance_transcript_started', {
-        language: isParakeetModel ? 'auto' : (selectedLang === 'auto' ? 'auto' : selectedLang),
+        language: languageAutoOnly ? 'auto' : (selectedLang === 'auto' ? 'auto' : selectedLang),
         model_provider: selectedModelDetails?.provider || '',
         model_name: selectedModelDetails?.name || ''
       });
@@ -301,7 +304,7 @@ export function RetranscribeDialog({
 
         <div className="space-y-4 py-4">
           {!isProcessing && !error && (
-            !isParakeetModel ? (
+            !languageAutoOnly ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-muted-foreground" />
@@ -330,7 +333,9 @@ export function RetranscribeDialog({
                   <span className="text-sm font-medium">Language</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Language selection isn't supported for Parakeet. It always uses automatic detection.
+                  {isGigaamModel
+                    ? 'GigaAM transcribes Russian and always auto-detects — no language selection needed.'
+                    : "Language selection isn't supported for Parakeet. It always uses automatic detection."}
                 </p>
               </div>
             )
