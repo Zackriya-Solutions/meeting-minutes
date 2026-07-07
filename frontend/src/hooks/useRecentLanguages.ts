@@ -55,8 +55,10 @@ function writeToStorage(values: string[]): void {
  * addRecent: push to front, dedupe, trim to MAX_RECENTS, persist.
  */
 export function useRecentLanguages() {
-  const [recents, setRecents] = useState<string[]>(() => readFromStorage());
+  // Read the pinned default first: on a fresh install this seeds the Russian default
+  // (and its quick-switch chip) into storage, so the recents read below picks it up.
   const [pinned, setPinnedState] = useState<string | null>(() => readPinnedFromStorage());
+  const [recents, setRecents] = useState<string[]>(() => readFromStorage());
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {

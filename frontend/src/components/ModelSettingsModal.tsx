@@ -31,7 +31,7 @@ import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai' | 'gigachat' | 'deepseek';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -99,6 +99,20 @@ const GROQ_FALLBACK_MODELS = [
   'llama-3.1-70b-versatile',
   'mixtral-8x7b-32768',
   'gemma2-9b-it',
+];
+
+// GigaChat (Sber) and DeepSeek expose no public /models list to the app, so we offer
+// a curated set. Credentials for both are managed in Settings → Providers.
+const GIGACHAT_FALLBACK_MODELS = [
+  'GigaChat-3-Ultra',
+  'GigaChat-3.5-432B-A28B',
+  'GigaChat-2-Max',
+  'GigaChat',
+];
+
+const DEEPSEEK_FALLBACK_MODELS = [
+  'deepseek-chat',
+  'deepseek-reasoner',
 ];
 
 interface ModelSettingsModalProps {
@@ -231,6 +245,8 @@ export function ModelSettingsModal({
     openrouter: openRouterModels.map((m) => m.id),
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
+    gigachat: GIGACHAT_FALLBACK_MODELS,
+    deepseek: DEEPSEEK_FALLBACK_MODELS,
   };
 
   const requiresApiKey =
@@ -877,6 +893,8 @@ export function ModelSettingsModal({
                 <SelectItem value="builtin-ai">Built-in AI (Offline, No API needed)</SelectItem>
                 <SelectItem value="claude">Claude</SelectItem>
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
+                <SelectItem value="deepseek">DeepSeek</SelectItem>
+                <SelectItem value="gigachat">GigaChat (Sber)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
@@ -943,6 +961,16 @@ export function ModelSettingsModal({
             )}
           </div>
         </div>
+
+        {(modelConfig.provider === 'gigachat' || modelConfig.provider === 'deepseek') && (
+          <Alert>
+            <AlertDescription>
+              {modelConfig.provider === 'gigachat' ? 'GigaChat' : 'DeepSeek'} credentials are managed
+              in <span className="font-medium">Settings → Providers</span>. Pick a model here; the key
+              you saved there is used automatically.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Custom OpenAI Configuration Section */}
         {modelConfig.provider === 'custom-openai' && (

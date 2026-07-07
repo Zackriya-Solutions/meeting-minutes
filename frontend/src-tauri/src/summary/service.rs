@@ -324,6 +324,31 @@ impl SummaryService {
         let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
             // These providers don't require API keys from the standard database column
             String::new()
+        } else if provider == LLMProvider::GigaChat {
+            // GigaChat credentials live in app_settings_kv (Settings → Providers), not the
+            // settings table. Resolve them to a single Basic-auth key the client can use.
+            match crate::llm::providers::resolve_gigachat_auth_key(&pool).await {
+                Some(key) => key,
+                None => {
+                    let err_msg =
+                        "GigaChat is not configured. Add your credentials in Settings → Providers."
+                            .to_string();
+                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                    return;
+                }
+            }
+        } else if provider == LLMProvider::DeepSeek {
+            // DeepSeek credentials also live in app_settings_kv (Settings → Providers).
+            match crate::llm::providers::resolve_deepseek_api_key(&pool).await {
+                Some(key) => key,
+                None => {
+                    let err_msg =
+                        "DeepSeek is not configured. Add your API key in Settings → Providers."
+                            .to_string();
+                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                    return;
+                }
+            }
         } else {
             match SettingsRepository::get_api_key(&pool, &model_provider).await {
                 Ok(Some(key)) if !key.is_empty() => key,

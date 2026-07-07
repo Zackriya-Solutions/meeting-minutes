@@ -3,6 +3,11 @@ import { normaliseLanguageCode } from '@/lib/summary-languages';
 
 export const SUMMARY_LANGUAGE_RECENTS_KEY = 'summaryLanguageRecents';
 export const SUMMARY_LANGUAGE_DEFAULT_KEY = 'summaryLanguageDefault';
+// Marks that the default has been initialised once, so clearing it (choosing Auto)
+// sticks instead of re-seeding the out-of-the-box default on the next read.
+const SUMMARY_LANGUAGE_SEEDED_KEY = 'summaryLanguageSeeded';
+// Out-of-the-box default summary language for this (Russian-market) build.
+export const DEFAULT_SUMMARY_LANGUAGE = 'ru';
 const SUMMARY_LANGUAGE_FALLBACK_PREFIX = 'summaryLanguageFallback';
 const DETECTED_SUMMARY_LANGUAGE_FALLBACK_PREFIX = 'detectedSummaryLanguageFallback';
 
@@ -33,7 +38,23 @@ export interface SummaryLanguageDetectionResult {
 export function readPinnedSummaryLanguageDefault(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return normaliseLanguageCode(window.localStorage.getItem(SUMMARY_LANGUAGE_DEFAULT_KEY));
+    const stored = window.localStorage.getItem(SUMMARY_LANGUAGE_DEFAULT_KEY);
+    if (stored !== null) return normaliseLanguageCode(stored);
+
+    // No default stored. Seed the build default (Russian) exactly once, so fresh
+    // installs summarise in Russian without any setup. After seeding, an explicit
+    // "Auto" choice (which removes the key) is respected instead of being re-seeded.
+    if (window.localStorage.getItem(SUMMARY_LANGUAGE_SEEDED_KEY)) return null;
+    window.localStorage.setItem(SUMMARY_LANGUAGE_SEEDED_KEY, '1');
+    window.localStorage.setItem(SUMMARY_LANGUAGE_DEFAULT_KEY, DEFAULT_SUMMARY_LANGUAGE);
+    // Surface it as a quick-switch chip so it's visible and removable in Settings.
+    if (!window.localStorage.getItem(SUMMARY_LANGUAGE_RECENTS_KEY)) {
+      window.localStorage.setItem(
+        SUMMARY_LANGUAGE_RECENTS_KEY,
+        JSON.stringify([DEFAULT_SUMMARY_LANGUAGE])
+      );
+    }
+    return DEFAULT_SUMMARY_LANGUAGE;
   } catch {
     return null;
   }
@@ -42,6 +63,9 @@ export function readPinnedSummaryLanguageDefault(): string | null {
 export function writePinnedSummaryLanguageDefault(value: string | null): void {
   if (typeof window === 'undefined') return;
   try {
+    // Any explicit choice (including Auto/null) counts as configured, so it is never
+    // overwritten by the one-time default seed above.
+    window.localStorage.setItem(SUMMARY_LANGUAGE_SEEDED_KEY, '1');
     if (value) window.localStorage.setItem(SUMMARY_LANGUAGE_DEFAULT_KEY, value);
     else window.localStorage.removeItem(SUMMARY_LANGUAGE_DEFAULT_KEY);
   } catch {
