@@ -11,7 +11,7 @@ silently reimplemented:
 | Assumed baseline | Reality in this repo | Impact |
 |---|---|---|
 | Tauri app (Rust + Next.js) | ✅ present | — |
-| GigaAM v3 e2e ONNX transcription | ❌ **Whisper (`whisper-rs`) + Parakeet (`ort`)** | None for the KB layer — segments exist regardless of ASR engine |
+| GigaAM v3 e2e ONNX transcription | Was ❌ (Whisper + Parakeet only) → **now IMPLEMENTED** (`src/gigaam_engine/`) and the sole transcription engine. See the GigaAM section below. | Closed |
 | `segments(meeting_id, start_ms, end_ms, text)` | ⚠️ No `segments` table. Equivalent = `transcripts(id TEXT, meeting_id TEXT, transcript, audio_start_time REAL, audio_end_time REAL, speaker)` | **Adapted:** timing is seconds (REAL); ids are TEXT |
 | FTS5 search | ❌ missing | Must be added at Phase 1 start (search-critical) |
 | Meeting entity (title, datetime, duration, tags, audio path) | ⚠️ title/created_at/folder_path only; **no duration/tags** | Add as needed per phase |
@@ -50,6 +50,60 @@ silently reimplemented:
 external-resource-gated (ONNX models, LLM provider config, frontend UI) and clearly
 marked with `SCAFFOLD` / `TODO` in code. **Decision taken:** user chose "scaffold Phases
 2–5 backend"; embedding model defaulted to `multilingual-e5-small` / dim 384.
+
+Beyond the PLAN phases, two things were added that PLAN.md assumed as *baseline*:
+- [x] **GigaAM v3 transcription** — implemented + end-to-end verified (see below).
+- [x] **DeepSeek / GigaChat LLM providers** — implemented + wired (see LLM section).
+
+## Transcription engine — GigaAM v3 (IMPLEMENTED + END-TO-END VERIFIED) ✅
+
+GigaAM v3 (Sber, Russian ASR) is now the **sole** transcription engine. Source model:
+`istupakov/gigaam-v3-onnx` (onnx-asr), variant **e2e-CTC int8** (`v3_e2e_ctc.int8.onnx`,
+~224 MB) → punctuated + capitalized Russian output.
+
+- **`src/gigaam_engine/featurizer.rs`** — Rust log-mel featurizer, an *exact* port of
+  onnx-asr's `GigaamPreprocessorNumpy` v3 (16 kHz, win=n_fft=320, hop=160, no padding,
+  bundled window + mel filterbank in `resources/gigaam/*.f32`, `log(clip(·,1e-9,1e9))`,
+  no CMVN). **Unit-tested against the numpy reference** (per-frame values + sum).
+- **`src/gigaam_engine/model.rs`** — `ort` session for the e2e-CTC model
+  (`features[1,64,T] + feature_lengths[1] → log_probs[1,T,257]`), greedy CTC decode
+  (blank = 256, collapse repeats), vocab loader (`▁`→space). Vocab-parse unit test.
+- **`src/gigaam_engine/{mod,commands}.rs`** — process-global model (`static
+  Mutex<Option<GigaamModel>>`, async `transcribe` via `spawn_blocking`); commands
+  `gigaam_status` / `gigaam_download_model` (HF download to `app_data_dir/models/gigaam/`,
+  progress events) / `gigaam_transcribe_audio` + `init_gigaam_at_startup`.
+- **Pipeline wiring:** live recording via a `GigaamProvider` (the `TranscriptionProvider`
+  trait) + `"gigaam"` arms in `audio/transcription/engine.rs` (init + validation), and the
+  **batch paths** `audio/import.rs` + `audio/retranscription.rs` (added a `use_gigaam`
+  branch → `crate::gigaam_engine::transcribe`).
+- **UI:** the transcript settings now offer **only GigaAM** (dropdown/cloud-key/Whisper+
+  Parakeet managers removed), auto-migrating any saved provider to `gigaam`. Default
+  provider is `gigaam` in `ConfigContext` and the backend `engine.rs` fallback.
+  `get_transcript_api_key` treats `gigaam` as keyless (fixed an `Invalid provider` error).
+- **END-TO-END VERIFIED (real audio):** `say -v Milena` Russian TTS → ffmpeg 16 kHz mono →
+  a standalone Rust binary using the real `featurizer.rs` + `model.rs` produced text
+  **identical** to the onnx-asr reference: *"Привет, коллеги. Сегодня мы обсудим бюджет
+  проекта на следующий квартал."* (punctuated, capitalized).
+- **Gotchas (fixed / noted):** (1) `include_bytes!` blobs are align-1 → parse assets with
+  `f32::from_le_bytes`, NOT `bytemuck::cast_slice` (that panicked on model load). (2)
+  onnxruntime **CoreML EP fails** on the int8 model on macOS — force CPU; the Rust
+  `Session` uses the default CPU EP so the app is unaffected.
+
+## Post-scaffold UX & fixes
+
+- **Onboarding no longer force-downloads.** `DownloadProgressStep` made both model
+  downloads opt-in (Download buttons + "Skip & continue"; Continue no longer gated on a
+  model), and `OnboardingContext.completeOnboarding` no longer auto-downloads the local
+  summary model. New tab structure + defaults point at GigaAM.
+- **Recording-readiness gate made provider-aware** (`src/lib/transcriptionReadiness.ts`,
+  `isConfiguredTranscriptionModelReady`, injectable `invoke`): checks `gigaam_status.loaded`
+  for GigaAM, `*_has_available_models` for Whisper/Parakeet, always-ready for cloud. Fixed
+  the false "Transcription model not ready" for GigaAM (the gate had hardcoded a Parakeet
+  check; GigaAM selection also wasn't persisted to the backend — now `api_save_transcript_config`
+  is called on select). Covered by a **bun test** `tests/lib/transcriptionReadiness.test.ts`
+  (5 pass, incl. a regression guard that GigaAM does not hit the Parakeet check).
+- **pnpm via corepack**: Tauri's `beforeDevCommand` is `pnpm dev`; run `corepack enable
+  pnpm` so it's on PATH.
 
 ## Phases 2–5 scaffold (this pass)
 
@@ -184,12 +238,20 @@ vector branch — one-line change, marked with a TODO).
 
 ### Verified test inventory (standalone harness, exact project deps)
 
-**48 Rust tests green** (47 unit + 1 integration): `vector` (1) · `jobs` (6) ·
-`pipeline::chunker` (5) · `pipeline::diarization` (5) · `pipeline::extraction` (5) ·
-embedder pure math (4) · `search::hybrid` (4 + 1 e2e integration) · `search::rag` (5) ·
-`llm` guard/router/prompts + DB privacy (8) · `collections` series (4). Plus SQL
-validated via sqlite3 CLI (all 13 migrations, FTS5 Cyrillic MATCH + trigger sync, job
-lifecycle) and `evals/phase0/sqlite_vec_smoke.py`.
+**Rust unit/integration tests (standalone harness, exact project deps):** `vector` (1) ·
+`jobs` (6) · `pipeline::chunker` (5) · `pipeline::diarization` (5) · `pipeline::extraction`
+(5) · embedder pure math (4) · `search::hybrid` (4 + 1 e2e integration) · `search::rag`
+(5) · `llm` guard/router/prompts + DB privacy (8) · `collections` series (4) ·
+**`gigaam_engine::featurizer` (matches onnx-asr numpy reference)** + vocab-parse + provider
+parse helpers. Plus SQL validated via sqlite3 CLI (all migrations, FTS5 Cyrillic MATCH +
+trigger sync, job lifecycle), `evals/phase0/sqlite_vec_smoke.py`, and the tokenizer
+runtime-verified on real `tokenizer.json`.
+
+**Frontend tests (`bun test`):** `tests/lib/transcriptionReadiness.test.ts` — 5 pass
+(provider-aware recording gate, incl. GigaAM regression guard).
+
+**Runtime end-to-end:** GigaAM Rust engine output == onnx-asr reference on real Russian
+speech (see the GigaAM section).
 
 The harness (`scratchpad/verify`) uses the EXACT dependency versions this project
 declares, so a green harness is strong evidence the modules compile and behave in the
@@ -270,18 +332,34 @@ harness with the exact project dependency versions, confirming:
 - `sqlite-vec` 0.1.9 links via `sqlite3_auto_extension`; vec0 KNN works at runtime.
 - `Cargo.lock` gained only `sqlite-vec` (+11 lines); no version churn.
 
-## Next steps (need user input per PLAN.md §11)
+## Git state
 
-To finish Phase 1 and unblock later phases:
-1. **§11 #1 — Embedding model + dim.** Default assumed: `multilingual-e5-small` (384).
-   Confirm, or pick another (e5-base=768, a ru-tuned encoder, …). Needed to build the
-   embedder and finalize the `chunk_embeddings` dim. Also requires the ONNX model file
-   (export step) bundled/downloaded like the existing Parakeet models.
-2. **§11 #3 — Eval query set.** Supply 30 real Russian queries with expected meeting_id +
-   approx timestamp so `evals/search/` can measure recall@5 / MRR.
-3. Then: implement `pipeline/embedder.rs`, flip the `chunk_embed` job + `search_meetings`
-   to use it, and build the search UI.
+Pushed to `origin/main` (`git@github.com:andyzt/meet_at_giga.git`):
+- `eb46382` — V1 knowledge base (Phases 0–5 + hybrid search + RAG + GigaChat/DeepSeek + search/chat UI).
+- `3123e5f` — GigaAM v3 Russian ASR (engine + live/batch wiring + GigaAM-only UI) +
+  provider-credentials UI + onboarding/UX fixes + recording-readiness fix.
 
-Later phases (2 diarization, 3 entities/actions, 4 RAG, 5 collections/privacy) each have
-their own §11 gates (diarization go/no-go, thresholds) and depend on real data — best
-run interactively phase by phase.
+Reproduce the full compile (needs full Xcode + the `llama-helper` sidecar built into
+`frontend/src-tauri/binaries/`): `cd frontend && ./dev-gpu.sh` (auto-detects Metal, builds
+the sidecar, runs). Or `cargo check --lib` in `frontend/src-tauri` after building
+`llama-helper`. Frontend: `corepack enable pnpm` first.
+
+## Remaining / not done
+
+- **Eval harness** (`evals/search/`): recall@5 / MRR (FTS-only vs vector-only vs hybrid) —
+  still needs the user's 30 real Russian queries (PLAN.md §11 #3).
+- **Phase 2 diarization** — the ONNX diarizer (pyannote/Sortformer) is scaffolded but not
+  wired to a real model; segments stay `speaker_id = NULL` until a model + audio wiring land.
+  Speaker-resolution algorithms are done + tested.
+- **Phase 3 extraction DB persistence** — the LLM extraction call is wired (privacy-guarded,
+  routed to GigaChat/DeepSeek, JSON validated); resolving entities into
+  `entities`/`entity_mentions`/`action_items` + `pending_merges` is scaffolded (the pure
+  resolution logic is tested) but the DB inserts are TODO.
+- **Phase 4/5 UI depth** — entity page, action board, collections/series-suggestion UI,
+  saved-searches pinning, and the privacy toggles screen aren't built (backend/logic exist).
+- **Embedding model default** — `multilingual-e5-small`/384 (downloadable in Settings →
+  Search). Reconfirm after the eval benchmark (PLAN.md §11 #1); changing the dim just
+  drops/recreates the empty `chunk_embeddings` table.
+- **Live GigaAM run in the packaged app** — verified end-to-end via a standalone Rust
+  binary on real audio; a final check inside the running app (record → transcript) is the
+  last confirmation.

@@ -86,6 +86,9 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "openrouter" => "openRouterApiKey",
             "builtin-ai" => return Ok(()), // No API key needed
+            // GigaChat / DeepSeek keep their credentials in app_settings_kv (Settings → Providers),
+            // not in the settings table — no-op here so saving the model config never fails for them.
+            "gigachat" | "deepseek" => return Ok(()),
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -124,6 +127,9 @@ impl SettingsRepository {
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
             "builtin-ai" => return Ok(None), // No API key needed
+            // GigaChat / DeepSeek resolve their credentials from app_settings_kv
+            // (Settings → Providers), so there is no key in the settings table.
+            "gigachat" | "deepseek" => return Ok(None),
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),

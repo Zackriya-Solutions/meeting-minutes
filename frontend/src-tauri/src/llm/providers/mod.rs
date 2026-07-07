@@ -5,6 +5,7 @@
 pub mod deepseek;
 pub mod gigachat;
 
+use base64::Engine as _;
 use sqlx::SqlitePool;
 
 use deepseek::DeepSeekClient;
@@ -57,6 +58,25 @@ pub async fn resolve_gigachat(pool: &SqlitePool) -> Option<GigaChatClient> {
         model,
         base,
     ))
+}
+
+/// Resolve the GigaChat credential as a single Basic-auth key string, for callers
+/// (like the meeting-summary pipeline) that only carry one `api_key` value and
+/// build a [`GigaChatAuth::Key`] from it. Prefers the Sber "Authorization Key"
+/// (`gigachat.auth_key` / `GIGACHAT_AUTH_KEY`); otherwise base64(user:password),
+/// which is exactly what HTTP Basic auth expects. Returns None if unconfigured.
+pub async fn resolve_gigachat_auth_key(pool: &SqlitePool) -> Option<String> {
+    if let Some(key) = setting_or_env(pool, "gigachat.auth_key", "GIGACHAT_AUTH_KEY").await {
+        return Some(key);
+    }
+    let user = setting_or_env(pool, "gigachat.user", "GIGACHAT_USER").await?;
+    let password = setting_or_env(pool, "gigachat.password", "GIGACHAT_PASSWORD").await?;
+    Some(base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}")))
+}
+
+/// Resolve the DeepSeek API key (`deepseek.api_key` / `DEEPSEEK_API_KEY`). None if unset.
+pub async fn resolve_deepseek_api_key(pool: &SqlitePool) -> Option<String> {
+    setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await
 }
 
 /// Which providers are configured — for the settings UI / diagnostics.
