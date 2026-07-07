@@ -7,6 +7,8 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { Textarea } from './ui/textarea';
+import { Switch } from './ui/switch';
 
 
 export interface TranscriptModelProps {
@@ -27,11 +29,27 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
+    const [deepgramKeyterm, setDeepgramKeyterm] = useState<string>('');
+    const [deepgramDiarize, setDeepgramDiarize] = useState<boolean>(true);
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
         setUiProvider(transcriptModelConfig.provider);
     }, [transcriptModelConfig.provider]);
+
+    // Load Deepgram-specific knobs when the Deepgram provider is active.
+    useEffect(() => {
+        if (uiProvider !== 'deepgram') return;
+        (async () => {
+            try {
+                const opts = await invoke('api_get_deepgram_options') as { keyterm: string; diarize: boolean };
+                setDeepgramKeyterm(opts.keyterm || '');
+                setDeepgramDiarize(opts.diarize ?? true);
+            } catch (err) {
+                console.error('Failed to load Deepgram options:', err);
+            }
+        })();
+    }, [uiProvider]);
 
     useEffect(() => {
         if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
@@ -53,12 +71,28 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
-        deepgram: ['nova-2-phonecall'],
+        deepgram: ['nova-3', 'nova-2', 'flux-general-en', 'flux-general-multi'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = uiProvider === 'deepgram' || uiProvider === 'elevenLabs' || uiProvider === 'openai' || uiProvider === 'groq';
+
+    const saveCloudConfig = async (provider: TranscriptModelProps['provider'], model: string, key: string | null) => {
+        try {
+            await invoke('api_save_transcript_config', { provider, model, apiKey: key || null });
+        } catch (error) {
+            console.error('Failed to save transcript provider:', error);
+        }
+    };
+
+    const saveDeepgramOptions = async (keyterm: string, diarize: boolean) => {
+        try {
+            await invoke('api_save_deepgram_options', { keyterm: keyterm || null, diarize });
+        } catch (error) {
+            console.error('Failed to save Deepgram options:', error);
+        }
+    };
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -114,6 +148,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     setUiProvider(provider);
                                     if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
+                                        const model = modelOptions[provider][0];
+                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider, model });
+                                        saveCloudConfig(provider, model, apiKey);
                                     }
                                 }}
                             >
@@ -123,8 +160,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
-                                    <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
+                                    <SelectItem value="deepgram">☁️ Deepgram (Realtime + Diarization)</SelectItem>
+                                    {/* <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
                                     <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
                                 </SelectContent>
@@ -136,6 +173,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     onValueChange={(value) => {
                                         const model = value as TranscriptModelProps['model'];
                                         setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
+                                        saveCloudConfig(uiProvider, model, apiKey);
                                     }}
                                 >
                                     <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
@@ -185,6 +223,13 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         }`}
                                     value={apiKey || ''}
                                     onChange={(e) => setApiKey(e.target.value)}
+                                    onBlur={() => {
+                                        if (requiresApiKey) {
+                                            const model = transcriptModelConfig.model || modelOptions[uiProvider][0];
+                                            saveCloudConfig(uiProvider, model, apiKey);
+                                            setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model, apiKey });
+                                        }
+                                    }}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
                                     placeholder="Enter your API key"
@@ -217,6 +262,38 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     </Button>
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {uiProvider === 'deepgram' && (
+                        <div className="space-y-3">
+                            <div>
+                                <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Keyterms (one per line)
+                                </Label>
+                                <Textarea
+                                    className="mx-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    value={deepgramKeyterm}
+                                    rows={3}
+                                    placeholder="Product names, acronyms, or jargon to boost recognition (nova-3 keyterm prompting)"
+                                    onChange={(e) => setDeepgramKeyterm(e.target.value)}
+                                    onBlur={() => saveDeepgramOptions(deepgramKeyterm, deepgramDiarize)}
+                                />
+                            </div>
+                            {!transcriptModelConfig.model?.startsWith('flux') && (
+                                <div className="flex items-center justify-between mx-1">
+                                    <Label className="text-sm font-medium text-gray-700">
+                                        Speaker diarization
+                                    </Label>
+                                    <Switch
+                                        checked={deepgramDiarize}
+                                        onCheckedChange={(checked) => {
+                                            setDeepgramDiarize(checked);
+                                            saveDeepgramOptions(deepgramKeyterm, checked);
+                                        }}
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

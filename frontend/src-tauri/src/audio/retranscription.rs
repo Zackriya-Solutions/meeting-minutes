@@ -102,10 +102,14 @@ pub async fn start_retranscription<R: Runtime>(
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_deepgram = provider.as_deref() == Some(super::deepgram::PROVIDER);
     let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
 
-    // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    // Unload the engine after the batch job (success, failure, or cancellation).
+    // Deepgram is cloud-based with no local engine to unload.
+    if !use_deepgram {
+        super::common::unload_engine_after_batch(use_parakeet).await;
+    }
 
     // Guard will automatically clear flag on drop
     // No need for manual: RETRANSCRIPTION_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -182,11 +186,125 @@ async fn run_retranscription<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_deepgram = provider.as_deref() == Some(super::deepgram::PROVIDER);
 
     info!(
         "Starting retranscription for meeting {} with language {:?}, model {:?}, provider {:?}",
         meeting_id, language, model, provider
     );
+
+    if use_deepgram {
+        emit_progress(&app, &meeting_id, "transcribing", 5, "Preparing Deepgram transcription...");
+        let duration_seconds = match super::import::validate_audio_file(&audio_path) {
+            Ok(info) => info.duration_seconds,
+            Err(e) => {
+                warn!("Deepgram retranscription metadata duration failed: {}, decoding duration", e);
+                let decoded = tokio::task::spawn_blocking({
+                    let path = audio_path.clone();
+                    move || decode_audio_file(&path)
+                })
+                .await
+                .map_err(|e| anyhow!("Decode task panicked: {}", e))??;
+                decoded.duration_seconds
+            }
+        };
+
+        let client = super::deepgram::client_from_config(&app).await?;
+        let app_for_progress = app.clone();
+        let meeting_id_for_progress = meeting_id.clone();
+        let client_reference_id = format!("retranscription:{}", meeting_id);
+        let transcript = client
+            .transcribe_file_with_progress(
+                &audio_path,
+                language.clone(),
+                &client_reference_id,
+                move |provider_progress, message| {
+                    let overall_progress = 5 + ((provider_progress as f32 * 0.75) as u32);
+                    emit_progress(
+                        &app_for_progress,
+                        &meeting_id_for_progress,
+                        "transcribing",
+                        overall_progress.min(80),
+                        message,
+                    );
+                },
+                || RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst),
+            )
+            .await?;
+
+        if RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst) {
+            return Err(anyhow!("Retranscription cancelled"));
+        }
+
+        emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
+        let segments = super::deepgram::transcript_to_segments(&transcript, duration_seconds);
+
+        let app_state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| anyhow!("App state not available"))?;
+
+        let pool = app_state.db_manager.pool();
+        let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
+        let mut tx = sqlx::Connection::begin(&mut *conn)
+            .await
+            .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
+
+        sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
+            .bind(&meeting_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
+
+        for segment in &segments {
+            sqlx::query(
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+            .bind(&segment.id)
+            .bind(&meeting_id)
+            .bind(&segment.text)
+            .bind(&segment.timestamp)
+            .bind(segment.audio_start_time)
+            .bind(segment.audio_end_time)
+            .bind(segment.duration)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
+        }
+
+        tx.commit().await
+            .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+
+        emit_progress(&app, &meeting_id, "saving", 90, "Writing transcript files...");
+
+        if let Err(e) = write_transcripts_json(&folder_path, &segments) {
+            warn!("Failed to write transcripts.json: {}", e);
+        }
+
+        let audio_filename = audio_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("audio.mp4")
+            .to_string();
+
+        if let Err(e) = write_retranscription_metadata(
+            &folder_path,
+            &meeting_id,
+            duration_seconds,
+            &audio_filename,
+        ) {
+            warn!("Failed to update metadata.json: {}", e);
+        }
+
+        emit_progress(&app, &meeting_id, "complete", 100, "Retranscription complete");
+
+        return Ok(RetranscriptionResult {
+            meeting_id,
+            segments_count: segments.len(),
+            duration_seconds,
+            language,
+        });
+    }
 
     // Emit progress: decoding
     emit_progress(&app, &meeting_id, "decoding", 5, "Decoding audio file...");

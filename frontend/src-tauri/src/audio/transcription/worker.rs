@@ -49,6 +49,24 @@ pub fn start_transcription_task<R: Runtime>(
     tokio::spawn(async move {
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
 
+        if super::engine::is_deepgram_transcription_provider(&app).await {
+            info!("☁️ Starting Deepgram realtime transcription task");
+            if let Err(e) = crate::audio::deepgram::run_realtime_transcription(
+                app.clone(),
+                transcription_receiver,
+            )
+            .await
+            {
+                error!("Deepgram realtime transcription failed: {}", e);
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "error": e,
+                    "userMessage": "Deepgram transcription failed. Check your API key and network connection.",
+                    "actionable": true
+                }));
+            }
+            return;
+        }
+
         // Initialize transcription engine (Whisper or Parakeet based on config)
         let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await {
             Ok(engine) => engine,
