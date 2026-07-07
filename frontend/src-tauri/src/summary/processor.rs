@@ -101,6 +101,7 @@ pub(crate) fn language_name_from_code(code: &str) -> Option<&'static str> {
         "nl" => Some("Dutch"),
         "pl" => Some("Polish"),
         "ar" => Some("Arabic"),
+        "fa" => Some("Persian"),
         "hi" => Some("Hindi"),
         "ta" => Some("Tamil"),
         "tr" => Some("Turkish"),

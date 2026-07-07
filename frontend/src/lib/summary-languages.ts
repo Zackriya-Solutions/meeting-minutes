@@ -23,6 +23,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: 'nl', label: 'Dutch' },
   { code: 'pl', label: 'Polish' },
   { code: 'ar', label: 'Arabic' },
+  { code: 'fa', label: 'Persian' },
   { code: 'hi', label: 'Hindi' },
   { code: 'ta', label: 'Tamil' },
   { code: 'tr', label: 'Turkish' },
