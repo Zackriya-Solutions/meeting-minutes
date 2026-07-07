@@ -16,6 +16,14 @@ case $LOG_LEVEL in
         ;;
 esac
 
+# Bypass any configured HTTP proxy for localhost. Without this, an http_proxy/
+# HTTPS_PROXY with no localhost exception routes 127.0.0.1 through the proxy,
+# which can't reach it — breaking the Next dev server / HMR (ChunkLoadError:
+# timeout) and the app's local service calls (Ollama on :11434, etc.) with 503.
+# Prepend to any existing no_proxy so we don't clobber other entries.
+export no_proxy="localhost,127.0.0.1,::1${no_proxy:+,$no_proxy}"
+export NO_PROXY="localhost,127.0.0.1,::1${NO_PROXY:+,$NO_PROXY}"
+
 # Clean up previous builds
 echo "Cleaning up previous builds..."
 #rm -rf target/
