@@ -38,6 +38,22 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
+const [transcriptionLanguage, setTranscriptionLanguage] = useState<string>("auto");
+
+    useEffect(() => {
+        const savedLanguage = localStorage.getItem("meetily_transcription_language") || "auto";
+        setTranscriptionLanguage(savedLanguage);
+    }, []);
+
+    const handleLanguageChange = async (newLanguage: string) => {
+        setTranscriptionLanguage(newLanguage);
+        localStorage.setItem("meetily_transcription_language", newLanguage);
+        try {
+            await invoke("set_language_preference", { language: newLanguage });
+        } catch (error) {
+            console.error("Failed to set language preference:", error);
+        }
+    };
 
     const fetchApiKey = async (provider: string) => {
         try {
@@ -97,6 +113,28 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
     return (
         <div>
+            <div className="flex flex-col space-y-3 p-4 border rounded-lg bg-card mb-4">
+                <div>
+                    <h3 className="text-lg font-medium leading-none mb-2">Transcription Language</h3>
+                    <p className="text-sm text-muted-foreground">
+                        Lock the language to disable per-segment auto-detection.
+                    </p>
+                </div>
+                
+                <Select value={transcriptionLanguage} onValueChange={handleLanguageChange}>
+                    <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="auto">Auto-Detect (Default)</SelectItem>
+                        <SelectItem value="auto-translate">Auto-Translate to English</SelectItem>
+                        <SelectItem value="en">English</SelectItem>
+                        <SelectItem value="ru">Russian</SelectItem>
+                        <SelectItem value="hi">Hindi</SelectItem>
+                        <SelectItem value="es">Spanish</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
             <div>
                 {/* <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-semibold text-gray-900">Transcript Settings</h3>

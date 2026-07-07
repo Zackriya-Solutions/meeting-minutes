@@ -68,6 +68,19 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+useEffect(() => {
+    const hydrateLanguagePreference = async () => {
+      try {
+        const savedLanguage = localStorage.getItem("meetily_transcription_language");
+        if (savedLanguage) {
+          await invoke("set_language_preference", { language: savedLanguage });
+        }
+      } catch (error) {
+        console.error("Failed to hydrate language preference on startup:", error);
+      }
+    };
+    hydrateLanguagePreference();
+  }, []);
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
 
