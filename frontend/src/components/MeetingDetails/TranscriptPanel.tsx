@@ -2,9 +2,11 @@
 
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
-import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
+import { VirtualizedTranscriptView, type TranscriptViewHandle } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { MeetingTimeline } from './MeetingTimeline';
+import { generateTimeline, type TimelineMarker } from '@/lib/meeting-timeline';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -64,6 +66,38 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  // Imperative handle to the transcript view for timeline-driven navigation.
+  const transcriptViewRef = useRef<TranscriptViewHandle>(null);
+  const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(true);
+
+  // Derive timeline key moments from the loaded segments. Only meaningful once
+  // recording has stopped and the transcript is available.
+  const timelineMarkers = useMemo<TimelineMarker[]>(() => {
+    if (isRecording) return [];
+    return generateTimeline(
+      convertedSegments.map((segment) => ({
+        id: segment.id,
+        startTime: segment.timestamp,
+        endTime: segment.endTime,
+        text: segment.text,
+      })),
+    );
+  }, [convertedSegments, isRecording]);
+
+  const handleMarkerSelect = useCallback((marker: TimelineMarker) => {
+    setActiveMarkerId(marker.id);
+    setActiveSegmentId(marker.segmentId);
+    transcriptViewRef.current?.scrollToSegment(marker.segmentId);
+  }, []);
+
+  const handleToggleTimeline = useCallback(() => {
+    setIsTimelineOpen((open) => !open);
+  }, []);
+
+  const showTimeline = !isRecording && timelineMarkers.length > 0;
+
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
       {/* Title area */}
@@ -78,9 +112,23 @@ export function TranscriptPanel({
         />
       </div>
 
+      {/* Interactive timeline of key moments (collapsible) */}
+      {showTimeline && (
+        <MeetingTimeline
+          markers={timelineMarkers}
+          activeMarkerId={activeMarkerId}
+          onMarkerSelect={handleMarkerSelect}
+          collapsible
+          isOpen={isTimelineOpen}
+          onToggleOpen={handleToggleTimeline}
+          className="max-h-[38vh] border-b border-gray-200"
+        />
+      )}
+
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
         <VirtualizedTranscriptView
+          ref={transcriptViewRef}
           segments={convertedSegments}
           isRecording={isRecording}
           isPaused={false}
@@ -89,6 +137,7 @@ export function TranscriptPanel({
           enableStreaming={false}
           showConfidence={true}
           disableAutoScroll={disableAutoScroll}
+          activeSegmentId={activeSegmentId}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}
