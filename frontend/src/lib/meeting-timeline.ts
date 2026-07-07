@@ -354,3 +354,63 @@ function toMarker(item: IndexedSegment, kind: TimelineMarkerKind, idSuffix: stri
     segmentIndex: item.index,
   };
 }
+
+/**
+ * Returns the id of the marker that is "active" at the given playback time —
+ * the last marker whose time is at or before `timeSeconds`. Assumes `markers`
+ * are in chronological order (as returned by {@link generateTimeline}).
+ *
+ * @returns The active marker id, or null when there is no marker at/before the
+ *          time (or the time is negative/non-finite).
+ */
+export function findActiveMarkerId(
+  markers: readonly TimelineMarker[],
+  timeSeconds: number,
+): string | null {
+  if (!Number.isFinite(timeSeconds) || timeSeconds < 0) {
+    return null;
+  }
+  let activeId: string | null = null;
+  for (const marker of markers) {
+    if (marker.time <= timeSeconds) {
+      activeId = marker.id;
+    } else {
+      break;
+    }
+  }
+  return activeId;
+}
+
+/** Minimal segment shape needed to resolve the active segment at a time. */
+export interface PlayableSegment {
+  id: string;
+  /** Seconds from the start of the recording. */
+  startTime: number;
+}
+
+/**
+ * Returns the id of the transcript segment that is "active" at the given
+ * playback time — the last segment that has started at or before `timeSeconds`.
+ * Keeping the most recently started segment active means the highlight stays
+ * stable through silence gaps rather than flickering off. Assumes `segments`
+ * are in chronological order.
+ *
+ * @returns The active segment id, or null when playback is before the first
+ *          segment (or the time is negative/non-finite).
+ */
+export function findActiveSegmentIdAtTime(
+  segments: readonly PlayableSegment[],
+  timeSeconds: number,
+): string | null {
+  if (!Number.isFinite(timeSeconds) || timeSeconds < 0) {
+    return null;
+  }
+  let activeId: string | null = null;
+  for (const segment of segments) {
+    if (segment.startTime > timeSeconds) {
+      break;
+    }
+    activeId = segment.id;
+  }
+  return activeId;
+}

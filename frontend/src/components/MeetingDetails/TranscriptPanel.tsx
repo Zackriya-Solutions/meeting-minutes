@@ -5,8 +5,15 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView, type TranscriptViewHandle } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { MeetingTimeline } from './MeetingTimeline';
-import { generateTimeline, type TimelineMarker } from '@/lib/meeting-timeline';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { MeetingAudioPlayer } from './MeetingAudioPlayer';
+import {
+  generateTimeline,
+  findActiveMarkerId,
+  findActiveSegmentIdAtTime,
+  type TimelineMarker,
+} from '@/lib/meeting-timeline';
+import { useAudioPlayer } from '@/hooks/useAudioPlayer';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -72,6 +79,34 @@ export function TranscriptPanel({
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [isTimelineOpen, setIsTimelineOpen] = useState(true);
 
+  // Resolve the finalized meeting recording (saved as `audio.mp4` in the
+  // meeting folder) so it can be played back and seeked from the timeline.
+  const [audioPath, setAudioPath] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const resolveAudio = async () => {
+      if (isRecording || !meetingFolderPath) {
+        setAudioPath(null);
+        return;
+      }
+      try {
+        const { join } = await import('@tauri-apps/api/path');
+        const { exists } = await import('@tauri-apps/plugin-fs');
+        const candidate = await join(meetingFolderPath, 'audio.mp4');
+        const found = await exists(candidate);
+        if (!cancelled) setAudioPath(found ? candidate : null);
+      } catch {
+        if (!cancelled) setAudioPath(null);
+      }
+    };
+    resolveAudio();
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingFolderPath, isRecording]);
+
+  const audio = useAudioPlayer(audioPath);
+
   // Derive timeline key moments from the loaded segments. Only meaningful once
   // recording has stopped and the transcript is available.
   const timelineMarkers = useMemo<TimelineMarker[]>(() => {
@@ -86,17 +121,43 @@ export function TranscriptPanel({
     );
   }, [convertedSegments, isRecording]);
 
-  const handleMarkerSelect = useCallback((marker: TimelineMarker) => {
-    setActiveMarkerId(marker.id);
-    setActiveSegmentId(marker.segmentId);
-    transcriptViewRef.current?.scrollToSegment(marker.segmentId);
-  }, []);
+  // Lightweight segment shape reused for resolving the active segment during
+  // playback (see the follow-playback effect below).
+  const playableSegments = useMemo(
+    () => convertedSegments.map((segment) => ({ id: segment.id, startTime: segment.timestamp })),
+    [convertedSegments],
+  );
+
+  const handleMarkerSelect = useCallback(
+    (marker: TimelineMarker) => {
+      setActiveMarkerId(marker.id);
+      setActiveSegmentId(marker.segmentId);
+      transcriptViewRef.current?.scrollToSegment(marker.segmentId);
+      // Jump audio playback to the same moment when a recording is available.
+      if (audioPath) {
+        audio.seek(marker.time);
+        audio.play();
+      }
+    },
+    [audioPath, audio],
+  );
+
+  // While playing, keep the active marker and transcript segment in sync with
+  // the playback position. Setting the same id is a no-op, so this stays cheap.
+  useEffect(() => {
+    if (!audio.isPlaying) return;
+    const segmentId = findActiveSegmentIdAtTime(playableSegments, audio.currentTime);
+    if (segmentId) setActiveSegmentId(segmentId);
+    const markerId = findActiveMarkerId(timelineMarkers, audio.currentTime);
+    if (markerId) setActiveMarkerId(markerId);
+  }, [audio.currentTime, audio.isPlaying, playableSegments, timelineMarkers]);
 
   const handleToggleTimeline = useCallback(() => {
     setIsTimelineOpen((open) => !open);
   }, []);
 
   const showTimeline = !isRecording && timelineMarkers.length > 0;
+  const showAudioPlayer = !isRecording && audioPath !== null;
 
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
@@ -111,6 +172,21 @@ export function TranscriptPanel({
           onRefetchTranscripts={onRefetchTranscripts}
         />
       </div>
+
+      {/* Recorded audio transport (play / seek), when a recording exists */}
+      {showAudioPlayer && (
+        <div className="border-b border-gray-200">
+          <MeetingAudioPlayer
+            isPlaying={audio.isPlaying}
+            currentTime={audio.currentTime}
+            duration={audio.duration}
+            error={audio.error}
+            onPlay={audio.play}
+            onPause={audio.pause}
+            onSeek={audio.seek}
+          />
+        </div>
+      )}
 
       {/* Interactive timeline of key moments (collapsible) */}
       {showTimeline && (

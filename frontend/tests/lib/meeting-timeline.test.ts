@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   classifySegment,
+  findActiveMarkerId,
+  findActiveSegmentIdAtTime,
   formatTimecode,
   generateTimeline,
   summarizeSegmentText,
@@ -196,5 +198,51 @@ describe('generateTimeline', () => {
     const markers = generateTimeline(segments);
     const uniqueIds = new Set(markers.map((m) => m.id));
     expect(uniqueIds.size).toBe(markers.length);
+  });
+});
+
+describe('findActiveMarkerId', () => {
+  const markers = [
+    { id: 'm0', time: 0, label: 'a', kind: 'chapter' as const, segmentId: 's0', segmentIndex: 0 },
+    { id: 'm1', time: 30, label: 'b', kind: 'question' as const, segmentId: 's1', segmentIndex: 1 },
+    { id: 'm2', time: 90, label: 'c', kind: 'action' as const, segmentId: 's2', segmentIndex: 2 },
+  ];
+
+  test('returns null before the first marker or for invalid time', () => {
+    expect(findActiveMarkerId(markers, -5)).toBeNull();
+    expect(findActiveMarkerId(markers, Number.NaN)).toBeNull();
+    expect(findActiveMarkerId([], 10)).toBeNull();
+  });
+
+  test('returns the last marker at or before the time', () => {
+    expect(findActiveMarkerId(markers, 0)).toBe('m0');
+    expect(findActiveMarkerId(markers, 29)).toBe('m0');
+    expect(findActiveMarkerId(markers, 30)).toBe('m1');
+    expect(findActiveMarkerId(markers, 89)).toBe('m1');
+    expect(findActiveMarkerId(markers, 1000)).toBe('m2');
+  });
+});
+
+describe('findActiveSegmentIdAtTime', () => {
+  const segments = [
+    { id: 's0', startTime: 0 },
+    { id: 's1', startTime: 12 },
+    { id: 's2', startTime: 40 },
+  ];
+
+  test('returns null before the first segment or for invalid time', () => {
+    const later = [{ id: 'x', startTime: 5 }];
+    expect(findActiveSegmentIdAtTime(later, 1)).toBeNull();
+    expect(findActiveSegmentIdAtTime(segments, -1)).toBeNull();
+    expect(findActiveSegmentIdAtTime(segments, Number.POSITIVE_INFINITY)).toBeNull();
+    expect(findActiveSegmentIdAtTime([], 10)).toBeNull();
+  });
+
+  test('returns the last segment that has started', () => {
+    expect(findActiveSegmentIdAtTime(segments, 0)).toBe('s0');
+    expect(findActiveSegmentIdAtTime(segments, 11.9)).toBe('s0');
+    expect(findActiveSegmentIdAtTime(segments, 12)).toBe('s1');
+    expect(findActiveSegmentIdAtTime(segments, 39)).toBe('s1');
+    expect(findActiveSegmentIdAtTime(segments, 500)).toBe('s2');
   });
 });
