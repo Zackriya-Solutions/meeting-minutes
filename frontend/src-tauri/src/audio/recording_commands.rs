@@ -346,6 +346,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let send_continuous_transcription = transcription::is_deepgram_transcription_provider(&app).await;
 
     // Notify frontend that startup has begun (surfaces STARTING state)
     app.emit("recording-starting", serde_json::json!({
@@ -402,7 +403,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            send_continuous_transcription,
+        )
         .await
         .map_err(|error| map_recording_start_error(&app, error))?;
 
@@ -536,6 +542,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let send_continuous_transcription = transcription::is_deepgram_transcription_provider(&app).await;
 
     // Notify frontend that startup has begun (surfaces STARTING state)
     app.emit("recording-starting", serde_json::json!({
@@ -589,7 +596,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            send_continuous_transcription,
+        )
         .await
         .map_err(|error| map_recording_start_error(&app, error))?;
 

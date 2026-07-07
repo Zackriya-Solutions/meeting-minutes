@@ -26,6 +26,12 @@ use super::vad::{ContinuousVadProcessor};
 /// during continuous speech is tracked separately in #756.
 const VAD_REDEMPTION_TIME_MS: u32 = 500;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscriptionPipelineMode {
+    VadSpeechOnly,
+    ContinuousMixed,
+}
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -707,6 +713,8 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    transcription_mode: TranscriptionPipelineMode,
+    mixed_transcription_next_timestamp: Option<f64>,
 }
 
 impl AudioPipeline {
@@ -720,6 +728,7 @@ impl AudioPipeline {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
+        send_continuous_transcription: bool,
     ) -> Result<Self> {
         // Log device characteristics for adaptive buffering
         info!("🎛️ AudioPipeline initializing with device characteristics:");
@@ -785,6 +794,12 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            transcription_mode: if send_continuous_transcription {
+                TranscriptionPipelineMode::ContinuousMixed
+            } else {
+                TranscriptionPipelineMode::VadSpeechOnly
+            },
+            mixed_transcription_next_timestamp: None,
         })
     }
 
@@ -856,37 +871,62 @@ impl AudioPipeline {
                             // Previous 2x gain was causing excessive limiting/distortion
                             let mixed_with_gain = mixed_clean;
 
-                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
-                                Ok(speech_segments) => {
-                                    for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+                            // STEP 3: Send mixed audio for transcription.
+                            // Local engines still receive VAD speech segments, while a
+                            // realtime cloud provider receives a continuous stream to keep
+                            // its endpointing / turn detection stable.
+                            if self.transcription_mode == TranscriptionPipelineMode::ContinuousMixed {
+                                let duration = mixed_with_gain.len() as f64 / self.sample_rate as f64;
+                                let timestamp = self
+                                    .mixed_transcription_next_timestamp
+                                    .unwrap_or(chunk.timestamp);
+                                self.mixed_transcription_next_timestamp = Some(timestamp + duration);
 
-                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
-                                                  duration_ms, segment.samples.len());
+                                let transcription_chunk = AudioChunk {
+                                    data: mixed_with_gain.clone(),
+                                    sample_rate: self.sample_rate,
+                                    timestamp,
+                                    chunk_id: self.chunk_id_counter,
+                                    device_type: DeviceType::Microphone,
+                                };
 
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000,
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
-                                            };
+                                if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                                    warn!("Failed to send mixed continuous transcription chunk: {}", e);
+                                } else {
+                                    self.chunk_id_counter += 1;
+                                }
+                            } else {
+                                match self.vad_processor.process_audio(&mixed_with_gain) {
+                                    Ok(speech_segments) => {
+                                        for segment in speech_segments {
+                                            let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                                warn!("Failed to send VAD segment: {}", e);
+                                            if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
+                                                info!("📤 Sending VAD segment: {:.1}ms, {} samples",
+                                                      duration_ms, segment.samples.len());
+
+                                                let transcription_chunk = AudioChunk {
+                                                    data: segment.samples,
+                                                    sample_rate: 16000,
+                                                    timestamp: segment.start_timestamp_ms / 1000.0,
+                                                    chunk_id: self.chunk_id_counter,
+                                                    device_type: DeviceType::Microphone,  // Mixed audio
+                                                };
+
+                                                if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                                                    warn!("Failed to send VAD segment: {}", e);
+                                                } else {
+                                                    self.chunk_id_counter += 1;
+                                                }
                                             } else {
-                                                self.chunk_id_counter += 1;
+                                                debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
+                                                       duration_ms, segment.samples.len());
                                             }
-                                        } else {
-                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
-                                                   duration_ms, segment.samples.len());
                                         }
                                     }
-                                }
-                                Err(e) => {
-                                    warn!("⚠️ VAD error: {}", e);
+                                    Err(e) => {
+                                        warn!("⚠️ VAD error: {}", e);
+                                    }
                                 }
                             }
 
@@ -916,7 +956,9 @@ impl AudioPipeline {
         }
 
         // Flush any remaining VAD segments
-        self.flush_remaining_audio()?;
+        if self.transcription_mode == TranscriptionPipelineMode::VadSpeechOnly {
+            self.flush_remaining_audio()?;
+        }
 
         info!("VAD-driven audio pipeline ended");
         Ok(())
@@ -991,6 +1033,7 @@ impl AudioPipelineManager {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
+        send_continuous_transcription: bool,
     ) -> Result<()> {
         // Log device information for adaptive buffering
         info!("🎙️ Starting pipeline with device info:");
@@ -1012,6 +1055,7 @@ impl AudioPipelineManager {
             mic_device_kind,
             system_device_name,
             system_device_kind,
+            send_continuous_transcription,
         )?;
         state.set_audio_sender(audio_sender.clone());
 

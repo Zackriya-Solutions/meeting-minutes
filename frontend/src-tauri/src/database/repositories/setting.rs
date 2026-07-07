@@ -231,6 +231,42 @@ impl SettingsRepository {
         Ok(api_key)
     }
 
+    /// Read Deepgram provider knobs (keyterm blob, diarize flag). Returns
+    /// (None, None) when no settings row exists yet.
+    pub async fn get_deepgram_options(
+        pool: &SqlitePool,
+    ) -> std::result::Result<(Option<String>, Option<i64>), sqlx::Error> {
+        let row: Option<(Option<String>, Option<i64>)> = sqlx::query_as(
+            "SELECT deepgramKeyterm, deepgramDiarize FROM transcript_settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+        Ok(row.unwrap_or((None, None)))
+    }
+
+    /// Persist Deepgram provider knobs without disturbing provider/model/api-key.
+    pub async fn save_deepgram_options(
+        pool: &SqlitePool,
+        keyterm: Option<&str>,
+        diarize: bool,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, deepgramKeyterm, deepgramDiarize)
+            VALUES ('1', 'parakeet', $3, $1, $2)
+            ON CONFLICT(id) DO UPDATE SET
+                deepgramKeyterm = $1,
+                deepgramDiarize = $2
+            "#,
+        )
+        .bind(keyterm)
+        .bind(if diarize { 1_i64 } else { 0_i64 })
+        .bind(crate::config::DEFAULT_PARAKEET_MODEL)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn delete_api_key(
         pool: &SqlitePool,
         provider: &str,

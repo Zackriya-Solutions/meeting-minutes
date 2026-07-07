@@ -714,6 +714,43 @@ pub async fn api_get_transcript_api_key<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn api_get_deepgram_options<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    match SettingsRepository::get_deepgram_options(pool).await {
+        Ok((keyterm, diarize)) => Ok(serde_json::json!({
+            "keyterm": keyterm.unwrap_or_default(),
+            "diarize": diarize.map(|d| d != 0).unwrap_or(true),
+        })),
+        Err(e) => {
+            log_error!("Failed to get Deepgram options: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn api_save_deepgram_options<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    keyterm: Option<String>,
+    diarize: bool,
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    if let Err(e) =
+        SettingsRepository::save_deepgram_options(pool, keyterm.as_deref(), diarize).await
+    {
+        log_error!("Failed to save Deepgram options: {}", e);
+        return Err(e.to_string());
+    }
+    Ok(serde_json::json!({ "status": "success", "message": "Deepgram options saved successfully" }))
+}
+
+#[tauri::command]
 pub async fn api_delete_api_key<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,

@@ -127,4 +127,10 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "openaiApiKey")]
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
+    #[sqlx(rename = "deepgramKeyterm")]
+    #[serde(rename = "deepgramKeyterm")]
+    pub deepgram_keyterm: Option<String>,
+    #[sqlx(rename = "deepgramDiarize")]
+    #[serde(rename = "deepgramDiarize")]
+    pub deepgram_diarize: Option<i64>,
 }

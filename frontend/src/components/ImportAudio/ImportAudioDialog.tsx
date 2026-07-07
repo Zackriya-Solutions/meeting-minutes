@@ -395,7 +395,7 @@ export function ImportAudioDialog({
                                   key={`${model.provider}:${model.name}`}
                                   value={`${model.provider}:${model.name}`}
                                 >
-                                  {model.displayName} ({Math.round(model.size_mb)} MB)
+                                  {model.displayName}{model.size_mb > 0 ? ` (${Math.round(model.size_mb)} MB)` : ''}
                                 </SelectItem>
                               ))}
                             </SelectContent>

@@ -16,7 +16,8 @@ pub use engine::{
     TranscriptionEngine,
     validate_transcription_model_ready,
     get_or_init_transcription_engine,
-    get_or_init_whisper
+    get_or_init_whisper,
+    is_deepgram_transcription_provider
 };
 pub use worker::{
     start_transcription_task,
