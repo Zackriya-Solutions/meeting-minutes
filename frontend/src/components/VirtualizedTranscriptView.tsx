@@ -34,6 +34,10 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+
+    /** When set (seconds), scroll to and briefly highlight the segment at this time.
+     *  Powers jump-to-timestamp from search results / RAG citations. */
+    scrollToTimestamp?: number | null;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -71,6 +75,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    highlight = false,
 }: {
     id: string;
     timestamp: number;
@@ -78,11 +83,15 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    highlight?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div
+            id={`segment-${id}`}
+            className={`mb-3 rounded-lg transition-colors duration-500 ${highlight ? 'bg-yellow-100 ring-2 ring-yellow-300 -mx-2 px-2 py-1' : ''}`}
+        >
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -124,9 +133,14 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    scrollToTimestamp = null,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
+    // Segment id to briefly highlight after a jump-to-timestamp.
+    const [highlightedId, setHighlightedId] = useState<string | null>(null);
+    // Ensures a given jump target is consumed only once (not re-triggered on paginate).
+    const seekConsumedRef = useRef<number | null>(null);
     // Ref for infinite scroll trigger element
     const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +177,43 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
+
+    // Jump-to-timestamp: scroll to and briefly highlight the segment at `scrollToTimestamp`
+    // (seconds). Consumed once per target so pagination re-renders don't re-trigger it.
+    useEffect(() => {
+        if (scrollToTimestamp == null || segments.length === 0) return;
+        if (seekConsumedRef.current === scrollToTimestamp) return;
+        seekConsumedRef.current = scrollToTimestamp;
+
+        // Last loaded segment starting at/before the target time (0.5s tolerance).
+        let idx = 0;
+        for (let i = 0; i < segments.length; i++) {
+            if ((segments[i].timestamp ?? 0) <= scrollToTimestamp + 0.5) idx = i;
+            else break;
+        }
+        const target = segments[idx];
+        if (!target) return;
+
+        const useVirt = segments.length >= VIRTUALIZATION_THRESHOLD;
+        // Small delay so the list has laid out before we scroll.
+        const scrollTimer = setTimeout(() => {
+            if (useVirt) {
+                virtualizer.scrollToIndex(idx, { align: 'center' });
+            } else {
+                document
+                    .getElementById(`segment-${target.id}`)
+                    ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+            setHighlightedId(target.id);
+        }, 150);
+        const clearTimer = setTimeout(() => {
+            setHighlightedId((cur) => (cur === target.id ? null : cur));
+        }, 3200);
+        return () => {
+            clearTimeout(scrollTimer);
+            clearTimeout(clearTimer);
+        };
+    }, [scrollToTimestamp, segments, virtualizer]);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {
@@ -296,6 +347,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        highlight={highlightedId === segment.id}
                                     />
                                 </div>
                             );
@@ -352,6 +404,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        highlight={highlightedId === segment.id}
                                     />
                                 </motion.div>
                             );

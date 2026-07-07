@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, MessageSquare } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -450,6 +450,8 @@ const Sidebar: React.FC = () => {
     const isHomePage = pathname === '/';
     const isMeetingPage = pathname?.includes('/meeting-details');
     const isSettingsPage = pathname === '/settings';
+    const isChatPage = pathname === '/chat';
+    const isSearchPage = pathname === '/search';
 
     return (
       <TooltipProvider>
@@ -521,6 +523,36 @@ const Sidebar: React.FC = () => {
             </TooltipTrigger>
             <TooltipContent side="right">
               <p>Meeting Notes</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/search')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${isSearchPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                  }`}
+              >
+                <SearchIcon className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Search meetings</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/chat')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${isChatPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                  }`}
+              >
+                <MessageSquare className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Chat with archive</p>
             </TooltipContent>
           </Tooltip>
 
@@ -801,6 +833,22 @@ const Sidebar: React.FC = () => {
                 <span>Import Audio</span>
               </button>
             )}
+
+            <button
+              onClick={() => router.push('/search')}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/search' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
+            >
+              <SearchIcon className="w-4 h-4 mr-2" />
+              <span>Search meetings</span>
+            </button>
+
+            <button
+              onClick={() => router.push('/chat')}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/chat' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
+            >
+              <MessageSquare className="w-4 h-4 mr-2" />
+              <span>Chat with archive</span>
+            </button>
 
             <button
               onClick={() => router.push('/settings')}

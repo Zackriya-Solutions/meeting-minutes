@@ -146,6 +146,24 @@ ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", bran
 
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
 
+# V1 knowledge base: local vector search via sqlite-vec (PLAN.md Phase 0/1).
+# The extension is statically linked and registered via sqlite3_auto_extension
+# (see src/vector/mod.rs), so no per-OS binary needs to be shipped.
+# IMPORTANT: `libsqlite3-sys` MUST resolve to the SAME version sqlx-sqlite links,
+# otherwise the amalgamation is compiled twice (duplicate-symbol link error) or the
+# auto-extension registers on a different SQLite than sqlx uses. sqlx 0.8 pins
+# libsqlite3-sys 0.30.x; keep this in sync if sqlx is bumped. Features unify with
+# sqlx's (bundled), so we only declare the version here.
+sqlite-vec = "0.1"
+libsqlite3-sys = "0.30"
+
+# Fuzzy string matching for entity resolution (PLAN.md Phase 3, Jaro-Winkler).
+strsim = "0.10.0"
+
+# HuggingFace tokenizer for the local embedder (loads tokenizer.json). default-features
+# off to avoid the progressbar/esaxx extras; `onig` supplies the regex backend.
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
+
 # Common Tauri configuration
 tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
 tauri-plugin-fs = "2.4.0"

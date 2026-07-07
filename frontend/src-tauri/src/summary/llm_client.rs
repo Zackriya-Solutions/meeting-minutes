@@ -73,6 +73,11 @@ pub enum LLMProvider {
     OpenRouter,
     BuiltInAI,
     CustomOpenAI,
+    /// DeepSeek (OpenAI-compatible). api_key = DeepSeek API key.
+    DeepSeek,
+    /// GigaChat (Sber). api_key = Sber "Authorization Key" (base64(client_id:secret)).
+    /// Handled via the dedicated client (OAuth token mint) — see early return below.
+    GigaChat,
 }
 
 impl LLMProvider {
@@ -86,6 +91,8 @@ impl LLMProvider {
             "openrouter" => Ok(Self::OpenRouter),
             "builtin-ai" | "local-llama" | "localllama" => Ok(Self::BuiltInAI),
             "custom-openai" => Ok(Self::CustomOpenAI),
+            "deepseek" => Ok(Self::DeepSeek),
+            "gigachat" => Ok(Self::GigaChat),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
     }
@@ -148,6 +155,18 @@ pub async fn generate_summary(
         .map_err(|e| e.to_string());
     }
 
+    // GigaChat needs an OAuth token mint before the chat call, so it's handled by the
+    // dedicated client rather than the generic OpenAI-compatible path below. The
+    // `api_key` here is the Sber "Authorization Key" (base64(client_id:secret)).
+    if provider == &LLMProvider::GigaChat {
+        let client = crate::llm::providers::gigachat::GigaChatClient::new(
+            crate::llm::providers::gigachat::GigaChatAuth::Key(api_key.to_string()),
+            Some(model_name.to_string()),
+            None,
+        );
+        return client.complete(system_prompt, user_prompt).await;
+    }
+
     let (api_url, mut headers) = match provider {
         LLMProvider::OpenAI => (
             "https://api.openai.com/v1/chat/completions".to_string(),
@@ -159,6 +178,10 @@ pub async fn generate_summary(
         ),
         LLMProvider::OpenRouter => (
             "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::DeepSeek => (
+            "https://api.deepseek.com/v1/chat/completions".to_string(),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
@@ -197,6 +220,10 @@ pub async fn generate_summary(
         LLMProvider::BuiltInAI => {
             // This case is handled earlier with early returns
             unreachable!("BuiltInAI is handled before this match statement")
+        }
+        LLMProvider::GigaChat => {
+            // Handled earlier via the dedicated GigaChat client (OAuth token mint).
+            unreachable!("GigaChat is handled before this match statement")
         }
     };
 
@@ -342,5 +369,7 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+        LLMProvider::DeepSeek => "DeepSeek",
+        LLMProvider::GigaChat => "GigaChat",
     }
 }

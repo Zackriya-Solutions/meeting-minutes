@@ -38,9 +38,12 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod collections;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod jobs;
+pub mod llm;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -49,10 +52,13 @@ pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod pipeline;
+pub mod search;
 pub mod state;
 pub mod summary;
 pub mod tray;
 pub mod utils;
+pub mod vector;
 pub mod whisper_engine;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
@@ -499,6 +505,15 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Load the local embedding model in the background if it's already downloaded
+            // (enables the vector branch of search/RAG). Never blocks startup.
+            {
+                let app_handle = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    pipeline::commands::init_embedder_at_startup(&app_handle).await;
+                });
+            }
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -524,6 +539,17 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            search::commands::search_meetings,
+            search::commands::rag_ask,
+            pipeline::commands::embedder_status,
+            pipeline::commands::embedder_download_model,
+            collections::commands::create_collection,
+            collections::commands::add_meeting_to_collection,
+            collections::commands::list_collections,
+            collections::commands::save_search,
+            collections::commands::suggest_meeting_series,
+            collections::commands::run_backfill,
+            collections::commands::set_app_setting,
             start_recording,
             stop_recording,
             is_recording,

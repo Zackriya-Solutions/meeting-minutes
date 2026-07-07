@@ -23,6 +23,10 @@ function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
+  // Optional jump-to-timestamp deep link (?t=<seconds>) from search results / RAG citations.
+  const seekParam = searchParams.get('t');
+  const seekToSeconds =
+    seekParam != null && seekParam !== '' && Number.isFinite(Number(seekParam)) ? Number(seekParam) : null;
   const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
@@ -377,6 +381,7 @@ function MeetingDetailsContent() {
     totalCount={totalCount}
     loadedCount={loadedCount}
     onLoadMore={loadMore}
+    seekToSeconds={seekToSeconds}
   />;
 }
 

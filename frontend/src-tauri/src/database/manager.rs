@@ -30,9 +30,30 @@ impl DatabaseManager {
             }
         }
 
+        // Register sqlite-vec BEFORE opening the pool so it loads on every
+        // connection (PLAN.md Phase 0). Best-effort; failures degrade gracefully.
+        crate::vector::register();
+
         let pool = SqlitePool::connect(tauri_db_path).await?;
 
         sqlx::migrate!("./migrations").run(&pool).await?;
+
+        // Create the vec0 embeddings table if the extension is available. Never
+        // fatal: a build without sqlite-vec still boots (hybrid search falls back
+        // to FTS-only).
+        if let Err(e) = crate::vector::ensure_chunk_embeddings_table(&pool).await {
+            log::warn!("vector table init returned an error (continuing without vectors): {e}");
+        }
+
+        // Start the background job runner (PLAN.md Phase 0). Runs on the app's tokio
+        // runtime; jobs are claimed atomically so this is safe even if a second
+        // runner were ever started against the same database.
+        crate::jobs::JobRunner::new(
+            pool.clone(),
+            crate::jobs::JobRegistry::with_defaults(),
+            crate::jobs::RunnerConfig::default(),
+        )
+        .spawn();
 
         Ok(DatabaseManager { pool })
     }

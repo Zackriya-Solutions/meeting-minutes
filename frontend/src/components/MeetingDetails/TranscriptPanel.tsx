@@ -28,6 +28,9 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+
+  /** Jump-to-timestamp (seconds) from search results / RAG citations. */
+  scrollToTimestamp?: number | null;
 }
 
 export function TranscriptPanel({
@@ -48,6 +51,7 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  scrollToTimestamp = null,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -94,6 +98,7 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          scrollToTimestamp={scrollToTimestamp}
         />
       </div>
 

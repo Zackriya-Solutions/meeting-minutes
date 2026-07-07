@@ -89,6 +89,24 @@ pub async fn api_save_meeting_summary<R: Runtime>(
     match SummaryProcessesRepository::update_meeting_summary(pool, &meeting_id, &summary).await {
         Ok(true) => {
             log_info!("Summary saved successfully for meeting_id: {}", meeting_id);
+
+            // Finalize hook (PLAN.md Phase 0): a saved summary marks the meeting as
+            // fully transcribed, so kick off the post-meeting knowledge-base pipeline
+            // (chunk_embed -> diarize + extract). Fire-and-forget: never blocks the UI
+            // and a failure here does not fail the save.
+            match crate::jobs::enqueue_post_meeting_pipeline(pool, &meeting_id).await {
+                Ok(job_id) => log_info!(
+                    "Enqueued post-meeting pipeline job {} for meeting {}",
+                    job_id,
+                    meeting_id
+                ),
+                Err(e) => log_warn!(
+                    "Failed to enqueue post-meeting pipeline for {}: {}",
+                    meeting_id,
+                    e
+                ),
+            }
+
             Ok(serde_json::json!({
                 "message": "Meeting summary saved successfully"
             }))
