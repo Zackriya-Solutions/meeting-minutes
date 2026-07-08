@@ -5,7 +5,6 @@ import type { PartialBlock, Block } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/shadcn/style.css";
-import "@blocknote/core/fonts/inter.css";
 
 interface EditorProps {
   initialContent?: Block[];

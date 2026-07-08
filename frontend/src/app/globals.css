@@ -219,3 +219,10 @@
     overflow: visible !important;
   }
 }
+
+/* BlockNote surfaces follow the app font (SF Pro via the system stack).
+   Doubled class beats BlockNote's own .bn-container declaration without !important. */
+.bn-container.bn-container {
+  --bn-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}

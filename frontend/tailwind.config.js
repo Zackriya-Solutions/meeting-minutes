@@ -25,8 +25,17 @@ module.exports = {
   theme: {
   	extend: {
   		fontFamily: {
+  			// SF Pro on Apple platforms via the system stack; sensible fallbacks elsewhere
   			sans: [
-  				'var(--font-source-sans-3)'
+  				'-apple-system',
+  				'BlinkMacSystemFont',
+  				'"SF Pro Text"',
+  				'"SF Pro Display"',
+  				'"Segoe UI"',
+  				'Roboto',
+  				'Helvetica',
+  				'Arial',
+  				'sans-serif'
   			]
   		},
   		colors: {

@@ -1,7 +1,6 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
@@ -26,12 +25,6 @@ import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 
-
-const sourceSans3 = Source_Sans_3({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-source-sans-3',
-})
 
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
@@ -232,7 +225,7 @@ export default function RootLayout({
 
   return (
     <html lang="en" className="dark">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
