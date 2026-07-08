@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { File, Settings, ChevronLeftCircle, ChevronRightCircle, Home, Trash2, Mic, Square, Pencil, NotebookPen, SearchIcon, X, Upload, Folder as FolderIcon, FolderPlus } from 'lucide-react';
+import { File, Settings, Home, Trash2, Mic, Square, Pencil, NotebookPen, SearchIcon, X, Upload, Folder as FolderIcon, FolderPlus, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
@@ -38,6 +38,10 @@ const Sidebar: React.FC = () => {
     setCurrentMeeting,
     isCollapsed,
     toggleCollapse,
+    sidebarWidth,
+    setSidebarWidth,
+    isResizingSidebar,
+    setIsResizingSidebar,
     handleRecordingToggle,
     searchTranscripts,
     searchResults,
@@ -337,6 +341,20 @@ const Sidebar: React.FC = () => {
     return (
       <TooltipProvider>
         <div className="flex flex-col items-center space-y-4 mt-4">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleCollapse}
+                className="p-2 rounded-lg transition-colors duration-150 text-gray-500 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <PanelLeftOpen className="w-5 h-5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Expand sidebar</p>
+            </TooltipContent>
+          </Tooltip>
+
           <Logo isCollapsed={isCollapsed} />
 
           <Tooltip>
@@ -427,25 +445,40 @@ const Sidebar: React.FC = () => {
 
 
 
+  // Drag-to-resize from the sidebar's right edge (expanded mode only)
+  const startSidebarResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingSidebar(true);
+
+    const onMove = (ev: MouseEvent) => setSidebarWidth(ev.clientX);
+    const onUp = () => {
+      setIsResizingSidebar(false);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
   return (
     <div className="fixed top-0 left-0 h-screen z-40">
-      {/* Floating collapse button */}
-      <button
-        onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-surface hover:bg-gray-100 rounded-full shadow-lg border"
-        style={{ transform: 'translateX(50%)' }}
-      >
-        {isCollapsed ? (
-          <ChevronRightCircle className="w-6 h-6" />
-        ) : (
-          <ChevronLeftCircle className="w-6 h-6" />
-        )}
-      </button>
-
       <div
-        className={`h-screen bg-background border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'
-          }`}
+        className={`h-screen bg-background border-r shadow-sm flex flex-col relative ${isResizingSidebar ? '' : 'transition-all duration-300'}`}
+        style={{ width: isCollapsed ? 64 : sidebarWidth }}
       >
+        {/* Resize handle */}
+        {!isCollapsed && (
+          <div
+            onMouseDown={startSidebarResize}
+            className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize z-50 hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+            aria-hidden="true"
+          />
+        )}
         {/*  Header with traffic light spacing */}
         <div className="flex-shrink-0 h-22 flex items-center">
 
@@ -456,10 +489,19 @@ const Sidebar: React.FC = () => {
           <div className="flex-1">
             {!isCollapsed && (
               <div className="p-3">
-                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
-                  <span>Meetily</span>
-                </span> */}
-                <Logo isCollapsed={isCollapsed} />
+                <div className="flex items-start gap-1">
+                  <div className="flex-1 min-w-0">
+                    <Logo isCollapsed={isCollapsed} />
+                  </div>
+                  <button
+                    onClick={toggleCollapse}
+                    className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
+                    aria-label="Collapse sidebar"
+                    title="Collapse sidebar"
+                  >
+                    <PanelLeftClose className="w-4 h-4" />
+                  </button>
+                </div>
 
                 <div className="relative mb-1">
                   <InputGroup >
@@ -492,7 +534,7 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className="px-3 text-sm font-medium text-gray-700 items-center hover:bg-gray-100 h-9 flex mx-3 mt-2 rounded-lg cursor-pointer"
               >
                 <Home className="w-4 h-4 mr-2" />
                 <span>Home</span>
@@ -543,7 +585,7 @@ const Sidebar: React.FC = () => {
                     {/* All Notes */}
                     <div
                       onClick={openAllNotes}
-                      className={`p-3 text-lg font-semibold items-center h-10 flex mx-3 mt-3 rounded-lg cursor-pointer ${pathname === '/notes' && !activeFolderId ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
+                      className={`px-3 text-sm font-medium text-gray-700 items-center h-9 flex mx-3 mt-1 rounded-lg cursor-pointer ${pathname === '/notes' && !activeFolderId ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
                     >
                       <NotebookPen className="w-4 h-4 mr-2" />
                       <span>All Notes</span>

@@ -1,3 +1,5 @@
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+
 interface StatusOverlaysProps {
   // Status flags
   isProcessing: boolean;      // Processing transcription after recording stops
@@ -15,14 +17,16 @@ interface StatusOverlayProps {
 }
 
 function StatusOverlay({ show, message, sidebarCollapsed }: StatusOverlayProps) {
+  const { sidebarWidth, isResizingSidebar } = useSidebar();
+
   if (!show) return null;
 
   return (
     <div className="fixed bottom-4 left-0 right-0 z-10">
       <div
-        className="flex justify-center transition-[margin] duration-300"
+        className={`flex justify-center ${isResizingSidebar ? '' : 'transition-[margin] duration-300'}`}
         style={{
-          marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+          marginLeft: sidebarCollapsed ? 64 : sidebarWidth
         }}
       >
         <div className="w-2/3 max-w-[750px] flex justify-center">

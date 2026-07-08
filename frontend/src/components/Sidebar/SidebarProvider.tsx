@@ -44,6 +44,11 @@ interface SidebarContextType {
   sidebarItems: SidebarItem[];
   isCollapsed: boolean;
   toggleCollapse: () => void;
+  // Resizable sidebar (expanded width in px, persisted)
+  sidebarWidth: number;
+  setSidebarWidth: (width: number) => void;
+  isResizingSidebar: boolean;
+  setIsResizingSidebar: (resizing: boolean) => void;
   meetings: CurrentMeeting[];
   setMeetings: (meetings: CurrentMeeting[]) => void;
   isMeetingActive: boolean;
@@ -73,6 +78,10 @@ interface SidebarContextType {
 
 const SidebarContext = createContext<SidebarContextType | null>(null);
 
+const SIDEBAR_WIDTH_KEY = 'meetily-sidebar-width';
+const SIDEBAR_WIDTH_DEFAULT = 256;
+const clampSidebarWidth = (width: number) => Math.min(420, Math.max(200, width));
+
 export const useSidebar = () => {
   const context = useContext(SidebarContext);
   if (!context) {
@@ -84,6 +93,22 @@ export const useSidebar = () => {
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
   const [isCollapsed, setIsCollapsed] = useState(true);
+  const [sidebarWidth, setSidebarWidthState] = useState<number>(() => {
+    if (typeof window === 'undefined') return SIDEBAR_WIDTH_DEFAULT;
+    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampSidebarWidth(stored) : SIDEBAR_WIDTH_DEFAULT;
+  });
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+
+  const setSidebarWidth = React.useCallback((width: number) => {
+    const clamped = clampSidebarWidth(width);
+    setSidebarWidthState(clamped);
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped));
+    } catch {
+      // Persistence is best-effort
+    }
+  }, []);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
@@ -379,6 +404,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       sidebarItems,
       isCollapsed,
       toggleCollapse,
+      sidebarWidth,
+      setSidebarWidth,
+      isResizingSidebar,
+      setIsResizingSidebar,
       meetings,
       setMeetings,
       isMeetingActive,

@@ -8,13 +8,14 @@ interface MainContentProps {
 }
 
 const MainContent: React.FC<MainContentProps> = ({ children }) => {
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, sidebarWidth, isResizingSidebar } = useSidebar();
 
   return (
     <main
-      className={`flex-1 min-h-screen bg-gray-50 transition-all duration-300 ${
-        isCollapsed ? 'ml-16' : 'ml-64'
+      className={`flex-1 min-h-screen bg-gray-50 ${
+        isResizingSidebar ? '' : 'transition-all duration-300'
       }`}
+      style={{ marginLeft: isCollapsed ? 64 : sidebarWidth }}
     >
       {children}
     </main>
