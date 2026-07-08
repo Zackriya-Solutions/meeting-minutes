@@ -672,7 +672,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       {/* Context Menu */}
       {contextMenu.visible && selectedBlocks.length > 0 && (
         <div
-          className="fixed z-50 bg-white shadow-lg rounded-lg py-1 min-w-[160px] border border-gray-200
+          className="fixed z-50 bg-surface shadow-lg rounded-lg py-1 min-w-[160px] border border-gray-200
                      animate-in fade-in zoom-in-95 duration-150"
           style={{ 
             left: contextMenu.x, 

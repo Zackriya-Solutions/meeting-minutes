@@ -342,7 +342,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   return (
     <TooltipProvider>
       <div className="flex flex-col space-y-2">
-        <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
+        <div className="flex items-center space-x-2 bg-surface rounded-full shadow-lg px-4 py-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900"></div>
@@ -429,7 +429,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                             disabled={isPausing || isResuming || isStopping}
                             className={`w-10 h-10 flex items-center justify-center ${isPausing || isResuming || isStopping
                               ? 'bg-gray-200 border-2 border-gray-300 text-gray-400'
-                              : 'bg-white border-2 border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-50'
+                              : 'bg-surface border-2 border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-50'
                               } rounded-full transition-colors relative`}
                           >
                             {isPaused ? <Play size={16} /> : <Pause size={16} />}

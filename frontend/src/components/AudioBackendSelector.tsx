@@ -104,7 +104,7 @@ export function AudioBackendSelector({
             <Info className="h-4 w-4" />
           </button>
           {showTooltip && (
-            <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-gray-900 text-white rounded-lg shadow-lg">
+            <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-gray-900 text-gray-50 rounded-lg shadow-lg">
               <p className="font-semibold mb-1">Audio Capture Methods:</p>
               <ul className="space-y-1">
                 {backends.map((backend) => (
@@ -139,7 +139,7 @@ export function AudioBackendSelector({
               className={`flex items-start p-3 border rounded-lg transition-all ${
                 currentBackend === backend.id
                   ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-300 hover:border-gray-400 bg-white'
+                  : 'border-gray-300 hover:border-gray-400 bg-surface'
               } ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <input

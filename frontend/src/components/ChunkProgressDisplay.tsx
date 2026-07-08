@@ -88,7 +88,7 @@ export function ChunkProgressDisplay({
   };
 
   return (
-    <div className={`bg-white border border-gray-200 rounded-lg p-4 ${className}`}>
+    <div className={`bg-surface border border-gray-200 rounded-lg p-4 ${className}`}>
       {/* Progress Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">

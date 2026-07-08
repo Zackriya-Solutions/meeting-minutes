@@ -81,7 +81,7 @@ export function LanguagePickerPopover({
   return (
     <div
       ref={containerRef}
-      className="w-72 rounded-lg bg-white border border-gray-200 shadow-lg overflow-hidden"
+      className="w-72 rounded-lg bg-surface border border-gray-200 shadow-lg overflow-hidden"
       role="dialog"
       aria-label="Pick summary language"
     >

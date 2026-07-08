@@ -10,7 +10,7 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
   };
 
   const statusColors = {
-    idle: 'bg-neutral-300',
+    idle: 'bg-gray-300',
     checking: 'bg-yellow-400 animate-pulse',
     success: 'bg-green-500',
     error: 'bg-red-500',

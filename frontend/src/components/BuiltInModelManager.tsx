@@ -302,7 +302,7 @@ export function BuiltInModelManager({
               className={cn(
                 'p-4 rounded-lg border transition-colors',
                 modelIsDownloading
-                  ? 'bg-white border-gray-200'
+                  ? 'bg-surface border-gray-200'
                   : 'bg-card',
                 selectedModel === model.name
                   ? 'ring-2 ring-gray-800 border-gray-800'

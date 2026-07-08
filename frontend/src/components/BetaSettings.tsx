@@ -32,7 +32,7 @@ export function BetaSettings() {
       {featureOrder.map((featureKey) => (
         <div
           key={featureKey}
-          className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm"
+          className="bg-surface rounded-lg border border-gray-200 p-6 shadow-sm"
         >
           <div className="flex items-center justify-between">
             <div className="flex-1">

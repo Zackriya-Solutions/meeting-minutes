@@ -192,7 +192,7 @@ export default function AnalyticsConsentSwitch() {
                   Share this ID when reporting issues to help us investigate your issue logs
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="text-xs text-gray-700 bg-white px-2 py-1 rounded border border-gray-300 font-mono flex-1 truncate">
+                  <code className="text-xs text-gray-700 bg-surface px-2 py-1 rounded border border-gray-300 font-mono flex-1 truncate">
                     {userId}
                   </code>
                   <Button

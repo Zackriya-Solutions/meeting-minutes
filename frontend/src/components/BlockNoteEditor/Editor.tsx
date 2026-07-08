@@ -47,5 +47,5 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
     };
   }, [editor, onChange]);
 
-  return <BlockNoteView editor={editor} editable={editable} theme="light" />;
+  return <BlockNoteView editor={editor} editable={editable} theme="dark" />;
 }

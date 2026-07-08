@@ -14,7 +14,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-surface rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center gap-3">
@@ -142,7 +142,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
         <div className="flex items-center justify-between gap-4 p-6 border-t border-gray-200 bg-gray-50">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            className="px-4 py-2 text-gray-700 bg-surface border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
           >
             Keep Analytics Enabled
           </button>

@@ -536,7 +536,7 @@ function ModelCard({
         ${isSelected && isAvailable
           ? 'border-blue-500 bg-blue-50'
           : isAvailable
-            ? 'border-gray-200 hover:border-gray-300 bg-white'
+            ? 'border-gray-200 hover:border-gray-300 bg-surface'
             : 'border-gray-200 bg-gray-50'
         }
         ${isAvailable ? '' : 'cursor-default'}

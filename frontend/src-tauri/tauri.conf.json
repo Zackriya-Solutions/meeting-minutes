@@ -17,7 +17,8 @@
                 "height": 700,
                 "resizable": true,
                 "fullscreen": false,
-                "theme": "Light",
+                "theme": "Dark",
+                "backgroundColor": "#1B1B19",
                 "decorations": true
             }
         ],

@@ -71,7 +71,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
         width: `${position.width}px`,
       }}
     >
-      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3">
+      <div className="bg-surface border border-gray-200 rounded-lg shadow-lg p-3">
         {/* Header with close button */}
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center gap-1">

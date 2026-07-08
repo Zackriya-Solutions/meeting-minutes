@@ -16,7 +16,7 @@ export function SummaryLanguageSettings() {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm relative">
+    <div className="bg-surface rounded-lg border border-gray-200 p-6 shadow-sm relative">
       <div className="flex items-center gap-2 mb-2">
         <Globe size={18} className="text-gray-500" />
         <h3 className="text-lg font-semibold text-gray-900">Summary Language</h3>

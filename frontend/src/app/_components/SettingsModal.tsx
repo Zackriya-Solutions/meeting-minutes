@@ -62,7 +62,7 @@ export function SettingsModals({
     {/* Legacy Settings Modal */}
     {modals.modelSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="bg-surface rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="flex justify-between items-center p-6 border-b">
             <h3 className="text-xl font-semibold text-gray-900">Preferences</h3>
@@ -92,7 +92,7 @@ export function SettingsModals({
                   </label>
                   <div className="flex space-x-2">
                     <select
-                      className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      className="px-3 py-2 text-sm bg-surface border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                       value={modelConfig.provider}
                       onChange={(e) => {
                         const provider = e.target.value as ModelConfig['provider'];
@@ -112,7 +112,7 @@ export function SettingsModals({
                     </select>
 
                     <select
-                      className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      className="flex-1 px-3 py-2 text-sm bg-surface border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                       value={modelConfig.model}
                       onChange={(e) => setModelConfig((prev: ModelConfig) => ({ ...prev, model: e.target.value }))}
                     >
@@ -136,7 +136,7 @@ export function SettingsModals({
                       {models.map((model) => (
                         <div
                           key={model.id}
-                          className={`bg-white p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
+                          className={`bg-surface p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'
                             }`}
                           onClick={() => setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))}
                         >
@@ -168,7 +168,7 @@ export function SettingsModals({
     {/* Device Settings Modal */}
     {modals.deviceSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <div className="bg-surface rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Audio Device Settings</h3>
             <button
@@ -209,7 +209,7 @@ export function SettingsModals({
     {/* Language Settings Modal */}
     {modals.languageSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <div className="bg-surface rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Language Settings</h3>
             <button
@@ -244,7 +244,7 @@ export function SettingsModals({
     {/* Model Selection Modal */}
     {modals.modelSelector && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] flex flex-col">
+        <div className="bg-surface rounded-lg max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] flex flex-col">
           {/* Fixed Header */}
           <div className="flex justify-between items-center p-6 pb-4 border-b border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900">
@@ -302,7 +302,7 @@ export function SettingsModals({
     {/* Error Alert Modal */}
     {modals.errorAlert && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <Alert className="max-w-md mx-4 border-red-200 bg-white shadow-xl">
+        <Alert className="max-w-md mx-4 border-red-200 bg-surface shadow-xl">
           <AlertTitle className="text-red-800">Recording Stopped</AlertTitle>
           <AlertDescription className="text-red-700">
             {messages.errorAlert}
@@ -320,7 +320,7 @@ export function SettingsModals({
     {/* Chunk Drop Warning Modal */}
     {modals.chunkDropWarning && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <Alert className="max-w-lg mx-4 border-yellow-200 bg-white shadow-xl">
+        <Alert className="max-w-lg mx-4 border-yellow-200 bg-surface shadow-xl">
           <AlertTitle className="text-yellow-800">Transcription Performance Warning</AlertTitle>
           <AlertDescription className="text-yellow-700">
             {messages.chunkDropWarning}

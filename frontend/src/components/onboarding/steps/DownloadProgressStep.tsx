@@ -394,7 +394,7 @@ export function DownloadProgressStep() {
     modelSize: string,
     sizeUnit = 'MB'
   ) => (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
+    <div className="bg-surface rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
@@ -457,7 +457,7 @@ export function DownloadProgressStep() {
           {(title === 'Transcription Engine' || title === 'Summary Engine') && (
             <button
               onClick={title === 'Transcription Engine' ? handleRetryDownload : handleRetrySummaryDownload}
-              className="mt-3 w-full h-9 px-4 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
+              className="mt-3 w-full h-9 px-4 bg-gray-900 hover:bg-gray-800 text-gray-50 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -525,7 +525,7 @@ export function DownloadProgressStep() {
           <Button
             onClick={handleContinue}
             disabled={!parakeetDownloaded || isCompleting}
-            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {(isCompleting || !parakeetDownloaded) ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />

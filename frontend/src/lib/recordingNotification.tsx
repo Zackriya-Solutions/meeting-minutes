@@ -46,7 +46,7 @@ export async function showRecordingNotification(): Promise<void> {
                 Analytics.trackButtonClick('recording_notification_acknowledged', 'toast');
                 toast.dismiss(toastId);
               }}
-              className="w-full px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 transition-colors font-medium"
+              className="w-full px-3 py-1.5 bg-gray-900 text-gray-50 text-xs rounded hover:bg-gray-800 transition-colors font-medium"
             >
               I've Notified Participants
             </button>

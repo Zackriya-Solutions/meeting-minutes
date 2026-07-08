@@ -103,7 +103,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
           <p className="text-sm text-blue-800 mb-2">
             We found an existing database from your previous Meetily installation (Python backend version).
           </p>
-          <div className="bg-white/50 rounded p-2 mb-3">
+          <div className="bg-surface/50 rounded p-2 mb-3">
             <p className="text-xs text-blue-700 font-mono break-all">
               {detectedPath}
             </p>

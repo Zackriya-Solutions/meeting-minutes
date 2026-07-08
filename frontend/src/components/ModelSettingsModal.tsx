@@ -1277,7 +1277,7 @@ export function ModelSettingsModal({
 
                         {/* Show progress for gemma3:1b download */}
                         {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
-                          <div className="bg-white rounded-md border p-3">
+                          <div className="bg-surface rounded-md border p-3">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
                               <span className="text-sm font-semibold text-blue-600">

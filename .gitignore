@@ -28,6 +28,7 @@
 # misc
 .DS_Store
 *.pem
+CLAUDE.local.md
 
 # debug
 npm-debug.log*
