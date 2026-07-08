@@ -26,6 +26,8 @@ interface BlockNoteSummaryViewProps {
     created_at: string;
   };
   onDirtyChange?: (isDirty: boolean) => void;
+  /** Called when a transcript reference is clicked */
+  onTranscriptRefClick?: (startTime: number, endTime: number) => void;
 }
 
 export interface BlockNoteSummaryViewRef {
@@ -73,13 +75,15 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   error = null,
   onRegenerateSummary,
   meeting,
-  onDirtyChange
+  onDirtyChange,
+  onTranscriptRefClick
 }, ref) => {
   const { format, data } = detectSummaryFormat(summaryData);
   const [isDirty, setIsDirty] = useState(false);
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Create BlockNote editor for markdown parsing
   const editor = useCreateBlockNote({
@@ -117,6 +121,77 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       }, 100);
     }
   }, [format, data?.summary_json]);
+
+  // Make transcript references [MM:SS-MM:SS] clickable in the rendered DOM
+  useEffect(() => {
+    if ((format !== 'markdown' && format !== 'blocknote') || !containerRef.current) return;
+
+    const root = containerRef.current;
+    const TIMESTAMP_REF = /\[(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\]/g;
+
+    // Find all text nodes and wrap timestamp refs in clickable elements
+    function walkTextNodes(node: Node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        if (!TIMESTAMP_REF.test(text)) return;
+        TIMESTAMP_REF.lastIndex = 0;
+
+        const fragment = document.createDocumentFragment();
+        let lastIndex = 0;
+        let match: RegExpExecArray | null;
+
+        while ((match = TIMESTAMP_REF.exec(text)) !== null) {
+          // Text before match
+          if (match.index > lastIndex) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+          }
+          // Parse timestamps
+          const startM = parseInt(match[1].split(':')[0]);
+          const startS = parseInt(match[1].split(':')[1]);
+          const endM = parseInt(match[2].split(':')[0]);
+          const endS = parseInt(match[2].split(':')[1]);
+          const startTime = startM * 60 + startS;
+          const endTime = endM * 60 + endS;
+
+          const refEl = document.createElement('span');
+          refEl.textContent = match[0];
+          refEl.className = 'transcript-ref inline text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded px-1 mx-0.5 cursor-pointer select-none hover:bg-blue-100 hover:text-blue-800 transition-colors';
+          refEl.title = `Jump to transcript ${match[0]}`;
+          refEl.dataset.start = String(startTime);
+          refEl.dataset.end = String(endTime);
+          refEl.onclick = (e) => {
+            e.stopPropagation();
+            onTranscriptRefClick?.(startTime, endTime);
+          };
+          fragment.appendChild(refEl);
+
+          lastIndex = match.index + match[0].length;
+        }
+        // Remaining text after last match
+        if (lastIndex < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+
+        node.parentNode?.replaceChild(fragment, node);
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        // Don't go into elements that might be re-rendered by BlockNote
+        const el = node as HTMLElement;
+        if (el.classList.contains('transcript-ref')) return;
+        // Process children
+        const children = Array.from(el.childNodes);
+        for (const child of children) {
+          walkTextNodes(child);
+        }
+      }
+    }
+
+    // Wait for BlockNote to render, then walk
+    const timer = setTimeout(() => {
+      walkTextNodes(root);
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [format, data?.markdown, data?.summary_json, onTranscriptRefClick]);
 
   const handleEditorChange = useCallback((blocks: Block[]) => {
     // Only set dirty flag if content has finished loading
@@ -237,7 +312,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   if (format === 'blocknote') {
     console.log('🎨 Rendering BLOCKNOTE format (direct)');
     return (
-      <div className="flex flex-col w-full">
+      <div ref={containerRef} className="flex flex-col w-full">
         <div className="w-full">
           <Editor
             initialContent={data.summary_json}
@@ -256,7 +331,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   if (format === 'markdown') {
     console.log('🎨 Rendering MARKDOWN format (parsed to BlockNote)');
     return (
-      <div className="flex flex-col w-full">
+      <div ref={containerRef} className="flex flex-col w-full">
         <div className="w-full">
           <BlockNoteView
             editor={editor}

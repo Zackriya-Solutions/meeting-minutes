@@ -274,7 +274,7 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            setAiSummary(pollingResult.data as any);
             setSummaryStatus('completed');
 
             // Show success toast

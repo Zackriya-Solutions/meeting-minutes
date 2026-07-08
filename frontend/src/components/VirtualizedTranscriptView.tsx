@@ -27,6 +27,10 @@ export interface VirtualizedTranscriptViewProps {
     showConfidence?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
+    /** When set, scrolls to the segment whose timestamp contains this time (seconds) */
+    scrollToTime?: number;
+    /** Increment to trigger scrollToTime even if time value is the same */
+    scrollToKey?: number;
 
     // Pagination props (infinite scroll)
     hasMore?: boolean;
@@ -119,6 +123,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     enableStreaming = false,
     showConfidence = true,
     disableAutoScroll = false,
+    scrollToTime,
+    scrollToKey,
     hasMore = false,
     isLoadingMore = false,
     totalCount = 0,
@@ -222,6 +228,33 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
+
+    // Scroll to specific segment when scrollToTime changes
+    useEffect(() => {
+        if (scrollToTime === undefined || segments.length === 0) return;
+
+        // Find the segment whose time range contains the target
+        let targetIndex = segments.findIndex(s =>
+            s.timestamp <= scrollToTime && (s.endTime ?? s.timestamp) >= scrollToTime
+        );
+        // Fallback: find nearest segment
+        if (targetIndex === -1) {
+            let best = 0;
+            let bestDist = Infinity;
+            for (let i = 0; i < segments.length; i++) {
+                const dist = Math.abs(segments[i].timestamp - scrollToTime);
+                if (dist < bestDist) { bestDist = dist; best = i; }
+            }
+            targetIndex = best;
+        }
+
+        if (useVirtualization) {
+            virtualizer.scrollToIndex(targetIndex, { align: 'center' });
+        } else {
+            const el = document.getElementById(`segment-${segments[targetIndex].id}`);
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, [scrollToTime, scrollToKey, segments, useVirtualization, virtualizer]);
 
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">

@@ -3,6 +3,7 @@ use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -11,6 +12,20 @@ use tracing::{error, info};
 static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap()
 });
+
+/// Matches timestamp references like [14:32-15:18] or [2:01-3:45]
+static REFERENCE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\[(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})\]").unwrap()
+});
+
+/// A parsed transcript reference extracted from the summary markdown.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptReference {
+    /// Start time in seconds (parsed from [MM:SS-MM:SS])
+    pub start_time: f64,
+    /// End time in seconds (parsed from [MM:SS-MM:SS])
+    pub end_time: f64,
+}
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
@@ -134,15 +149,23 @@ fn translation_system_prompt(target_language: &str) -> String {
     )
 }
 
+const REFERENCE_INSTRUCTION: &str = "**TRANSCRIPT REFERENCE REQUIREMENT:**\
+\nAfter each key point, decision, action item, or important detail, include the \
+timestamp range from the transcript where this was discussed, in the format `[MM:SS-MM:SS]`.\
+Use the `[MM:SS]` prefixes shown in the transcript text.\
+\nExample: \"Decision: Migrate authentication to OAuth2. [14:32-15:18]\"\
+\nExample: \"Alice will prepare the migration plan. [27:41-28:05]\"\
+\nInclude the reference at the end of each relevant item.";
+
 fn build_chunk_summary_user_prompt(chunk: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\n{REFERENCE_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
     )
 }
 
 fn build_combine_summary_user_prompt(combined_text: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.\n\n<summaries>\n{combined_text}\n</summaries>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\n{REFERENCE_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically. Preserve the transcript timestamp references from the individual summaries.\n\n<summaries>\n{combined_text}\n</summaries>"
     )
 }
 
@@ -161,6 +184,7 @@ fn build_final_report_system_prompt(
 5. If a section has no relevant info, write "None noted in this section."
 6. Output **only** the completed Markdown report.
 7. If unsure about something, omit it.
+8. {REFERENCE_INSTRUCTION}
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
@@ -278,6 +302,26 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
 
     // If no fences found, return the trimmed string
     trimmed.to_string()
+}
+
+/// Extracts transcript timestamp references from markdown text.
+///
+/// Finds all `[MM:SS-MM:SS]` or `[M:SS-MM:SS]` patterns and converts
+/// them to structured `TranscriptReference` values with start/end times in seconds.
+pub fn extract_transcript_references(markdown: &str) -> Vec<TranscriptReference> {
+    let mut refs = Vec::new();
+    for cap in REFERENCE_REGEX.captures_iter(markdown) {
+        let start_m: f64 = cap[1].parse().unwrap_or(0.0);
+        let start_s: f64 = cap[2].parse().unwrap_or(0.0);
+        let end_m: f64 = cap[3].parse().unwrap_or(0.0);
+        let end_s: f64 = cap[4].parse().unwrap_or(0.0);
+        let start_time = start_m * 60.0 + start_s;
+        let end_time = end_m * 60.0 + end_s;
+        if end_time > start_time {
+            refs.push(TranscriptReference { start_time, end_time });
+        }
+    }
+    refs
 }
 
 /// Extracts meeting name from the first heading in markdown
@@ -714,6 +758,7 @@ mod tests {
         let prompt = build_chunk_summary_user_prompt("会議の内容");
 
         assert!(prompt.contains(ENGLISH_BASE_SUMMARY_INSTRUCTION));
+        assert!(prompt.contains(REFERENCE_INSTRUCTION));
         assert!(prompt.contains("<transcript_chunk>"));
     }
 
@@ -722,6 +767,7 @@ mod tests {
         let prompt = build_combine_summary_user_prompt("chunk one\n---\nchunk two");
 
         assert!(prompt.contains(ENGLISH_BASE_SUMMARY_INSTRUCTION));
+        assert!(prompt.contains(REFERENCE_INSTRUCTION));
         assert!(prompt.contains("<summaries>"));
     }
 
@@ -730,6 +776,7 @@ mod tests {
         let prompt = build_final_report_system_prompt("Fill the section", "# <Add Title here>");
 
         assert!(prompt.contains(ENGLISH_BASE_SUMMARY_INSTRUCTION));
+        assert!(prompt.contains(REFERENCE_INSTRUCTION));
         assert!(prompt.contains("SECTION-SPECIFIC INSTRUCTIONS"));
     }
 
@@ -792,6 +839,59 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // extract_transcript_references -------------------------------------------
+
+    #[test]
+    fn extracts_single_reference() {
+        let refs = extract_transcript_references(
+            "Decision: Migrate to OAuth2. [14:32-15:18]"
+        );
+        assert_eq!(refs.len(), 1);
+        assert!((refs[0].start_time - 872.0).abs() < f64::EPSILON);
+        assert!((refs[0].end_time - 918.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extracts_multiple_references() {
+        let refs = extract_transcript_references(
+            "First point. [01:05-02:30]\nSecond point. [27:41-28:05]"
+        );
+        assert_eq!(refs.len(), 2);
+        assert!((refs[0].start_time - 65.0).abs() < f64::EPSILON);
+        assert!((refs[1].start_time - 1661.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn no_references_returns_empty() {
+        let refs = extract_transcript_references(
+            "Just a plain summary without any timestamps."
+        );
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn malformed_brackets_are_ignored() {
+        let refs = extract_transcript_references(
+            "Some text with [not a time] or [12:345-67:890]."
+        );
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn extracts_single_digit_minutes() {
+        let refs = extract_transcript_references("[1:23-4:56]");
+        assert_eq!(refs.len(), 1);
+        assert!((refs[0].start_time - 83.0).abs() < f64::EPSILON);
+        assert!((refs[0].end_time - 296.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn ignores_zero_duration_reference() {
+        // end <= start should be skipped
+        let refs = extract_transcript_references("[05:30-05:30]");
+        assert!(refs.is_empty());
     }
 
     // resolve_cached_english matrix -------------------------------------------
