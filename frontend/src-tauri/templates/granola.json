@@ -1,0 +1,11 @@
+{
+  "name": "Granola Style",
+  "description": "Topic-based notes in the Granola style: short section headings named after what was discussed, with terse factual bullets and indented context sub-bullets.",
+  "sections": [
+    {
+      "title": "Notes",
+      "instruction": "Replace this section's bold 'Notes' placeholder entirely with topic-based sections; the literal word 'Notes' must not appear in the output. Break the meeting into 2-7 topics in the order they were discussed. For each topic, output a heading line formatted as '### <Topic Heading>' where the heading is a specific 3-7 word noun phrase describing that part of the conversation (e.g. '### Front End Integration and Branch Strategy', '### Layoffs and Internship Outlook'), followed by 2-6 bullet points. Each bullet is one short, factual sentence with no filler words: record updates, facts, decisions, agreements, and who said or did what, using people's names from the transcript. State uncertainty plainly inside the bullet when the transcript is vague or tentative (e.g. 'details unclear', 'not confirmed', 'likely a factor', 'framed as hopeful'). Add at most one two-space-indented sub-bullet beneath a point, and only when it carries essential context, a reason, or a caveat for that point. Do not write paragraphs, do not editorialize or praise, do not invent owners or dates, and do not repeat the same fact under two topics. If tasks were explicitly assigned, make the final topic '### Action Items' with one bullet per task in the form '<Owner>: <task>'; omit that topic entirely when no tasks were assigned",
+      "format": "list"
+    }
+  ]
+}
