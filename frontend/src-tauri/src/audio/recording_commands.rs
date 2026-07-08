@@ -98,7 +98,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+            // Surface the actual reason (missing API key, model still downloading, unsupported
+            // provider, ...). validation_error is already user-facing per provider, e.g. Deepgram
+            // returns "Deepgram API key is not configured. Add it in Transcription settings...".
+            "userMessage": format!("Recording cannot start: {}", validation_error),
             "actionable": false
         }));
 
@@ -350,7 +353,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+            // Surface the actual reason (missing API key, model still downloading, unsupported
+            // provider, ...). validation_error is already user-facing per provider, e.g. Deepgram
+            // returns "Deepgram API key is not configured. Add it in Transcription settings...".
+            "userMessage": format!("Recording cannot start: {}", validation_error),
             "actionable": false
         }));
 
