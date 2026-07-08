@@ -6,6 +6,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
+import { DetectSpeakersButton } from './DetectSpeakersButton';
 import { useConfig } from '@/contexts/ConfigContext';
 
 
@@ -16,6 +17,8 @@ interface TranscriptButtonGroupProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  /** Refresh speakers + transcripts after a successful speaker detection. */
+  onSpeakersDetected?: () => Promise<void> | void;
 }
 
 
@@ -26,6 +29,7 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  onSpeakersDetected,
 }: TranscriptButtonGroupProps) {
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
@@ -83,6 +87,8 @@ export function TranscriptButtonGroup({
             <span className="hidden lg:inline">Enhance</span>
           </Button>
         )}
+
+        <DetectSpeakersButton meetingId={meetingId} onDetected={onSpeakersDetected} />
       </ButtonGroup>
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (

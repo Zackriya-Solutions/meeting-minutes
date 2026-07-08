@@ -1,15 +1,16 @@
-//! GigaAM model management: download / status / startup load. Files live in
-//! `app_data_dir/models/gigaam/`. Default = the int8 e2e-CTC export from
-//! `istupakov/gigaam-v3-onnx` (~224 MB): fast, small, punctuated Russian output.
+//! GigaAM model management: variant select / download / status / startup load. Files live
+//! in `app_data_dir/models/gigaam/`; the selected variant is persisted to
+//! `selected_variant.txt` so startup reloads it. Variants differ in decoder (CTC vs
+//! RNN-T) and precision (int8 vs fp32) for A/B quality testing — see `variant.rs`.
 
 use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use super::variant::GigaamVariant;
+
 const HF_BASE: &str = "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/main";
-pub const MODEL_FILE: &str = "v3_e2e_ctc.int8.onnx";
-pub const VOCAB_FILE: &str = "v3_e2e_ctc_vocab.txt";
 
 fn gigaam_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
@@ -22,8 +23,39 @@ fn gigaam_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn model_present(dir: &Path) -> bool {
-    dir.join(MODEL_FILE).exists() && dir.join(VOCAB_FILE).exists()
+fn variant_marker(dir: &Path) -> PathBuf {
+    dir.join("selected_variant.txt")
+}
+
+/// The persisted variant selection. With no marker file (fresh or pre-variant install),
+/// default to `GigaamVariant::default()` (e2e-RNN-T fp32) — but keep an already-downloaded
+/// variant if one is present, so existing installs aren't forced to re-download.
+fn read_selected(dir: &Path) -> GigaamVariant {
+    if let Some(v) = std::fs::read_to_string(variant_marker(dir))
+        .ok()
+        .and_then(|s| GigaamVariant::from_id(s.trim()))
+    {
+        return v;
+    }
+    let default = GigaamVariant::default();
+    if variant_present(dir, default) {
+        return default;
+    }
+    // Prefer any already-present variant (e.g. a legacy e2e-ctc-int8 download) over
+    // forcing the new default's download; otherwise fall back to the default.
+    GigaamVariant::ALL
+        .into_iter()
+        .find(|v| variant_present(dir, *v))
+        .unwrap_or(default)
+}
+
+fn write_selected(dir: &Path, v: GigaamVariant) -> Result<(), String> {
+    std::fs::write(variant_marker(dir), v.id()).map_err(|e| e.to_string())
+}
+
+/// True when every file the variant needs is present on disk.
+fn variant_present(dir: &Path, v: GigaamVariant) -> bool {
+    v.all_files().iter().all(|f| dir.join(f).exists())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -88,33 +120,69 @@ pub async fn gigaam_transcribe_audio(audio_data: Vec<f32>) -> Result<String, Str
 #[tauri::command]
 pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
     let dir = gigaam_dir(&app)?;
+    let selected = read_selected(&dir);
+    let variants: Vec<serde_json::Value> = GigaamVariant::ALL
+        .iter()
+        .map(|v| {
+            serde_json::json!({
+                "id": v.id(),
+                "label": v.label(),
+                "size_mb": v.approx_mb(),
+                "present": variant_present(&dir, *v),
+            })
+        })
+        .collect();
     Ok(serde_json::json!({
-        "model": "gigaam-v3-e2e-ctc",
-        "model_present": model_present(&dir),
+        "selected": selected.id(),
+        "model_present": variant_present(&dir, selected),
         "loaded": super::is_loaded(),
+        "loaded_variant": super::loaded_variant().map(|v| v.id()),
+        "variants": variants,
     }))
 }
 
-/// Download the GigaAM v3 e2e-CTC model (vocab + int8 ONNX) and load it.
+/// Persist a variant selection. If its files are already present, load it immediately
+/// (and emit `gigaam-ready`); otherwise the frontend will prompt a download. The
+/// previously loaded model is left running until the new one is ready.
+#[tauri::command]
+pub async fn gigaam_select_variant<R: Runtime>(app: AppHandle<R>, variant: String) -> Result<(), String> {
+    let v = GigaamVariant::from_id(&variant).ok_or_else(|| format!("unknown GigaAM variant: {variant}"))?;
+    let dir = gigaam_dir(&app)?;
+    write_selected(&dir, v)?;
+    if variant_present(&dir, v) {
+        let d = dir.clone();
+        tokio::task::spawn_blocking(move || super::load_global(v, d))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        let _ = app.emit("gigaam-ready", ());
+        log::info!("GigaAM variant switched to {}", v.id());
+    }
+    Ok(())
+}
+
+/// Download the currently-selected variant's files (vocab + ONNX) and load it.
 #[tauri::command]
 pub async fn gigaam_download_model<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let dir = gigaam_dir(&app)?;
-    download_file(&app, &format!("{HF_BASE}/{VOCAB_FILE}"), &dir.join(VOCAB_FILE), VOCAB_FILE).await?;
-    download_file(&app, &format!("{HF_BASE}/{MODEL_FILE}"), &dir.join(MODEL_FILE), MODEL_FILE).await?;
+    let v = read_selected(&dir);
+    for f in v.all_files() {
+        download_file(&app, &format!("{HF_BASE}/{f}"), &dir.join(f), f).await?;
+    }
 
-    let model_path = dir.join(MODEL_FILE);
-    let vocab_path = dir.join(VOCAB_FILE);
-    tokio::task::spawn_blocking(move || super::load_global(model_path, vocab_path))
+    let d = dir.clone();
+    tokio::task::spawn_blocking(move || super::load_global(v, d))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
     let _ = app.emit("gigaam-ready", ());
-    log::info!("GigaAM model downloaded and loaded");
+    log::info!("GigaAM {} downloaded and loaded", v.id());
     Ok(())
 }
 
-/// Load the GigaAM model at startup if its files are already present. Non-blocking.
+/// Load the selected GigaAM variant at startup if its files are already present.
+/// Non-blocking.
 pub async fn init_gigaam_at_startup<R: Runtime>(app: &AppHandle<R>) {
     let dir = match gigaam_dir(app) {
         Ok(d) => d,
@@ -123,11 +191,11 @@ pub async fn init_gigaam_at_startup<R: Runtime>(app: &AppHandle<R>) {
             return;
         }
     };
-    if model_present(&dir) {
-        let model_path = dir.join(MODEL_FILE);
-        let vocab_path = dir.join(VOCAB_FILE);
+    let v = read_selected(&dir);
+    if variant_present(&dir, v) {
+        let d = dir.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            if let Err(e) = super::load_global(model_path, vocab_path) {
+            if let Err(e) = super::load_global(v, d) {
                 log::warn!("failed to load GigaAM at startup: {e}");
             }
         })

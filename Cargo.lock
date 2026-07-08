@@ -3359,6 +3359,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "kodama"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f868feceed4703c842925c14232667c5f29c8059d0354154b2d06ec3bf9daf82"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3667,6 +3673,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "infer 0.15.0",
+ "kodama",
  "lazy_static",
  "libsqlite3-sys",
  "log",

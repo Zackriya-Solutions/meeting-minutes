@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -51,6 +52,21 @@ function MeetingDetailsContent() {
     refetch,
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
+
+  // Diarized speaker identities for this meeting. Kept here (alongside the
+  // transcript pagination hook) so the `diarization-complete` listener can
+  // refresh both speakers and transcripts for the currently open meeting.
+  const { speakersById, refetchSpeakers, renameSpeaker } = useMeetingSpeakers({
+    meetingId: meetingId || null,
+    onDiarized: refetch,
+  });
+
+  // Explicit refresh after a Detect action completes (immediate feedback;
+  // the diarization-complete event covers refreshes triggered elsewhere).
+  const handleSpeakersDetected = useCallback(async () => {
+    await refetchSpeakers();
+    await refetch();
+  }, [refetchSpeakers, refetch]);
 
   // Check if gemma3:1b model is available in Ollama
   const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
@@ -382,6 +398,10 @@ function MeetingDetailsContent() {
     loadedCount={loadedCount}
     onLoadMore={loadMore}
     seekToSeconds={seekToSeconds}
+    // Speaker diarization props
+    speakersById={speakersById}
+    onRenameSpeaker={renameSpeaker}
+    onSpeakersDetected={handleSpeakersDetected}
   />;
 }
 

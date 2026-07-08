@@ -142,6 +142,117 @@ impl AudioMixerRingBuffer {
 
 }
 
+/// Root-mean-square amplitude of a slice of audio samples.
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+/// Relative margin by which the system channel must exceed the microphone
+/// channel before a speech segment is attributed to remote participants.
+///
+/// Deliberately biased toward `"mic"`: a mic-only setup produces zero system
+/// energy (so everything resolves to `"mic"`), and near-ties fall back to the
+/// local speaker rather than flapping. Kept intentionally simple and easy to
+/// tune — this is a coarse channel tag, not a diarizer.
+const CHANNEL_DOMINANCE_MARGIN: f64 = 1.15;
+
+/// Pure dominance rule for channel attribution.
+///
+/// Given the integrated microphone and system energy over a speech segment,
+/// return `"system"` when the system channel clearly dominates (remote
+/// participants) and `"mic"` otherwise (the local user, and the default for
+/// silence / mic-only recordings where `system_energy == 0`).
+fn classify_channel(mic_energy: f64, system_energy: f64) -> &'static str {
+    if system_energy > mic_energy * CHANNEL_DOMINANCE_MARGIN {
+        "system"
+    } else {
+        "mic"
+    }
+}
+
+/// Tracks pre-mix per-channel (mic vs system) energy over a timeline aligned
+/// with the VAD's cumulative clock, so that finalized speech segments can be
+/// attributed to their dominant audio channel.
+///
+/// Alignment: every mixing window feeds exactly `window_ms` of audio to the VAD
+/// (a fixed 48kHz window that the VAD resamples to 16kHz), advancing the VAD's
+/// cumulative sample clock by the same `window_ms`. `SpeechSegment` start/end
+/// timestamps are stamped on that same clock (see `vad.rs`), so integrating the
+/// recorded window energies over `[start_ms, end_ms]` lines up window-for-window
+/// with the audio the VAD actually saw.
+struct ChannelEnergyTracker {
+    /// `(window_start_ms, window_end_ms, mic_rms, system_rms)` on the VAD clock.
+    windows: VecDeque<(f64, f64, f32, f32)>,
+    /// Cumulative audio time (ms) fed to the VAD so far (mirrors the VAD clock).
+    timeline_ms: f64,
+    /// Duration of one mixing window in milliseconds.
+    window_ms: f64,
+}
+
+impl ChannelEnergyTracker {
+    /// Retain at most this much history. Comfortably exceeds the longest speech
+    /// segment the VAD will accumulate before finalizing (~60s), so no window
+    /// needed by an in-progress segment is ever dropped, while bounding memory
+    /// during long silences.
+    const MAX_RETAIN_MS: f64 = 120_000.0;
+
+    fn new(window_size_samples: usize, sample_rate: u32) -> Self {
+        let window_ms = window_size_samples as f64 / sample_rate as f64 * 1000.0;
+        Self {
+            windows: VecDeque::new(),
+            timeline_ms: 0.0,
+            window_ms,
+        }
+    }
+
+    /// Record the pre-mix RMS of one aligned mic/system window and advance the
+    /// clock by one window. O(1) amortized (bounded pruning at the front).
+    fn record_window(&mut self, mic_window: &[f32], system_window: &[f32]) {
+        let start = self.timeline_ms;
+        let end = start + self.window_ms;
+        self.windows
+            .push_back((start, end, rms(mic_window), rms(system_window)));
+        self.timeline_ms = end;
+
+        // Prune history older than any plausible in-progress segment.
+        let cutoff = self.timeline_ms - Self::MAX_RETAIN_MS;
+        while let Some(&(_, w_end, _, _)) = self.windows.front() {
+            if w_end < cutoff {
+                self.windows.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Integrate mic vs system energy over `[start_ms, end_ms]` and classify the
+    /// dominant channel. Energy is `rms^2 * overlap_ms` summed over overlapping
+    /// windows. Returns `None` only when no recorded window overlaps the
+    /// interval (should not happen for live segments).
+    fn classify(&self, start_ms: f64, end_ms: f64) -> Option<String> {
+        let mut mic_energy = 0.0f64;
+        let mut system_energy = 0.0f64;
+        let mut covered = false;
+
+        for &(w_start, w_end, mic_rms, sys_rms) in &self.windows {
+            let overlap = end_ms.min(w_end) - start_ms.max(w_start);
+            if overlap > 0.0 {
+                covered = true;
+                mic_energy += (mic_rms as f64) * (mic_rms as f64) * overlap;
+                system_energy += (sys_rms as f64) * (sys_rms as f64) * overlap;
+            }
+        }
+
+        if !covered {
+            return None;
+        }
+        Some(classify_channel(mic_energy, system_energy).to_string())
+    }
+}
+
 /// Simple audio mixer without aggressive ducking
 /// Combines mic + system audio with basic clipping prevention
 struct ProfessionalAudioMixer;
@@ -613,6 +724,7 @@ impl AudioCapture {
             timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
+            speaker: None,  // Channel is assigned downstream after VAD segmentation
         };
 
         // NOTE: Raw audio is NOT sent to recording saver to prevent echo
@@ -692,6 +804,8 @@ pub struct AudioPipeline {
     // PROFESSIONAL AUDIO MIXING: Ring buffer + RMS-based mixer
     ring_buffer: AudioMixerRingBuffer,
     mixer: ProfessionalAudioMixer,
+    // Per-channel energy timeline for speaker (mic/system) attribution
+    channel_energy: ChannelEnergyTracker,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
@@ -741,6 +855,11 @@ impl AudioPipeline {
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
 
+        // Energy tracker uses the SAME window size + sample rate as the ring
+        // buffer, so its per-window duration matches the audio actually fed to
+        // the VAD (and therefore the VAD's segment timestamps).
+        let channel_energy = ChannelEnergyTracker::new(ring_buffer.window_size_samples, sample_rate);
+
         // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
         let _ = target_chunk_duration_ms;
 
@@ -759,6 +878,7 @@ impl AudioPipeline {
             // Initialize professional audio mixing
             ring_buffer,
             mixer,
+            channel_energy,
             recording_sender_for_mixed: None,  // Will be set by manager
         }
     }
@@ -822,6 +942,11 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
+                            // Record per-channel energy BEFORE mixing collapses the two
+                            // streams into one buffer. This advances the energy timeline
+                            // by exactly one window, in lock-step with the VAD clock.
+                            self.channel_energy.record_window(&mic_window, &sys_window);
+
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
@@ -838,8 +963,13 @@ impl AudioPipeline {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
                                         if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
-                                                  duration_ms, segment.samples.len());
+                                            // Attribute this segment to its dominant audio channel
+                                            // by integrating mic vs system energy over its timespan.
+                                            let speaker = self.channel_energy
+                                                .classify(segment.start_timestamp_ms, segment.end_timestamp_ms);
+
+                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples, speaker={:?}",
+                                                  duration_ms, segment.samples.len(), speaker);
 
                                             let transcription_chunk = AudioChunk {
                                                 data: segment.samples,
@@ -847,6 +977,7 @@ impl AudioPipeline {
                                                 timestamp: segment.start_timestamp_ms / 1000.0,
                                                 chunk_id: self.chunk_id_counter,
                                                 device_type: DeviceType::Microphone,  // Mixed audio
+                                                speaker,
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -873,6 +1004,7 @@ impl AudioPipeline {
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone,  // Mixed audio
+                                    speaker: None,  // Recording path is channel-agnostic
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
@@ -908,8 +1040,11 @@ impl AudioPipeline {
 
                     // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
                     if segment.samples.len() >= 800 {
-                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
-                              duration_ms, segment.samples.len());
+                        let speaker = self.channel_energy
+                            .classify(segment.start_timestamp_ms, segment.end_timestamp_ms);
+
+                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples, speaker={:?}",
+                              duration_ms, segment.samples.len(), speaker);
 
                         let transcription_chunk = AudioChunk {
                             data: segment.samples,
@@ -917,6 +1052,7 @@ impl AudioPipeline {
                             timestamp: segment.start_timestamp_ms / 1000.0,
                             chunk_id: self.chunk_id_counter,
                             device_type: DeviceType::Microphone,
+                            speaker,
                         };
 
                         if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -1039,6 +1175,7 @@ impl AudioPipelineManager {
                 timestamp: 0.0,
                 chunk_id: u64::MAX, // Special ID to indicate flush
                 device_type: super::recording_state::DeviceType::Microphone,
+                speaker: None,
             };
 
             if let Err(e) = sender.send(flush_chunk) {
@@ -1059,6 +1196,7 @@ impl AudioPipelineManager {
                         timestamp: 0.0,
                         chunk_id: u64::MAX - (i as u64),
                         device_type: super::recording_state::DeviceType::Microphone,
+                        speaker: None,
                     };
                     let _ = sender.send(additional_flush);
                 }
@@ -1076,5 +1214,71 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_channel_prefers_mic_on_tie_and_silence() {
+        // Silence on both channels (e.g. mic-only setup → system_energy == 0).
+        assert_eq!(classify_channel(0.0, 0.0), "mic");
+        // Exact tie stays with the local speaker.
+        assert_eq!(classify_channel(1.0, 1.0), "mic");
+    }
+
+    #[test]
+    fn classify_channel_detects_clear_dominance() {
+        // Remote participant clearly louder → system.
+        assert_eq!(classify_channel(0.1, 10.0), "system");
+        // Local speaker clearly louder → mic.
+        assert_eq!(classify_channel(10.0, 0.1), "mic");
+    }
+
+    #[test]
+    fn classify_channel_respects_dominance_margin() {
+        // System slightly above mic but within the dead-band → still mic.
+        assert_eq!(classify_channel(1.0, 1.10), "mic");
+        // System beyond the margin → system.
+        assert_eq!(classify_channel(1.0, 1.20), "system");
+    }
+
+    #[test]
+    fn tracker_classifies_dominant_channel_over_segment() {
+        // window_size 8000 @ 16kHz → 500ms windows for easy arithmetic.
+        let mut tracker = ChannelEnergyTracker::new(8000, 16000);
+        assert!((tracker.window_ms - 500.0).abs() < 1e-9);
+
+        // Window 0 [0,500): system dominates. Window 1 [500,1000): mic dominates.
+        tracker.record_window(&[0.05; 8000], &[0.9; 8000]);
+        tracker.record_window(&[0.9; 8000], &[0.05; 8000]);
+
+        // A segment covering only the first window → system.
+        assert_eq!(tracker.classify(0.0, 500.0).as_deref(), Some("system"));
+        // A segment covering only the second window → mic.
+        assert_eq!(tracker.classify(500.0, 1000.0).as_deref(), Some("mic"));
+        // A segment straddling both windows equally → mic (tie/margin default).
+        assert_eq!(tracker.classify(0.0, 1000.0).as_deref(), Some("mic"));
+    }
+
+    #[test]
+    fn tracker_returns_none_without_overlap() {
+        let tracker = ChannelEnergyTracker::new(8000, 16000);
+        // No windows recorded → nothing to integrate.
+        assert_eq!(tracker.classify(0.0, 500.0), None);
+    }
+
+    #[test]
+    fn tracker_prunes_old_windows() {
+        let mut tracker = ChannelEnergyTracker::new(8000, 16000); // 500ms windows
+        // Record far more history than MAX_RETAIN_MS (120s / 0.5s = 240 windows).
+        let total = (ChannelEnergyTracker::MAX_RETAIN_MS / 500.0) as usize + 50;
+        for _ in 0..total {
+            tracker.record_window(&[0.1; 8000], &[0.1; 8000]);
+        }
+        // Memory stays bounded near the retention window, not the full history.
+        assert!(tracker.windows.len() <= (ChannelEnergyTracker::MAX_RETAIN_MS / 500.0) as usize + 1);
     }
 }

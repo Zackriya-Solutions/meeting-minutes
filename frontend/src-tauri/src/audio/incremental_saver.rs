@@ -440,6 +440,7 @@ mod tests {
                 timestamp: i as f64 * 0.5,  // timestamp in seconds
                 chunk_id: i as u64,
                 device_type: DeviceType::Microphone,
+                speaker: None,
             };
             saver.add_chunk(chunk).unwrap();
         }

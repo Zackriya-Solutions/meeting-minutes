@@ -31,6 +31,12 @@ interface TranscriptPanelProps {
 
   /** Jump-to-timestamp (seconds) from search results / RAG citations. */
   scrollToTimestamp?: number | null;
+
+  // Speaker diarization props
+  speakersById?: Map<number, string> | null;
+  onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+  /** Refresh speakers + transcripts after a successful detect. */
+  onSpeakersDetected?: () => Promise<void> | void;
 }
 
 export function TranscriptPanel({
@@ -52,6 +58,9 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
   scrollToTimestamp = null,
+  speakersById = null,
+  onRenameSpeaker,
+  onSpeakersDetected,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -65,6 +74,8 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker: t.speaker,
+      speaker_id: t.speaker_id,
     }));
   }, [transcripts, usePagination, segments]);
 
@@ -79,6 +90,7 @@ export function TranscriptPanel({
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
+          onSpeakersDetected={onSpeakersDetected}
         />
       </div>
 
@@ -99,6 +111,8 @@ export function TranscriptPanel({
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
           scrollToTimestamp={scrollToTimestamp}
+          speakersById={speakersById}
+          onRenameSpeaker={onRenameSpeaker}
         />
       </div>
 

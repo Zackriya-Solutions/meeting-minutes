@@ -159,42 +159,55 @@ impl JobHandler for DiarizeHandler {
 
     async fn run(
         &self,
-        _ctx: &JobContext,
+        ctx: &JobContext,
         meeting_id: Option<&str>,
         _payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
-        use crate::pipeline::diarization::{Diarizer, DiarizerConfig};
+        use crate::pipeline::diarization_commands::{app_handle, run_diarization_core, DiarizeError};
 
-        let meeting_id = meeting_id.unwrap_or("<none>");
+        let meeting_id = meeting_id.ok_or_else(|| anyhow::anyhow!("diarize requires a meeting_id"))?;
 
-        // Locate the diarization model (env override for now; wired to app paths later).
-        let model_dir = std::env::var("MEETILY_DIARIZATION_MODEL_DIR")
-            .ok()
-            .map(std::path::PathBuf::from);
-
-        let diarizer = match model_dir.map(|d| Diarizer::load(DiarizerConfig { model_dir: d })) {
-            Some(Ok(d)) => d,
-            _ => {
-                // DEGRADATION RULE (Phase 2): no model -> succeed with segments left
-                // unattributed (speaker_id NULL). Must NOT fail the pipeline.
-                log::info!(
-                    "[diarize] meeting {meeting_id}: diarization model unavailable; \
-                     leaving segments unattributed (search/RAG unaffected)"
-                );
-                return Ok(());
-            }
+        // The runner owns no AppHandle; the diarize core reaches Tauri (model dir + event
+        // emission) via the process-wide handle set at startup. If it is absent (should not
+        // happen in a running app), degrade gracefully — segments stay unattributed.
+        let Some(app) = app_handle() else {
+            log::info!(
+                "[diarize] meeting {meeting_id}: app handle unavailable; \
+                 leaving segments unattributed (search/RAG unaffected)"
+            );
+            return Ok(());
         };
 
-        // With a model present (future), the flow is:
-        //   1. resolve the meeting audio file path,
-        //   2. `diarizer.diarize(audio)` -> turns + per-cluster embeddings,
-        //   3. for each segment: `assign_segment(...)` -> cluster (or NULL if ambiguous),
-        //   4. `match_speaker(cluster_emb, known, tau)` -> existing speaker or new,
-        //   5. UPDATE transcripts SET speaker_id = ? ; fold embeddings into speakers.
-        // All five use the unit-tested pure helpers in `pipeline::diarization`.
-        let _ = diarizer; // silence unused until audio wiring lands
-        log::warn!("[diarize] meeting {meeting_id}: model present but audio wiring pending");
-        Ok(())
+        // Diarization degrades safely: model/recording absent -> succeed with segments left
+        // unattributed. Only genuine failures propagate (retryable). Because diarize is its
+        // own job (chunk_embed already ran and enqueued extract in parallel), a failure here
+        // can never block search or extraction.
+        match run_diarization_core(&app, &ctx.pool, meeting_id).await {
+            Ok(o) => {
+                log::info!(
+                    "[diarize] meeting {meeting_id}: {} speaker(s), {}/{} segment(s) attributed",
+                    o.speaker_count,
+                    o.assigned_segments,
+                    o.total_segments
+                );
+                Ok(())
+            }
+            Err(DiarizeError::ModelsUnavailable) => {
+                log::info!(
+                    "[diarize] meeting {meeting_id}: diarization models unavailable; \
+                     leaving segments unattributed (search/RAG unaffected)"
+                );
+                Ok(())
+            }
+            Err(DiarizeError::NoRecording) => {
+                log::info!(
+                    "[diarize] meeting {meeting_id}: no saved recording; \
+                     leaving segments unattributed"
+                );
+                Ok(())
+            }
+            Err(DiarizeError::Other(e)) => Err(e),
+        }
     }
 }
 

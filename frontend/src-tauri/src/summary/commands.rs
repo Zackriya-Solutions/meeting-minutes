@@ -365,6 +365,19 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
+
+    // Rebuild the summary input with speaker labels when this meeting's stored transcripts
+    // carry speaker info (a diarized `speaker_id` or a 'mic'/'system' channel tag). The
+    // frontend concatenates `text` WITHOUT labels, so without this the LLM never learns who
+    // said what. Doing it here — keyed on `meeting_id`, before chunk storage / language
+    // detection / caching / the summary itself — covers both Generate and Regenerate at once,
+    // keeps renamed speaker names fresh at generation time, and leaves pre-diarization and
+    // unsaved/live meetings byte-for-bit unchanged (falls back to the passed `text`).
+    let text = crate::summary::transcript_labeling::build_speaker_labeled_transcript(
+        &pool, &m_id, text,
+    )
+    .await;
+
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 

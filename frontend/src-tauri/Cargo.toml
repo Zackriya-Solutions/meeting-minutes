@@ -161,6 +161,10 @@ libsqlite3-sys = "0.30"
 # Fuzzy string matching for entity resolution (PLAN.md Phase 3, Jaro-Winkler).
 strsim = "0.10.0"
 
+# Agglomerative hierarchical clustering for speaker diarization (PLAN.md Phase 2).
+# Pure-Rust, MIT; used to cluster per-turn speaker embeddings into global speakers.
+kodama = "0.3"
+
 # HuggingFace tokenizer for the local embedder (loads tokenizer.json). default-features
 # off to avoid the progressbar/esaxx extras; `onig` supplies the regex backend.
 tokenizers = { version = "0.20", default-features = false, features = ["onig"] }

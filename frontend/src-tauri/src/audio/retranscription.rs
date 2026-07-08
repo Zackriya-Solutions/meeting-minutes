@@ -138,7 +138,10 @@ pub async fn start_retranscription<R: Runtime>(
 
 /// Find audio file in meeting folder
 /// Tries common names first, then scans for any file with an audio extension
-fn find_audio_file(folder: &Path) -> Result<PathBuf> {
+///
+/// Shared with the diarization pipeline (`pipeline::diarization_commands`), which locates
+/// the same saved recording to diarize a finalized meeting.
+pub(crate) fn find_audio_file(folder: &Path) -> Result<PathBuf> {
     let candidates = [
         "audio.mp4", "audio.m4a", "audio.wav", "audio.mp3",
         "audio.flac", "audio.ogg", "recording.mp4",

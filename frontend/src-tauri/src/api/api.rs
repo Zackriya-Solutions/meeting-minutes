@@ -137,6 +137,12 @@ pub struct MeetingTranscript {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    // Audio-channel source: 'mic' (local user) | 'system' (remote participants) | NULL
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    // Resolved diarized speaker profile id; NULL when unattributed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<i64>,
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -188,6 +194,10 @@ pub struct TranscriptSegment {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    // Audio-channel source: 'mic' (local user) | 'system' (remote participants) | NULL.
+    // `default` so segments deserialized from the frontend without this field are None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -878,6 +888,8 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
+                    speaker: t.speaker,
+                    speaker_id: t.speaker_id,
                 })
                 .collect::<Vec<_>>();
 

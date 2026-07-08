@@ -22,6 +22,10 @@ pub struct AudioChunk {
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    /// Dominant audio channel for this chunk when known: `Some("mic")` for the
+    /// local speaker, `Some("system")` for remote participants, `None` when the
+    /// channel is unknown (e.g. raw capture chunks or recording-only chunks).
+    pub speaker: Option<String>,
 }
 
 /// Processed audio chunk (post-VAD) for recording

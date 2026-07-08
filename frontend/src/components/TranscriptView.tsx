@@ -1,6 +1,6 @@
 'use client';
 
-import { Transcript } from '@/types';
+import { Transcript, resolveSpeakerLabel } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -273,6 +273,9 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
           || (originalWasEmpty && !isStreaming ? '[Silence]' : '');
 
+        // Speaker attribution label ("You" for mic, "Others" for system audio)
+        const speakerLabel = resolveSpeakerLabel(transcript);
+
         return (
           <motion.div
             key={transcript.id ? `${transcript.id}-${index}` : `transcript-${index}`}
@@ -282,28 +285,35 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
             className="mb-3"
           >
             <div className="flex items-start gap-2">
-              <Tooltip>
-                <TooltipTrigger>
-                  <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
-                    {transcript.audio_start_time !== undefined
-                      ? formatRecordingTime(transcript.audio_start_time)
-                      : transcript.timestamp}
+              <div className="flex flex-col items-start flex-shrink-0 min-w-[50px] mt-1">
+                {speakerLabel && (
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 leading-tight">
+                    {speakerLabel}
                   </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {transcript.duration !== undefined && (
+                )}
+                <Tooltip>
+                  <TooltipTrigger>
                     <span className="text-xs text-gray-400">
-                      {transcript.duration.toFixed(1)}s
-                      {transcript.confidence !== undefined && (
-                        <ConfidenceIndicator
-                          confidence={transcript.confidence}
-                          showIndicator={showConfidence}
-                        />
-                      )}
+                      {transcript.audio_start_time !== undefined
+                        ? formatRecordingTime(transcript.audio_start_time)
+                        : transcript.timestamp}
                     </span>
-                  )}
-                </TooltipContent>
-              </Tooltip>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {transcript.duration !== undefined && (
+                      <span className="text-xs text-gray-400">
+                        {transcript.duration.toFixed(1)}s
+                        {transcript.confidence !== undefined && (
+                          <ConfidenceIndicator
+                            confidence={transcript.confidence}
+                            showIndicator={showConfidence}
+                          />
+                        )}
+                      </span>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
               <div className="flex-1">
                 {isStreaming ? (
                   // Streaming transcript - show in bubble (full width)
