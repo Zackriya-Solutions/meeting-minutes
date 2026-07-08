@@ -16,9 +16,7 @@ const MainContent: React.FC<MainContentProps> = ({ children }) => {
         isCollapsed ? 'ml-16' : 'ml-64'
       }`}
     >
-      <div className="pl-8">
-        {children}
-      </div>
+      {children}
     </main>
   );
 };

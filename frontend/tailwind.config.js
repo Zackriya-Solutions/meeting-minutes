@@ -1,3 +1,19 @@
+// Warm dark neutral ramp shared by every neutral family so stray
+// neutral/slate/zinc/stone classes can't render light-mode colors.
+const warmGray = {
+	'50': '#212120',
+	'100': '#2C2C29',
+	'200': '#35352F',
+	'300': '#41413A',
+	'400': '#8C8C82',
+	'500': '#A4A499',
+	'600': '#BDBDB1',
+	'700': '#D1D1C6',
+	'800': '#E1E1D7',
+	'900': '#EDEDE4',
+	'950': '#F7F7F1'
+}
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
     darkMode: ['class'],
@@ -25,19 +41,11 @@ module.exports = {
   			// existing classes keep their *semantic* role on a dark canvas.
   			// Low shades (50-300) stay dark (fills/borders), high shades (400-900)
   			// become light (icons/text) - i.e. the ramp is inverted around its middle.
-  			gray: {
-  				'50': '#212120',
-  				'100': '#2C2C29',
-  				'200': '#35352F',
-  				'300': '#41413A',
-  				'400': '#8C8C82',
-  				'500': '#A4A499',
-  				'600': '#BDBDB1',
-  				'700': '#D1D1C6',
-  				'800': '#E1E1D7',
-  				'900': '#EDEDE4',
-  				'950': '#F7F7F1'
-  			},
+  			gray: warmGray,
+  			neutral: warmGray,
+  			slate: warmGray,
+  			zinc: warmGray,
+  			stone: warmGray,
   			blue: {
   				'50': '#1E2A3E',
   				'100': '#233650',
