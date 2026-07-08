@@ -563,6 +563,7 @@ pub fn run() {
             pipeline::diarization_commands::rename_speaker,
             gigaam_engine::commands::gigaam_status,
             gigaam_engine::commands::gigaam_download_model,
+            gigaam_engine::commands::gigaam_select_variant,
             gigaam_engine::commands::gigaam_transcribe_audio,
             collections::commands::create_collection,
             collections::commands::add_meeting_to_collection,

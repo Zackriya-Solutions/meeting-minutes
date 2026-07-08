@@ -5,10 +5,19 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Download, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 
+interface VariantInfo {
+  id: string;
+  label: string;
+  size_mb: number;
+  present: boolean;
+}
+
 interface GigaamStatus {
-  model: string;
+  selected: string;
   model_present: boolean;
   loaded: boolean;
+  loaded_variant: string | null;
+  variants: VariantInfo[];
 }
 
 interface DownloadProgress {
@@ -23,12 +32,14 @@ function mb(bytes: number): string {
 }
 
 /**
- * GigaAM v3 (Russian ASR) model manager: download + status. Mirrors the embedding-model
- * card. The transcript provider is set to `gigaam` by the parent when this is shown.
+ * GigaAM v3 (Russian ASR) model manager: pick a variant (CTC/RNN-T × int8/fp32) for A/B
+ * quality testing, download it, and see load status. The transcript provider is set to
+ * `gigaam` by the parent when this is shown.
  */
 export function GigaamModelManager() {
   const [status, setStatus] = useState<GigaamStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +55,7 @@ export function GigaamModelManager() {
       unProgress = await listen<DownloadProgress>('gigaam-download-progress', (e) => setProgress(e.payload));
       unReady = await listen('gigaam-ready', () => {
         setDownloading(false);
+        setSwitching(false);
         setProgress(null);
         refresh();
       });
@@ -53,6 +65,22 @@ export function GigaamModelManager() {
       unReady?.();
     };
   }, [refresh]);
+
+  const selectVariant = useCallback(
+    async (variant: string) => {
+      setError(null);
+      setSwitching(true);
+      try {
+        await invoke('gigaam_select_variant', { variant });
+        refresh();
+      } catch (e) {
+        setError(typeof e === 'string' ? e : 'Failed to switch variant.');
+      } finally {
+        setSwitching(false);
+      }
+    },
+    [refresh],
+  );
 
   const download = useCallback(async () => {
     setError(null);
@@ -67,8 +95,11 @@ export function GigaamModelManager() {
     }
   }, [refresh]);
 
-  const loaded = !!status?.loaded;
+  const selected = status?.variants.find((v) => v.id === status.selected) ?? null;
   const present = !!status?.model_present;
+  const loaded = !!status?.loaded;
+  // The selected variant is the one actually running only if it's loaded AND matches.
+  const selectedActive = loaded && status?.loaded_variant === status?.selected;
 
   return (
     <div className="rounded-xl border border-gray-200 p-5">
@@ -76,10 +107,10 @@ export function GigaamModelManager() {
         <div>
           <h3 className="text-sm font-semibold text-gray-900">GigaAM v3 (Russian)</h3>
           <p className="text-xs text-gray-400">
-            Sber ASR · e2e-CTC · punctuated &amp; capitalized · ~224&nbsp;MB · fully local
+            Sber ASR · punctuated &amp; capitalized · fully local
           </p>
         </div>
-        {loaded ? (
+        {selectedActive ? (
           <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
             <CheckCircle2 className="h-3.5 w-3.5" /> Active
           </span>
@@ -88,6 +119,26 @@ export function GigaamModelManager() {
         ) : (
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Not downloaded</span>
         )}
+      </div>
+
+      {/* Variant selector for A/B quality testing */}
+      <div className="mt-4">
+        <label className="mb-1 block text-xs font-medium text-gray-600">Model variant</label>
+        <select
+          value={status?.selected ?? 'e2e-rnnt-fp32'}
+          onChange={(e) => selectVariant(e.target.value)}
+          disabled={!status || downloading || switching}
+          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none disabled:opacity-50"
+        >
+          {(status?.variants ?? []).map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.label} · ~{v.size_mb} MB{v.present ? ' · installed' : ''}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-gray-400">
+          RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger &amp; slower).
+        </p>
       </div>
 
       <div className="mt-4">
@@ -111,10 +162,15 @@ export function GigaamModelManager() {
               />
             </div>
           </div>
-        ) : loaded ? (
+        ) : switching ? (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading {selected?.label ?? 'variant'}…
+          </div>
+        ) : selectedActive ? (
           <div className="flex items-center gap-2 text-sm font-medium text-green-600">
             <CheckCircle2 className="h-4 w-4" />
-            Ready — recordings will transcribe with GigaAM
+            Ready — recordings will transcribe with this variant
           </div>
         ) : (
           <button
@@ -122,8 +178,16 @@ export function GigaamModelManager() {
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
           >
             <Download className="h-4 w-4" />
-            {present ? 'Re-download model' : 'Download model'}
+            {present ? 'Re-download variant' : `Download variant (~${selected?.size_mb ?? '?'} MB)`}
           </button>
+        )}
+
+        {/* Loaded-vs-selected mismatch hint (e.g. selected a new variant that still needs a download) */}
+        {!switching && !downloading && loaded && !selectedActive && (
+          <p className="mt-2 text-xs text-amber-600">
+            Currently running <span className="font-medium">{status?.loaded_variant}</span>.
+            {present ? ' Restart to load the selected variant.' : ' Download the selected variant to switch.'}
+          </p>
         )}
 
         {error && (
