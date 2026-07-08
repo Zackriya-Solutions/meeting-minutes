@@ -2,9 +2,18 @@
 
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
-import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
+import { VirtualizedTranscriptView, type TranscriptViewHandle } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { MeetingTimeline } from './MeetingTimeline';
+import { MeetingAudioPlayer } from './MeetingAudioPlayer';
+import {
+  generateTimeline,
+  findActiveMarkerId,
+  findActiveSegmentIdAtTime,
+  type TimelineMarker,
+} from '@/lib/meeting-timeline';
+import { useAudioPlayer } from '@/hooks/useAudioPlayer';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -64,6 +73,96 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  // Imperative handle to the transcript view for timeline-driven navigation.
+  const transcriptViewRef = useRef<TranscriptViewHandle>(null);
+  const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(true);
+
+  // Resolve the finalized meeting recording (saved as `audio.mp4` in the
+  // meeting folder) so it can be played back and seeked from the timeline.
+  // Note: recordings live outside the app's data dir (e.g. ~/Music), so we do
+  // not use the permission-scoped `plugin-fs` here. We build the path and let
+  // the audio loader (`read_audio_file`) report whether it can be read; the
+  // player is only shown once the audio loads successfully.
+  const [audioPath, setAudioPath] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const resolveAudio = async () => {
+      if (isRecording || !meetingFolderPath) {
+        setAudioPath(null);
+        return;
+      }
+      try {
+        const { join } = await import('@tauri-apps/api/path');
+        const candidate = await join(meetingFolderPath, 'audio.mp4');
+        if (!cancelled) setAudioPath(candidate);
+      } catch {
+        if (!cancelled) setAudioPath(null);
+      }
+    };
+    resolveAudio();
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingFolderPath, isRecording]);
+
+  const audio = useAudioPlayer(audioPath);
+
+  // Derive timeline key moments from the loaded segments. Only meaningful once
+  // recording has stopped and the transcript is available.
+  const timelineMarkers = useMemo<TimelineMarker[]>(() => {
+    if (isRecording) return [];
+    return generateTimeline(
+      convertedSegments.map((segment) => ({
+        id: segment.id,
+        startTime: segment.timestamp,
+        endTime: segment.endTime,
+        text: segment.text,
+      })),
+    );
+  }, [convertedSegments, isRecording]);
+
+  // Lightweight segment shape reused for resolving the active segment during
+  // playback (see the follow-playback effect below).
+  const playableSegments = useMemo(
+    () => convertedSegments.map((segment) => ({ id: segment.id, startTime: segment.timestamp })),
+    [convertedSegments],
+  );
+
+  const handleMarkerSelect = useCallback(
+    (marker: TimelineMarker) => {
+      setActiveMarkerId(marker.id);
+      setActiveSegmentId(marker.segmentId);
+      transcriptViewRef.current?.scrollToSegment(marker.segmentId);
+      // Jump audio playback to the same moment when a recording is available.
+      if (audioPath) {
+        audio.seek(marker.time);
+        audio.play();
+      }
+    },
+    [audioPath, audio],
+  );
+
+  // While playing, keep the active marker and transcript segment in sync with
+  // the playback position. Setting the same id is a no-op, so this stays cheap.
+  useEffect(() => {
+    if (!audio.isPlaying) return;
+    const segmentId = findActiveSegmentIdAtTime(playableSegments, audio.currentTime);
+    if (segmentId) setActiveSegmentId(segmentId);
+    const markerId = findActiveMarkerId(timelineMarkers, audio.currentTime);
+    if (markerId) setActiveMarkerId(markerId);
+  }, [audio.currentTime, audio.isPlaying, playableSegments, timelineMarkers]);
+
+  const handleToggleTimeline = useCallback(() => {
+    setIsTimelineOpen((open) => !open);
+  }, []);
+
+  const showTimeline = !isRecording && timelineMarkers.length > 0;
+  // Show the player once a recording path is resolved; hide it if the audio
+  // could not be loaded (e.g. the meeting has no recording).
+  const showAudioPlayer = !isRecording && audioPath !== null && !audio.error;
+
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
       {/* Title area */}
@@ -78,9 +177,38 @@ export function TranscriptPanel({
         />
       </div>
 
+      {/* Recorded audio transport (play / seek), when a recording exists */}
+      {showAudioPlayer && (
+        <div className="border-b border-gray-200">
+          <MeetingAudioPlayer
+            isPlaying={audio.isPlaying}
+            currentTime={audio.currentTime}
+            duration={audio.duration}
+            error={audio.error}
+            onPlay={audio.play}
+            onPause={audio.pause}
+            onSeek={audio.seek}
+          />
+        </div>
+      )}
+
+      {/* Interactive timeline of key moments (collapsible) */}
+      {showTimeline && (
+        <MeetingTimeline
+          markers={timelineMarkers}
+          activeMarkerId={activeMarkerId}
+          onMarkerSelect={handleMarkerSelect}
+          collapsible
+          isOpen={isTimelineOpen}
+          onToggleOpen={handleToggleTimeline}
+          className="max-h-[38vh] border-b border-gray-200"
+        />
+      )}
+
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
         <VirtualizedTranscriptView
+          ref={transcriptViewRef}
           segments={convertedSegments}
           isRecording={isRecording}
           isPaused={false}
@@ -89,6 +217,7 @@ export function TranscriptPanel({
           enableStreaming={false}
           showConfidence={true}
           disableAutoScroll={disableAutoScroll}
+          activeSegmentId={activeSegmentId}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}

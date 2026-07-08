@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
+import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo, forwardRef, useImperativeHandle } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { cn } from "@/lib/utils";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
@@ -34,6 +35,14 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    /** Id of the segment to visually highlight (e.g. selected from the timeline). */
+    activeSegmentId?: string | null;
+}
+
+/** Imperative API exposed via ref for programmatic navigation. */
+export interface TranscriptViewHandle {
+    /** Scrolls the given segment into view, if it is currently loaded. */
+    scrollToSegment: (segmentId: string) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -71,6 +80,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    isActive = false,
 }: {
     id: string;
     timestamp: number;
@@ -78,11 +88,18 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    isActive?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div
+            id={`segment-${id}`}
+            className={cn(
+                'mb-3 rounded-md transition-colors',
+                isActive && 'bg-blue-50 px-2 -mx-2 ring-1 ring-blue-200',
+            )}
+        >
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -110,7 +127,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     );
 });
 
-export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
+export const VirtualizedTranscriptView = forwardRef<TranscriptViewHandle, VirtualizedTranscriptViewProps>(
+    function VirtualizedTranscriptView({
     segments,
     isRecording = false,
     isPaused = false,
@@ -124,7 +142,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
-}) => {
+    activeSegmentId = null,
+}, ref) {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
@@ -156,6 +175,21 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         virtualizationThreshold: VIRTUALIZATION_THRESHOLD,
         disableAutoScroll,
     });
+
+    // Expose an imperative scroll-to-segment API for the meeting timeline.
+    const scrollToSegment = useCallback((segmentId: string) => {
+        const index = segments.findIndex((segment) => segment.id === segmentId);
+        if (index < 0) return;
+
+        if (segments.length >= VIRTUALIZATION_THRESHOLD) {
+            virtualizer.scrollToIndex(index, { align: 'center' });
+        } else {
+            const element = document.getElementById(`segment-${segmentId}`);
+            element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, [segments, virtualizer]);
+
+    useImperativeHandle(ref, () => ({ scrollToSegment }), [scrollToSegment]);
 
     // Streaming text effect hook (typewriter animation for new transcripts)
     const { streamingSegmentId, getDisplayText } = useTranscriptStreaming(
@@ -296,6 +330,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        isActive={segment.id === activeSegmentId}
                                     />
                                 </div>
                             );
@@ -352,6 +387,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        isActive={segment.id === activeSegmentId}
                                     />
                                 </motion.div>
                             );
@@ -391,4 +427,4 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             </div>
         </div>
     );
-};
+});
