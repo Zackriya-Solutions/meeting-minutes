@@ -721,9 +721,13 @@ pub async fn api_get_deepgram_options<R: Runtime>(
 ) -> Result<serde_json::Value, String> {
     let pool = state.db_manager.pool();
     match SettingsRepository::get_deepgram_options(pool).await {
-        Ok((keyterm, diarize)) => Ok(serde_json::json!({
-            "keyterm": keyterm.unwrap_or_default(),
-            "diarize": diarize.map(|d| d != 0).unwrap_or(true),
+        Ok(opts) => Ok(serde_json::json!({
+            "keyterm": opts.keyterm.unwrap_or_default(),
+            "diarize": opts.diarize.map(|d| d != 0).unwrap_or(true),
+            // Privacy-first default: opt OUT of Deepgram's model-improvement program when unset.
+            "mipOptOut": opts.mip_opt_out.map(|m| m != 0).unwrap_or(true),
+            // Deepgram-specific language; empty string means "use nova-3 default (multi)".
+            "language": opts.language.unwrap_or_default(),
         })),
         Err(e) => {
             log_error!("Failed to get Deepgram options: {}", e);
@@ -738,11 +742,19 @@ pub async fn api_save_deepgram_options<R: Runtime>(
     state: tauri::State<'_, AppState>,
     keyterm: Option<String>,
     diarize: bool,
+    #[allow(non_snake_case)] mipOptOut: bool,
+    language: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let pool = state.db_manager.pool();
-    if let Err(e) =
-        SettingsRepository::save_deepgram_options(pool, keyterm.as_deref(), diarize).await
+    if let Err(e) = SettingsRepository::save_deepgram_options(
+        pool,
+        keyterm.as_deref(),
+        diarize,
+        mipOptOut,
+        language.as_deref().filter(|l| !l.is_empty()),
+    )
+    .await
     {
         log_error!("Failed to save Deepgram options: {}", e);
         return Err(e.to_string());

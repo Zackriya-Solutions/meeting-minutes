@@ -9,6 +9,7 @@ import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 import { Textarea } from './ui/textarea';
 import { Switch } from './ui/switch';
+import { LanguageSelection } from './LanguageSelection';
 
 
 export interface TranscriptModelProps {
@@ -31,6 +32,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
     const [deepgramKeyterm, setDeepgramKeyterm] = useState<string>('');
     const [deepgramDiarize, setDeepgramDiarize] = useState<boolean>(true);
+    const [deepgramMipOptOut, setDeepgramMipOptOut] = useState<boolean>(true);
+    // Deepgram-specific language, kept separate from the global (Whisper/Parakeet) pref.
+    const [deepgramLanguage, setDeepgramLanguage] = useState<string>('');
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
@@ -42,9 +46,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         if (uiProvider !== 'deepgram') return;
         (async () => {
             try {
-                const opts = await invoke('api_get_deepgram_options') as { keyterm: string; diarize: boolean };
+                const opts = await invoke('api_get_deepgram_options') as { keyterm: string; diarize: boolean; mipOptOut: boolean; language: string };
                 setDeepgramKeyterm(opts.keyterm || '');
                 setDeepgramDiarize(opts.diarize ?? true);
+                setDeepgramMipOptOut(opts.mipOptOut ?? true);
+                setDeepgramLanguage(opts.language || '');
             } catch (err) {
                 console.error('Failed to load Deepgram options:', err);
             }
@@ -71,12 +77,20 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
-        deepgram: ['nova-3', 'nova-2', 'flux-general-en', 'flux-general-multi'],
+        deepgram: ['nova-3', 'flux-general-en', 'flux-general-multi'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
     };
     const requiresApiKey = uiProvider === 'deepgram' || uiProvider === 'elevenLabs' || uiProvider === 'openai' || uiProvider === 'groq';
+    // Flux models pick their language via the model itself and ignore nova-only knobs
+    // (language selection, diarization), so those controls are hidden for Flux.
+    const isFluxModel = transcriptModelConfig.model?.startsWith('flux') ?? false;
+
+    const persistDeepgramLanguage = (code: string) => {
+        setDeepgramLanguage(code);
+        saveDeepgramOptions(deepgramKeyterm, deepgramDiarize, deepgramMipOptOut, code);
+    };
 
     const saveCloudConfig = async (provider: TranscriptModelProps['provider'], model: string, key: string | null) => {
         try {
@@ -86,9 +100,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
-    const saveDeepgramOptions = async (keyterm: string, diarize: boolean) => {
+    const saveDeepgramOptions = async (keyterm: string, diarize: boolean, mipOptOut: boolean, language: string) => {
         try {
-            await invoke('api_save_deepgram_options', { keyterm: keyterm || null, diarize });
+            await invoke('api_save_deepgram_options', { keyterm: keyterm || null, diarize, mipOptOut, language: language || null });
         } catch (error) {
             console.error('Failed to save Deepgram options:', error);
         }
@@ -267,6 +281,30 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
                     {uiProvider === 'deepgram' && (
                         <div className="space-y-3">
+                            <p className="text-xs text-gray-500 mx-1">
+                                Need an API key?{' '}
+                                <a
+                                    href="https://console.deepgram.com/"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-blue-600 hover:underline"
+                                >
+                                    Create a free Deepgram account
+                                </a>
+                                {' '}to get one.
+                            </p>
+                            {/* Language selection is a nova-3 knob. Flux models pick their
+                                language via the model itself (flux-general-en / -multi). */}
+                            {!isFluxModel && (
+                                <div className="mx-1">
+                                    <LanguageSelection
+                                        provider="deepgram"
+                                        selectedLanguage={deepgramLanguage}
+                                        onLanguageChange={persistDeepgramLanguage}
+                                        disabled={false}
+                                    />
+                                </div>
+                            )}
                             <div>
                                 <Label className="block text-sm font-medium text-gray-700 mb-1">
                                     Keyterms (one per line)
@@ -277,10 +315,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     rows={3}
                                     placeholder="Product names, acronyms, or jargon to boost recognition (nova-3 keyterm prompting)"
                                     onChange={(e) => setDeepgramKeyterm(e.target.value)}
-                                    onBlur={() => saveDeepgramOptions(deepgramKeyterm, deepgramDiarize)}
+                                    onBlur={() => saveDeepgramOptions(deepgramKeyterm, deepgramDiarize, deepgramMipOptOut, deepgramLanguage)}
                                 />
                             </div>
-                            {!transcriptModelConfig.model?.startsWith('flux') && (
+                            {!isFluxModel && (
                                 <div className="flex items-center justify-between mx-1">
                                     <Label className="text-sm font-medium text-gray-700">
                                         Speaker diarization
@@ -289,11 +327,28 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         checked={deepgramDiarize}
                                         onCheckedChange={(checked) => {
                                             setDeepgramDiarize(checked);
-                                            saveDeepgramOptions(deepgramKeyterm, checked);
+                                            saveDeepgramOptions(deepgramKeyterm, checked, deepgramMipOptOut, deepgramLanguage);
                                         }}
                                     />
                                 </div>
                             )}
+                            <div className="flex items-center justify-between mx-1">
+                                <div className="pr-3">
+                                    <Label className="text-sm font-medium text-gray-700">
+                                        Opt out of model improvement
+                                    </Label>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        Sends mip_opt_out=true so Deepgram does not retain your audio for model training. On by default.
+                                    </p>
+                                </div>
+                                <Switch
+                                    checked={deepgramMipOptOut}
+                                    onCheckedChange={(checked) => {
+                                        setDeepgramMipOptOut(checked);
+                                        saveDeepgramOptions(deepgramKeyterm, deepgramDiarize, checked, deepgramLanguage);
+                                    }}
+                                />
+                            </div>
                         </div>
                     )}
                 </div>
