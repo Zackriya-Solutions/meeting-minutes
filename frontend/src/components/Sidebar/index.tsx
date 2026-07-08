@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, ArrowDown, ArrowUp } from 'lucide-react';
+import { format } from 'date-fns';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -37,6 +38,7 @@ interface SidebarItem {
   title: string;
   type: 'folder' | 'file';
   children?: SidebarItem[];
+  created_at?: string;
 }
 
 const Sidebar: React.FC = () => {
@@ -63,6 +65,7 @@ const Sidebar: React.FC = () => {
   const { betaFeatures } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [sortNewestFirst, setSortNewestFirst] = useState(true);
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -317,6 +320,31 @@ const Sidebar: React.FC = () => {
     }
   }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
 
+  // Sort meeting items by creation date; composes with the search filtering above
+  const sortedSidebarItems = useMemo(() => {
+    const timeOf = (item: SidebarItem): number | null => {
+      if (!item.created_at) return null;
+      const time = new Date(item.created_at).getTime();
+      return isNaN(time) ? null : time;
+    };
+
+    return filteredSidebarItems.map(folder => {
+      if (folder.type !== 'folder' || !folder.children) return folder;
+
+      const sortedChildren = [...folder.children].sort((a, b) => {
+        const timeA = timeOf(a);
+        const timeB = timeOf(b);
+        // Items without a date sort last regardless of direction
+        if (timeA === null && timeB === null) return 0;
+        if (timeA === null) return 1;
+        if (timeB === null) return -1;
+        return sortNewestFirst ? timeB - timeA : timeA - timeB;
+      });
+
+      return { ...folder, children: sortedChildren };
+    });
+  }, [filteredSidebarItems, sortNewestFirst]);
+
 
   const handleDelete = async (itemId: string) => {
     console.log('Deleting item:', itemId);
@@ -551,11 +579,20 @@ const Sidebar: React.FC = () => {
     return searchResults.find(result => result.id === itemId);
   };
 
+  // Compact "MMM d, yyyy" date, or null if missing/unparseable
+  const formatMeetingDate = (isoDate?: string) => {
+    if (!isoDate) return null;
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return null;
+    return format(date, 'MMM d, yyyy');
+  };
+
   const renderItem = (item: SidebarItem, depth = 0) => {
     const isExpanded = expandedFolders.has(item.id);
     const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
+    const meetingDate = isMeetingItem ? formatMeetingDate(item.created_at) : null;
 
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
@@ -615,9 +652,14 @@ const Sidebar: React.FC = () => {
                     <Plus className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                 )}
-                <span className="flex-1 break-words">{item.title}</span>
+                <span className="flex-1 min-w-0 break-words">{item.title}</span>
+                {meetingDate && (
+                  <span className="ml-2 flex-shrink-0 text-xs text-gray-400 group-hover:hidden">
+                    {meetingDate}
+                  </span>
+                )}
                 {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <div className="hidden group-hover:flex items-center gap-1">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -739,7 +781,7 @@ const Sidebar: React.FC = () => {
             {/* Meeting Notes folder header - fixed */}
             {!isCollapsed && (
               <div className="flex-shrink-0">
-                {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
+                {sortedSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
                     <div
                       className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
@@ -752,13 +794,31 @@ const Sidebar: React.FC = () => {
                     </div>
                   </div>
                 ))}
+                {/* Column headers with date sort toggle */}
+                {expandedFolders.has('meetings') && (
+                  <div className="flex items-center justify-between mx-3 pl-6 pr-3 pb-1 text-xs text-gray-400">
+                    <span>Title</span>
+                    <button
+                      onClick={() => setSortNewestFirst(prev => !prev)}
+                      className="flex items-center gap-1 hover:text-gray-600 transition-colors"
+                      aria-label={`Sort by date, currently ${sortNewestFirst ? 'newest' : 'oldest'} first`}
+                    >
+                      <span>Date</span>
+                      {sortNewestFirst ? (
+                        <ArrowDown className="w-3 h-3" />
+                      ) : (
+                        <ArrowUp className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Scrollable meeting items */}
             {!isCollapsed && (
               <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
-                {filteredSidebarItems
+                {sortedSidebarItems
                   .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
                   .map(item => (
                     <div key={`${item.id}-children`} className="mx-3">
