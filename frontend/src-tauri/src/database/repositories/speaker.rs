@@ -26,6 +26,25 @@ pub struct MeetingSpeaker {
     pub segment_count: i64,
 }
 
+/// One transcript segment with its resolved speaker display name (LEFT JOINed), ordered as
+/// the UI shows it. Used to rebuild speaker-labeled summary input (see
+/// `summary::transcript_labeling`). `display_name` is present only when `speaker_id` resolves
+/// to an existing `speakers` row.
+#[derive(Debug, Clone)]
+pub struct TranscriptSpeakerSegment {
+    pub text: String,
+    /// Wall-clock timestamp string (the frontend's `formatTime` fallback when no audio time).
+    pub timestamp: String,
+    /// Seconds from recording start; NULL when unknown.
+    pub audio_start_time: Option<f64>,
+    /// Audio-channel tag: 'mic' | 'system' | NULL.
+    pub speaker: Option<String>,
+    /// Resolved diarized speaker profile id; NULL until diarization runs.
+    pub speaker_id: Option<i64>,
+    /// speakers.display_name when speaker_id resolves, else NULL.
+    pub display_name: Option<String>,
+}
+
 /// Encode an embedding as raw little-endian f32 bytes (see module docs). 4 bytes/dim.
 pub fn encode_embedding(v: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(v.len() * 4);
@@ -199,6 +218,62 @@ impl SpeakersRepository {
             })
             .collect())
     }
+
+    /// A meeting's transcript segments with resolved speaker display names, ordered as the UI
+    /// shows them (`audio_start_time ASC`, rowid tiebreak — matching
+    /// `MeetingsRepository::get_meeting_transcripts_paginated`). Read-only. LEFT JOIN so
+    /// segments without a resolved `speaker_id` are still returned (with `display_name` NULL).
+    /// Used by `summary::transcript_labeling` to rebuild speaker-labeled summary input.
+    pub async fn meeting_transcript_segments(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Vec<TranscriptSpeakerSegment>, SqlxError> {
+        let rows: Vec<(String, String, Option<f64>, Option<String>, Option<i64>, Option<String>)> =
+            sqlx::query_as(
+                "SELECT t.transcript, t.timestamp, t.audio_start_time, t.speaker, t.speaker_id, s.display_name \
+                 FROM transcripts t \
+                 LEFT JOIN speakers s ON s.id = t.speaker_id \
+                 WHERE t.meeting_id = ? \
+                 ORDER BY t.audio_start_time ASC, t.rowid ASC",
+            )
+            .bind(meeting_id)
+            .fetch_all(pool)
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(text, timestamp, audio_start_time, speaker, speaker_id, display_name)| {
+                    TranscriptSpeakerSegment {
+                        text,
+                        timestamp,
+                        audio_start_time,
+                        speaker,
+                        speaker_id,
+                        display_name,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    /// Garbage-collect orphaned speaker profiles: delete **unconfirmed** speakers no longer
+    /// referenced by ANY transcript row. Re-runs clear a meeting's `speaker_id`s and may
+    /// resolve clusters to different/new profiles, stranding the old auto-created
+    /// "Speaker N" rows; without GC they accumulate forever. Confirmed (user-renamed)
+    /// speakers are NEVER deleted, even when currently unreferenced — the user's label and
+    /// voice profile must survive re-runs. Returns the number of rows deleted.
+    pub async fn delete_orphaned_unconfirmed(pool: &SqlitePool) -> Result<u64, SqlxError> {
+        let res = sqlx::query(
+            "DELETE FROM speakers \
+             WHERE is_confirmed = 0 \
+               AND id NOT IN (SELECT DISTINCT speaker_id FROM transcripts \
+                              WHERE speaker_id IS NOT NULL)",
+        )
+        .execute(pool)
+        .await?;
+        Ok(res.rows_affected())
+    }
 }
 
 #[cfg(test)]
@@ -233,5 +308,98 @@ mod tests {
         // 5 bytes is not a whole number of f32s.
         assert_eq!(decode_embedding(&[1, 2, 3, 4, 5]), None);
         assert_eq!(decode_embedding(&[1]), None);
+    }
+
+    /// In-memory pool with just the columns the GC SQL touches (mirrors the real schema's
+    /// relevant subset: speakers.id/display_name/voice_embedding/is_confirmed,
+    /// transcripts.id/meeting_id/speaker_id).
+    async fn gc_test_pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db");
+        sqlx::query(
+            "CREATE TABLE speakers (
+                id INTEGER PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                voice_embedding BLOB,
+                is_confirmed INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                speaker_id INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn speaker_ids(pool: &SqlitePool) -> Vec<i64> {
+        sqlx::query_scalar("SELECT id FROM speakers ORDER BY id")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn gc_deletes_only_unreferenced_unconfirmed_speakers() {
+        let pool = gc_test_pool().await;
+        // 1: unconfirmed + referenced  -> kept
+        // 2: unconfirmed + unreferenced -> DELETED
+        // 3: confirmed   + unreferenced -> kept (user-renamed profiles are never GC'd)
+        // 4: confirmed   + referenced  -> kept
+        for (id, confirmed) in [(1, 0), (2, 0), (3, 1), (4, 1)] {
+            sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(format!("Speaker {id}"))
+                .bind(confirmed)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for (tid, sid) in [("t1", Some(1)), ("t2", Some(4)), ("t3", None)] {
+            sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES (?, 'm1', ?)")
+                .bind(tid)
+                .bind(sid)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool).await.unwrap();
+        assert_eq!(deleted, 1, "only the orphaned unconfirmed speaker is removed");
+        assert_eq!(speaker_ids(&pool).await, vec![1, 3, 4]);
+
+        // Idempotent: nothing left to collect.
+        let again = SpeakersRepository::delete_orphaned_unconfirmed(&pool).await.unwrap();
+        assert_eq!(again, 0);
+    }
+
+    #[tokio::test]
+    async fn gc_respects_references_from_any_meeting() {
+        let pool = gc_test_pool().await;
+        // Unconfirmed speaker referenced only by ANOTHER meeting's transcript must be kept:
+        // the GC criterion is "unreferenced by ANY transcript row", not per-meeting.
+        sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (5, 'Speaker 5', 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES ('x', 'other-meeting', 5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool).await.unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(speaker_ids(&pool).await, vec![5]);
     }
 }

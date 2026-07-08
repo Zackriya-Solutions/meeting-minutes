@@ -136,7 +136,7 @@ fn translation_system_prompt(target_language: &str) -> String {
 
 fn build_chunk_summary_user_prompt(chunk: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals. Lines may be prefixed with a speaker name and a colon; preserve who said or is responsible for each point.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
     )
 }
 
@@ -161,6 +161,7 @@ fn build_final_report_system_prompt(
 5. If a section has no relevant info, write "None noted in this section."
 6. Output **only** the completed Markdown report.
 7. If unsure about something, omit it.
+8. Transcript lines may be prefixed with a speaker name and a colon (e.g. `Alice:`, `You:`); treat that prefix as who spoke the line and attribute statements, decisions, and action items to that speaker.
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
