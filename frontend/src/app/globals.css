@@ -221,8 +221,53 @@
 }
 
 /* BlockNote surfaces follow the app font (SF Pro via the system stack).
-   Doubled class beats BlockNote's own .bn-container declaration without !important. */
+   Doubled class beats BlockNote's own .bn-container declaration without !important;
+   .bn-default-styles needs its own override because it hardcodes a font-family
+   (Inter, SF Pro Display, ...) directly rather than reading --bn-font-family. */
 .bn-container.bn-container {
   --bn-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.bn-container .bn-default-styles {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* @blocknote/shadcn bundles its own slate `.dark` palette (background
+   222.2 84% 4.9% ≈ #020817). It loads unlayered after globals.css, so with
+   class="dark" on <html> it hijacks the app's theme tokens wherever that
+   stylesheet is loaded. Re-assert the warm palette with higher specificity,
+   app-wide (:root.dark) and inside BlockNote's own themed containers. */
+:root.dark,
+.bn-shadcn.bn-shadcn.dark,
+.bn-container.bn-container.dark {
+  --background: 60 4% 10%;
+  --foreground: 55 9% 91%;
+  --card: 60 3% 15%;
+  --card-foreground: 55 9% 91%;
+  --popover: 60 3% 15%;
+  --popover-foreground: 55 9% 91%;
+  --primary: 55 9% 92%;
+  --primary-foreground: 60 4% 10%;
+  --secondary: 60 4% 16%;
+  --secondary-foreground: 55 9% 91%;
+  --muted: 60 4% 16%;
+  --muted-foreground: 55 6% 63%;
+  --accent: 60 4% 19%;
+  --accent-foreground: 55 9% 91%;
+  --destructive: 4 76% 61%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 55 6% 20%;
+  --input: 55 6% 23%;
+  --ring: 217 89% 61%;
+}
+
+/* The summary editor canvas sits on its panel's surface gray instead of
+   painting its own darker background. Tripled classes outrank BlockNote's
+   own `.bn-shadcn .bn-editor { background: hsl(var(--background)) }`. */
+.bn-container.bn-container,
+.bn-container.bn-container .bn-editor,
+.bn-shadcn.bn-shadcn .bn-editor {
+  background-color: transparent;
 }
