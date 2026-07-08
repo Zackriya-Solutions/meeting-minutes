@@ -9,6 +9,10 @@ pub struct MeetingModel {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub folder_path: Option<String>,
+    // Organizational folder (folders.id); #[sqlx(default)] keeps older
+    // explicit-column SELECTs that omit it decoding as None.
+    #[sqlx(default)]
+    pub folder_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
