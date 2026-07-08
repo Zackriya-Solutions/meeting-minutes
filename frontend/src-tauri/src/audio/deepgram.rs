@@ -66,6 +66,14 @@ pub struct DeepgramOptions {
     pub model: String,
     pub keyterms: Vec<String>,
     pub diarize: bool,
+    /// Opt out of Deepgram's Model Improvement Program (sends `mip_opt_out=true`).
+    /// Defaults to true: Meetily is privacy-first, so audio is not retained for
+    /// model training unless the user explicitly opts back in.
+    pub mip_opt_out: bool,
+    /// Deepgram-specific language mode (`multi`, `detect`, or an ISO code). Kept
+    /// separate from the shared global language pref so Deepgram-only values never
+    /// leak into the Whisper/Parakeet path. None -> fall back to the caller's hint.
+    pub language: Option<String>,
 }
 
 impl Default for DeepgramOptions {
@@ -74,6 +82,8 @@ impl Default for DeepgramOptions {
             model: crate::config::DEFAULT_DEEPGRAM_REALTIME_MODEL.to_string(),
             keyterms: Vec::new(),
             diarize: true,
+            mip_opt_out: true,
+            language: None,
         }
     }
 }
@@ -108,7 +118,7 @@ struct Alternative {
     words: Vec<DeepgramWord>,
 }
 
-// Deepgram splits utterances by speaker when diarize=true, so each utterance is
+// Deepgram splits utterances by speaker when diarization is on, so each utterance is
 // already a single-speaker turn. meetily's transcript model has no diarization
 // speaker field (its `speaker` column is audio-source: mic/system), so the
 // numeric speaker id is intentionally not carried — diarization manifests as
@@ -360,9 +370,18 @@ impl DeepgramClient {
             ("paragraphs".to_string(), "true".to_string()),
         ];
         if self.options.diarize {
-            query.push(("diarize".to_string(), "true".to_string()));
+            // Deepgram's current diarizer. `diarize_model` is mutually exclusive with
+            // `diarize`/`diarize_version` (sending both -> HTTP 400), so emit ONLY
+            // diarize_model=latest here, never diarize=true. Verified live against
+            // api.deepgram.com (both prerecorded and streaming return 200/101).
+            query.push(("diarize_model".to_string(), "latest".to_string()));
         }
-        apply_language(&mut query, language.as_deref(), model);
+        if self.options.mip_opt_out {
+            query.push(("mip_opt_out".to_string(), "true".to_string()));
+        }
+        // Deepgram-specific language wins; fall back to the caller's hint if unset.
+        let lang = self.options.language.as_deref().or(language.as_deref());
+        apply_language(&mut query, lang, model);
         apply_keyterms(&mut query, &self.options.keyterms);
         query
     }
@@ -430,13 +449,17 @@ pub async fn configured_options<R: Runtime>(app: &AppHandle<R>) -> Result<Deepgr
         }
     }
 
-    let (keyterm, diarize) = SettingsRepository::get_deepgram_options(pool)
+    let row = SettingsRepository::get_deepgram_options(pool)
         .await
-        .unwrap_or((None, None));
-    options.keyterms = parse_keyterms(keyterm.as_deref());
-    if let Some(diarize) = diarize {
+        .unwrap_or_default();
+    options.keyterms = parse_keyterms(row.keyterm.as_deref());
+    if let Some(diarize) = row.diarize {
         options.diarize = diarize != 0;
     }
+    if let Some(mip_opt_out) = row.mip_opt_out {
+        options.mip_opt_out = mip_opt_out != 0;
+    }
+    options.language = row.language.filter(|l| !l.trim().is_empty());
 
     Ok(options)
 }
@@ -816,9 +839,16 @@ fn build_realtime_url(options: &DeepgramOptions, language: Option<String>) -> St
         ("endpointing".to_string(), "300".to_string()),
     ];
     if options.diarize {
-        query.push(("diarize".to_string(), "true".to_string()));
+        // diarize_model=latest replaces diarize=true (400 if both sent). See
+        // prerecorded_query; verified live that streaming accepts it (101 handshake).
+        query.push(("diarize_model".to_string(), "latest".to_string()));
     }
-    apply_language(&mut query, language.as_deref(), &options.model);
+    if options.mip_opt_out {
+        query.push(("mip_opt_out".to_string(), "true".to_string()));
+    }
+    // Deepgram-specific language wins; fall back to the caller's hint if unset.
+    let lang = options.language.as_deref().or(language.as_deref());
+    apply_language(&mut query, lang, &options.model);
     apply_keyterms(&mut query, &options.keyterms);
     encode_ws_url(LISTEN_WS_URL, &query)
 }
@@ -904,41 +934,37 @@ fn emit_transcript_update<R: Runtime>(
 // HELPERS
 // ============================================================================
 
-/// Apply a language hint. Deepgram nova-3 supports `multi` for code-switching;
-/// when the user leaves language on auto we default nova-3 to `multi` and leave
-/// other models to their own default.
+/// Map the stored language preference to Deepgram query params. Three distinct modes:
+///   `detect`    -> `detect_language=true`  (auto-detect a single language)
+///   `multi`     -> `language=multi`        (nova-3 code-switching across 10 languages)
+///   ISO code    -> `language=<code>`       (explicit selection, e.g. `es`)
+/// When unset/auto, nova-3 defaults to `multi` (its code-switching default) and other
+/// models fall back to Deepgram's own default. Previously `detect` was silently dropped
+/// and auto collapsed to `multi`, so single-language detection was unreachable.
 fn apply_language(query: &mut Vec<(String, String)>, language: Option<&str>, model: &str) {
-    let hint = language
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && *l != "auto" && *l != "auto-translate" && *l != "detect");
-
-    match hint {
-        Some(lang) => query.push(("language".to_string(), lang.to_string())),
-        None if model.starts_with("nova-3") => {
-            query.push(("language".to_string(), "multi".to_string()))
+    match language.map(str::trim).unwrap_or("") {
+        "detect" => query.push(("detect_language".to_string(), "true".to_string())),
+        "multi" => query.push(("language".to_string(), "multi".to_string())),
+        "" | "auto" | "auto-translate" => {
+            if model.starts_with("nova-3") {
+                query.push(("language".to_string(), "multi".to_string()));
+            }
         }
-        None => {}
+        lang => query.push(("language".to_string(), lang.to_string())),
     }
 }
 
-/// keyterm prompting is supported by nova-3 and Flux (both use `keyterm`); nova-2
-/// uses `keywords`. Route each term to the correct parameter for the model.
+/// keyterm prompting. The only supported models (nova-3 and Flux) both use the
+/// `keyterm` parameter, so every term routes there. (nova-2's `keywords` param was
+/// dropped along with nova-2 model support.)
 fn apply_keyterms(query: &mut Vec<(String, String)>, keyterms: &[String]) {
     if keyterms.is_empty() {
         return;
     }
-    let param = if query
-        .iter()
-        .any(|(k, v)| k == "model" && (v.starts_with("nova-3") || v.starts_with("flux")))
-    {
-        "keyterm"
-    } else {
-        "keywords"
-    };
     for term in keyterms {
         let term = term.trim();
         if !term.is_empty() {
-            query.push((param.to_string(), term.to_string()));
+            query.push(("keyterm".to_string(), term.to_string()));
         }
     }
 }
@@ -1162,14 +1188,6 @@ mod tests {
     }
 
     #[test]
-    fn nova2_keyterms_use_keywords_param() {
-        let mut query = vec![("model".to_string(), "nova-2".to_string())];
-        apply_keyterms(&mut query, &["Meetily".to_string()]);
-        assert!(query.iter().any(|(k, _)| k == "keywords"));
-        assert!(!query.iter().any(|(k, _)| k == "keyterm"));
-    }
-
-    #[test]
     fn language_defaults_to_multi_for_nova3_only() {
         let mut q1 = vec![];
         apply_language(&mut q1, None, "nova-3");
@@ -1182,6 +1200,15 @@ mod tests {
         let mut q3 = vec![];
         apply_language(&mut q3, Some("en"), "nova-3");
         assert_eq!(q3, vec![("language".to_string(), "en".to_string())]);
+
+        // `detect` -> single-language auto-detect; `multi` -> code-switching (any model).
+        let mut q4 = vec![];
+        apply_language(&mut q4, Some("detect"), "nova-3");
+        assert_eq!(q4, vec![("detect_language".to_string(), "true".to_string())]);
+
+        let mut q5 = vec![];
+        apply_language(&mut q5, Some("multi"), "nova-2");
+        assert_eq!(q5, vec![("language".to_string(), "multi".to_string())]);
     }
 
     #[test]
@@ -1200,20 +1227,61 @@ mod tests {
             model: "nova-3".to_string(),
             keyterms: vec!["Meetily".to_string()],
             diarize: true,
+            mip_opt_out: true,
+            language: None,
         };
         let url = build_realtime_url(&options, Some("en".to_string()));
         assert!(url.starts_with("wss://api.deepgram.com/v1/listen?"));
         assert!(url.contains("encoding=linear16"));
         assert!(url.contains("model=nova-3"));
-        assert!(url.contains("diarize=true"));
+        assert!(url.contains("diarize_model=latest"));
+        assert!(!url.contains("diarize=true")); // diarize_model replaces diarize (400 if both)
+        assert!(url.contains("mip_opt_out=true")); // privacy-first: opt out by default
         assert!(url.contains("interim_results=false"));
         assert!(url.contains("keyterm=Meetily"));
         assert!(url.contains("language=en"));
     }
 
     #[test]
+    fn prerecorded_query_emits_diarize_model_and_mip_opt_out() {
+        let client = DeepgramClient::new(
+            "k".to_string(),
+            DeepgramOptions {
+                model: "nova-3".to_string(),
+                keyterms: vec![],
+                diarize: true,
+                mip_opt_out: true,
+                language: None,
+            },
+        );
+        let q = client.prerecorded_query(Some("es".to_string()));
+        let has = |k: &str, v: &str| q.iter().any(|(a, b)| a == k && b == v);
+        assert!(has("diarize_model", "latest"));
+        assert!(!q.iter().any(|(k, _)| k == "diarize")); // never diarize=true (400 if both)
+        assert!(has("mip_opt_out", "true"));
+        assert!(has("smart_format", "true"));
+        assert!(has("language", "es")); // caller hint used when options.language is unset
+    }
+
+    #[test]
+    fn deepgram_specific_language_overrides_caller_hint() {
+        let opts = DeepgramOptions {
+            model: "nova-3".to_string(),
+            keyterms: vec![],
+            diarize: false,
+            mip_opt_out: false,
+            language: Some("multi".to_string()),
+        };
+        // Even when the caller passes a global hint ("es"), the Deepgram-specific
+        // language ("multi") wins, so global values never override the provider setting.
+        let url = build_realtime_url(&opts, Some("es".to_string()));
+        assert!(url.contains("language=multi"));
+        assert!(!url.contains("language=es"));
+    }
+
+    #[test]
     fn language_auto_is_treated_as_no_hint() {
-        // "auto"/"detect" sentinels are filtered; nova-3 then falls back to multi.
+        // "auto" is treated as no explicit hint; nova-3 then falls back to multi.
         let mut q = vec![];
         apply_language(&mut q, Some("auto"), "nova-3");
         assert_eq!(q, vec![("language".to_string(), "multi".to_string())]);
@@ -1225,10 +1293,13 @@ mod tests {
             model: "nova-3".to_string(),
             keyterms: vec!["Acme Corp".to_string()],
             diarize: false,
+            mip_opt_out: false,
+            language: None,
         };
         let url = build_realtime_url(&options, None);
         assert!(url.contains("keyterm=Acme%20Corp"));
         assert!(!url.contains("diarize="));
+        assert!(!url.contains("mip_opt_out")); // off -> param omitted
     }
 
     // Contract tests: lock the Deepgram wire shape we verified live so a
@@ -1385,6 +1456,8 @@ mod tests {
             model: "flux-general-multi".to_string(),
             keyterms: vec!["Meetily".to_string()],
             diarize: true, // ignored by Flux
+            mip_opt_out: false,
+            language: None,
         };
         let url = build_flux_url(&opts, Some("en".to_string()));
         assert!(url.starts_with("wss://api.deepgram.com/v2/listen?"));
@@ -1403,6 +1476,8 @@ mod tests {
             model: "flux-general-en".to_string(),
             keyterms: vec![],
             diarize: false,
+            mip_opt_out: false,
+            language: None,
         };
         let url = build_flux_url(&opts, Some("en".to_string()));
         assert!(!url.contains("language_hint"));
@@ -1417,6 +1492,8 @@ mod tests {
                 model: "flux-general-en".to_string(),
                 keyterms: vec!["Meetily".to_string()],
                 diarize: true,
+                mip_opt_out: false,
+                language: None,
             },
         );
         let q = flux.prerecorded_query(None);

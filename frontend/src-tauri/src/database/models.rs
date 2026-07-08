@@ -133,4 +133,10 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "deepgramDiarize")]
     #[serde(rename = "deepgramDiarize")]
     pub deepgram_diarize: Option<i64>,
+    #[sqlx(rename = "deepgramMipOptOut")]
+    #[serde(rename = "deepgramMipOptOut")]
+    pub deepgram_mip_opt_out: Option<i64>,
+    #[sqlx(rename = "deepgramLanguage")]
+    #[serde(rename = "deepgramLanguage")]
+    pub deepgram_language: Option<String>,
 }
