@@ -81,6 +81,10 @@ export function TranscriptPanel({
 
   // Resolve the finalized meeting recording (saved as `audio.mp4` in the
   // meeting folder) so it can be played back and seeked from the timeline.
+  // Note: recordings live outside the app's data dir (e.g. ~/Music), so we do
+  // not use the permission-scoped `plugin-fs` here. We build the path and let
+  // the audio loader (`read_audio_file`) report whether it can be read; the
+  // player is only shown once the audio loads successfully.
   const [audioPath, setAudioPath] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -91,10 +95,8 @@ export function TranscriptPanel({
       }
       try {
         const { join } = await import('@tauri-apps/api/path');
-        const { exists } = await import('@tauri-apps/plugin-fs');
         const candidate = await join(meetingFolderPath, 'audio.mp4');
-        const found = await exists(candidate);
-        if (!cancelled) setAudioPath(found ? candidate : null);
+        if (!cancelled) setAudioPath(candidate);
       } catch {
         if (!cancelled) setAudioPath(null);
       }
@@ -157,7 +159,9 @@ export function TranscriptPanel({
   }, []);
 
   const showTimeline = !isRecording && timelineMarkers.length > 0;
-  const showAudioPlayer = !isRecording && audioPath !== null;
+  // Show the player once a recording path is resolved; hide it if the audio
+  // could not be loaded (e.g. the meeting has no recording).
+  const showAudioPlayer = !isRecording && audioPath !== null && !audio.error;
 
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
