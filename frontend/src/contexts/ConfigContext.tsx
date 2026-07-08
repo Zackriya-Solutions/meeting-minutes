@@ -6,7 +6,7 @@ import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
-import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import { BetaFeatures, BetaFeatureKey, DEFAULT_BETA_FEATURES, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 
 export interface OllamaModel {
   name: string;
@@ -137,36 +137,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   });
 
   // Language preference state
-  const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('primaryLanguage');
-      return saved || 'auto';
-    }
-    return 'auto';
-  });
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('auto');
 
   // UI preferences state
-  const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('showConfidenceIndicator');
-      return saved !== null ? saved === 'true' : true;
-    }
-    return true;
-  });
+  const [showConfidenceIndicator, setShowConfidenceIndicator] = useState<boolean>(true);
 
   // Summary configs
-  const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('isAutoSummary');
-      return saved !== null ? saved === 'true' : false
-    }
-    return false;
-  });
+  const [isAutoSummary, setisAutoSummary] = useState<boolean>(false);
 
   // Beta features state (localStorage)
-  const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
-    return loadBetaFeatures();
-  });
+  const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>({ ...DEFAULT_BETA_FEATURES });
 
   // Preference settings state (lazy loaded)
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
@@ -174,6 +154,25 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(false);
   const preferencesLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
+
+  useEffect(() => {
+    const savedLanguage = localStorage.getItem('primaryLanguage');
+    if (savedLanguage) {
+      setSelectedLanguage(savedLanguage);
+    }
+
+    const savedConfidenceIndicator = localStorage.getItem('showConfidenceIndicator');
+    if (savedConfidenceIndicator !== null) {
+      setShowConfidenceIndicator(savedConfidenceIndicator === 'true');
+    }
+
+    const savedAutoSummary = localStorage.getItem('isAutoSummary');
+    if (savedAutoSummary !== null) {
+      setisAutoSummary(savedAutoSummary === 'true');
+    }
+
+    setBetaFeatures(loadBetaFeatures());
+  }, []);
 
   // Load Ollama models (uses saved endpoint, re-runs when endpoint changes after config load)
   useEffect(() => {
@@ -211,18 +210,18 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     loadTranscriptConfig();
   }, []);
 
-  // Sync language preference to Rust on mount (fixes startup desync bug)
+  // Sync language preference to Rust whenever the hydrated preference changes.
   useEffect(() => {
     if (selectedLanguage) {
       invoke('set_language_preference', { language: selectedLanguage })
         .then(() => {
-          console.log('[ConfigContext] Synced language preference to Rust on startup:', selectedLanguage);
+          console.log('[ConfigContext] Synced language preference to Rust:', selectedLanguage);
         })
         .catch(err => {
-          console.error('[ConfigContext] Failed to sync language preference to Rust on startup:', err);
+          console.error('[ConfigContext] Failed to sync language preference to Rust:', err);
         });
     }
-  }, []); 
+  }, [selectedLanguage]); 
 
   // Load model configuration on mount
   useEffect(() => {

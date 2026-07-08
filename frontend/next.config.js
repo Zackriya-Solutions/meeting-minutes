@@ -15,8 +15,13 @@ const nextConfig = {
   assetPrefix: '/',
 
   // Add webpack configuration for Tauri
-  webpack: (config, { isServer }) => {
+  webpack: (config, { dev, isServer }) => {
     if (!isServer) {
+      if (dev) {
+        // Tauri's dev WebView can take longer to execute Next's large dev chunks.
+        config.output.chunkLoadTimeout = 300000;
+      }
+
       config.resolve.fallback = {
         ...config.resolve.fallback,
         fs: false,

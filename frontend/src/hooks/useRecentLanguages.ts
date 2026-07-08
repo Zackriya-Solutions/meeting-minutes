@@ -55,10 +55,13 @@ function writeToStorage(values: string[]): void {
  * addRecent: push to front, dedupe, trim to MAX_RECENTS, persist.
  */
 export function useRecentLanguages() {
-  const [recents, setRecents] = useState<string[]>(() => readFromStorage());
-  const [pinned, setPinnedState] = useState<string | null>(() => readPinnedFromStorage());
+  const [recents, setRecents] = useState<string[]>([]);
+  const [pinned, setPinnedState] = useState<string | null>(null);
 
   useEffect(() => {
+    setRecents(readFromStorage());
+    setPinnedState(readPinnedFromStorage());
+
     const onStorage = (e: StorageEvent) => {
       if (e.key === MRU_KEY) setRecents(readFromStorage());
       if (e.key === PINNED_KEY) setPinnedState(readPinnedFromStorage());

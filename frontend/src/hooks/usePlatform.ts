@@ -32,7 +32,7 @@ function detectPlatformFromUserAgent(): Platform {
  * @returns The current platform
  */
 export function usePlatform(): Platform {
-  const [currentPlatform, setCurrentPlatform] = useState<Platform>(() => detectPlatformFromUserAgent());
+  const [currentPlatform, setCurrentPlatform] = useState<Platform>('unknown');
 
   useEffect(() => {
     async function detectPlatform() {
