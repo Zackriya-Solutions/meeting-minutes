@@ -1,11 +1,12 @@
 //! DeepSeek provider (OpenAI-compatible). Protocol per GigaTool's provider config:
 //! base `https://api.deepseek.com/v1`, `POST /chat/completions`, Bearer auth,
-//! models `deepseek-chat` / `deepseek-reasoner`. Non-streaming (summary/extract/RAG).
+//! models `deepseek-v4-pro` / `deepseek-v4-flash` (the legacy `deepseek-chat` /
+//! `deepseek-reasoner` aliases retire 2026-07-24). Non-streaming (summary/extract/RAG).
 
 use serde_json::json;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1";
-pub const DEFAULT_MODEL: &str = "deepseek-chat";
+pub const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 
 /// A configured DeepSeek client. Cheap to construct per call.
 pub struct DeepSeekClient {

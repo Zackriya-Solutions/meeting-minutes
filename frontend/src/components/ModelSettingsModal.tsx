@@ -111,8 +111,8 @@ const GIGACHAT_FALLBACK_MODELS = [
 ];
 
 const DEEPSEEK_FALLBACK_MODELS = [
-  'deepseek-chat',
-  'deepseek-reasoner',
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
 ];
 
 interface ModelSettingsModalProps {

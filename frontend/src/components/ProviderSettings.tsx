@@ -121,7 +121,7 @@ export function ProviderSettings() {
             type="text"
             value={dsModel}
             onChange={(e) => setDsModel(e.target.value)}
-            placeholder="deepseek-chat"
+            placeholder="deepseek-v4-flash"
             className={inputCls}
           />
         </Field>

@@ -371,7 +371,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     'builtin-ai': [],
     'custom-openai': [],
     gigachat: ['GigaChat-3-Ultra', 'GigaChat-3.5-432B-A28B', 'GigaChat-2-Max', 'GigaChat'],
-    deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+    deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
   };
 
   // Toggle confidence indicator with localStorage persistence
