@@ -2,21 +2,34 @@
 //! model (PLAN.md Phase 2 diarization).
 //!
 //! The WeSpeaker CAM++ / ResNet34 ONNX exports (from wespeaker / sherpa-onnx) expect
-//! `feats` of shape `[1, num_frames, 80]`: kaldi `fbank` features followed by per-utterance
-//! mean normalization (CMN). This is NOT baked into the ONNX, so we reproduce it here.
+//! `feats` of shape `[1, num_frames, 80]`: kaldi `fbank` features.
 //!
-//! Config reproduced bit-for-bit from `pyannote-rs`' `knf-rs` wrapper (which drives the
-//! same models), which in turn uses `kaldi-native-fbank` with these settings:
+//! Frame/mel config matches `kaldi-native-fbank` (as used by sherpa-onnx and
+//! `pyannote-rs`' `knf-rs` wrapper):
 //!   frame_opts: samp_freq=16000, frame_length=25ms (400), frame_shift=10ms (160),
 //!               dither=0, snip_edges=true, preemph=0.97, remove_dc_offset=true,
 //!               window="povey", round_to_power_of_two=true (=> 512-point FFT)
 //!   mel_opts:   num_bins=80, low_freq=20, high_freq=8000 (Nyquist), use_power=true,
 //!               use_log_fbank=true, use_energy=false
-//!   post:       features = frames - mean_over_time(frames)   (CMN, from knf-rs)
 //!
-//! The input-waveform scale is irrelevant: kaldi log-mel adds a constant `2*ln(c)` to
-//! every bin/frame when the waveform is scaled by `c`, and CMN subtracts the per-bin
-//! temporal mean, cancelling it. We feed 16 kHz mono f32 in [-1, 1] (as knf-rs does).
+//! ## Normalization: follow the MODEL's ONNX metadata, not knf-rs
+//! sherpa-onnx reads two metadata keys from each speaker-embedding ONNX and adapts the
+//! frontend (`speaker-embedding-extractor-general-impl.h` + `features.cc`):
+//!   * `normalize_samples` — `0` means the model wants **i16-scale** waveforms (samples
+//!     multiplied by 32768; WeSpeaker trains on `torchaudio.load(normalize=False)` audio).
+//!     Without CMN the scale matters enormously: log-mels live around [5, 25] at i16 scale
+//!     vs [-16, 4] at [-1, 1] scale.
+//!   * `feature_normalize_type` — CMN (`global-mean`) is applied ONLY when this key exists.
+//!
+//! `wespeaker_en_voxceleb_CAM++.onnx` (meetily's embedding model) declares
+//! `normalize_samples=0` and **no** `feature_normalize_type`: raw i16-scale fbank, NO CMN.
+//! `knf-rs` unconditionally feeds [-1, 1] samples and subtracts the per-utterance mean;
+//! measured on real speech (CMU Arctic 3-speaker probe) that combination makes the
+//! embeddings nearly speaker-agnostic (same-speaker cosine ≈ cross-speaker ≈ 0.6, with
+//! pairs as wild as same=0.07 / cross=0.97) — the direct cause of a real 3-person meeting
+//! diarizing as 15 speakers. [`KaldiFbank::compute_raw`] (no CMN) + i16-scale input
+//! restores real speaker discrimination; [`KaldiFbank::compute`] (with CMN) remains for
+//! models whose metadata asks for `global-mean`.
 
 use std::sync::Arc;
 
@@ -55,6 +68,9 @@ impl KaldiFbank {
             .collect();
 
         // Triangular mel filterbank over fft bins 0..N_FFT_BINS-1 (kaldi ignores Nyquist).
+        // high_freq stays at the kaldi/torchaudio default (Nyquist) — WeSpeaker trains with
+        // torchaudio kaldi fbank defaults; sherpa-onnx's 7600 Hz measured slightly worse
+        // (same/cross clip-mean gap 0.134 vs 0.175 on the CMU Arctic probe).
         let fft_bin_width = SAMPLE_RATE as f32 / N_FFT as f32; // 31.25 Hz
         let mel_low = mel_scale(LOW_FREQ);
         let mel_high = mel_scale(HIGH_FREQ);
@@ -93,9 +109,27 @@ impl KaldiFbank {
         }
     }
 
-    /// Compute CMN-normalized kaldi fbank for a 16 kHz mono waveform.
+    /// Compute CMN-normalized kaldi fbank for a 16 kHz mono waveform (for models whose
+    /// metadata declares `feature_normalize_type=global-mean`, e.g. 3D-Speaker CAM++).
     /// Returns `[num_frames, N_MELS]` (row-major) as an ndarray, ready to gain a batch axis.
     pub fn compute(&self, waveform: &[f32]) -> ndarray::Array2<f32> {
+        let feats = self.compute_raw(waveform);
+        // CMN: subtract the per-bin mean over time (sherpa's "global-mean").
+        if feats.shape()[0] == 0 {
+            return feats;
+        }
+        if let Some(mean) = feats.mean_axis(ndarray::Axis(0)) {
+            feats - mean
+        } else {
+            feats
+        }
+    }
+
+    /// Compute raw (non-CMN) kaldi fbank for a 16 kHz mono waveform — the frontend for
+    /// models with NO `feature_normalize_type` metadata (WeSpeaker VoxCeleb exports).
+    /// The waveform must already be at the scale the model expects (i16 range for
+    /// `normalize_samples=0` models).
+    pub fn compute_raw(&self, waveform: &[f32]) -> ndarray::Array2<f32> {
         let n_frames = Self::num_frames(waveform.len());
         if n_frames == 0 {
             return ndarray::Array2::zeros((0, N_MELS));
@@ -144,12 +178,7 @@ impl KaldiFbank {
             }
         }
 
-        // 5) CMN: subtract the per-bin mean over time (matches knf-rs `frames - mean`).
-        if let Some(mean) = feats.mean_axis(ndarray::Axis(0)) {
-            feats - mean
-        } else {
-            feats
-        }
+        feats
     }
 }
 
@@ -209,5 +238,26 @@ mod tests {
         let fb = KaldiFbank::new();
         let feats = fb.compute(&[0.0; 100]);
         assert_eq!(feats.shape(), &[0, N_MELS]);
+        assert_eq!(fb.compute_raw(&[0.0; 100]).shape(), &[0, N_MELS]);
+    }
+
+    #[test]
+    fn compute_is_compute_raw_minus_temporal_mean() {
+        let fb = KaldiFbank::new();
+        let wav: Vec<f32> = (0..8000)
+            .map(|i| 0.2 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / SAMPLE_RATE as f32).sin())
+            .collect();
+        let raw = fb.compute_raw(&wav);
+        let cmn = fb.compute(&wav);
+        let mean = raw.mean_axis(ndarray::Axis(0)).unwrap();
+        for t in 0..raw.shape()[0] {
+            for m in 0..N_MELS {
+                let expect = raw[[t, m]] - mean[m];
+                assert!((cmn[[t, m]] - expect).abs() < 1e-5);
+            }
+        }
+        // Raw features are NOT zero-mean (CMN really was skipped).
+        let raw_mean = raw.mean_axis(ndarray::Axis(0)).unwrap();
+        assert!(raw_mean.iter().any(|m| m.abs() > 0.1));
     }
 }

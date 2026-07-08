@@ -331,6 +331,17 @@ pub async fn run_diarization_core<R: Runtime>(
         .collect::<HashSet<i64>>()
         .len() as i64;
 
+    // 5b) Garbage-collect orphaned auto-created profiles. Re-runs clear this meeting's
+    //     speaker_ids and may resolve clusters to new profiles, stranding previous
+    //     "Speaker N" rows; without GC they accumulate across re-runs and pollute future
+    //     profile matching. Never touches confirmed (user-renamed) speakers. Best-effort:
+    //     a GC failure must not fail the diarization run.
+    match SpeakersRepository::delete_orphaned_unconfirmed(pool).await {
+        Ok(0) => {}
+        Ok(n) => log::info!("[diarize] GC removed {n} orphaned unconfirmed speaker profile(s)"),
+        Err(e) => log::warn!("[diarize] orphaned-speaker GC failed (non-fatal): {e}"),
+    }
+
     // 6) Notify the UI. snake_case field names, exactly as the frontend expects.
     let _ = app.emit(
         "diarization-complete",
