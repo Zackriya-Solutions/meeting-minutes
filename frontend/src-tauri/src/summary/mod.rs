@@ -72,6 +72,7 @@ pub use template_commands::{
 pub use llm_client::LLMProvider;
 pub use processor::{
     chunk_text, clean_llm_markdown_output, extract_meeting_name_from_markdown,
-    generate_meeting_summary, rough_token_count,
+    extract_transcript_references, generate_meeting_summary, rough_token_count,
+    TranscriptReference,
 };
 pub use service::SummaryService;

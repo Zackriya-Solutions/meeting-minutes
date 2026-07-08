@@ -57,6 +57,14 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const [scrollToTime, setScrollToTime] = useState<number | undefined>(undefined);
+  const [scrollToKey, setScrollToKey] = useState(0);
+
+  // Handle transcript reference click - scroll to the matching segment
+  const handleTranscriptRefClick = (startTime: number, endTime: number) => {
+    setScrollToTime(startTime);
+    setScrollToKey(k => k + 1);
+  };
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -179,6 +187,8 @@ export default function PageContent({
           onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
           isRecording={isRecording}
           disableAutoScroll={true}
+          scrollToTime={scrollToTime}
+          scrollToKey={scrollToKey}
           // Pagination props for efficient loading
           usePagination={true}
           segments={segments}
@@ -226,6 +236,7 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          onTranscriptRefClick={handleTranscriptRefClick}
         />
       </div>
     </motion.div>

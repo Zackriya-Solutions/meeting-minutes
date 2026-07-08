@@ -5,7 +5,8 @@ use crate::summary::llm_client::LLMProvider;
 use crate::summary::language_detection::detect_summary_language;
 use crate::summary::metadata::read_detected_summary_language_from_metadata;
 use crate::summary::processor::{
-    extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
+    extract_meeting_name_from_markdown, extract_transcript_references, generate_meeting_summary,
+    language_name_from_code, TranscriptReference,
 };
 use crate::summary::templates::{self, Template};
 use crate::ollama::metadata::ModelMetadataCache;
@@ -140,8 +141,11 @@ fn build_summary_result_json(
     source: SummaryCacheSource,
     output_language: Option<&str>,
 ) -> serde_json::Value {
+    let stripped_markdown = strip_title_if_present(final_markdown);
+    let references = extract_transcript_references(&stripped_markdown);
     serde_json::json!({
-        "markdown": strip_title_if_present(final_markdown),
+        "markdown": stripped_markdown,
+        "transcript_references": references,
         ENGLISH_CACHE_FIELD: EnglishSummaryCache {
             markdown: english_markdown.to_string(),
             source,
@@ -969,6 +973,7 @@ mod tests {
             result["english_cache"]["markdown"],
             "# English Title\n## Decisions\nDone"
         );
+        assert!(result.get("transcript_references").is_some());
     }
 
     #[test]

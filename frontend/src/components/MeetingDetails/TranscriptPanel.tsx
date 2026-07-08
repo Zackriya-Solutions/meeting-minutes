@@ -15,6 +15,10 @@ interface TranscriptPanelProps {
   isRecording: boolean;
   disableAutoScroll?: boolean;
 
+  // Scroll-to-segment support (transcript references)
+  scrollToTime?: number;
+  scrollToKey?: number;
+
   // Optional pagination props (when using virtualization)
   usePagination?: boolean;
   segments?: TranscriptSegmentData[];
@@ -38,6 +42,8 @@ export function TranscriptPanel({
   onOpenMeetingFolder,
   isRecording,
   disableAutoScroll = false,
+  scrollToTime,
+  scrollToKey,
   usePagination = false,
   segments,
   hasMore,
@@ -89,6 +95,8 @@ export function TranscriptPanel({
           enableStreaming={false}
           showConfidence={true}
           disableAutoScroll={disableAutoScroll}
+          scrollToTime={scrollToTime}
+          scrollToKey={scrollToKey}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}

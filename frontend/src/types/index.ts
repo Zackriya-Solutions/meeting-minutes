@@ -79,6 +79,7 @@ export interface BlockNoteBlock {
 export interface SummaryDataResponse {
   markdown?: string;
   summary_json?: BlockNoteBlock[];
+  transcript_references?: TranscriptReference[];
   // Legacy format fields
   MeetingName?: string;
   _section_order?: string[];
@@ -98,6 +99,12 @@ export interface PaginatedTranscriptsResponse {
   transcripts: Transcript[];
   total_count: number;
   has_more: boolean;
+}
+
+// Transcript reference linking summary items to transcript segments
+export interface TranscriptReference {
+  startTime: number; // Seconds from recording start
+  endTime: number;   // Seconds from recording start
 }
 
 // Transcript segment data for virtualized display
