@@ -366,7 +366,7 @@ const Sidebar: React.FC = () => {
       </button>
 
       <div
-        className={`h-screen bg-background shadow-sm flex flex-col relative overflow-hidden ${isCollapsed ? '' : 'border-r'} ${isResizingSidebar ? '' : 'transition-all duration-300'}`}
+        className={`h-screen bg-sidebar shadow-sm flex flex-col relative overflow-hidden ${isCollapsed ? '' : 'border-r'} ${isResizingSidebar ? '' : 'transition-all duration-300'}`}
         style={{ width: isCollapsed ? 0 : sidebarWidth }}
       >
         {/* Resize handle */}

@@ -80,7 +80,7 @@
   /* Warm charcoal dark theme (Granola-inspired), Meetily blue kept as accent.
      The app ships dark-only, so :root and .dark hold the same values. */
   :root {
-    --background: 60 4% 10%;
+    --background: 60 3% 14.5%; /* #262624 */
     --foreground: 55 9% 91%;
     --card: 60 3% 15%;
     --card-foreground: 55 9% 91%;
@@ -108,7 +108,7 @@
   }
 
   .dark {
-    --background: 60 4% 10%;
+    --background: 60 3% 14.5%; /* #262624 */
     --foreground: 55 9% 91%;
     --card: 60 3% 15%;
     --card-foreground: 55 9% 91%;
@@ -242,7 +242,7 @@
 :root.dark,
 .bn-shadcn.bn-shadcn.dark,
 .bn-container.bn-container.dark {
-  --background: 60 4% 10%;
+  --background: 60 3% 14.5%; /* #262624 */
   --foreground: 55 9% 91%;
   --card: 60 3% 15%;
   --card-foreground: 55 9% 91%;

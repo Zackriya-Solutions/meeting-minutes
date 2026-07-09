@@ -46,6 +46,8 @@ module.exports = {
   			ring: 'hsl(var(--ring))',
   			// Raised panel surface (dark equivalent of the old `bg-white` cards/sidebar)
   			surface: '#262624',
+  			// Sidebar sits slightly darker than the #262624 canvas/panels
+  			sidebar: '#212121',
   			// Granola-style warm dark theme: the stock light-mode ramps are remapped so
   			// existing classes keep their *semantic* role on a dark canvas.
   			// Low shades (50-300) stay dark (fills/borders), high shades (400-900)

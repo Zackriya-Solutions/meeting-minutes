@@ -149,7 +149,7 @@ function NotesContent() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-surface">
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="max-w-3xl mx-auto px-8 py-12">
           {/* Header */}
@@ -354,7 +354,7 @@ function NotesContent() {
 
 export default function NotesPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen bg-gray-50" />}>
+    <Suspense fallback={<div className="flex items-center justify-center h-screen bg-surface" />}>
       <NotesContent />
     </Suspense>
   );
