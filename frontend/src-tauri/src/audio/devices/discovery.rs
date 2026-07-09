@@ -25,6 +25,11 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         {
             platform::configure_macos_audio(&host)?
         }
+
+        #[cfg(target_os = "android")]
+        {
+            platform::configure_android_audio(&host)?
+        }
     };
 
     // Add any additional devices from the default host

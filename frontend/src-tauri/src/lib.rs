@@ -51,8 +51,24 @@ pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
+#[cfg(desktop)]
 pub mod tray;
 pub mod utils;
+
+/// No-op tray shim for mobile builds: Android/iOS have no system tray, so
+/// call sites (recording commands, engine commands) compile unchanged.
+#[cfg(mobile)]
+pub mod tray {
+    use tauri::{AppHandle, Runtime};
+
+    pub fn create_tray<R: Runtime>(_app: &AppHandle<R>) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    pub fn update_tray_menu<R: Runtime>(_app: &AppHandle<R>) {}
+
+    pub(crate) fn focus_main_window<R: Runtime>(_app: &AppHandle<R>) {}
+}
 pub mod whisper_engine;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
@@ -387,7 +403,16 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Route `log` output to logcat on Android (no terminal/env_logger there)
+    #[cfg(target_os = "android")]
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Info)
+            .with_tag("meetily"),
+    );
+
     log::set_max_level(log::LevelFilter::Info);
 
     let mut builder = tauri::Builder::default();
@@ -405,12 +430,18 @@ pub fn run() {
         }));
     }
 
-    builder
+    // Desktop-only plugins: auto-updater and process control (relaunch/exit)
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
+    }
+
+    let builder = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -510,19 +541,25 @@ pub fn run() {
             }
 
             Ok(())
-        })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
-                    } else {
-                        log::info!("Main window hidden to tray on close request");
-                    }
+        });
+
+    // Hide-to-tray on window close is desktop-only behavior; Android manages
+    // the activity lifecycle itself.
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if window.label() == "main" {
+                api.prevent_close();
+                if let Err(e) = window.hide() {
+                    log::error!("Failed to hide main window on close request: {}", e);
+                } else {
+                    log::info!("Main window hidden to tray on close request");
                 }
             }
-        })
+        }
+    });
+
+    builder
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,

@@ -276,7 +276,16 @@ impl SidecarManager {
     }
 
     /// Spawn the sidecar process
+    #[cfg_attr(target_os = "android", allow(unreachable_code, unused_variables, unused_mut))]
     async fn spawn(&self, model_path: PathBuf) -> Result<()> {
+        // Android apps cannot ship or exec the llama-helper sidecar binary;
+        // built-in summaries need an in-process llama.cpp integration there.
+        #[cfg(target_os = "android")]
+        return Err(anyhow!(
+            "Built-in AI summaries are not supported on Android yet. \
+             Configure Ollama on your network or a cloud provider in Settings instead."
+        ));
+
         // Shutdown existing process if running
         self.shutdown().await?;
 
