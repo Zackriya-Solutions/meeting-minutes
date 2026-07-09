@@ -53,6 +53,30 @@ pnpm install
 pnpm tauri android init
 ```
 
+### Automated setup (recommended)
+
+Steps 1–3 below are automated by a script — after `pnpm tauri android init`,
+run:
+
+```bash
+node scripts/setup-android-project.js
+```
+
+It patches the manifest permissions, adds the runtime permission request to
+`MainActivity.kt`, and installs `libonnxruntime.so` into jniLibs. It is
+idempotent and safe to re-run. The sections below describe what it does, for
+reference or manual setup.
+
+### CI builds
+
+The repository ships a GitHub Actions workflow,
+[`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml),
+that runs the full pipeline (init → setup script → NDK build → sign → upload)
+and publishes an installable arm64 APK as a build artifact. Without signing
+secrets it signs with an ephemeral debug key; set `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, and `ANDROID_KEY_ALIAS` repository secrets for
+release signing.
+
 ### 1. Add permissions to the generated AndroidManifest.xml
 
 Edit `src-tauri/gen/android/app/src/main/AndroidManifest.xml` and add inside
