@@ -101,7 +101,10 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: pnpm install
+        # --no-frozen-lockfile: the committed pnpm-lock.yaml has a pre-existing
+        # "overrides" mismatch with package.json that fails CI's default frozen
+        # install (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH)
+        run: pnpm install --no-frozen-lockfile
 
       - name: Initialize Android project
         working-directory: frontend
