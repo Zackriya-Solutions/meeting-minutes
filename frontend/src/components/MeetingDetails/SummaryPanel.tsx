@@ -10,7 +10,9 @@ import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown } from 'lucide-react';
+import { Languages, ChevronDown, PanelLeftClose, PanelLeftOpen, CalendarDays, Folder as FolderIcon } from 'lucide-react';
+import { format } from 'date-fns';
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -60,6 +62,8 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  showTranscript?: boolean;
+  onToggleTranscript?: () => void;
 }
 
 export function SummaryPanel({
@@ -95,8 +99,11 @@ export function SummaryPanel({
   selectedTemplate,
   onTemplateSelect,
   isModelConfigLoading = false,
-  onOpenModelSettings
+  onOpenModelSettings,
+  showTranscript = false,
+  onToggleTranscript
 }: SummaryPanelProps) {
+  const { meetings: sidebarMeetings, folders: sidebarFolders } = useSidebar();
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
@@ -252,21 +259,60 @@ export function SummaryPanel({
     </Popover>
   );
 
+  const meetingDate = meeting.created_at ? new Date(meeting.created_at) : null;
+  const meetingDateLabel =
+    meetingDate && !isNaN(meetingDate.getTime()) ? format(meetingDate, 'EEE, MMM d · h:mm a') : null;
+  const meetingFolderId = sidebarMeetings.find(m => m.id === meeting.id)?.folder_id;
+  const meetingFolderName = meetingFolderId
+    ? sidebarFolders.find(f => f.id === meetingFolderId)?.name ?? null
+    : null;
+
+  // Granola-style centered header: big editable title + quiet meta chips
+  const titleHeader = (
+    <div className="w-full max-w-3xl mx-auto px-6 pt-8">
+      <EditableTitle
+        title={meetingTitle}
+        isEditing={isEditingTitle}
+        onStartEditing={onStartEditTitle}
+        onFinishEditing={onFinishEditTitle}
+        onChange={onTitleChange}
+      />
+      <div className="flex items-center flex-wrap gap-2 mt-2 px-1 text-xs text-gray-500">
+        {meetingDateLabel && (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-gray-50">
+            <CalendarDays className="w-3.5 h-3.5" />
+            {meetingDateLabel}
+          </span>
+        )}
+        {meetingFolderName && (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-gray-50">
+            <FolderIcon className="w-3.5 h-3.5" />
+            {meetingFolderName}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-surface overflow-hidden">
-      {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
-        {/* <EditableTitle
-          title={meetingTitle}
-          isEditing={isEditingTitle}
-          onStartEditing={onStartEditTitle}
-          onFinishEditing={onFinishEditTitle}
-          onChange={onTitleChange}
-        /> */}
+      {/* Slim toolbar: transcript toggle left, summary tools right */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200">
+        {onToggleTranscript && (
+          <button
+            onClick={onToggleTranscript}
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
+            title={showTranscript ? 'Hide transcript' : 'Show transcript'}
+            aria-label={showTranscript ? 'Hide transcript' : 'Show transcript'}
+          >
+            {showTranscript ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+          </button>
+        )}
+        <div className="flex-1" />
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-center w-full pt-0 gap-2">
+          <div className="flex items-center justify-end gap-2 min-w-0 overflow-x-auto">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup
@@ -337,6 +383,7 @@ export function SummaryPanel({
         </div>
       ) : !aiSummary ? (
         <div className="flex flex-col h-full">
+          {titleHeader}
           {/* Centered Summary Generator Button Group when no summary */}
           <div className="flex items-center justify-center gap-2 pt-8 pb-4">
             <SummaryGeneratorButtonGroup
@@ -411,7 +458,8 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
-          <div className="p-6 w-full">
+          {titleHeader}
+          <div className="px-6 pt-2 pb-12 w-full max-w-3xl mx-auto">
             <BlockNoteSummaryView
               ref={summaryRef}
               summaryData={aiSummary}

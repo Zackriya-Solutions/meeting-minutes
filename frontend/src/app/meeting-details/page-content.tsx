@@ -56,6 +56,8 @@ export default function PageContent({
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
+  // Granola-style: summary is the primary view; transcript is opt-in
+  const [showTranscript, setShowTranscript] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
@@ -171,6 +173,7 @@ export default function PageContent({
       className="flex flex-col h-screen bg-gray-50"
     >
       <div className="flex flex-1 overflow-hidden">
+        {showTranscript && (
         <TranscriptPanel
           transcripts={meetingData.transcripts}
           customPrompt={customPrompt}
@@ -192,7 +195,10 @@ export default function PageContent({
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
         />
+        )}
         <SummaryPanel
+          showTranscript={showTranscript}
+          onToggleTranscript={() => setShowTranscript(v => !v)}
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}
           onTitleChange={meetingData.handleTitleChange}
