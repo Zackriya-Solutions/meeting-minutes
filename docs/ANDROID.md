@@ -113,15 +113,25 @@ works; every audio window is forwarded to Whisper without speech filtering).
 
 ## Development
 
+> **Required:** export `ORT_SKIP_DOWNLOAD=1` when building for Android. The
+> `ort-sys` crate has no prebuilt ONNX Runtime binaries for Android and would
+> fail the build trying to download them; on Android the library is loaded at
+> runtime from jniLibs instead (see above). The `pnpm tauri:android:*` scripts
+> set this automatically.
+
 ```bash
 cd frontend
 
 # Run on a connected device or emulator with hot reload
-pnpm tauri android dev
+pnpm tauri:android:dev
+# equivalent to: ORT_SKIP_DOWNLOAD=1 pnpm tauri android dev
 
 # Pick a specific device
-pnpm tauri android dev --device
+ORT_SKIP_DOWNLOAD=1 pnpm tauri android dev --device
 ```
+
+On Windows (PowerShell): `$env:ORT_SKIP_DOWNLOAD="1"` before running the
+`pnpm tauri android ...` commands directly.
 
 Logs go to logcat with the tag `meetily`:
 
@@ -133,7 +143,8 @@ adb logcat -s meetily RustStdoutStderr
 
 ```bash
 cd frontend
-pnpm tauri android build --apk --target aarch64
+pnpm tauri:android:build
+# equivalent to: ORT_SKIP_DOWNLOAD=1 pnpm tauri android build --apk --target aarch64
 # Output: src-tauri/gen/android/app/build/outputs/apk/...
 ```
 

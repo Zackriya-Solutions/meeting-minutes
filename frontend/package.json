@@ -25,6 +25,9 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
+        "tauri:android:init": "tauri android init",
+        "tauri:android:dev": "ORT_SKIP_DOWNLOAD=1 tauri android dev",
+        "tauri:android:build": "ORT_SKIP_DOWNLOAD=1 tauri android build --apk --target aarch64",
         "lint": "next lint"
     },
     "dependencies": {
