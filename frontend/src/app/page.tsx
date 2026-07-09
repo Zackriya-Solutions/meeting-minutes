@@ -227,7 +227,7 @@ export default function Home() {
               <div
                 className={`flex justify-center ${isResizingSidebar ? '' : 'transition-[margin] duration-300'}`}
                 style={{
-                  marginLeft: sidebarCollapsed ? 64 : sidebarWidth
+                  marginLeft: sidebarCollapsed ? 0 : sidebarWidth
                 }}
               >
                 <div className="w-2/3 max-w-[750px] flex justify-center">

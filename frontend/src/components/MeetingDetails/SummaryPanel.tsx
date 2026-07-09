@@ -103,7 +103,7 @@ export function SummaryPanel({
   showTranscript = false,
   onToggleTranscript
 }: SummaryPanelProps) {
-  const { meetings: sidebarMeetings, folders: sidebarFolders } = useSidebar();
+  const { meetings: sidebarMeetings, folders: sidebarFolders, isCollapsed: sidebarHidden } = useSidebar();
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
@@ -298,6 +298,8 @@ export function SummaryPanel({
     <div className="flex-1 min-w-0 flex flex-col bg-surface overflow-hidden">
       {/* Slim toolbar: transcript toggle left, summary tools right */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200">
+        {/* Clearance for the fixed sidebar toggle when the sidebar is hidden */}
+        {sidebarHidden && <div className="w-8 flex-shrink-0" aria-hidden="true" />}
         {onToggleTranscript && (
           <button
             onClick={onToggleTranscript}

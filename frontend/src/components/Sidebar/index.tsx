@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { File, Settings, Home, Trash2, Mic, Square, Pencil, NotebookPen, SearchIcon, X, Upload, Folder as FolderIcon, FolderPlus, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { File, Settings, Home, Trash2, Mic, Square, Pencil, NotebookPen, SearchIcon, X, Upload, Folder as FolderIcon, FolderPlus, PanelLeft } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
@@ -10,7 +10,6 @@ import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
@@ -25,7 +24,6 @@ import {
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 
 import { MessageToast } from '../MessageToast';
-import Logo from '../Logo';
 import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
@@ -331,117 +329,6 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const renderCollapsedIcons = () => {
-    if (!isCollapsed) return null;
-
-    const isHomePage = pathname === '/';
-    const isMeetingPage = pathname?.includes('/meeting-details');
-    const isSettingsPage = pathname === '/settings';
-
-    return (
-      <TooltipProvider>
-        <div className="flex flex-col items-center space-y-4 mt-4">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={toggleCollapse}
-                className="p-2 rounded-lg transition-colors duration-150 text-gray-500 hover:bg-gray-100 hover:text-gray-600"
-              >
-                <PanelLeftOpen className="w-5 h-5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Expand sidebar</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Logo isCollapsed={isCollapsed} />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <Home className="w-5 h-5 text-gray-600" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Home</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleRecordingToggle}
-                disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
-              >
-                {isRecording ? (
-                  <Square className="w-5 h-5 text-white" />
-                ) : (
-                  <Mic className="w-5 h-5 text-white" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
-            </TooltipContent>
-          </Tooltip>
-
-          {betaFeatures.importAndRetranscribe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
-                >
-                  <Upload className="w-5 h-5 text-blue-600" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Import Audio</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/notes')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage || pathname === '/notes' ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <NotebookPen className="w-5 h-5 text-gray-600" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>All Notes</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/settings')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <Settings className="w-5 h-5 text-gray-600" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Settings</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Info isCollapsed={isCollapsed} />
-        </div>
-      </TooltipProvider>
-    );
-  };
 
 
 
@@ -467,9 +354,20 @@ const Sidebar: React.FC = () => {
 
   return (
     <div className="fixed top-0 left-0 h-screen z-40">
+      {/* Sidebar toggle - fixed at the window's top-left, Granola-style.
+          Same position whether the sidebar is open or fully hidden. */}
+      <button
+        onClick={toggleCollapse}
+        className="fixed top-2 left-2 z-50 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        aria-label={isCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        title={isCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+      >
+        <PanelLeft className="w-[18px] h-[18px]" />
+      </button>
+
       <div
-        className={`h-screen bg-background border-r shadow-sm flex flex-col relative ${isResizingSidebar ? '' : 'transition-all duration-300'}`}
-        style={{ width: isCollapsed ? 64 : sidebarWidth }}
+        className={`h-screen bg-background shadow-sm flex flex-col relative overflow-hidden ${isCollapsed ? '' : 'border-r'} ${isResizingSidebar ? '' : 'transition-all duration-300'}`}
+        style={{ width: isCollapsed ? 0 : sidebarWidth }}
       >
         {/* Resize handle */}
         {!isCollapsed && (
@@ -479,30 +377,14 @@ const Sidebar: React.FC = () => {
             aria-hidden="true"
           />
         )}
-        {/*  Header with traffic light spacing */}
-        <div className="flex-shrink-0 h-22 flex items-center">
 
-          {/* Title container */}
+        {/* Clearance for the fixed toggle button */}
+        <div className="flex-shrink-0 h-11" />
 
-
-
+        <div className="flex-shrink-0">
           <div className="flex-1">
             {!isCollapsed && (
-              <div className="p-3">
-                <div className="flex items-start gap-1">
-                  <div className="flex-1 min-w-0">
-                    <Logo isCollapsed={isCollapsed} />
-                  </div>
-                  <button
-                    onClick={toggleCollapse}
-                    className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
-                    aria-label="Collapse sidebar"
-                    title="Collapse sidebar"
-                  >
-                    <PanelLeftClose className="w-4 h-4" />
-                  </button>
-                </div>
-
+              <div className="px-3 pb-1">
                 <div className="relative mb-1">
                   <InputGroup >
                     <InputGroupInput placeholder='Search meeting content...' value={searchQuery}
@@ -544,7 +426,6 @@ const Sidebar: React.FC = () => {
 
           {/* Content area */}
           <div className="flex-1 flex flex-col min-h-0">
-            {renderCollapsedIcons()}
             {/* All Notes + Folders navigation (Granola-style), or search results */}
             {!isCollapsed && (
               <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pb-2">
