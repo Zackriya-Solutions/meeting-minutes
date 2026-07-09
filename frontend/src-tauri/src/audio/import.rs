@@ -266,6 +266,7 @@ pub async fn start_import<R: Runtime>(
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_deepgram = provider.as_deref() == Some(super::deepgram::PROVIDER);
     let result = run_import(
         app.clone(),
         source_path,
@@ -276,8 +277,11 @@ pub async fn start_import<R: Runtime>(
     )
     .await;
 
-    // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    // Unload the engine after the batch job (success, failure, or cancellation).
+    // Deepgram is cloud-based with no local engine to unload.
+    if !use_deepgram {
+        super::common::unload_engine_after_batch(use_parakeet).await;
+    }
 
     // Guard will automatically clear flag on drop
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -330,6 +334,7 @@ async fn run_import<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_deepgram = provider.as_deref() == Some(super::deepgram::PROVIDER);
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -368,6 +373,85 @@ async fn run_import<R: Runtime>(
         // Cleanup: remove the meeting folder
         let _ = std::fs::remove_dir_all(&meeting_folder);
         return Err(anyhow!("Import cancelled"));
+    }
+
+    if use_deepgram {
+        emit_progress(&app, "transcribing", 15, "Preparing Deepgram transcription...");
+        let duration_seconds = match extract_duration_from_metadata(&dest_path) {
+            Ok(duration) => duration,
+            Err(e) => {
+                warn!("Deepgram import metadata duration failed: {}, decoding duration", e);
+                let decoded = tokio::task::spawn_blocking({
+                    let path = dest_path.clone();
+                    move || decode_audio_file(&path)
+                })
+                .await
+                .map_err(|e| anyhow!("Decode task join error: {}", e))??;
+                decoded.duration_seconds
+            }
+        };
+
+        let client = super::deepgram::client_from_config(&app).await?;
+        let app_for_progress = app.clone();
+        let client_reference_id = format!("import:{}", title);
+        let transcript = client
+            .transcribe_file_with_progress(
+                &dest_path,
+                language.clone(),
+                &client_reference_id,
+                move |provider_progress, message| {
+                    let overall_progress = 15 + ((provider_progress as f32 * 0.70) as u32);
+                    emit_progress(&app_for_progress, "transcribing", overall_progress.min(85), message);
+                },
+                || IMPORT_CANCELLED.load(Ordering::SeqCst),
+            )
+            .await?;
+
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            let _ = std::fs::remove_dir_all(&meeting_folder);
+            return Err(anyhow!("Import cancelled"));
+        }
+
+        emit_progress(&app, "saving", 85, "Creating meeting...");
+        let segments = super::deepgram::transcript_to_segments(&transcript, duration_seconds);
+
+        let app_state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| anyhow!("App state not available"))?;
+
+        let meeting_id = create_meeting_with_transcripts(
+            app_state.db_manager.pool(),
+            &title,
+            &segments,
+            meeting_folder.to_string_lossy().to_string(),
+        )
+        .await?;
+
+        emit_progress(&app, "saving", 90, "Writing transcript files...");
+
+        if let Err(e) = write_transcripts_json(&meeting_folder, &segments) {
+            warn!("Failed to write transcripts.json: {}", e);
+        }
+
+        if let Err(e) = write_import_metadata(
+            &meeting_folder,
+            &meeting_id,
+            &title,
+            duration_seconds,
+            &dest_filename,
+            "import",
+        ) {
+            warn!("Failed to write metadata.json: {}", e);
+        }
+
+        emit_progress(&app, "complete", 100, "Import complete");
+
+        return Ok(ImportResult {
+            meeting_id,
+            title,
+            segments_count: segments.len(),
+            duration_seconds,
+        });
     }
 
     emit_progress(&app, "decoding", 15, "Decoding audio file...");

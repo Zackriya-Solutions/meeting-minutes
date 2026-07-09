@@ -2,6 +2,16 @@ use crate::database::models::{Setting, TranscriptSetting};
 use crate::summary::CustomOpenAIConfig;
 use sqlx::SqlitePool;
 
+/// Deepgram provider knobs read from the dedicated `transcript_settings` columns.
+/// `diarize`/`mip_opt_out` are stored as 1/0 integers (None = column never set).
+#[derive(Debug, Default, Clone)]
+pub struct DeepgramOptionsRow {
+    pub keyterm: Option<String>,
+    pub diarize: Option<i64>,
+    pub mip_opt_out: Option<i64>,
+    pub language: Option<String>,
+}
+
 #[derive(serde::Deserialize, Debug)]
 pub struct SaveModelConfigRequest {
     pub provider: String,
@@ -229,6 +239,51 @@ impl SettingsRepository {
         );
         let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
         Ok(api_key)
+    }
+
+    /// Read Deepgram provider knobs. All fields are None/absent when no settings
+    /// row exists yet. `language` is Deepgram-specific and deliberately separate
+    /// from the shared global language preference (which is Whisper/Parakeet-oriented),
+    /// so Deepgram-only values like `multi`/`detect` never reach the Whisper path.
+    pub async fn get_deepgram_options(
+        pool: &SqlitePool,
+    ) -> std::result::Result<DeepgramOptionsRow, sqlx::Error> {
+        let row: Option<(Option<String>, Option<i64>, Option<i64>, Option<String>)> = sqlx::query_as(
+            "SELECT deepgramKeyterm, deepgramDiarize, deepgramMipOptOut, deepgramLanguage FROM transcript_settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+        let (keyterm, diarize, mip_opt_out, language) = row.unwrap_or((None, None, None, None));
+        Ok(DeepgramOptionsRow { keyterm, diarize, mip_opt_out, language })
+    }
+
+    /// Persist Deepgram provider knobs without disturbing provider/model/api-key.
+    pub async fn save_deepgram_options(
+        pool: &SqlitePool,
+        keyterm: Option<&str>,
+        diarize: bool,
+        mip_opt_out: bool,
+        language: Option<&str>,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, deepgramKeyterm, deepgramDiarize, deepgramMipOptOut, deepgramLanguage)
+            VALUES ('1', 'parakeet', $5, $1, $2, $3, $4)
+            ON CONFLICT(id) DO UPDATE SET
+                deepgramKeyterm = $1,
+                deepgramDiarize = $2,
+                deepgramMipOptOut = $3,
+                deepgramLanguage = $4
+            "#,
+        )
+        .bind(keyterm)
+        .bind(if diarize { 1_i64 } else { 0_i64 })
+        .bind(if mip_opt_out { 1_i64 } else { 0_i64 })
+        .bind(language)
+        .bind(crate::config::DEFAULT_PARAKEET_MODEL)
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn delete_api_key(

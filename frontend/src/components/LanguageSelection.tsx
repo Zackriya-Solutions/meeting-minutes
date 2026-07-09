@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Globe } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
-import { useConfig } from '@/contexts/ConfigContext';
 
 export interface Language {
   code: string;
@@ -128,24 +127,98 @@ export function LanguageSelection({
   provider = 'localWhisper'
 }: LanguageSelectionProps) {
   const [saving, setSaving] = useState(false);
-  const { setSelectedLanguage } = useConfig();
 
   // Parakeet only supports auto-detection (doesn't support manual language selection)
   const isParakeet = provider === 'parakeet';
+  const isDeepgram = provider === 'deepgram';
+  // Deepgram exposes three distinct language modes (no Whisper-style "translate to English"):
+  //   multi  -> language=multi (nova-3 code-switching across 10 languages)
+  //   detect -> detect_language=true (auto-detect a single language)
+  //   <code> -> explicit language selection
+  // nova-3 language set (primary code per language; regional variants collapsed to
+  // the base code, except the ones Deepgram treats as distinct: Swiss German and the
+  // three Chinese scripts). `multi` = code-switching; `detect` = single-language auto-detect.
+  const DEEPGRAM_LANGUAGES: Language[] = [
+    { code: 'multi', name: 'Multilingual (code-switching)' },
+    { code: 'detect', name: 'Auto-detect (single language)' },
+    { code: 'ar', name: 'Arabic' },
+    { code: 'be', name: 'Belarusian' },
+    { code: 'bn', name: 'Bengali' },
+    { code: 'bs', name: 'Bosnian' },
+    { code: 'bg', name: 'Bulgarian' },
+    { code: 'ca', name: 'Catalan' },
+    { code: 'zh-HK', name: 'Chinese (Cantonese, Traditional)' },
+    { code: 'zh', name: 'Chinese (Mandarin, Simplified)' },
+    { code: 'zh-TW', name: 'Chinese (Mandarin, Traditional)' },
+    { code: 'hr', name: 'Croatian' },
+    { code: 'cs', name: 'Czech' },
+    { code: 'da', name: 'Danish' },
+    { code: 'nl', name: 'Dutch' },
+    { code: 'en', name: 'English' },
+    { code: 'et', name: 'Estonian' },
+    { code: 'fi', name: 'Finnish' },
+    { code: 'nl-BE', name: 'Flemish' },
+    { code: 'fr', name: 'French' },
+    { code: 'de', name: 'German' },
+    { code: 'de-CH', name: 'German (Switzerland)' },
+    { code: 'el', name: 'Greek' },
+    { code: 'gu', name: 'Gujarati' },
+    { code: 'he', name: 'Hebrew' },
+    { code: 'hi', name: 'Hindi' },
+    { code: 'hu', name: 'Hungarian' },
+    { code: 'id', name: 'Indonesian' },
+    { code: 'it', name: 'Italian' },
+    { code: 'ja', name: 'Japanese' },
+    { code: 'kn', name: 'Kannada' },
+    { code: 'ko', name: 'Korean' },
+    { code: 'lv', name: 'Latvian' },
+    { code: 'lt', name: 'Lithuanian' },
+    { code: 'mk', name: 'Macedonian' },
+    { code: 'ms', name: 'Malay' },
+    { code: 'mr', name: 'Marathi' },
+    { code: 'no', name: 'Norwegian' },
+    { code: 'fa', name: 'Persian' },
+    { code: 'pl', name: 'Polish' },
+    { code: 'pt', name: 'Portuguese' },
+    { code: 'ro', name: 'Romanian' },
+    { code: 'ru', name: 'Russian' },
+    { code: 'sr', name: 'Serbian' },
+    { code: 'sk', name: 'Slovak' },
+    { code: 'sl', name: 'Slovenian' },
+    { code: 'es', name: 'Spanish' },
+    { code: 'sv', name: 'Swedish' },
+    { code: 'tl', name: 'Tagalog' },
+    { code: 'ta', name: 'Tamil' },
+    { code: 'te', name: 'Telugu' },
+    { code: 'th', name: 'Thai' },
+    { code: 'tr', name: 'Turkish' },
+    { code: 'uk', name: 'Ukrainian' },
+    { code: 'ur', name: 'Urdu' },
+    { code: 'vi', name: 'Vietnamese' },
+  ];
   const availableLanguages = isParakeet
     ? LANGUAGES.filter(lang => lang.code === 'auto' || lang.code === 'auto-translate')
-    : LANGUAGES;
+    : isDeepgram
+      ? DEEPGRAM_LANGUAGES
+      : LANGUAGES;
+  // When Deepgram is active but the stored preference is a Whisper-ism (auto / auto-translate /
+  // empty), display `multi`, which is what the backend maps those to for nova-3.
+  const effectiveSelected = isDeepgram && ['auto', 'auto-translate', ''].includes(selectedLanguage)
+    ? 'multi'
+    : selectedLanguage;
 
   const handleLanguageChange = async (languageCode: string) => {
     setSaving(true);
     try {
-      // Save language preference to localStorage and sync to backend
-      setSelectedLanguage(languageCode);
+      // The parent owns persistence (global pref for Whisper/Parakeet, or the
+      // Deepgram-specific setting) via onLanguageChange. This component no longer
+      // writes the shared global pref directly, so provider-specific values
+      // (e.g. Deepgram's `multi`/`detect`) never leak across providers.
       onLanguageChange(languageCode);
       console.log('Language preference saved:', languageCode);
 
       // Track language selection analytics
-      const selectedLang = LANGUAGES.find(lang => lang.code === languageCode);
+      const selectedLang = availableLanguages.find(lang => lang.code === languageCode);
       await Analytics.track('language_selected', {
         language_code: languageCode,
         language_name: selectedLang?.name || 'Unknown',
@@ -169,8 +242,8 @@ export function LanguageSelection({
   };
 
   // Find the selected language name for display
-  const selectedLanguageName = LANGUAGES.find(
-    lang => lang.code === selectedLanguage
+  const selectedLanguageName = availableLanguages.find(
+    lang => lang.code === effectiveSelected
   )?.name || 'Auto Detect (Original Language)';
 
   return (
@@ -184,7 +257,7 @@ export function LanguageSelection({
 
       <div className="space-y-2">
         <select
-          value={selectedLanguage}
+          value={effectiveSelected}
           onChange={(e) => handleLanguageChange(e.target.value)}
           disabled={disabled || saving}
           className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
@@ -192,7 +265,7 @@ export function LanguageSelection({
           {availableLanguages.map((language) => (
             <option key={language.code} value={language.code}>
               {language.name}
-              {language.code !== 'auto' && language.code !== 'auto-translate' && ` (${language.code})`}
+              {!isDeepgram && !['auto', 'auto-translate', 'detect', 'multi'].includes(language.code) && ` (${language.code})`}
             </option>
           ))}
         </select>
@@ -202,6 +275,14 @@ export function LanguageSelection({
           <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
             <p className="font-medium">ℹ️ Parakeet Language Support</p>
             <p className="mt-1 text-xs">Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.</p>
+          </div>
+        )}
+
+        {/* Deepgram language modes */}
+        {isDeepgram && (
+          <div className="p-2 bg-blue-50 border border-blue-200 rounded text-blue-800 text-xs">
+            <p className="font-medium">Deepgram language modes</p>
+            <p className="mt-1"><strong>Multilingual</strong>: nova-3 code-switching across English, Spanish, French, German, Hindi, Russian, Portuguese, Japanese, Italian, and Dutch. <strong>Auto-detect</strong>: picks one language for the whole recording. Or choose a specific language for best accuracy.</p>
           </div>
         )}
 

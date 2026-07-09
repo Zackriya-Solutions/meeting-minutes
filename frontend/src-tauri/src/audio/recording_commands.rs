@@ -98,13 +98,17 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+            // Surface the actual reason (missing API key, model still downloading, unsupported
+            // provider, ...). validation_error is already user-facing per provider, e.g. Deepgram
+            // returns "Deepgram API key is not configured. Add it in Transcription settings...".
+            "userMessage": format!("Recording cannot start: {}", validation_error),
             "actionable": false
         }));
 
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let send_continuous_transcription = transcription::is_deepgram_transcription_provider(&app).await;
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
@@ -234,7 +238,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            send_continuous_transcription,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -344,13 +353,17 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+            // Surface the actual reason (missing API key, model still downloading, unsupported
+            // provider, ...). validation_error is already user-facing per provider, e.g. Deepgram
+            // returns "Deepgram API key is not configured. Add it in Transcription settings...".
+            "userMessage": format!("Recording cannot start: {}", validation_error),
             "actionable": false
         }));
 
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let send_continuous_transcription = transcription::is_deepgram_transcription_provider(&app).await;
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -405,7 +418,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            send_continuous_transcription,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 

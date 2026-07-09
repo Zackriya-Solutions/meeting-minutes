@@ -108,7 +108,7 @@ fi
 # Note: llama-cpp-2 does NOT support coreml, only metal/cuda/vulkan
 # So for macOS Apple Silicon (which returns 'coreml' for Whisper), use 'metal' for llama-helper
 HELPER_FEATURES=""
-if [ -n "$TAURI_GPU_FEATURE" ]; then
+if [ -n "$TAURI_GPU_FEATURE" ] && [ "$TAURI_GPU_FEATURE" != "none" ]; then
     LLAMA_FEATURE="$TAURI_GPU_FEATURE"
     if [ "$LLAMA_FEATURE" = "coreml" ]; then
         LLAMA_FEATURE="metal"
