@@ -82,7 +82,12 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          key: android-arm64
+          # Bump this suffix (v2, v3, ...) to force a fresh cache namespace if
+          # a build ever fails with a filesystem-level error (missing file/dir)
+          # inside a vendored C/C++ dependency's build directory — that's the
+          # signature of a corrupted cache entry, not a real source change,
+          # since Cargo.lock/source hashing alone won't invalidate it.
+          key: android-arm64-v2
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
