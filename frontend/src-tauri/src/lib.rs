@@ -67,6 +67,7 @@ pub mod tray {
 
     pub fn update_tray_menu<R: Runtime>(_app: &AppHandle<R>) {}
 
+    #[allow(dead_code)]
     pub(crate) fn focus_main_window<R: Runtime>(_app: &AppHandle<R>) {}
 }
 pub mod whisper_engine;
@@ -415,6 +416,7 @@ pub fn run() {
 
     log::set_max_level(log::LevelFilter::Info);
 
+    #[cfg_attr(mobile, allow(unused_mut))]
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]

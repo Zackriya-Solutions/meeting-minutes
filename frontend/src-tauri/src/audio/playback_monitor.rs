@@ -29,6 +29,18 @@ pub async fn get_active_audio_output() -> Result<AudioOutputInfo> {
     {
         get_linux_output().await
     }
+
+    // Mobile and other platforms: no desktop-style output-device monitoring
+    // (Bluetooth playback warnings are a desktop feature)
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Ok(AudioOutputInfo {
+            device_name: "Default".to_string(),
+            is_bluetooth: false,
+            sample_rate: None,
+            device_type: "unknown".to_string(),
+        })
+    }
 }
 
 #[cfg(target_os = "macos")]
