@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { File, Settings, Home, Trash2, Mic, Square, Pencil, NotebookPen, SearchIcon, X, Upload, Folder as FolderIcon, FolderPlus, PanelLeft } from 'lucide-react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -32,6 +32,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '
 const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     setCurrentMeeting,
     isCollapsed,
@@ -73,20 +74,23 @@ const Sidebar: React.FC = () => {
 
   // Folder nav state (Granola-style sidebar)
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [isUncategorizedActive, setIsUncategorizedActive] = useState(false);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [folderRenameState, setFolderRenameState] = useState<{ isOpen: boolean; folderId: string | null }>({ isOpen: false, folderId: null });
   const [renamingFolderName, setRenamingFolderName] = useState('');
   const [folderDeleteState, setFolderDeleteState] = useState<{ isOpen: boolean; folderId: string | null }>({ isOpen: false, folderId: null });
 
-  // Keep the highlighted folder in sync with the URL (?folder=... on /notes)
+  // Keep the highlighted folder or virtual Uncategorized view in sync with the URL.
   useEffect(() => {
     if (pathname === '/notes') {
-      setActiveFolderId(new URLSearchParams(window.location.search).get('folder'));
+      setActiveFolderId(searchParams.get('folder'));
+      setIsUncategorizedActive(searchParams.get('view') === 'uncategorized');
     } else {
       setActiveFolderId(null);
+      setIsUncategorizedActive(false);
     }
-  }, [pathname]);
+  }, [pathname, searchParams]);
 
   // useEffect(() => {
   //   if (settingsSaveSuccess !== null) {
@@ -253,16 +257,31 @@ const Sidebar: React.FC = () => {
       .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
   }, [searchQuery, searchResults, meetings]);
 
+  // Meetings without a folder stay easy to find without being mixed into the folder list.
+  const uncategorizedMeetings = useMemo(() => {
+    return meetings
+      .filter(meeting => meeting.folder_id === null || meeting.folder_id === undefined)
+      .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+  }, [meetings]);
+
 
   // ----- Folder navigation & CRUD -----
 
   const openAllNotes = () => {
     setActiveFolderId(null);
+    setIsUncategorizedActive(false);
     router.push('/notes');
+  };
+
+  const openUncategorized = () => {
+    setActiveFolderId(null);
+    setIsUncategorizedActive(true);
+    router.push('/notes?view=uncategorized');
   };
 
   const openFolder = (folderId: string) => {
     setActiveFolderId(folderId);
+    setIsUncategorizedActive(false);
     router.push(`/notes?folder=${folderId}`);
   };
 
@@ -466,10 +485,22 @@ const Sidebar: React.FC = () => {
                     {/* All Notes */}
                     <div
                       onClick={openAllNotes}
-                      className={`px-3 text-sm font-medium text-gray-700 items-center h-9 flex mx-3 mt-1 rounded-lg cursor-pointer ${pathname === '/notes' && !activeFolderId ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
+                      className={`px-3 text-sm font-medium text-gray-700 items-center h-9 flex mx-3 mt-1 rounded-lg cursor-pointer ${pathname === '/notes' && !activeFolderId && !isUncategorizedActive ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
                     >
                       <NotebookPen className="w-4 h-4 mr-2" />
                       <span>All Notes</span>
+                    </div>
+
+                    {/* Virtual folder for meetings that have not been assigned to a folder */}
+                    <div className="mx-3 mt-1">
+                      <div
+                        onClick={openUncategorized}
+                        className={`px-3 py-2 my-0.5 rounded-md text-sm flex items-center group cursor-pointer ${isUncategorizedActive ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-100'}`}
+                      >
+                        <FolderIcon className="w-4 h-4 mr-2 flex-shrink-0" />
+                        <span className="flex-1 min-w-0 truncate">Uncategorized</span>
+                        <span className="ml-2 text-xs text-gray-400">{uncategorizedMeetings.length}</span>
+                      </div>
                     </div>
 
                     {/* Folders */}

@@ -47,6 +47,7 @@ function NotesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const folderId = searchParams.get('folder');
+  const isUncategorized = searchParams.get('view') === 'uncategorized';
 
   const {
     meetings,
@@ -61,13 +62,15 @@ function NotesContent() {
   const [renameTitle, setRenameTitle] = useState('');
   const [deleteState, setDeleteState] = useState<{ isOpen: boolean; meetingId: string | null }>({ isOpen: false, meetingId: null });
 
-  const activeFolder = folderId ? folders.find(f => f.id === folderId) ?? null : null;
+  const activeFolder = !isUncategorized && folderId ? folders.find(f => f.id === folderId) ?? null : null;
   const folderNameById = useMemo(() => new Map(folders.map(f => [f.id, f.name])), [folders]);
 
   // Meetings in scope, newest first, grouped by calendar day
   const groups = useMemo<MeetingGroup[]>(() => {
     const inScope = activeFolder
       ? meetings.filter(m => m.folder_id === activeFolder.id)
+      : isUncategorized
+        ? meetings.filter(m => m.folder_id === null || m.folder_id === undefined)
       : meetings;
 
     const sorted = [...inScope].sort((a, b) =>
@@ -89,7 +92,7 @@ function NotesContent() {
       }
     }
     return result;
-  }, [meetings, activeFolder]);
+  }, [meetings, activeFolder, isUncategorized]);
 
   const meetingCount = groups.reduce((n, g) => n + g.meetings.length, 0);
 
@@ -155,7 +158,7 @@ function NotesContent() {
           {/* Header */}
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gray-100 border border-gray-200">
-              {activeFolder ? (
+              {activeFolder || isUncategorized ? (
                 <FolderIcon className="w-5 h-5 text-gray-500" />
               ) : (
                 <NotebookPen className="w-5 h-5 text-gray-500" />
@@ -163,11 +166,13 @@ function NotesContent() {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-gray-900">
-                {activeFolder ? activeFolder.name : 'All Notes'}
+                {activeFolder ? activeFolder.name : isUncategorized ? 'Uncategorized' : 'All Notes'}
               </h1>
               <p className="text-sm text-gray-500 mt-0.5">
                 {activeFolder
                   ? `${meetingCount} ${meetingCount === 1 ? 'meeting' : 'meetings'} in this folder`
+                  : isUncategorized
+                    ? `${meetingCount} ${meetingCount === 1 ? 'meeting' : 'meetings'} without a folder`
                   : `Notes from all of your meetings · ${meetingCount} ${meetingCount === 1 ? 'meeting' : 'meetings'}`}
               </p>
             </div>
@@ -179,11 +184,15 @@ function NotesContent() {
               <p className="text-gray-500">
                 {activeFolder
                   ? 'No meetings in this folder yet.'
+                  : isUncategorized
+                    ? 'No uncategorized meetings yet.'
                   : 'No meetings yet.'}
               </p>
               <p className="text-sm text-gray-400 mt-1">
                 {activeFolder
                   ? 'Use the ⋯ menu on any note to move it here.'
+                  : isUncategorized
+                    ? 'Meetings without a folder will appear here.'
                   : 'Start a recording to create your first meeting note.'}
               </p>
             </div>
@@ -196,7 +205,7 @@ function NotesContent() {
               {group.meetings.map(meeting => {
                 const date = meeting.created_at ? new Date(meeting.created_at) : null;
                 const timeLabel = date && !isNaN(date.getTime()) ? format(date, 'h:mm a') : '';
-                const folderName = !activeFolder && meeting.folder_id
+                const folderName = !activeFolder && !isUncategorized && meeting.folder_id
                   ? folderNameById.get(meeting.folder_id)
                   : null;
 
