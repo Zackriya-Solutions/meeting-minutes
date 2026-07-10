@@ -647,6 +647,7 @@ pub fn run() {
             // Diarization settings commands
             diarization::commands::get_diarization_settings,
             diarization::commands::save_diarization_settings,
+            diarization::commands::apply_diarization_segments,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,
