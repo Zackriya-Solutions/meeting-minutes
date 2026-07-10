@@ -2,10 +2,13 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::{
-    database::{models::Transcript, repositories::diarization::DiarizationRepository},
+    database::{
+        models::Transcript,
+        repositories::diarization::{diarization_status_to_database_value, DiarizationRepository},
+    },
     diarization::{
         alignment::assign_speaker_to_transcript,
-        types::{SpeakerSegment, TranscriptWindow},
+        types::{DiarizationStatus, SpeakerSegment, TranscriptWindow},
     },
     state::AppState,
 };
@@ -78,11 +81,20 @@ pub async fn apply_diarization_segments(
     } = request;
     let segments = segments_for_meeting(segments, &meeting_id);
 
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+
+    replace_speaker_segments(&mut transaction, &meeting_id, &method, &segments)
+        .await
+        .map_err(|error| error.to_string())?;
+    upsert_meeting_diarization_status(&mut transaction, &meeting_id, &method, &segments)
+        .await
+        .map_err(|error| error.to_string())?;
+
     let transcripts = sqlx::query_as::<_, Transcript>(
         "SELECT * FROM transcripts WHERE meeting_id = ? ORDER BY audio_start_time ASC",
     )
     .bind(&meeting_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|error| error.to_string())?;
 
@@ -95,10 +107,19 @@ pub async fn apply_diarization_segments(
 
         let assignment = assign_speaker_to_transcript(&window, &segments, 0.1, &method);
 
-        DiarizationRepository::update_transcript_assignment(pool, &transcript.id, &assignment)
-            .await
-            .map_err(|error| error.to_string())?;
+        DiarizationRepository::update_transcript_assignment(
+            &mut *transaction,
+            &transcript.id,
+            &assignment,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
     }
+
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -110,10 +131,134 @@ fn segments_for_meeting(segments: Vec<SpeakerSegment>, meeting_id: &str) -> Vec<
         .collect()
 }
 
+async fn replace_speaker_segments(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    meeting_id: &str,
+    method: &str,
+    segments: &[SpeakerSegment],
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM speaker_segments WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut **transaction)
+        .await?;
+
+    for (index, segment) in segments.iter().enumerate() {
+        let segment_id = format!("{meeting_id}:{method}:{index}");
+        let segment_status = diarization_status_to_database_value(segment.diarization_status);
+        let segment_method = segment.diarization_method.as_deref().unwrap_or(method);
+
+        sqlx::query(
+            "INSERT INTO speaker_segments (
+                id, meeting_id, source, start_time, end_time,
+                speaker_id, speaker_label, confidence, is_overlap,
+                diarization_status, diarization_method
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(segment_id)
+        .bind(meeting_id)
+        .bind(&segment.source)
+        .bind(segment.start_time)
+        .bind(segment.end_time)
+        .bind(&segment.speaker_id)
+        .bind(&segment.speaker_label)
+        .bind(segment.confidence)
+        .bind(segment.is_overlap as i64)
+        .bind(segment_status)
+        .bind(segment_method)
+        .execute(&mut **transaction)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn upsert_meeting_diarization_status(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    meeting_id: &str,
+    method: &str,
+    segments: &[SpeakerSegment],
+) -> Result<(), sqlx::Error> {
+    let current_status = meeting_status_from_segments(segments);
+    let method = method.to_ascii_lowercase();
+    let live_enabled = current_status == "provisional"
+        || current_status == "fallback_to_live"
+        || method.contains("live")
+        || method.contains("online");
+    let post_call_enabled =
+        current_status == "final" || method.contains("post") || method.contains("offline");
+
+    sqlx::query(
+        "INSERT INTO meeting_diarization_status (
+            meeting_id, enabled, live_enabled, post_call_enabled,
+            current_status, quality_flags, processed_at, updated_at
+         )
+         VALUES (?, 1, ?, ?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT(meeting_id) DO UPDATE SET
+            enabled = 1,
+            live_enabled = excluded.live_enabled,
+            post_call_enabled = excluded.post_call_enabled,
+            current_status = excluded.current_status,
+            quality_flags = NULL,
+            processed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP",
+    )
+    .bind(meeting_id)
+    .bind(live_enabled as i64)
+    .bind(post_call_enabled as i64)
+    .bind(current_status)
+    .execute(&mut **transaction)
+    .await?;
+
+    Ok(())
+}
+
+fn meeting_status_from_segments(segments: &[SpeakerSegment]) -> &'static str {
+    if segments.is_empty() {
+        return "needs_review";
+    }
+
+    if segments
+        .iter()
+        .any(|segment| segment.diarization_status == DiarizationStatus::Failed)
+    {
+        return "failed";
+    }
+
+    if segments
+        .iter()
+        .any(|segment| segment.diarization_status == DiarizationStatus::NeedsReview)
+    {
+        return "needs_review";
+    }
+
+    if segments
+        .iter()
+        .any(|segment| segment.diarization_status == DiarizationStatus::FallbackToLive)
+    {
+        return "fallback_to_live";
+    }
+
+    if segments
+        .iter()
+        .any(|segment| segment.diarization_status == DiarizationStatus::Provisional)
+    {
+        return "provisional";
+    }
+
+    if segments
+        .iter()
+        .all(|segment| segment.diarization_status == DiarizationStatus::Final)
+    {
+        return "final";
+    }
+
+    "none"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diarization::types::DiarizationStatus;
 
     fn segment(meeting_id: &str, speaker_label: &str) -> SpeakerSegment {
         SpeakerSegment {
@@ -143,5 +288,23 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].meeting_id, "meeting-1");
         assert_eq!(segments[0].speaker_label.as_deref(), Some("Speaker 1"));
+    }
+
+    #[test]
+    fn meeting_status_from_segments_returns_needs_review_for_empty_segments() {
+        assert_eq!(meeting_status_from_segments(&[]), "needs_review");
+    }
+
+    #[test]
+    fn meeting_status_from_segments_prefers_failed_over_final_segments() {
+        let mut failed = segment("meeting-1", "Speaker 1");
+        failed.diarization_status = DiarizationStatus::Failed;
+        let mut final_segment = segment("meeting-1", "Speaker 2");
+        final_segment.diarization_status = DiarizationStatus::Final;
+
+        assert_eq!(
+            meeting_status_from_segments(&[final_segment, failed]),
+            "failed"
+        );
     }
 }

@@ -1,5 +1,5 @@
 use crate::database::models::DiarizationSetting;
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 
 pub struct DiarizationRepository;
 
@@ -61,11 +61,14 @@ impl DiarizationRepository {
         Ok(())
     }
 
-    pub async fn update_transcript_assignment(
-        pool: &SqlitePool,
+    pub async fn update_transcript_assignment<'e, E>(
+        executor: E,
         transcript_id: &str,
         assignment: &crate::diarization::types::SpeakerAssignment,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<(), sqlx::Error>
+    where
+        E: sqlx::Executor<'e, Database = Sqlite>,
+    {
         let diarization_status =
             diarization_status_to_database_value(assignment.diarization_status);
 
@@ -88,14 +91,14 @@ impl DiarizationRepository {
         .bind(&assignment.diarization_method)
         .bind(assignment.diarization_confidence)
         .bind(transcript_id)
-        .execute(pool)
+        .execute(executor)
         .await?;
 
         Ok(())
     }
 }
 
-fn diarization_status_to_database_value(
+pub(crate) fn diarization_status_to_database_value(
     status: crate::diarization::types::DiarizationStatus,
 ) -> String {
     serde_json::to_value(status)

@@ -28,7 +28,8 @@ pub fn assign_speaker_to_transcript(
     }
 
     let min_overlap_ratio = normalize_min_overlap_ratio(min_overlap_ratio);
-    let mut best_segment: Option<(&SpeakerSegment, f64)> = None;
+    let mut best_overlap_segment: Option<(&SpeakerSegment, f64)> = None;
+    let mut best_speaker_segment: Option<(&SpeakerSegment, f64)> = None;
 
     for segment in segments {
         let overlap_start = transcript_start.max(segment.start_time);
@@ -43,26 +44,33 @@ pub fn assign_speaker_to_transcript(
             continue;
         }
 
-        match best_segment {
-            Some((_, best_overlap)) if best_overlap >= overlap => {}
-            _ => best_segment = Some((segment, overlap)),
+        if segment.is_overlap {
+            match best_overlap_segment {
+                Some((_, best_overlap)) if best_overlap >= overlap => {}
+                _ => best_overlap_segment = Some((segment, overlap)),
+            }
+        } else {
+            match best_speaker_segment {
+                Some((_, best_overlap)) if best_overlap >= overlap => {}
+                _ => best_speaker_segment = Some((segment, overlap)),
+            }
         }
     }
 
-    let Some((segment, _)) = best_segment else {
-        return SpeakerAssignment::unknown(
-            DiarizationStatus::NeedsReview,
-            Some(method.to_string()),
-        );
-    };
-
-    if segment.is_overlap {
+    if let Some((segment, _)) = best_overlap_segment {
         return SpeakerAssignment::overlap(
             segment.confidence.unwrap_or(0.0),
             segment.diarization_status,
             method.to_string(),
         );
     }
+
+    let Some((segment, _)) = best_speaker_segment else {
+        return SpeakerAssignment::unknown(
+            DiarizationStatus::NeedsReview,
+            Some(method.to_string()),
+        );
+    };
 
     SpeakerAssignment {
         speaker_id: segment.speaker_id.clone(),
@@ -143,6 +151,29 @@ mod tests {
         );
         assert!(assignment.is_overlap);
         assert_eq!(assignment.diarization_confidence, Some(0.93));
+    }
+
+    #[test]
+    fn marks_overlap_even_when_shorter_than_primary_speaker_segment() {
+        let transcript = TranscriptWindow {
+            transcript_id: "t2-overlap-precedence".to_string(),
+            audio_start_time: Some(10.0),
+            audio_end_time: Some(20.0),
+        };
+        let primary = segment("Speaker 1", 10.0, 20.0);
+        let mut interruption = segment("Speaker 2", 14.0, 15.0);
+        interruption.is_overlap = true;
+        interruption.confidence = Some(0.77);
+
+        let assignment =
+            assign_speaker_to_transcript(&transcript, &[primary, interruption], 0.1, "unit_test");
+
+        assert_eq!(
+            assignment.speaker_label.as_deref(),
+            Some("Multiple speakers")
+        );
+        assert!(assignment.is_overlap);
+        assert_eq!(assignment.diarization_confidence, Some(0.77));
     }
 
     #[test]
