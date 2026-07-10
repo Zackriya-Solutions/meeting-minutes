@@ -12,6 +12,7 @@ const QWEN35_4B_RECOMMENDED_RAM_GB: u64 = 14;
 
 pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     match model_name {
+        "qwen3.5:9b" => 5,
         "qwen3.5:4b" => 4,
         "qwen3.5:2b" => 3,
         "gemma3:4b" => 2,
@@ -425,6 +426,7 @@ mod tests {
 
     #[test]
     fn available_summary_model_priority_prefers_qwen_over_gemma() {
+        assert!(summary_model_priority("qwen3.5:9b") > summary_model_priority("qwen3.5:4b"));
         assert!(summary_model_priority("qwen3.5:4b") > summary_model_priority("qwen3.5:2b"));
         assert!(summary_model_priority("qwen3.5:2b") > summary_model_priority("gemma3:4b"));
         assert!(summary_model_priority("gemma3:4b") > summary_model_priority("gemma3:1b"));

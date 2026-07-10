@@ -189,6 +189,21 @@ pub fn get_available_models() -> Vec<ModelDef> {
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
         },
+        // Qwen 3.5 9B - Max quality tier for 16GB+ machines (GGUF build of Qwen3.5-9B;
+        // the MLX release of the same model needs Apple's MLX runtime, which the
+        // llama-helper sidecar does not provide).
+        ModelDef {
+            name: "qwen3.5:9b".to_string(),
+            display_name: "Qwen 3.5 9B (Max Quality)".to_string(),
+            gguf_file: "Qwen3.5-9B-Q4_K_M.gguf".to_string(),
+            template: "qwen3.5_nonthinking".to_string(),
+            download_url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf".to_string(),
+            size_mb: 5417,
+            context_size: 32768,
+            layer_count: 32,
+            sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
+            description: "Largest Qwen 3.5 model for built-in summaries. Best quality; needs ~6GB free RAM, recommended for Apple Silicon or 16GB+ machines.".to_string(),
+        },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
         ModelDef {
             name: "gemma3:4b".to_string(),
@@ -345,6 +360,19 @@ mod tests {
         assert_eq!(qwen_2b.context_size, 32768);
         assert_eq!(qwen_2b.layer_count, 24);
         assert_eq!(qwen_2b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
+
+        let qwen_9b = get_model_by_name("qwen3.5:9b").expect("qwen 9b model should exist");
+        assert_eq!(qwen_9b.display_name, "Qwen 3.5 9B (Max Quality)");
+        assert_eq!(qwen_9b.gguf_file, "Qwen3.5-9B-Q4_K_M.gguf");
+        assert_eq!(qwen_9b.template, "qwen3.5_nonthinking");
+        assert_eq!(
+            qwen_9b.download_url,
+            "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"
+        );
+        assert_eq!(qwen_9b.size_mb, 5417);
+        assert_eq!(qwen_9b.context_size, 32768);
+        assert_eq!(qwen_9b.layer_count, 32);
+        assert_eq!(qwen_9b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
 
         let qwen_4b = get_model_by_name("qwen3.5:4b").expect("qwen 4b model should exist");
         assert_eq!(qwen_4b.display_name, "Qwen 3.5 4B (High Quality)");
