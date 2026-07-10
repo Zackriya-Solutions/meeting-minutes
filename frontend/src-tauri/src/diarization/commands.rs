@@ -4,7 +4,9 @@ use tauri::State;
 use crate::{
     database::{
         models::Transcript,
-        repositories::diarization::{diarization_status_to_database_value, DiarizationRepository},
+        repositories::diarization::{
+            diarization_status_to_database_value, DiarizationRepository, MeetingSpeaker,
+        },
     },
     diarization::{
         alignment::assign_speaker_to_transcript,
@@ -58,6 +60,64 @@ pub async fn save_diarization_settings(
     )
     .await
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_meeting_speakers(
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Vec<MeetingSpeaker>, String> {
+    if meeting_id.trim().is_empty() {
+        return Err("Meeting id cannot be empty".to_string());
+    }
+
+    DiarizationRepository::get_meeting_speakers(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameSpeakerRequest {
+    pub meeting_id: String,
+    pub speaker_id: String,
+    pub label: String,
+}
+
+#[tauri::command]
+pub async fn rename_speaker(
+    state: State<'_, AppState>,
+    request: RenameSpeakerRequest,
+) -> Result<(), String> {
+    let RenameSpeakerRequest {
+        meeting_id,
+        speaker_id,
+        label,
+    } = request;
+    let label = normalize_speaker_label(&label)?;
+
+    if meeting_id.trim().is_empty() {
+        return Err("Meeting id cannot be empty".to_string());
+    }
+
+    if speaker_id.trim().is_empty() {
+        return Err("Speaker id cannot be empty".to_string());
+    }
+
+    let updated_count = DiarizationRepository::rename_speaker(
+        state.db_manager.pool(),
+        &meeting_id,
+        &speaker_id,
+        &label,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    if updated_count == 0 {
+        return Err("Speaker not found for meeting".to_string());
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +316,16 @@ fn meeting_status_from_segments(segments: &[SpeakerSegment]) -> &'static str {
     "none"
 }
 
+fn normalize_speaker_label(label: &str) -> Result<String, String> {
+    let label = label.trim();
+
+    if label.is_empty() {
+        return Err("Speaker label cannot be empty".to_string());
+    }
+
+    Ok(label.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +375,22 @@ mod tests {
         assert_eq!(
             meeting_status_from_segments(&[final_segment, failed]),
             "failed"
+        );
+    }
+
+    #[test]
+    fn normalize_speaker_label_trims_non_empty_label() {
+        assert_eq!(
+            normalize_speaker_label("  Alice Johnson  ").expect("label should be valid"),
+            "Alice Johnson"
+        );
+    }
+
+    #[test]
+    fn normalize_speaker_label_rejects_blank_label() {
+        assert_eq!(
+            normalize_speaker_label(" \n\t ").expect_err("blank label should be rejected"),
+            "Speaker label cannot be empty"
         );
     }
 }

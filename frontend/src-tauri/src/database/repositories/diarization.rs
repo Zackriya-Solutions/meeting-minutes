@@ -1,7 +1,17 @@
 use crate::database::models::DiarizationSetting;
+use serde::Serialize;
 use sqlx::{Sqlite, SqlitePool};
 
 pub struct DiarizationRepository;
+
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSpeaker {
+    pub speaker_id: String,
+    pub speaker_label: String,
+    pub speaker_color: Option<String>,
+    pub segment_count: i64,
+}
 
 impl DiarizationRepository {
     pub async fn get_settings(pool: &SqlitePool) -> Result<DiarizationSetting, sqlx::Error> {
@@ -96,6 +106,72 @@ impl DiarizationRepository {
 
         Ok(())
     }
+
+    pub async fn get_meeting_speakers(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Vec<MeetingSpeaker>, sqlx::Error> {
+        sqlx::query_as::<_, MeetingSpeaker>(
+            "SELECT
+                speaker_id AS speaker_id,
+                COALESCE(NULLIF(TRIM(MAX(speaker_label)), ''), speaker_id) AS speaker_label,
+                MAX(speaker_color) AS speaker_color,
+                COUNT(*) AS segment_count
+             FROM transcripts
+             WHERE meeting_id = ?
+                AND speaker_id IS NOT NULL
+                AND TRIM(speaker_id) <> ''
+             GROUP BY speaker_id
+             ORDER BY MIN(COALESCE(audio_start_time, 0)), speaker_id",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await
+    }
+
+    pub async fn rename_speaker(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        speaker_id: &str,
+        speaker_label: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let mut transaction = pool.begin().await?;
+
+        let transcript_result = sqlx::query(
+            "UPDATE transcripts
+             SET speaker_label = ?
+             WHERE meeting_id = ? AND speaker_id = ?",
+        )
+        .bind(speaker_label)
+        .bind(meeting_id)
+        .bind(speaker_id)
+        .execute(&mut *transaction)
+        .await?;
+
+        let segment_result = sqlx::query(
+            "UPDATE speaker_segments
+             SET speaker_label = ?
+             WHERE meeting_id = ? AND speaker_id = ?",
+        )
+        .bind(speaker_label)
+        .bind(meeting_id)
+        .bind(speaker_id)
+        .execute(&mut *transaction)
+        .await?;
+
+        sqlx::query(
+            "UPDATE meeting_diarization_status
+             SET updated_at = CURRENT_TIMESTAMP
+             WHERE meeting_id = ?",
+        )
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+        transaction.commit().await?;
+
+        Ok(transcript_result.rows_affected() + segment_result.rows_affected())
+    }
 }
 
 pub(crate) fn diarization_status_to_database_value(
@@ -140,6 +216,146 @@ mod tests {
             .execute(&pool)
             .await
             .expect("transcript row should be inserted");
+
+        pool
+    }
+
+    async fn speaker_test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("test pool should connect");
+
+        sqlx::query(
+            "CREATE TABLE transcripts (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                speaker_id TEXT,
+                speaker_label TEXT,
+                speaker_color TEXT,
+                audio_start_time REAL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("transcripts table should be created");
+
+        sqlx::query(
+            "CREATE TABLE speaker_segments (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                start_time REAL NOT NULL,
+                end_time REAL NOT NULL,
+                speaker_id TEXT,
+                speaker_label TEXT,
+                confidence REAL,
+                is_overlap INTEGER NOT NULL DEFAULT 0,
+                diarization_status TEXT NOT NULL,
+                diarization_method TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("speaker_segments table should be created");
+
+        sqlx::query(
+            "CREATE TABLE meeting_diarization_status (
+                meeting_id TEXT PRIMARY KEY NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("meeting_diarization_status table should be created");
+
+        sqlx::query(
+            "INSERT INTO meeting_diarization_status (meeting_id) VALUES ('meeting-1')",
+        )
+        .execute(&pool)
+        .await
+        .expect("meeting diarization status should be inserted");
+
+        for (id, meeting_id, speaker_id, speaker_label, speaker_color, audio_start_time) in [
+            (
+                "t-1",
+                "meeting-1",
+                Some("speaker-1"),
+                Some("Speaker 1"),
+                Some("#2563eb"),
+                0.0,
+            ),
+            (
+                "t-2",
+                "meeting-1",
+                Some("speaker-1"),
+                Some("Speaker 1"),
+                Some("#2563eb"),
+                1.0,
+            ),
+            (
+                "t-3",
+                "meeting-1",
+                Some("speaker-2"),
+                Some("Speaker 2"),
+                Some("#16a34a"),
+                2.0,
+            ),
+            (
+                "t-4",
+                "meeting-2",
+                Some("speaker-1"),
+                Some("Other meeting speaker"),
+                Some("#dc2626"),
+                3.0,
+            ),
+            ("t-5", "meeting-1", None, None, None, 4.0),
+        ] {
+            sqlx::query(
+                "INSERT INTO transcripts (
+                    id, meeting_id, speaker_id, speaker_label, speaker_color, audio_start_time
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(meeting_id)
+            .bind(speaker_id)
+            .bind(speaker_label)
+            .bind(speaker_color)
+            .bind(audio_start_time)
+            .execute(&pool)
+            .await
+            .expect("transcript row should be inserted");
+        }
+
+        for (id, meeting_id, speaker_id, speaker_label) in [
+            ("s-1", "meeting-1", Some("speaker-1"), Some("Speaker 1")),
+            ("s-2", "meeting-1", Some("speaker-1"), Some("Speaker 1")),
+            ("s-3", "meeting-1", Some("speaker-2"), Some("Speaker 2")),
+            (
+                "s-4",
+                "meeting-2",
+                Some("speaker-1"),
+                Some("Other meeting speaker"),
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO speaker_segments (
+                    id, meeting_id, source, start_time, end_time,
+                    speaker_id, speaker_label, diarization_status
+                 )
+                 VALUES (?, ?, 'unit_test', 0, 1, ?, ?, 'final')",
+            )
+            .bind(id)
+            .bind(meeting_id)
+            .bind(speaker_id)
+            .bind(speaker_label)
+            .execute(&pool)
+            .await
+            .expect("speaker segment row should be inserted");
+        }
 
         pool
     }
@@ -191,5 +407,67 @@ mod tests {
         assert_eq!(row.4, "final");
         assert_eq!(row.5.as_deref(), Some("pyannote-rs"));
         assert_eq!(row.6, Some(0.82));
+    }
+
+    #[tokio::test]
+    async fn get_meeting_speakers_returns_distinct_speakers_for_full_meeting() {
+        let pool = speaker_test_pool().await;
+
+        let speakers = DiarizationRepository::get_meeting_speakers(&pool, "meeting-1")
+            .await
+            .expect("speakers should be loaded");
+
+        assert_eq!(speakers.len(), 2);
+        assert_eq!(speakers[0].speaker_id, "speaker-1");
+        assert_eq!(speakers[0].speaker_label, "Speaker 1");
+        assert_eq!(speakers[0].speaker_color.as_deref(), Some("#2563eb"));
+        assert_eq!(speakers[0].segment_count, 2);
+        assert_eq!(speakers[1].speaker_id, "speaker-2");
+        assert_eq!(speakers[1].speaker_label, "Speaker 2");
+        assert_eq!(speakers[1].segment_count, 1);
+    }
+
+    #[tokio::test]
+    async fn rename_speaker_updates_transcripts_and_segments_for_one_meeting() {
+        let pool = speaker_test_pool().await;
+
+        let updated_count =
+            DiarizationRepository::rename_speaker(&pool, "meeting-1", "speaker-1", "Alice")
+                .await
+                .expect("speaker should be renamed");
+
+        assert_eq!(updated_count, 4);
+
+        let meeting_one_labels: Vec<String> = sqlx::query_scalar(
+            "SELECT speaker_label FROM transcripts
+             WHERE meeting_id = 'meeting-1' AND speaker_id = 'speaker-1'
+             ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("meeting one transcript labels should be fetched");
+
+        assert_eq!(meeting_one_labels, vec!["Alice", "Alice"]);
+
+        let meeting_two_label: String = sqlx::query_scalar(
+            "SELECT speaker_label FROM transcripts
+             WHERE meeting_id = 'meeting-2' AND speaker_id = 'speaker-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("meeting two transcript label should be fetched");
+
+        assert_eq!(meeting_two_label, "Other meeting speaker");
+
+        let segment_labels: Vec<String> = sqlx::query_scalar(
+            "SELECT speaker_label FROM speaker_segments
+             WHERE meeting_id = 'meeting-1' AND speaker_id = 'speaker-1'
+             ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("speaker segment labels should be fetched");
+
+        assert_eq!(segment_labels, vec!["Alice", "Alice"]);
     }
 }

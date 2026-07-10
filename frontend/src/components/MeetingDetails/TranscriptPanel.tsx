@@ -1,10 +1,13 @@
 "use client";
 
-import { Transcript, TranscriptSegmentData } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
+import { MeetingSpeaker, Transcript, TranscriptSegmentData } from '@/types';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { invoke } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -71,6 +74,105 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  const [speakers, setSpeakers] = useState<MeetingSpeaker[]>([]);
+  const [isLoadingSpeakers, setIsLoadingSpeakers] = useState(false);
+  const [editingSpeakerId, setEditingSpeakerId] = useState<string | null>(null);
+  const [draftSpeakerLabel, setDraftSpeakerLabel] = useState('');
+  const [savingSpeakerId, setSavingSpeakerId] = useState<string | null>(null);
+
+  const speakerSourceCount = usePagination
+    ? totalCount ?? convertedSegments.length
+    : transcripts.length;
+
+  const loadSpeakers = useCallback(async () => {
+    if (!meetingId || speakerSourceCount === 0) {
+      setSpeakers([]);
+      return;
+    }
+
+    setIsLoadingSpeakers(true);
+    try {
+      const loadedSpeakers = await invoke<MeetingSpeaker[]>('get_meeting_speakers', { meetingId });
+      setSpeakers(loadedSpeakers);
+    } catch (error) {
+      console.error('Failed to load meeting speakers:', error);
+      toast.error('Failed to load speakers');
+    } finally {
+      setIsLoadingSpeakers(false);
+    }
+  }, [meetingId, speakerSourceCount]);
+
+  useEffect(() => {
+    if (isRecording) {
+      setSpeakers([]);
+      setEditingSpeakerId(null);
+      return;
+    }
+
+    void loadSpeakers();
+  }, [isRecording, loadSpeakers]);
+
+  const startEditingSpeaker = useCallback((speaker: MeetingSpeaker) => {
+    setEditingSpeakerId(speaker.speakerId);
+    setDraftSpeakerLabel(speaker.speakerLabel);
+  }, []);
+
+  const cancelEditingSpeaker = useCallback(() => {
+    setEditingSpeakerId(null);
+    setDraftSpeakerLabel('');
+  }, []);
+
+  const saveSpeakerLabel = useCallback(async (speaker: MeetingSpeaker) => {
+    if (!meetingId) {
+      return;
+    }
+
+    const label = draftSpeakerLabel.trim();
+    if (!label) {
+      toast.error('Speaker name cannot be empty');
+      return;
+    }
+
+    if (label === speaker.speakerLabel) {
+      cancelEditingSpeaker();
+      return;
+    }
+
+    setSavingSpeakerId(speaker.speakerId);
+    try {
+      await invoke('rename_speaker', {
+        request: {
+          meetingId,
+          speakerId: speaker.speakerId,
+          label,
+        },
+      });
+
+      setSpeakers(previousSpeakers =>
+        previousSpeakers.map(previousSpeaker =>
+          previousSpeaker.speakerId === speaker.speakerId
+            ? { ...previousSpeaker, speakerLabel: label }
+            : previousSpeaker
+        )
+      );
+      cancelEditingSpeaker();
+
+      if (onRefetchTranscripts) {
+        await onRefetchTranscripts();
+      }
+      await loadSpeakers();
+
+      toast.success('Speaker renamed');
+    } catch (error) {
+      console.error('Failed to rename speaker:', error);
+      toast.error('Failed to rename speaker', {
+        description: String(error),
+      });
+    } finally {
+      setSavingSpeakerId(null);
+    }
+  }, [cancelEditingSpeaker, draftSpeakerLabel, loadSpeakers, meetingId, onRefetchTranscripts]);
+
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
       {/* Title area */}
@@ -84,6 +186,101 @@ export function TranscriptPanel({
           onRefetchTranscripts={onRefetchTranscripts}
         />
       </div>
+
+      {!isRecording && meetingId && (speakers.length > 0 || isLoadingSpeakers) && (
+        <div className="px-4 py-3 border-b border-border space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Speakers{speakers.length > 0 ? ` (${speakers.length})` : ''}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Names are applied to transcript labels and copied text.
+              </p>
+            </div>
+            {isLoadingSpeakers && (
+              <span className="text-xs text-muted-foreground">Loading…</span>
+            )}
+          </div>
+
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {speakers.map((speaker) => {
+              const isEditing = editingSpeakerId === speaker.speakerId;
+              const isSaving = savingSpeakerId === speaker.speakerId;
+              const transcriptSegmentLabel =
+                speaker.segmentCount === 1 ? 'transcript segment' : 'transcript segments';
+
+              return (
+                <div
+                  key={speaker.speakerId}
+                  className="rounded-md border border-border bg-background/60 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full border border-border shrink-0"
+                      style={{ backgroundColor: speaker.speakerColor || '#94a3b8' }}
+                    />
+
+                    {isEditing ? (
+                      <>
+                        <Input
+                          aria-label="Speaker name"
+                          className="h-8 min-w-0 flex-1"
+                          value={draftSpeakerLabel}
+                          disabled={isSaving}
+                          onChange={(event) => setDraftSpeakerLabel(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              void saveSpeakerLabel(speaker);
+                            }
+                            if (event.key === 'Escape') {
+                              cancelEditingSpeaker();
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => void saveSpeakerLabel(speaker)}
+                          disabled={isSaving}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={cancelEditingSpeaker}
+                          disabled={isSaving}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {speaker.speakerLabel}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {speaker.segmentCount} {transcriptSegmentLabel}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => startEditingSpeaker(speaker)}
+                          disabled={savingSpeakerId !== null}
+                        >
+                          Rename
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">

@@ -129,3 +129,10 @@ export interface TranscriptSegmentData {
   diarization_method?: string | null;
   diarization_confidence?: number | null;
 }
+
+export interface MeetingSpeaker {
+  speakerId: string;
+  speakerLabel: string;
+  speakerColor?: string | null;
+  segmentCount: number;
+}
