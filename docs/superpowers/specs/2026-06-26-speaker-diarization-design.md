@@ -371,6 +371,14 @@ Rules:
 7. Add summary integration using final speaker labels.
 8. Add quality telemetry that remains local unless analytics consent explicitly allows aggregated event tracking.
 
+## Follow-up implementation plans
+
+- FluidAudio macOS sidecar and model packaging.
+- Source-aware microphone/system audio stem persistence.
+- Live provisional diarization event stream.
+- Offline post-call refinement orchestration.
+- Speaker review editor actions backed by database updates.
+
 ## Open implementation decisions
 
 - Exact minimum accumulated speech duration before surfacing a new stable speaker.
