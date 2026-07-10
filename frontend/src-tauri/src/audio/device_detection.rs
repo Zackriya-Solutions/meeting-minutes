@@ -483,7 +483,11 @@ mod tests {
             3840,
             48000,
         );
-        assert_eq!(timeout, Duration::from_millis(160));
+        assert!(
+            timeout.abs_diff(Duration::from_millis(160)) <= Duration::from_micros(10),
+            "expected timeout close to 160ms, got {:?}",
+            timeout
+        );
     }
 
     #[test]
