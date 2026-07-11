@@ -57,6 +57,7 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const [activeTab, setActiveTab] = useState<'transcript' | 'summary'>('transcript');
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -170,6 +171,31 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
+      {/* Responsive tab switcher — visible below lg when summary exists */}
+      {meetingData.aiSummary && (
+        <div className="flex lg:hidden border-b border-gray-200 bg-white sticky top-0 z-10">
+          <button
+            onClick={() => setActiveTab('transcript')}
+            className={`flex-1 py-3 text-center font-medium border-b-2 text-sm transition-colors ${
+              activeTab === 'transcript'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Transcript
+          </button>
+          <button
+            onClick={() => setActiveTab('summary')}
+            className={`flex-1 py-3 text-center font-medium border-b-2 text-sm transition-colors ${
+              activeTab === 'summary'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Summary
+          </button>
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
           transcripts={meetingData.transcripts}
@@ -191,6 +217,7 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          className={`${meetingData.aiSummary && activeTab !== 'transcript' ? 'hidden' : 'flex flex-1 w-full h-full'} lg:flex lg:w-1/3 lg:min-w-[320px] lg:max-w-[450px] border-r border-gray-200 bg-white flex-col relative shrink-0`}
         />
         <SummaryPanel
           meeting={meeting}
@@ -226,6 +253,7 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          className={`${meetingData.aiSummary && activeTab !== 'summary' ? 'hidden' : 'flex flex-1 w-full h-full'} lg:flex-1 min-w-0 flex flex-col bg-white overflow-hidden`}
         />
       </div>
     </motion.div>

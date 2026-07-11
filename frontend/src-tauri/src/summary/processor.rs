@@ -13,7 +13,7 @@ static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 static REASONING_BLOCKS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)(?im)^(?:###?\s+)?(?:\*\*|__)?(?:Thinking(?: Process)?|Self-Correction|Decision Strategy|Strict Interpretation|Wait\.\.\.|Actually checking the provided text again carefully\.\.\.?)(?:\*\*|__)?[:\-\s\n]*.*?(?P<delim>\n\s*(?:#+\s+|\*\*[^*]+\*\*\s*(?:\n|$)|__[^_]+__\s*(?:\n|$))|\z)").unwrap()
+    Regex::new(r"(?s)(?im)^(?:###?\s+)?(?:\*\*|__)?(?:Thinking(?: Process)?|Self-Correction|Decision Strategy|Strict Interpretation|Wait\.\.\.|Actually checking the provided text again carefully\.\.\.?)(?:\*\*|__)?[:\-\s\n]*.*?(?P<delim>\n\s*(?:\n|#+\s+|\*\*[^*]+\*\*\s*(?:\n|$)|__[^_]+__\s*(?:\n|$))|\z)").unwrap()
 });
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
@@ -273,11 +273,9 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
 
     let mut trimmed = cleaned.trim().to_string();
 
-    // If there is a markdown title or sub-header, strip any preceding garbage/thinking
-    if let Some(pos) = trimmed.find("# ") {
-        trimmed = trimmed[pos..].to_string();
-    } else if let Some(pos) = trimmed.find("## ") {
-        trimmed = trimmed[pos..].to_string();
+    // Find the first markdown heading line (starts with '#') and discard any preceding noise
+    if let Some(line_idx) = trimmed.lines().position(|line| line.trim_start().starts_with('#')) {
+        trimmed = trimmed.lines().skip(line_idx).collect::<Vec<&str>>().join("\n");
     }
 
     // List of possible language identifiers for code blocks
@@ -893,5 +891,18 @@ We have multi-paragraph reasoning here.
         assert!(!cleaned.contains("Bold point"));
         assert!(cleaned.contains("**Summary**"));
         assert!(cleaned.contains("**Action Items**"));
+    }
+
+    #[test]
+    fn test_normal_content_after_thinking() {
+        let raw_output = "\
+# Title
+Summary...
+Thinking: I am thinking.
+
+Some normal content here.
+";
+        let cleaned = clean_llm_markdown_output(raw_output);
+        assert!(cleaned.contains("Some normal content here."));
     }
 }
