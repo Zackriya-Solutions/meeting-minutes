@@ -13,7 +13,7 @@ static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 static REASONING_BLOCKS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)(?im)^(?:###?\s+)?(?:\*\*|__)?(?:Thinking(?: Process)?|Self-Correction|Decision Strategy|Strict Interpretation|Wait\.\.\.|Actually checking the provided text again carefully\.\.\.?)(?:\*\*|__)?[:\-\s\n]*.*?(?P<delim>\n\s*\n|\n\s*(?:#|\*\*|__|- \*\*)|$)").unwrap()
+    Regex::new(r"(?s)(?im)^(?:###?\s+)?(?:\*\*|__)?(?:Thinking(?: Process)?|Self-Correction|Decision Strategy|Strict Interpretation|Wait\.\.\.|Actually checking the provided text again carefully\.\.\.?)(?:\*\*|__)?[:\-\s\n]*.*?(?P<delim>\n\s*(?:#+\s+|\*\*[^*]+\*\*\s*(?:\n|$)|__[^_]+__\s*(?:\n|$))|\z)").unwrap()
 });
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
@@ -872,11 +872,6 @@ mod tests {
     #[test]
     fn test_clean_llm_markdown_output_reasoning_removal() {
         let raw_output = "\
-Thinking Process:
-1. Summarize details...
-Wait... Actually checking the provided text again carefully...
-Wait! Let me re-verify.
-
 # Meeting Title
 
 **Summary**
@@ -884,15 +879,18 @@ This is a summary.
 
 Self-Correction:
 No, let's fix that.
+We have multi-paragraph reasoning here.
+- **Bold point**: details
+- List item 2
 
 **Action Items**
 - Task 1
 ";
         let cleaned = clean_llm_markdown_output(raw_output);
         assert!(cleaned.starts_with("# Meeting Title"));
-        assert!(!cleaned.contains("Thinking Process"));
         assert!(!cleaned.contains("Self-Correction"));
-        assert!(!cleaned.contains("Actually checking"));
+        assert!(!cleaned.contains("We have multi-paragraph"));
+        assert!(!cleaned.contains("Bold point"));
         assert!(cleaned.contains("**Summary**"));
         assert!(cleaned.contains("**Action Items**"));
     }
