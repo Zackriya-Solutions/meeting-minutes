@@ -12,6 +12,10 @@ static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap()
 });
 
+static REASONING_BLOCKS_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?s)(?im)^(?:###?\s+)?(?:\*\*|__)?(?:Thinking(?: Process)?|Self-Correction|Decision Strategy|Strict Interpretation|Wait\.\.\.|Actually checking the provided text again carefully\.\.\.?)(?:\*\*|__)?[:\-\s\n]*.*?(?P<delim>\n\s*\n|\n\s*(?:#|\*\*|__|- \*\*)|$)").unwrap()
+});
+
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
 
@@ -262,7 +266,19 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
     // Remove <think>...</think> or <thinking>...</thinking> blocks using cached regex
     let without_thinking = THINKING_TAG_REGEX.replace_all(markdown, "");
 
-    let trimmed = without_thinking.trim();
+    let mut cleaned = without_thinking.to_string();
+
+    // Remove block-level reasoning paragraphs
+    cleaned = REASONING_BLOCKS_REGEX.replace_all(&cleaned, "$delim").to_string();
+
+    let mut trimmed = cleaned.trim().to_string();
+
+    // If there is a markdown title or sub-header, strip any preceding garbage/thinking
+    if let Some(pos) = trimmed.find("# ") {
+        trimmed = trimmed[pos..].to_string();
+    } else if let Some(pos) = trimmed.find("## ") {
+        trimmed = trimmed[pos..].to_string();
+    }
 
     // List of possible language identifiers for code blocks
     const PREFIXES: &[&str] = &["```markdown\n", "```\n"];
@@ -276,8 +292,7 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
         }
     }
 
-    // If no fences found, return the trimmed string
-    trimmed.to_string()
+    trimmed
 }
 
 /// Extracts meeting name from the first heading in markdown
@@ -852,5 +867,33 @@ mod tests {
     fn underscore_locale_variant_returns_none() {
         // OS locale APIs (notably macOS) may emit "en_GB" with underscore.
         assert_eq!(resolve_cached_english(Some("body"), Some("en_GB")), None);
+    }
+
+    #[test]
+    fn test_clean_llm_markdown_output_reasoning_removal() {
+        let raw_output = "\
+Thinking Process:
+1. Summarize details...
+Wait... Actually checking the provided text again carefully...
+Wait! Let me re-verify.
+
+# Meeting Title
+
+**Summary**
+This is a summary.
+
+Self-Correction:
+No, let's fix that.
+
+**Action Items**
+- Task 1
+";
+        let cleaned = clean_llm_markdown_output(raw_output);
+        assert!(cleaned.starts_with("# Meeting Title"));
+        assert!(!cleaned.contains("Thinking Process"));
+        assert!(!cleaned.contains("Self-Correction"));
+        assert!(!cleaned.contains("Actually checking"));
+        assert!(cleaned.contains("**Summary**"));
+        assert!(cleaned.contains("**Action Items**"));
     }
 }
