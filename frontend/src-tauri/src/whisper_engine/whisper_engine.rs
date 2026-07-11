@@ -10,6 +10,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use crate::audio::transcription::streaming::{StreamingHypothesis, StreamingWord};
 use crate::config::WHISPER_MODEL_CATALOG;
 use super::acceleration::{whisper_context_acceleration_for, WhisperCompiledBackend};
 
@@ -20,6 +21,134 @@ pub enum ModelStatus {
     Downloading { progress: u8 },
     Error(String),
     Corrupted { file_size: u64, expected_min_size: u64 },
+}
+
+#[derive(Debug, Clone)]
+struct RawStreamingToken {
+    text: String,
+    start: f64,
+    end: f64,
+    probability: f32,
+}
+
+#[derive(Debug)]
+struct StreamingWordBuilder {
+    text: String,
+    start: f64,
+    end: f64,
+    probability_sum: f32,
+    token_count: usize,
+}
+
+impl StreamingWordBuilder {
+    fn new(token: &RawStreamingToken) -> Self {
+        Self {
+            text: token.text.trim().to_string(),
+            start: token.start,
+            end: token.end,
+            probability_sum: token.probability,
+            token_count: 1,
+        }
+    }
+
+    fn push(&mut self, token: &RawStreamingToken) {
+        self.text.push_str(token.text.trim());
+        self.end = token.end;
+        self.probability_sum += token.probability;
+        self.token_count += 1;
+    }
+
+    fn finish(self) -> StreamingWord {
+        StreamingWord {
+            text: self.text,
+            start: self.start,
+            end: self.end,
+            probability: self.probability_sum / self.token_count as f32,
+        }
+    }
+}
+
+fn tokens_to_streaming_words(tokens: Vec<RawStreamingToken>) -> Vec<StreamingWord> {
+    let mut words = Vec::new();
+    let mut current: Option<StreamingWordBuilder> = None;
+
+    for token in tokens {
+        let trimmed = token.text.trim();
+        let is_special = trimmed.is_empty()
+            || (trimmed.starts_with('<') && trimmed.ends_with('>'))
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+        if is_special {
+            continue;
+        }
+
+        let starts_new_word = token.text.chars().next().is_some_and(char::is_whitespace);
+        let is_punctuation = trimmed.chars().all(|character| !character.is_alphanumeric());
+
+        if starts_new_word && current.is_some() {
+            words.push(current.take().unwrap().finish());
+        }
+
+        match current.as_mut() {
+            Some(builder) if !starts_new_word || is_punctuation => builder.push(&token),
+            Some(_) => unreachable!("new words are flushed before token grouping"),
+            None => current = Some(StreamingWordBuilder::new(&token)),
+        }
+    }
+
+    if let Some(builder) = current {
+        words.push(builder.finish());
+    }
+
+    words
+}
+
+#[cfg(test)]
+mod streaming_word_tests {
+    use super::{tokens_to_streaming_words, RawStreamingToken};
+
+    fn token(text: &str, start: f64, end: f64, probability: f32) -> RawStreamingToken {
+        RawStreamingToken { text: text.to_string(), start, end, probability }
+    }
+
+    #[test]
+    fn groups_leading_space_bpe_tokens_into_words() {
+        let words = tokens_to_streaming_words(vec![
+            token(" trans", 0.0, 0.3, 0.9),
+            token("cription", 0.3, 0.6, 0.7),
+        ]);
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "transcription");
+        assert_eq!(words[0].start, 0.0);
+        assert_eq!(words[0].end, 0.6);
+        assert!((words[0].probability - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn attaches_punctuation_to_the_previous_word() {
+        let words = tokens_to_streaming_words(vec![
+            token(" Hello", 0.0, 0.3, 0.9),
+            token(" world", 0.3, 0.6, 0.8),
+            token("!", 0.6, 0.7, 0.6),
+        ]);
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Hello");
+        assert_eq!(words[1].text, "world!");
+        assert_eq!(words[1].end, 0.7);
+        assert!((words[1].probability - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn skips_empty_and_special_tokens() {
+        let words = tokens_to_streaming_words(vec![
+            token("<|startoftranscript|>", 0.0, 0.0, 1.0),
+            token("[BLANK]", 0.0, 0.0, 1.0),
+            token("   ", 0.0, 0.0, 1.0),
+            token(" useful", 0.1, 0.4, 0.9),
+            token("<|endoftext|>", 0.4, 0.4, 1.0),
+        ]);
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "useful");
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -628,6 +757,80 @@ impl WhisperEngine {
         };
 
         Ok((cleaned_result, avg_confidence, is_partial))
+    }
+
+    /// Decode a bounded live-audio window and retain token timestamps for
+    /// LocalAgreement. This is intentionally separate from the established
+    /// one-shot transcription path used by imports and retranscription.
+    pub async fn transcribe_streaming_window(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+        prompt: &str,
+    ) -> Result<StreamingHypothesis> {
+        let ctx_lock = self.current_context.read().await;
+        let ctx = ctx_lock.as_ref()
+            .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
+
+        let adaptive_config = crate::audio::HardwareProfile::detect().get_whisper_config();
+        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+            beam_size: adaptive_config.beam_size as i32,
+            patience: 1.0,
+        });
+        let (language_code, should_translate) = match language.as_deref() {
+            Some("auto") | None => (None, false),
+            Some("auto-translate") => (None, true),
+            Some(lang) => (Some(lang), false),
+        };
+        params.set_language(language_code);
+        params.set_translate(should_translate);
+        params.set_no_context(true);
+        params.set_no_timestamps(false);
+        params.set_token_timestamps(true);
+        if !prompt.trim().is_empty() {
+            params.set_initial_prompt(prompt);
+        }
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+        params.set_suppress_blank(true);
+        params.set_suppress_non_speech_tokens(true);
+        params.set_temperature(adaptive_config.temperature);
+        params.set_entropy_thold(2.4);
+        params.set_logprob_thold(-1.0);
+        params.set_no_speech_thold(0.55);
+        params.set_max_len(200);
+        params.set_single_segment(false);
+
+        let mut state = ctx.create_state()?;
+        state.full(params, &audio_data)?;
+
+        let mut raw_tokens = Vec::new();
+        let segment_count = state.full_n_segments()?;
+        for segment_index in 0..segment_count {
+            let token_count = state.full_n_tokens(segment_index)?;
+            for token_index in 0..token_count {
+                let data = state.full_get_token_data(segment_index, token_index)?;
+                if data.t0 < 0 || data.t1 < data.t0 {
+                    continue;
+                }
+                raw_tokens.push(RawStreamingToken {
+                    text: state.full_get_token_text_lossy(segment_index, token_index)?,
+                    start: data.t0 as f64 / 100.0,
+                    end: data.t1 as f64 / 100.0,
+                    probability: data.p,
+                });
+            }
+        }
+
+        let words = tokens_to_streaming_words(raw_tokens);
+        let confidence = if words.is_empty() {
+            0.0
+        } else {
+            words.iter().map(|word| word.probability).sum::<f32>() / words.len() as f32
+        };
+        Ok(StreamingHypothesis { words, confidence })
     }
 
     pub async fn transcribe_audio(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<String> {

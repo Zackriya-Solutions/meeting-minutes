@@ -32,6 +32,12 @@ export interface TranscriptUpdate {
   duration: number;          // Segment duration in seconds
 }
 
+export interface TranscriptPreview {
+  text: string;
+  audio_start_time: number;
+  audio_end_time: number;
+}
+
 export interface Block {
   id: string;
   type: string;

@@ -8,11 +8,13 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData } from "@/types";
+import { TranscriptPreview, TranscriptSegmentData } from "@/types";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
     segments: TranscriptSegmentData[];
+    /** Ephemeral Whisper hypothesis; never part of persisted segments */
+    preview?: TranscriptPreview | null;
     /** Whether recording is in progress */
     isRecording?: boolean;
     /** Whether recording is paused */
@@ -112,6 +114,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
+    preview = null,
     isRecording = false,
     isPaused = false,
     isProcessing = false,
@@ -129,6 +132,15 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
     const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (preview && scrollRef.current) {
+            scrollRef.current.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: 'smooth',
+            });
+        }
+    }, [preview]);
 
     // Force re-render without flushSync (avoids React warning)
     const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -236,7 +248,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
             {/* Content - add padding when recording to prevent overlap */}
             <div className={isRecording ? 'pt-2' : ''}>
-            {segments.length === 0 ? (
+            {segments.length === 0 && !preview ? (
                 // Empty state
                 <motion.div
                     initial={{ opacity: 0 }}
@@ -387,6 +399,27 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         </motion.div>
                     )}
                 </>
+            )}
+            {preview && (
+                <motion.div
+                    key="transcript-preview"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="mb-3 flex items-start gap-2"
+                    aria-live="polite"
+                >
+                    <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                        {formatRecordingTime(preview.audio_start_time)}
+                    </span>
+                    <div className="flex-1 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2">
+                        <div className="flex items-start gap-2">
+                            <div className="mt-2 h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-blue-400" />
+                            <p className="text-base italic leading-relaxed text-gray-500">
+                                {preview.text}
+                            </p>
+                        </div>
+                    </div>
+                </motion.div>
             )}
             </div>
         </div>

@@ -4,6 +4,10 @@
 
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
+use super::streaming::{
+    route_input, InputRoute, StreamingSegment, StreamingUpdate, TranscriptionInput,
+    TranscriptionMode, WhisperStreamingSession,
+};
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -38,13 +42,20 @@ pub struct TranscriptUpdate {
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TranscriptPreview {
+    pub text: String,
+    pub audio_start_time: f64,
+    pub audio_end_time: f64,
+}
+
 // NOTE: get_transcript_history and get_recording_meeting_name functions
 // have been moved to recording_commands.rs where they have access to RECORDING_MANAGER
 
 /// Optimized parallel transcription task ensuring ZERO chunk loss
 pub fn start_transcription_task<R: Runtime>(
     app: AppHandle<R>,
-    transcription_receiver: tokio::sync::mpsc::UnboundedReceiver<AudioChunk>,
+    transcription_receiver: tokio::sync::mpsc::UnboundedReceiver<TranscriptionInput>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
@@ -65,7 +76,7 @@ pub fn start_transcription_task<R: Runtime>(
 
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
-        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
+        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<TranscriptionInput>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
         // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
@@ -110,6 +121,8 @@ pub fn start_transcription_task<R: Runtime>(
                     warn!("⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped", worker_id, engine_name);
                 }
 
+                let mut streaming_session = WhisperStreamingSession::default();
+
                 loop {
                     // Try to get a chunk to process
                     let chunk = {
@@ -118,28 +131,50 @@ pub fn start_transcription_task<R: Runtime>(
                     };
 
                     match chunk {
-                        Some(chunk) => {
+                        Some(input) => {
                             // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
                             // Only log every 10th chunk per worker to reduce I/O overhead
-                            let should_log_this_chunk = chunk.chunk_id % 10 == 0;
+                            let should_log_this_chunk = input.chunk().chunk_id % 10 == 0;
 
                             if should_log_this_chunk {
                                 info!(
                                     "👷 Worker {} processing chunk {} with {} samples",
                                     worker_id,
-                                    chunk.chunk_id,
-                                    chunk.data.len()
+                                    input.chunk().chunk_id,
+                                    input.chunk().data.len()
                                 );
                             }
 
                             // Check if model is still loaded before processing
                             if !engine_clone.is_model_loaded().await {
-                                warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
+                                warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, input.chunk().chunk_id);
                                 // Still count as completed even if we can't process
                                 chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
                                 continue;
                             }
 
+                            let mode = match &engine_clone {
+                                TranscriptionEngine::Whisper(_) => TranscriptionMode::WhisperStreaming,
+                                TranscriptionEngine::Parakeet(_) | TranscriptionEngine::Provider(_) => TranscriptionMode::FinalOnly,
+                            };
+                            let route = route_input(mode, &input);
+                            if route != InputRoute::Finalize
+                                || matches!(&engine_clone, TranscriptionEngine::Whisper(_))
+                            {
+                                if let Err(e) = process_transcription_input(
+                                    &engine_clone,
+                                    &mut streaming_session,
+                                    input,
+                                    &app_clone,
+                                ).await {
+                                    warn!("Worker {}: Streaming transcription failed: {}", worker_id, e);
+                                    let _ = app_clone.emit("transcription-warning", e.to_string());
+                                }
+                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                continue;
+                            }
+
+                            let chunk = input.into_chunk();
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
@@ -326,7 +361,7 @@ pub fn start_transcription_task<R: Runtime>(
             let queued = chunks_queued.fetch_add(1, Ordering::SeqCst) + 1;
             info!(
                 "📥 Dispatching chunk {} to workers (total queued: {})",
-                chunk.chunk_id, queued
+                chunk.chunk().chunk_id, queued
             );
 
             if let Err(_) = work_sender.send(chunk) {
@@ -401,6 +436,197 @@ pub fn start_transcription_task<R: Runtime>(
 
         info!("✅ Parallel transcription task completed - all workers finished, ready for model unload");
     })
+}
+
+async fn process_transcription_input<R: Runtime>(
+    engine: &TranscriptionEngine,
+    session: &mut WhisperStreamingSession,
+    input: TranscriptionInput,
+    app: &AppHandle<R>,
+) -> std::result::Result<(), TranscriptionError> {
+    let mode = match engine {
+        TranscriptionEngine::Whisper(_) => TranscriptionMode::WhisperStreaming,
+        TranscriptionEngine::Parakeet(_) | TranscriptionEngine::Provider(_) => TranscriptionMode::FinalOnly,
+    };
+
+    match route_input(mode, &input) {
+        InputRoute::Ignore => Ok(()),
+        InputRoute::Stream => {
+            session.push_audio(input.into_chunk());
+            let Some(window) = session.take_inference_window() else {
+                return Ok(());
+            };
+            let TranscriptionEngine::Whisper(whisper_engine) = engine else {
+                return Ok(());
+            };
+            let hypothesis = whisper_engine
+                .transcribe_streaming_window(
+                    window.samples,
+                    crate::get_language_preference_internal(),
+                    &window.prompt,
+                )
+                .await
+                .map_err(|error| TranscriptionError::EngineFailed(error.to_string()))?;
+            emit_streaming_update(
+                app,
+                session.accept_relative_hypothesis(hypothesis, window.start_time),
+            );
+            Ok(())
+        }
+        InputRoute::Finalize => {
+            let chunk = input.into_chunk();
+            let TranscriptionEngine::Whisper(whisper_engine) = engine else {
+                return Ok(());
+            };
+            let prompt = session.prompt_for_start(chunk.timestamp);
+            match whisper_engine
+                .transcribe_streaming_window(
+                    chunk.data.clone(),
+                    crate::get_language_preference_internal(),
+                    &prompt,
+                )
+                .await
+            {
+                Ok(hypothesis) => {
+                    emit_streaming_update(app, session.finish_relative(hypothesis, chunk.timestamp));
+                    Ok(())
+                }
+                Err(streaming_error) => {
+                    warn!("Final streaming decode failed, falling back to one-shot Whisper: {}", streaming_error);
+                    let fallback_chunk = trim_confirmed_prefix(chunk, session.confirmed_end_time());
+                    session.reset_utterance();
+
+                    let Some(fallback_chunk) = fallback_chunk else {
+                        emit_preview(app, None);
+                        return Ok(());
+                    };
+
+                    let fallback_timestamp = fallback_chunk.timestamp;
+                    let fallback_duration = fallback_chunk.data.len() as f64
+                        / fallback_chunk.sample_rate as f64;
+                    let (text, confidence, _) = transcribe_chunk_with_provider(
+                        engine,
+                        fallback_chunk,
+                        app,
+                    ).await?;
+                    if !text.trim().is_empty() {
+                        emit_confirmed_text(
+                            app,
+                            text,
+                            fallback_timestamp,
+                            fallback_timestamp + fallback_duration,
+                            confidence.unwrap_or(0.85),
+                        );
+                    }
+                    emit_preview(app, None);
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+fn trim_confirmed_prefix(
+    mut chunk: AudioChunk,
+    confirmed_end_time: Option<f64>,
+) -> Option<AudioChunk> {
+    let fallback_start = confirmed_end_time
+        .unwrap_or(chunk.timestamp)
+        .max(chunk.timestamp);
+    let trim_samples = ((fallback_start - chunk.timestamp) * chunk.sample_rate as f64)
+        .round() as usize;
+
+    if trim_samples >= chunk.data.len() {
+        return None;
+    }
+    if trim_samples > 0 {
+        chunk.data.drain(..trim_samples);
+        chunk.timestamp = fallback_start;
+    }
+    Some(chunk)
+}
+
+fn emit_streaming_update<R: Runtime>(app: &AppHandle<R>, update: StreamingUpdate) {
+    if let Some(confirmed) = update.confirmed {
+        if confirmed.confidence >= 0.3 && !confirmed.text.trim().is_empty() {
+            emit_confirmed_segment(app, confirmed);
+        }
+    }
+    emit_preview(
+        app,
+        update.preview.filter(|segment| {
+            segment.confidence >= 0.3 && !segment.text.trim().is_empty()
+        }),
+    );
+}
+
+fn emit_confirmed_segment<R: Runtime>(app: &AppHandle<R>, segment: StreamingSegment) {
+    emit_confirmed_text(
+        app,
+        segment.text,
+        segment.audio_start_time,
+        segment.audio_end_time,
+        segment.confidence,
+    );
+}
+
+fn emit_confirmed_text<R: Runtime>(
+    app: &AppHandle<R>,
+    text: String,
+    audio_start_time: f64,
+    audio_end_time: f64,
+    confidence: f32,
+) {
+    emit_speech_detected_once(app);
+    let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let update = TranscriptUpdate {
+        text,
+        timestamp: format_current_timestamp(),
+        source: "Audio".to_string(),
+        sequence_id,
+        chunk_start_time: audio_start_time,
+        is_partial: false,
+        confidence,
+        audio_start_time,
+        audio_end_time,
+        duration: (audio_end_time - audio_start_time).max(0.0),
+    };
+    if let Err(error) = app.emit("transcript-update", &update) {
+        error!("Failed to emit confirmed transcript update: {}", error);
+    }
+}
+
+fn emit_preview<R: Runtime>(app: &AppHandle<R>, segment: Option<StreamingSegment>) {
+    let preview = match segment {
+        Some(segment) => {
+            emit_speech_detected_once(app);
+            TranscriptPreview {
+                text: segment.text,
+                audio_start_time: segment.audio_start_time,
+                audio_end_time: segment.audio_end_time,
+            }
+        }
+        None => TranscriptPreview {
+            text: String::new(),
+            audio_start_time: 0.0,
+            audio_end_time: 0.0,
+        },
+    };
+    if let Err(error) = app.emit("transcript-preview", &preview) {
+        error!("Failed to emit transcript preview: {}", error);
+    }
+}
+
+fn emit_speech_detected_once<R: Runtime>(app: &AppHandle<R>) {
+    if SPEECH_DETECTED_EMITTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if let Err(error) = app.emit(
+        "speech-detected",
+        serde_json::json!({ "message": "Speech activity detected" }),
+    ) {
+        error!("Failed to emit speech-detected event: {}", error);
+    }
 }
 
 /// Transcribe audio chunk using the appropriate provider (Whisper, Parakeet, or trait-based)
@@ -593,4 +819,33 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trim_confirmed_prefix;
+    use crate::audio::recording_state::{AudioChunk, DeviceType};
+
+    fn chunk() -> AudioChunk {
+        AudioChunk {
+            data: vec![0.1; 16_000],
+            sample_rate: 16_000,
+            timestamp: 10.0,
+            chunk_id: 1,
+            device_type: DeviceType::Microphone,
+        }
+    }
+
+    #[test]
+    fn fallback_keeps_only_audio_after_the_confirmed_boundary() {
+        let suffix = trim_confirmed_prefix(chunk(), Some(10.25)).unwrap();
+
+        assert_eq!(suffix.data.len(), 12_000);
+        assert_eq!(suffix.timestamp, 10.25);
+    }
+
+    #[test]
+    fn fallback_skips_decode_when_the_whole_chunk_is_confirmed() {
+        assert!(trim_confirmed_prefix(chunk(), Some(11.0)).is_none());
+    }
 }

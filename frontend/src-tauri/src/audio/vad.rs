@@ -109,6 +109,14 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
+    pub fn is_speech_active(&self) -> bool {
+        self.in_speech
+    }
+
+    pub fn processed_time_seconds(&self) -> f64 {
+        self.processed_samples as f64 / 16_000.0
+    }
+
     /// Improved resampling from input sample rate to 16kHz with anti-aliasing
     /// Uses linear interpolation and basic low-pass filtering for better quality
     fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {
@@ -591,5 +599,19 @@ mod tests {
             assert!(duration_ms >= 200.0, "Segment {} too short: {:.0}ms", i, duration_ms);
         }
     }
-}
 
+    #[test]
+    fn vad_exposes_activity_and_processed_stream_time() {
+        let mut processor = ContinuousVadProcessor::new(16_000, 400)
+            .expect("Failed to create processor");
+        assert!(!processor.is_speech_active());
+        assert_eq!(processor.processed_time_seconds(), 0.0);
+
+        processor
+            .process_audio(&vec![0.0; 480])
+            .expect("Silence processing failed");
+
+        assert!(!processor.is_speech_active());
+        assert!((processor.processed_time_seconds() - 0.03).abs() < f64::EPSILON);
+    }
+}
