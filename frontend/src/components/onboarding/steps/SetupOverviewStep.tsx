@@ -24,6 +24,21 @@ interface SummaryModelOption {
   description: string;
 }
 
+function getSummaryModelStatusMeta(status: SummaryModelOption['status']) {
+  switch (status.type) {
+    case 'available':
+      return { label: 'Ready', className: 'text-success' };
+    case 'downloading':
+      return { label: 'Downloading', className: 'text-info' };
+    case 'corrupted':
+    case 'error':
+      return { label: 'Retry', className: 'text-destructive' };
+    case 'not_downloaded':
+    default:
+      return { label: 'Download', className: 'text-muted-foreground' };
+  }
+}
+
 export function SetupOverviewStep() {
   const {
     goNext,
@@ -142,7 +157,7 @@ export function SetupOverviewStep() {
             {summaryModels.map((model) => {
               const isSelected = selectedSummaryModel === model.name;
               const isRecommended = recommendedSummaryModel === model.name;
-              const isAvailable = model.status.type === 'available';
+              const statusMeta = getSummaryModelStatusMeta(model.status);
 
               return (
                 <button
@@ -182,10 +197,10 @@ export function SetupOverviewStep() {
                       <span
                         className={cn(
                           'text-xs font-medium',
-                          isAvailable ? 'text-success' : 'text-muted-foreground'
+                          statusMeta.className
                         )}
                       >
-                        {isAvailable ? 'Ready' : 'Download'}
+                        {statusMeta.label}
                       </span>
                       {isSelected && <Check className="h-4 w-4 text-primary" />}
                     </div>

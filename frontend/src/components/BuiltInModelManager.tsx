@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,10 @@ import { cn } from '@/lib/utils';
 import { Download, RefreshCw, BadgeAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
+import {
+  getFirstSelectableBuiltInModelName,
+  isSelectableBuiltInModelStatus,
+} from '@/lib/builtin-ai-models';
 
 interface ModelInfo {
   name: string;
@@ -46,6 +50,21 @@ export function BuiltInModelManager({
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadProgressInfo, setDownloadProgressInfo] = useState<Record<string, DownloadProgressInfo>>({});
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+  const selectedModelRef = useRef(selectedModel);
+  const onModelSelectRef = useRef(onModelSelect);
+
+  useEffect(() => {
+    selectedModelRef.current = selectedModel;
+  }, [selectedModel]);
+
+  useEffect(() => {
+    onModelSelectRef.current = onModelSelect;
+  }, [onModelSelect]);
+
+  const selectModel = (modelName: string) => {
+    selectedModelRef.current = modelName;
+    onModelSelectRef.current(modelName);
+  };
 
   const fetchModels = async () => {
     try {
@@ -53,11 +72,10 @@ export function BuiltInModelManager({
       const data = (await invoke('builtin_ai_list_models')) as ModelInfo[];
       setModels(data);
 
-      // Auto-select first available model if none selected
-      if (data.length > 0 && !selectedModel) {
-        const firstAvailable = data.find((m) => m.status.type === 'available');
-        if (firstAvailable) {
-          onModelSelect(firstAvailable.name);
+      if (data.length > 0 && !selectedModelRef.current) {
+        const firstSelectableModelName = getFirstSelectableBuiltInModelName(data);
+        if (firstSelectableModelName) {
+          selectModel(firstSelectableModelName);
         }
       }
     } catch (error) {
@@ -199,6 +217,8 @@ export function BuiltInModelManager({
   }, []);
 
   const downloadModel = async (modelName: string) => {
+    selectModel(modelName);
+
     try {
       // Optimistically add to downloadingModels for immediate UI feedback
       setDownloadingModels((prev) => new Set([...prev, modelName]));
@@ -295,6 +315,7 @@ export function BuiltInModelManager({
           const isNotDownloaded = model.status.type === 'not_downloaded';
           const isCorrupted = model.status.type === 'corrupted';
           const isError = model.status.type === 'error';
+          const isSelectable = isSelectableBuiltInModelStatus(model.status.type, modelIsDownloading);
 
           return (
             <div
@@ -307,11 +328,11 @@ export function BuiltInModelManager({
                 selectedModel === model.name
                   ? 'ring-2 ring-gray-800 border-gray-800'
                   : 'border-gray-200 hover:border-gray-300',
-                isAvailable && !modelIsDownloading && 'cursor-pointer'
+                isSelectable && 'cursor-pointer'
               )}
               onClick={() => {
-                if (isAvailable && !modelIsDownloading) {
-                  onModelSelect(model.name);
+                if (isSelectable) {
+                  selectModel(model.name);
                 }
               }}
             >
@@ -321,17 +342,15 @@ export function BuiltInModelManager({
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="min-w-0 break-words text-base font-bold leading-snug text-gray-900">{model.display_name || model.name}</span>
                     {isAvailable && (
-                      <>
-                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
-                          <span className="h-2 w-2 rounded-full bg-green-600"></span>
-                          Ready
-                        </span>
-                        {selectedModel === model.name && (
-                          <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            Selected
-                          </span>
-                        )}
-                      </>
+                      <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
+                        <span className="h-2 w-2 rounded-full bg-green-600"></span>
+                        Ready
+                      </span>
+                    )}
+                    {selectedModel === model.name && (
+                      <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                        Selected
+                      </span>
                     )}
                     {isCorrupted && (
                       <span className="flex shrink-0 items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">

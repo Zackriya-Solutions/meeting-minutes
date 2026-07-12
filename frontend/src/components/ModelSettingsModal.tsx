@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/command';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
+import { getFirstSelectableBuiltInModelName } from '@/lib/builtin-ai-models';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
@@ -249,10 +250,14 @@ export function ModelSettingsModal({
     !customOpenAIModel.trim()
   );
 
+  const isBuiltInModelMissing =
+    modelConfig.provider === 'builtin-ai' && !modelConfig.model;
+
   const isDoneDisabled =
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
     (modelConfig.provider === 'ollama' && ollamaEndpointChanged) ||
-    isCustomOpenAIInvalid;
+    isCustomOpenAIInvalid ||
+    isBuiltInModelMissing;
 
   useEffect(() => {
     const fetchModelConfig = async () => {
@@ -510,11 +515,10 @@ export function ModelSettingsModal({
       const data = (await invoke('builtin_ai_list_models')) as any[];
       setBuiltinAiModels(data);
 
-      // Auto-select first available model if none selected
       if (data.length > 0 && !modelConfig.model) {
-        const firstAvailable = data.find((m: any) => m.status?.type === 'available');
-        if (firstAvailable) {
-          setModelConfig((prev: ModelConfig) => ({ ...prev, model: firstAvailable.name }));
+        const firstSelectableModelName = getFirstSelectableBuiltInModelName(data);
+        if (firstSelectableModelName) {
+          setModelConfig((prev: ModelConfig) => ({ ...prev, model: firstSelectableModelName }));
         }
       }
     } catch (err) {
