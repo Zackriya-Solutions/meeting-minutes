@@ -33,6 +33,7 @@ export interface TranscriptUpdate {
 }
 
 export interface TranscriptPreview {
+  confirmed_text: string;
   text: string;
   audio_start_time: number;
   audio_end_time: number;

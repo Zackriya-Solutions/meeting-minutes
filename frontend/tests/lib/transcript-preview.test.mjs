@@ -37,6 +37,7 @@ function loadTsModule(filePath) {
 const { reduceTranscriptPreview } = loadTsModule(modulePath);
 
 const first = reduceTranscriptPreview(null, {
+  confirmed_text: '  stable words  ',
   text: '  live hypothesis  ',
   audio_start_time: 1.2,
   audio_end_time: 2.4,
@@ -44,6 +45,7 @@ const first = reduceTranscriptPreview(null, {
 assert.deepEqual(
   JSON.parse(JSON.stringify(first)),
   {
+    confirmed_text: 'stable words',
     text: 'live hypothesis',
     audio_start_time: 1.2,
     audio_end_time: 2.4,
@@ -52,6 +54,7 @@ assert.deepEqual(
 );
 
 const replacement = reduceTranscriptPreview(first, {
+  confirmed_text: 'stable words',
   text: 'corrected hypothesis',
   audio_start_time: 1.2,
   audio_end_time: 2.8,
@@ -61,6 +64,7 @@ assert.equal(replacement.audio_end_time, 2.8);
 
 assert.equal(
   reduceTranscriptPreview(replacement, {
+    confirmed_text: '   ',
     text: '   ',
     audio_start_time: 0,
     audio_end_time: 0,
@@ -71,6 +75,7 @@ assert.equal(
 
 const confirmedTranscripts = [{ id: 'confirmed-1', text: 'persisted' }];
 reduceTranscriptPreview(replacement, {
+  confirmed_text: 'stable',
   text: 'ephemeral',
   audio_start_time: 3,
   audio_end_time: 4,

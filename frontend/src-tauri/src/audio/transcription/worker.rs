@@ -5,8 +5,8 @@
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
 use super::streaming::{
-    route_input, InputRoute, StreamingSegment, StreamingUpdate, TranscriptionInput,
-    TranscriptionMode, WhisperStreamingSession,
+    coalesce_streaming_audio, merge_transcript_parts, route_input, InputRoute, StreamingSegment,
+    StreamingUpdate, TranscriptionInput, TranscriptionMode, WhisperStreamingSession,
 };
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
@@ -44,6 +44,7 @@ pub struct TranscriptUpdate {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptPreview {
+    pub confirmed_text: String,
     pub text: String,
     pub audio_start_time: f64,
     pub audio_end_time: f64,
@@ -76,7 +77,9 @@ pub fn start_transcription_task<R: Runtime>(
 
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
-        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<TranscriptionInput>();
+        const WORK_QUEUE_CAPACITY: usize = 1;
+        let (work_sender, work_receiver) =
+            tokio::sync::mpsc::channel::<TranscriptionInput>(WORK_QUEUE_CAPACITY);
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
         // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
@@ -357,16 +360,62 @@ pub fn start_transcription_task<R: Runtime>(
 
         // Main dispatcher: receive chunks and distribute to workers
         let mut receiver = transcription_receiver;
-        while let Some(chunk) = receiver.recv().await {
-            let queued = chunks_queued.fetch_add(1, Ordering::SeqCst) + 1;
-            info!(
-                "📥 Dispatching chunk {} to workers (total queued: {})",
-                chunk.chunk().chunk_id, queued
-            );
+        let mut pending_streaming: Option<AudioChunk> = None;
+        while let Some(input) = receiver.recv().await {
+            match input {
+                TranscriptionInput::StreamingAudio(chunk) => {
+                    if let Some(pending) = pending_streaming.as_mut() {
+                        coalesce_streaming_audio(pending, chunk);
+                    } else {
+                        pending_streaming = Some(chunk);
+                    }
 
-            if let Err(_) = work_sender.send(chunk) {
-                error!("❌ Failed to send chunk to workers - this should not happen!");
-                break;
+                    let pending = TranscriptionInput::StreamingAudio(
+                        pending_streaming.take().expect("pending streaming audio"),
+                    );
+                    match work_sender.try_send(pending) {
+                        Ok(()) => {
+                            chunks_queued.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(
+                            TranscriptionInput::StreamingAudio(chunk),
+                        )) => {
+                            pending_streaming = Some(chunk);
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            error!("❌ Streaming transcription worker queue closed unexpectedly");
+                            break;
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            unreachable!("dispatcher only coalesces streaming audio here");
+                        }
+                    }
+                }
+                TranscriptionInput::UtteranceEnd(chunk) => {
+                    // The final VAD chunk contains the whole utterance, so stale preview
+                    // work can be discarded to prioritize the result that is persisted.
+                    pending_streaming = None;
+
+                    if work_sender
+                        .send(TranscriptionInput::UtteranceEnd(chunk))
+                        .await
+                        .is_err()
+                    {
+                        error!("❌ Failed to queue final utterance for transcription");
+                        break;
+                    }
+                    chunks_queued.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+
+        if let Some(pending) = pending_streaming {
+            if work_sender
+                .send(TranscriptionInput::StreamingAudio(pending))
+                .await
+                .is_ok()
+            {
+                chunks_queued.fetch_add(1, Ordering::SeqCst);
             }
         }
 
@@ -475,53 +524,39 @@ async fn process_transcription_input<R: Runtime>(
         }
         InputRoute::Finalize => {
             let chunk = input.into_chunk();
-            let TranscriptionEngine::Whisper(whisper_engine) = engine else {
-                return Ok(());
+            let utterance_start = chunk.timestamp;
+            let utterance_end = chunk.timestamp
+                + chunk.data.len() as f64 / chunk.sample_rate as f64;
+            let stable_text = session.stable_text();
+            let final_chunk = trim_confirmed_prefix(chunk, session.confirmed_end_time());
+
+            let tail_result = match final_chunk {
+                Some(final_chunk) => transcribe_chunk_with_provider(engine, final_chunk, app).await,
+                None => Ok((String::new(), None, false)),
             };
-            let prompt = session.prompt_for_start(chunk.timestamp);
-            match whisper_engine
-                .transcribe_streaming_window(
-                    chunk.data.clone(),
-                    crate::get_language_preference_internal(),
-                    &prompt,
-                )
-                .await
-            {
-                Ok(hypothesis) => {
-                    emit_streaming_update(app, session.finish_relative(hypothesis, chunk.timestamp));
-                    Ok(())
-                }
-                Err(streaming_error) => {
-                    warn!("Final streaming decode failed, falling back to one-shot Whisper: {}", streaming_error);
-                    let fallback_chunk = trim_confirmed_prefix(chunk, session.confirmed_end_time());
-                    session.reset_utterance();
+            session.reset_utterance();
+            emit_preview(app, None, None);
 
-                    let Some(fallback_chunk) = fallback_chunk else {
-                        emit_preview(app, None);
-                        return Ok(());
-                    };
-
-                    let fallback_timestamp = fallback_chunk.timestamp;
-                    let fallback_duration = fallback_chunk.data.len() as f64
-                        / fallback_chunk.sample_rate as f64;
-                    let (text, confidence, _) = transcribe_chunk_with_provider(
-                        engine,
-                        fallback_chunk,
-                        app,
-                    ).await?;
-                    if !text.trim().is_empty() {
-                        emit_confirmed_text(
-                            app,
-                            text,
-                            fallback_timestamp,
-                            fallback_timestamp + fallback_duration,
-                            confidence.unwrap_or(0.85),
-                        );
-                    }
-                    emit_preview(app, None);
-                    Ok(())
+            let (tail_text, confidence) = match tail_result {
+                Ok((text, confidence, _)) => (text, confidence.unwrap_or(0.85)),
+                Err(error) if !stable_text.trim().is_empty() => {
+                    warn!("Final tail decode failed; preserving stable streaming text: {}", error);
+                    (String::new(), 0.85)
                 }
+                Err(error) => return Err(error),
+            };
+            let merged = merge_transcript_parts(&stable_text, &tail_text);
+            let cleaned = crate::whisper_engine::WhisperEngine::clean_repetitive_text(&merged);
+            if !cleaned.trim().is_empty() {
+                emit_confirmed_text(
+                    app,
+                    cleaned,
+                    utterance_start,
+                    utterance_end,
+                    confidence,
+                );
             }
+            Ok(())
         }
     }
 }
@@ -531,6 +566,7 @@ fn trim_confirmed_prefix(
     confirmed_end_time: Option<f64>,
 ) -> Option<AudioChunk> {
     let fallback_start = confirmed_end_time
+        .map(|confirmed_end| confirmed_end - 0.5)
         .unwrap_or(chunk.timestamp)
         .max(chunk.timestamp);
     let trim_samples = ((fallback_start - chunk.timestamp) * chunk.sample_rate as f64)
@@ -547,27 +583,7 @@ fn trim_confirmed_prefix(
 }
 
 fn emit_streaming_update<R: Runtime>(app: &AppHandle<R>, update: StreamingUpdate) {
-    if let Some(confirmed) = update.confirmed {
-        if confirmed.confidence >= 0.3 && !confirmed.text.trim().is_empty() {
-            emit_confirmed_segment(app, confirmed);
-        }
-    }
-    emit_preview(
-        app,
-        update.preview.filter(|segment| {
-            segment.confidence >= 0.3 && !segment.text.trim().is_empty()
-        }),
-    );
-}
-
-fn emit_confirmed_segment<R: Runtime>(app: &AppHandle<R>, segment: StreamingSegment) {
-    emit_confirmed_text(
-        app,
-        segment.text,
-        segment.audio_start_time,
-        segment.audio_end_time,
-        segment.confidence,
-    );
+    emit_preview(app, update.stable, update.preview);
 }
 
 fn emit_confirmed_text<R: Runtime>(
@@ -596,17 +612,32 @@ fn emit_confirmed_text<R: Runtime>(
     }
 }
 
-fn emit_preview<R: Runtime>(app: &AppHandle<R>, segment: Option<StreamingSegment>) {
-    let preview = match segment {
-        Some(segment) => {
+fn emit_preview<R: Runtime>(
+    app: &AppHandle<R>,
+    stable: Option<StreamingSegment>,
+    provisional: Option<StreamingSegment>,
+) {
+    let preview = match (stable, provisional) {
+        (Some(stable), provisional) => {
             emit_speech_detected_once(app);
             TranscriptPreview {
-                text: segment.text,
-                audio_start_time: segment.audio_start_time,
-                audio_end_time: segment.audio_end_time,
+                confirmed_text: stable.text,
+                text: provisional.as_ref().map_or_else(String::new, |value| value.text.clone()),
+                audio_start_time: stable.audio_start_time,
+                audio_end_time: provisional.map_or(stable.audio_end_time, |value| value.audio_end_time),
             }
         }
-        None => TranscriptPreview {
+        (None, Some(provisional)) => {
+            emit_speech_detected_once(app);
+            TranscriptPreview {
+                confirmed_text: String::new(),
+                text: provisional.text,
+                audio_start_time: provisional.audio_start_time,
+                audio_end_time: provisional.audio_end_time,
+            }
+        }
+        (None, None) => TranscriptPreview {
+            confirmed_text: String::new(),
             text: String::new(),
             audio_start_time: 0.0,
             audio_end_time: 0.0,
@@ -837,15 +868,15 @@ mod tests {
     }
 
     #[test]
-    fn fallback_keeps_only_audio_after_the_confirmed_boundary() {
-        let suffix = trim_confirmed_prefix(chunk(), Some(10.25)).unwrap();
+    fn final_tail_keeps_a_short_overlap_before_the_confirmed_boundary() {
+        let suffix = trim_confirmed_prefix(chunk(), Some(10.75)).unwrap();
 
         assert_eq!(suffix.data.len(), 12_000);
         assert_eq!(suffix.timestamp, 10.25);
     }
 
     #[test]
-    fn fallback_skips_decode_when_the_whole_chunk_is_confirmed() {
-        assert!(trim_confirmed_prefix(chunk(), Some(11.0)).is_none());
+    fn final_tail_skips_decode_when_audio_after_overlap_is_exhausted() {
+        assert!(trim_confirmed_prefix(chunk(), Some(11.5)).is_none());
     }
 }

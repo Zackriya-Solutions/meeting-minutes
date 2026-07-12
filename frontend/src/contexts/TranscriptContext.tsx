@@ -64,25 +64,23 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Auto-scroll when transcripts change (only if user is at bottom)
+  // Auto-scroll the actual TranscriptPanel scroller while the user remains at the bottom.
   useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
     if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
-      const scrollTimeout = setTimeout(() => {
+      const frame = requestAnimationFrame(() => {
         const container = transcriptContainerRef.current;
         if (container) {
+          const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           container.scrollTo({
             top: container.scrollHeight,
-            behavior: 'smooth'
+            behavior: prefersReducedMotion || transcriptPreview ? 'auto' : 'smooth'
           });
         }
-      }, 150); // Match Framer Motion transition duration
+      });
 
-      return () => clearTimeout(scrollTimeout);
+      return () => cancelAnimationFrame(frame);
     }
-  }, [transcripts]);
+  }, [transcripts, transcriptPreview]);
 
   // Initialize IndexedDB and listen for recording-started/stopped events
   useEffect(() => {

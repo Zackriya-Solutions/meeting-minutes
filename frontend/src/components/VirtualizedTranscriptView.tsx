@@ -133,15 +133,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Ref for infinite scroll trigger element
     const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        if (preview && scrollRef.current) {
-            scrollRef.current.scrollTo({
-                top: scrollRef.current.scrollHeight,
-                behavior: 'smooth',
-            });
-        }
-    }, [preview]);
-
     // Force re-render without flushSync (avoids React warning)
     const [, rerender] = useReducer((x: number) => x + 1, 0);
 
@@ -248,7 +239,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
             {/* Content - add padding when recording to prevent overlap */}
             <div className={isRecording ? 'pt-2' : ''}>
-            {segments.length === 0 && !preview ? (
+            {segments.length === 0 ? (
                 // Empty state
                 <motion.div
                     initial={{ opacity: 0 }}
@@ -406,19 +397,17 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="mb-3 flex items-start gap-2"
-                    aria-live="polite"
                 >
                     <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
                         {formatRecordingTime(preview.audio_start_time)}
                     </span>
-                    <div className="flex-1 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2">
-                        <div className="flex items-start gap-2">
-                            <div className="mt-2 h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-blue-400" />
-                            <p className="text-base italic leading-relaxed text-gray-500">
-                                {preview.text}
-                            </p>
-                        </div>
-                    </div>
+                    <p className="flex-1 text-base leading-relaxed text-gray-800">
+                        {preview.confirmed_text}
+                        {preview.confirmed_text && preview.text ? ' ' : null}
+                        {preview.text && (
+                            <span className="italic text-gray-400">{preview.text}</span>
+                        )}
+                    </p>
                 </motion.div>
             )}
             </div>

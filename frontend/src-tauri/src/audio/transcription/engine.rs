@@ -3,6 +3,7 @@
 // TranscriptionEngine enum and model initialization/validation logic.
 
 use super::provider::TranscriptionProvider;
+use super::streaming::TranscriptionMode;
 use log::{info, warn};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
@@ -50,6 +51,15 @@ impl TranscriptionEngine {
 // ============================================================================
 // MODEL VALIDATION AND INITIALIZATION
 // ============================================================================
+
+pub async fn configured_transcription_mode<R: Runtime>(app: &AppHandle<R>) -> TranscriptionMode {
+    match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        Ok(Some(config)) if config.provider == "localWhisper" => {
+            TranscriptionMode::WhisperStreaming
+        }
+        _ => TranscriptionMode::FinalOnly,
+    }
+}
 
 /// Validate that transcription models (Whisper or Parakeet) are ready before starting recording
 pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {

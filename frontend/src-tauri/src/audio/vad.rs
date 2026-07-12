@@ -4,6 +4,10 @@ use log::{debug, info, warn};
 use std::collections::VecDeque;
 use std::time::Duration;
 
+fn absolute_vad_sample(timestamp_ms: usize) -> usize {
+    timestamp_ms * 16_000 / 1_000
+}
+
 /// Represents a complete speech segment detected by VAD
 #[derive(Debug, Clone)]
 pub struct SpeechSegment {
@@ -245,7 +249,8 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = true;
                     // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // Silero timestamps are absolute within the session, just like SpeechEnd.
+                    self.speech_start_sample = absolute_vad_sample(timestamp_ms);
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
@@ -419,6 +424,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speech_start_timestamp_is_absolute_across_chunk_boundaries() {
+        assert_eq!(absolute_vad_sample(2_500), 40_000);
+    }
 
     /// Generate synthetic speech-like audio with alternating speech/silence
     fn generate_test_audio_with_speech(duration_seconds: f32, sample_rate: u32) -> Vec<f32> {

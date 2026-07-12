@@ -4,13 +4,15 @@ export function reduceTranscriptPreview(
   _current: TranscriptPreview | null,
   event: TranscriptPreview
 ): TranscriptPreview | null {
+  const confirmedText = event.confirmed_text.trim();
   const text = event.text.trim();
-  if (!text) {
+  if (!confirmedText && !text) {
     return null;
   }
 
   return {
     ...event,
+    confirmed_text: confirmedText,
     text,
   };
 }

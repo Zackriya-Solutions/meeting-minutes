@@ -66,6 +66,7 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
+        transcription_mode: super::transcription::streaming::TranscriptionMode,
     ) -> Result<mpsc::UnboundedReceiver<TranscriptionInput>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
@@ -117,6 +118,7 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
+            transcription_mode,
         )?;
 
         // Give the pipeline a moment to fully initialize before starting streams
@@ -168,7 +170,11 @@ impl RecordingManager {
     ///
     /// User still hears audio via Bluetooth (playback), but recording captures
     /// via stable wired path for best quality.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<TranscriptionInput>> {
+    pub async fn start_recording_with_defaults_and_auto_save(
+        &mut self,
+        auto_save: bool,
+        transcription_mode: super::transcription::streaming::TranscriptionMode,
+    ) -> Result<mpsc::UnboundedReceiver<TranscriptionInput>> {
         #[cfg(target_os = "macos")]
         {
             info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
@@ -187,7 +193,7 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, transcription_mode).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -222,7 +228,7 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, transcription_mode).await
         }
     }
 
