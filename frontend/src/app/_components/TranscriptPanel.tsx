@@ -31,7 +31,7 @@ export function TranscriptPanel({
   showModal
 }: TranscriptPanelProps) {
   // Contexts
-  const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, transcriptPreview, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
@@ -107,6 +107,7 @@ export function TranscriptPanel({
           <div className="w-2/3 max-w-[750px]">
             <VirtualizedTranscriptView
               segments={segments}
+              preview={transcriptPreview}
               isRecording={isRecording}
               isPaused={isPaused}
               isProcessing={isProcessingStop}

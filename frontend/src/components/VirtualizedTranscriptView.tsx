@@ -8,11 +8,13 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData } from "@/types";
+import { TranscriptPreview, TranscriptSegmentData } from "@/types";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
     segments: TranscriptSegmentData[];
+    /** Ephemeral Whisper hypothesis; never part of persisted segments */
+    preview?: TranscriptPreview | null;
     /** Whether recording is in progress */
     isRecording?: boolean;
     /** Whether recording is paused */
@@ -112,6 +114,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
+    preview = null,
     isRecording = false,
     isPaused = false,
     isProcessing = false,
@@ -387,6 +390,25 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         </motion.div>
                     )}
                 </>
+            )}
+            {preview && (
+                <motion.div
+                    key="transcript-preview"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="mb-3 flex items-start gap-2"
+                >
+                    <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                        {formatRecordingTime(preview.audio_start_time)}
+                    </span>
+                    <p className="flex-1 text-base leading-relaxed text-gray-800">
+                        {preview.confirmed_text}
+                        {preview.confirmed_text && preview.text ? ' ' : null}
+                        {preview.text && (
+                            <span className="italic text-gray-400">{preview.text}</span>
+                        )}
+                    </p>
+                </motion.div>
             )}
             </div>
         </div>

@@ -10,8 +10,9 @@ use super::devices::get_safe_recording_devices_macos;
 
 #[cfg(not(target_os = "macos"))]
 use super::devices::{default_input_device, default_output_device};
-use super::recording_state::{RecordingState, AudioChunk, DeviceType as RecordingDeviceType};
+use super::recording_state::{RecordingState, DeviceType as RecordingDeviceType};
 use super::pipeline::AudioPipelineManager;
+use super::transcription::streaming::TranscriptionInput;
 use super::stream::AudioStreamManager;
 use super::recording_saver::RecordingSaver;
 use super::device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
@@ -65,11 +66,12 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
-    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+        transcription_mode: super::transcription::streaming::TranscriptionMode,
+    ) -> Result<mpsc::UnboundedReceiver<TranscriptionInput>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
         // Set up transcription channel
-        let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<TranscriptionInput>();
 
         // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
         // Pipeline will mix mic + system audio professionally and send to this channel
@@ -116,6 +118,7 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
+            transcription_mode,
         )?;
 
         // Give the pipeline a moment to fully initialize before starting streams
@@ -167,7 +170,11 @@ impl RecordingManager {
     ///
     /// User still hears audio via Bluetooth (playback), but recording captures
     /// via stable wired path for best quality.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+    pub async fn start_recording_with_defaults_and_auto_save(
+        &mut self,
+        auto_save: bool,
+        transcription_mode: super::transcription::streaming::TranscriptionMode,
+    ) -> Result<mpsc::UnboundedReceiver<TranscriptionInput>> {
         #[cfg(target_os = "macos")]
         {
             info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
@@ -186,7 +193,7 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, transcription_mode).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -221,7 +228,7 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, transcription_mode).await
         }
     }
 

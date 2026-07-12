@@ -39,3 +39,7 @@ graph TD
 *   **Transcription Engine:** Uses local speech-to-text models (Whisper or Parakeet) to transcribe the captured audio. It can be accelerated with a GPU.
 *   **Database:** A local SQLite database that stores meeting metadata, transcripts, and summaries.
 *   **Summary Engine:** Generates meeting summaries using various Large Language Models (LLMs), including local models via Ollama.
+
+### Live Whisper transcription
+
+Local Whisper uses a bounded streaming window and LocalAgreement confirmation. The frontend receives an ephemeral `transcript-preview` hypothesis while speech is active; this text may change as more audio arrives. Only stable text is emitted through `transcript-update` and written to meeting history, IndexedDB, or SQLite. Parakeet continues to consume complete VAD utterances and does not use the provisional path.

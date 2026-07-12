@@ -17,7 +17,13 @@ impl WhisperCompiledBackend {
             Self::Vulkan
         } else if cfg!(feature = "hipblas") {
             Self::HipBlas
-        } else if cfg!(target_os = "macos") || cfg!(feature = "metal") {
+        } else if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                Self::Metal
+            } else {
+                Self::Cpu
+            }
+        } else if cfg!(feature = "metal") {
             Self::Metal
         } else {
             Self::Cpu
@@ -140,5 +146,14 @@ mod tests {
             assert!(!params.use_gpu);
             assert!(!params.flash_attn);
         }
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    #[test]
+    fn current_backend_uses_cpu_on_intel_macos() {
+        assert_eq!(
+            WhisperCompiledBackend::current(),
+            WhisperCompiledBackend::Cpu
+        );
     }
 }

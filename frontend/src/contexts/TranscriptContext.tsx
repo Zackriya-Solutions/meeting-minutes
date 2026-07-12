@@ -1,15 +1,17 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
-import { Transcript, TranscriptUpdate } from '@/types';
+import { Transcript, TranscriptPreview, TranscriptUpdate } from '@/types';
 import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
+import { reduceTranscriptPreview } from '@/lib/transcript-preview';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
+  transcriptPreview: TranscriptPreview | null;
   transcriptsRef: MutableRefObject<Transcript[]>
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
@@ -26,6 +28,7 @@ const TranscriptContext = createContext<TranscriptContextType | undefined>(undef
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [transcriptPreview, setTranscriptPreview] = useState<TranscriptPreview | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
@@ -61,25 +64,23 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Auto-scroll when transcripts change (only if user is at bottom)
+  // Auto-scroll the actual TranscriptPanel scroller while the user remains at the bottom.
   useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
     if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
-      const scrollTimeout = setTimeout(() => {
+      const frame = requestAnimationFrame(() => {
         const container = transcriptContainerRef.current;
         if (container) {
+          const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           container.scrollTo({
             top: container.scrollHeight,
-            behavior: 'smooth'
+            behavior: prefersReducedMotion || transcriptPreview ? 'auto' : 'smooth'
           });
         }
-      }, 150); // Match Framer Motion transition duration
+      });
 
-      return () => clearTimeout(scrollTimeout);
+      return () => cancelAnimationFrame(frame);
     }
-  }, [transcripts]);
+  }, [transcripts, transcriptPreview]);
 
   // Initialize IndexedDB and listen for recording-started/stopped events
   useEffect(() => {
@@ -93,6 +94,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
+          setTranscriptPreview(null);
           try {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
@@ -144,6 +146,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-stopped event
         unlistenRecordingStopped = await recordingService.onRecordingStopped(async (payload) => {
+          setTranscriptPreview(null);
           try {
             if (currentMeetingId) {
               // Update folder path in IndexedDB
@@ -180,6 +183,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let unlistenPreviewFn: (() => void) | undefined;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -335,6 +339,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
           processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
+        unlistenPreviewFn = await transcriptService.onTranscriptPreview((preview) => {
+          setTranscriptPreview((current) => reduceTranscriptPreview(current, preview));
+        });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
@@ -354,6 +361,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       if (unlistenFn) {
         unlistenFn();
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
+      }
+      if (unlistenPreviewFn) {
+        unlistenPreviewFn();
       }
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
@@ -483,6 +493,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    setTranscriptPreview(null);
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
@@ -511,6 +522,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   const value: TranscriptContextType = {
     transcripts,
+    transcriptPreview,
     transcriptsRef,
     addTranscript,
     copyTranscript,

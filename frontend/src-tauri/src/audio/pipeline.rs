@@ -12,6 +12,16 @@ use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
+use super::transcription::streaming::{TranscriptionInput, TranscriptionMode};
+
+const STREAMING_PREBUFFER_SAMPLES: usize = 16_000 * 300 / 1_000;
+
+fn retain_streaming_prebuffer(buffer: &mut VecDeque<f32>, samples: &[f32]) {
+    buffer.extend(samples.iter().copied());
+    while buffer.len() > STREAMING_PREBUFFER_SAMPLES {
+        buffer.pop_front();
+    }
+}
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -679,7 +689,7 @@ impl AudioCapture {
 /// Uses Voice Activity Detection to segment speech in real-time and send only speech to Whisper
 pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
-    transcription_sender: mpsc::UnboundedSender<AudioChunk>,
+    transcription_sender: mpsc::UnboundedSender<TranscriptionInput>,
     state: Arc<RecordingState>,
     vad_processor: ContinuousVadProcessor,
     sample_rate: u32,
@@ -694,12 +704,15 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    transcription_mode: TranscriptionMode,
+    streaming_prebuffer: VecDeque<f32>,
+    streaming_was_active: bool,
 }
 
 impl AudioPipeline {
     pub fn new(
         receiver: mpsc::UnboundedReceiver<AudioChunk>,
-        transcription_sender: mpsc::UnboundedSender<AudioChunk>,
+        transcription_sender: mpsc::UnboundedSender<TranscriptionInput>,
         state: Arc<RecordingState>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
@@ -707,6 +720,7 @@ impl AudioPipeline {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
+        transcription_mode: TranscriptionMode,
     ) -> Self {
         // Log device characteristics for adaptive buffering
         info!("🎛️ AudioPipeline initializing with device characteristics:");
@@ -760,6 +774,9 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            transcription_mode,
+            streaming_prebuffer: VecDeque::with_capacity(STREAMING_PREBUFFER_SAMPLES),
+            streaming_was_active: false,
         }
     }
 
@@ -834,6 +851,53 @@ impl AudioPipeline {
                             // STEP 3: Send mixed audio for transcription (VAD + Whisper)
                             match self.vad_processor.process_audio(&mixed_with_gain) {
                                 Ok(speech_segments) => {
+                                    if self.transcription_mode == TranscriptionMode::WhisperStreaming {
+                                        let mut streaming_samples = crate::audio::audio_processing::resample_audio(
+                                            &mixed_with_gain,
+                                            self.sample_rate,
+                                            16_000,
+                                        );
+                                        let streaming_active = self.vad_processor.is_speech_active();
+
+                                        if self.streaming_was_active && !streaming_active {
+                                            self.streaming_prebuffer.clear();
+                                        }
+                                        if streaming_active {
+                                            if !self.streaming_was_active {
+                                                let mut with_prebuffer = Vec::with_capacity(
+                                                    self.streaming_prebuffer.len() + streaming_samples.len(),
+                                                );
+                                                with_prebuffer.extend(self.streaming_prebuffer.drain(..));
+                                                with_prebuffer.append(&mut streaming_samples);
+                                                streaming_samples = with_prebuffer;
+                                            }
+
+                                            if !streaming_samples.is_empty() {
+                                                let duration = streaming_samples.len() as f64 / 16_000.0;
+                                                let end_time = self.vad_processor.processed_time_seconds();
+                                                let streaming_chunk = AudioChunk {
+                                                    data: streaming_samples,
+                                                    sample_rate: 16_000,
+                                                    timestamp: (end_time - duration).max(0.0),
+                                                    chunk_id: self.chunk_id_counter,
+                                                    device_type: DeviceType::Microphone,
+                                                };
+
+                                                if self.transcription_sender.send(
+                                                    TranscriptionInput::StreamingAudio(streaming_chunk)
+                                                ).is_ok() {
+                                                    self.chunk_id_counter += 1;
+                                                }
+                                            }
+                                        } else {
+                                            retain_streaming_prebuffer(
+                                                &mut self.streaming_prebuffer,
+                                                &streaming_samples,
+                                            );
+                                        }
+                                        self.streaming_was_active = streaming_active;
+                                    }
+
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
@@ -849,7 +913,9 @@ impl AudioPipeline {
                                                 device_type: DeviceType::Microphone,  // Mixed audio
                                             };
 
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                                            if let Err(e) = self.transcription_sender.send(
+                                                TranscriptionInput::UtteranceEnd(transcription_chunk)
+                                            ) {
                                                 warn!("Failed to send VAD segment: {}", e);
                                             } else {
                                                 self.chunk_id_counter += 1;
@@ -919,7 +985,9 @@ impl AudioPipeline {
                             device_type: DeviceType::Microphone,
                         };
 
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                        if let Err(e) = self.transcription_sender.send(
+                            TranscriptionInput::UtteranceEnd(transcription_chunk)
+                        ) {
                             warn!("Failed to send final VAD segment: {}", e);
                         } else {
                             self.chunk_id_counter += 1;
@@ -958,7 +1026,7 @@ impl AudioPipelineManager {
     pub fn start(
         &mut self,
         state: Arc<RecordingState>,
-        transcription_sender: mpsc::UnboundedSender<AudioChunk>,
+        transcription_sender: mpsc::UnboundedSender<TranscriptionInput>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
@@ -966,6 +1034,7 @@ impl AudioPipelineManager {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
+        transcription_mode: TranscriptionMode,
     ) -> Result<()> {
         // Log device information for adaptive buffering
         info!("🎙️ Starting pipeline with device info:");
@@ -989,6 +1058,7 @@ impl AudioPipelineManager {
             mic_device_kind,
             system_device_name,
             system_device_kind,
+            transcription_mode,
         );
 
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
@@ -1076,5 +1146,24 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::{retain_streaming_prebuffer, STREAMING_PREBUFFER_SAMPLES};
+    use std::collections::VecDeque;
+
+    #[test]
+    fn onset_prebuffer_keeps_only_the_latest_three_hundred_milliseconds() {
+        let mut buffer = VecDeque::new();
+        let samples: Vec<f32> = (0..STREAMING_PREBUFFER_SAMPLES + 10)
+            .map(|sample| sample as f32)
+            .collect();
+
+        retain_streaming_prebuffer(&mut buffer, &samples);
+
+        assert_eq!(buffer.len(), STREAMING_PREBUFFER_SAMPLES);
+        assert_eq!(buffer.front().copied(), Some(10.0));
     }
 }
