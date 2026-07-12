@@ -107,14 +107,23 @@ impl HardwareProfile {
 
     /// Detect available system memory in GB
     fn detect_memory_gb() -> u8 {
-        // Simple memory detection - could be enhanced with system-specific calls
-        match std::env::var("MEMORY_GB") {
-            Ok(mem_str) => mem_str.parse().unwrap_or(8),
-            Err(_) => {
-                // Default estimates based on common configurations
-                8 // Conservative default
-            }
+        if let Ok(mem_str) = std::env::var("MEMORY_GB") {
+            return mem_str.parse().unwrap_or(8);
         }
+
+        let system = sysinfo::System::new_all();
+        Self::memory_bytes_to_gb(system.total_memory())
+    }
+
+    fn memory_bytes_to_gb(bytes: u64) -> u8 {
+        const GIB: u64 = 1024 * 1024 * 1024;
+
+        if bytes == 0 {
+            return 8;
+        }
+
+        let rounded_up = bytes.saturating_add(GIB - 1) / GIB;
+        rounded_up.min(u8::MAX as u64) as u8
     }
 
     /// Calculate performance tier based on hardware
@@ -322,5 +331,18 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
 
         assert!(!HardwareProfile::has_windows_vulkan_loader(temp_dir.path()));
+    }
+
+    #[test]
+    fn memory_bytes_convert_to_installed_gib() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+
+        assert_eq!(HardwareProfile::memory_bytes_to_gb(16 * GIB), 16);
+        assert_eq!(HardwareProfile::memory_bytes_to_gb(15 * GIB + 1), 16);
+    }
+
+    #[test]
+    fn zero_memory_bytes_use_conservative_fallback() {
+        assert_eq!(HardwareProfile::memory_bytes_to_gb(0), 8);
     }
 }
