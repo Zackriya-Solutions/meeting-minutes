@@ -15,6 +15,7 @@ import {
 } from "../ui/dialog";
 import { DiarizationStatus, DiarizeMeetingResult } from "@/types";
 import Analytics from "@/lib/analytics";
+import { useT } from "@/lib/i18n";
 
 interface DetectSpeakersButtonProps {
     meetingId?: string;
@@ -34,6 +35,7 @@ const errString = (err: unknown, fallback: string): string =>
  * and reports the outcome via toast — matching the retranscription idiom.
  */
 export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersButtonProps) {
+    const t = useT();
     const [phase, setPhase] = useState<Phase>("idle");
     const [showDownload, setShowDownload] = useState(false);
     const [downloading, setDownloading] = useState(false);
@@ -45,13 +47,13 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
         setPhase("diarizing");
         try {
             const result = await invoke<DiarizeMeetingResult>("diarize_meeting", { meetingId });
-            const plural = result.speaker_count === 1 ? "speaker" : "speakers";
+            const plural = result.speaker_count === 1 ? t('speaker') : t('speakers');
             toast.success(
-                `Found ${result.speaker_count} ${plural} · ${result.assigned_segments}/${result.total_segments} segments attributed`
+                `${t('Found')} ${result.speaker_count} ${plural} · ${result.assigned_segments}/${result.total_segments} ${t('segments attributed')}`
             );
             await onDetected?.();
         } catch (err) {
-            toast.error(errString(err, "Speaker detection failed"));
+            toast.error(errString(err, t("Speaker detection failed")));
         } finally {
             setPhase("idle");
         }
@@ -71,7 +73,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
             await runDiarize();
         } catch (err) {
             setPhase("idle");
-            toast.error(errString(err, "Could not check speaker models"));
+            toast.error(errString(err, t("Could not check speaker models")));
         }
     };
 
@@ -84,7 +86,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
             await runDiarize();
         } catch (err) {
             setDownloading(false);
-            toast.error(errString(err, "Failed to download speaker models"));
+            toast.error(errString(err, t("Failed to download speaker models")));
         }
     };
 
@@ -98,7 +100,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                 className="xl:px-4"
                 onClick={handleClick}
                 disabled={busy}
-                title="Detect and label speakers in this meeting"
+                title={t('Detect and label speakers in this meeting')}
             >
                 {busy ? (
                     <Loader2 className="xl:mr-2 animate-spin" size={18} />
@@ -106,7 +108,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                     <Users className="xl:mr-2" size={18} />
                 )}
                 <span className="hidden lg:inline">
-                    {phase === "diarizing" ? "Detecting..." : "Speakers"}
+                    {phase === "diarizing" ? t('Detecting...') : t('Speakers')}
                 </span>
             </Button>
 
@@ -118,11 +120,10 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Users className="h-5 w-5 text-[var(--gold)]" />
-                            Detect Speakers
+                            {t('Detect Speakers')}
                         </DialogTitle>
                         <DialogDescription>
-                            Speaker detection needs a one-time download of the diarization models
-                            (~35 MB). They are stored locally and reused for future meetings.
+                            {t('Speaker detection needs a one-time download of the diarization models (~35 MB). They are stored locally and reused for future meetings.')}
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
@@ -131,7 +132,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                             onClick={() => setShowDownload(false)}
                             disabled={downloading}
                         >
-                            Cancel
+                            {t('Cancel')}
                         </Button>
                         <Button
                             onClick={handleDownloadAndDetect}
@@ -141,12 +142,12 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                             {downloading ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Downloading...
+                                    {t('Downloading...')}
                                 </>
                             ) : (
                                 <>
                                     <Download className="h-4 w-4 mr-2" />
-                                    Download &amp; Detect
+                                    {t('Download & Detect')}
                                 </>
                             )}
                         </Button>

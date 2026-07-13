@@ -9,6 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useT } from '@/lib/i18n';
 
 interface EmptyStateSummaryProps {
   onGenerate: () => void;
@@ -17,6 +18,7 @@ interface EmptyStateSummaryProps {
 }
 
 export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }: EmptyStateSummaryProps) {
+  const t = useT();
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -26,10 +28,10 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
     >
       <FileQuestion className="w-16 h-16 text-[var(--fg3)] mb-4" />
       <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">
-        No Summary Generated Yet
+        {t('No Summary Generated Yet')}
       </h3>
       <p className="text-sm text-[var(--fg2)] mb-6 max-w-md">
-        Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.
+        {t('Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.')}
       </p>
 
       <TooltipProvider>
@@ -42,13 +44,13 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
                 className="gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                {isGenerating ? 'Generating...' : 'Generate Summary'}
+                {isGenerating ? t('Generating...') : t('Generate Summary')}
               </Button>
             </div>
           </TooltipTrigger>
           {!hasModel && (
             <TooltipContent>
-              <p>Сначала выбери модель в настройках</p>
+              <p>{t('Please select a model in Settings first')}</p>
             </TooltipContent>
           )}
         </Tooltip>
@@ -56,7 +58,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
 
       {!hasModel && (
         <p className="mt-3 text-xs text-[var(--gold)]">
-          Сначала выбери модель в настройках
+          {t('Please select a model in Settings first')}
         </p>
       )}
     </motion.div>

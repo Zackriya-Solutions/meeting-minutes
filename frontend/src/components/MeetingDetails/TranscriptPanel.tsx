@@ -5,6 +5,7 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { Icon } from '@/components/memento/Icon';
+import { useT } from '@/lib/i18n';
 import { useMemo } from 'react';
 
 function formatClock(totalSeconds: number): string {
@@ -76,6 +77,7 @@ export function TranscriptPanel({
   onRenameSpeaker,
   onSpeakersDetected,
 }: TranscriptPanelProps) {
+  const t = useT();
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -111,13 +113,13 @@ export function TranscriptPanel({
       {/* Marked moments — click to jump the transcript to that point */}
       {markedMoments.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
-          <span className="mm-eyebrow mr-1">Моменты</span>
+          <span className="mm-eyebrow mr-1">{t('Moments')}</span>
           {markedMoments.map((seconds) => (
             <button
               key={seconds}
               type="button"
               onClick={() => onSeekToMoment?.(seconds)}
-              title="Открыть этот момент в расшифровке"
+              title={t('Open this moment in the transcript')}
               className="mm-numeric inline-flex items-center gap-1 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-2 py-0.5 text-xs text-[var(--gold)] transition-colors hover:bg-[var(--gold-soft-strong)]"
             >
               <Icon name="dot" size={12} />
@@ -153,7 +155,7 @@ export function TranscriptPanel({
       {!isRecording && convertedSegments.length > 0 && (
         <div className="border-t border-[var(--border-subtle)] p-3">
           <textarea
-            placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
+            placeholder={t('Add context for AI summary. For example people involved, meeting overview, objective etc...')}
             className="mm-field min-h-[80px] w-full resize-y px-3 py-2 text-sm outline-none"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}

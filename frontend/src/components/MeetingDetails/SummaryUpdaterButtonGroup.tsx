@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, Save, Loader2, Search, FolderOpen } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
+import { useT } from '@/lib/i18n';
 
 interface SummaryUpdaterButtonGroupProps {
   isSaving: boolean;
@@ -24,6 +25,7 @@ export function SummaryUpdaterButtonGroup({
   onOpenFolder,
   hasSummary
 }: SummaryUpdaterButtonGroupProps) {
+  const t = useT();
   return (
     <ButtonGroup>
       {/* Save button */}
@@ -31,7 +33,7 @@ export function SummaryUpdaterButtonGroup({
         variant="outline"
         size="sm"
         className={`${isDirty ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]' : ""}`}
-        title={isSaving ? "Saving" : "Save Changes"}
+        title={isSaving ? t('Saving') : t('Save Changes')}
         onClick={() => {
           Analytics.trackButtonClick('save_changes', 'meeting_details');
           onSave();
@@ -41,12 +43,12 @@ export function SummaryUpdaterButtonGroup({
         {isSaving ? (
           <>
             <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">Сохранение…</span>
+            <span className="hidden lg:inline">{t('Saving...')}</span>
           </>
         ) : (
           <>
             <Save />
-            <span className="hidden lg:inline">Сохранить</span>
+            <span className="hidden lg:inline">{t('Save')}</span>
           </>
         )}
       </Button>
@@ -55,7 +57,7 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        title="Скопировать суть"
+        title={t('Copy Summary')}
         onClick={() => {
           Analytics.trackButtonClick('copy_summary', 'meeting_details');
           onCopy();
@@ -64,7 +66,7 @@ export function SummaryUpdaterButtonGroup({
         className="cursor-pointer"
       >
         <Copy />
-        <span className="hidden lg:inline">Copy</span>
+        <span className="hidden lg:inline">{t('Copy')}</span>
       </Button>
 
       {/* Find button */}

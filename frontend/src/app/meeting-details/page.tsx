@@ -10,6 +10,7 @@ import { LoaderIcon } from '@/components/memento/LucideCompat';
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
+import { useT } from "@/lib/i18n";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -31,6 +32,7 @@ function MeetingDetailsContent() {
   const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
+  const t = useT();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -206,7 +208,7 @@ function MeetingDetailsContent() {
 
     if (!meetingId || meetingId === 'intro-call') {
       console.warn('No valid meeting ID in URL - meetingId:', meetingId);
-      setError("Встреча не выбрана");
+      setError(t('No meeting selected'));
       setIsLoading(false);
       Analytics.trackPageView('meeting_details');
       return;
@@ -364,7 +366,7 @@ function MeetingDetailsContent() {
             onClick={() => router.push('/')}
             className="px-4 py-2 bg-[var(--gold)] text-[var(--fg-inverse)] rounded hover:bg-[var(--gold-active)]"
           >
-            Назад
+            {t('Go Back')}
           </button>
         </div>
       </div>

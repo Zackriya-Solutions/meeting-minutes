@@ -5,6 +5,7 @@ import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
 import { AlertTriangle, Copy, Trash2 } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 interface Props {
   summary: Summary | null;
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerateSummary, meeting }: Props) => {
+  const t = useT();
   const generateUniqueId = (sectionKey: string) => {
     return `${sectionKey}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
@@ -609,10 +611,10 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     <div className="w-full p-4 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg">
       <div className="flex items-center mb-2">
         <AlertTriangle className="mr-2 h-5 w-5 text-[var(--danger)]" />
-        <h3 className="text-[var(--danger)] font-medium">Не удалось создать суть</h3>
+        <h3 className="text-[var(--danger)] font-medium">{t('Error Generating Summary')}</h3>
       </div>
       <p className="text-[var(--danger)] text-sm">{error}</p>
-      <p className="text-[var(--danger)] text-xs mt-2">Проверь модель и API-ключ, затем попробуй снова.</p>
+      <p className="text-[var(--danger)] text-xs mt-2">{t('Please check your model configuration and API keys, or try again.')}</p>
     </div>
   );
 
@@ -622,12 +624,12 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         <div className="animate-spin rounded-full h-5 w-5 border-2 border-[var(--gold-border)] border-t-transparent"></div>
         <div>
           <h3 className="text-[var(--gold)] font-medium">
-            {status === 'processing' ? 'Обработка расшифровки' : 'Создание сути'}
+            {status === 'processing' ? t('Processing Transcript') : t('Generating Summary')}
           </h3>
           <p className="text-[var(--gold)] text-sm">
-            {status === 'processing' 
-              ? 'Анализируем расшифровку…' 
-              : 'Создаём подробную суть встречи…'}
+            {status === 'processing'
+              ? t('Analyzing your transcript...')
+              : t('Creating a detailed summary of your meeting...')}
           </p>
         </div>
       </div>
@@ -649,8 +651,8 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   if (!hasContent && status === 'completed') {
     return (
       <div className="w-full p-4 bg-[var(--bg-sheet)] border border-[var(--border-subtle)] rounded-lg text-center">
-        <p className="text-[var(--fg2)]">Суть встречи пока не создана.</p>
-        <p className="text-[var(--fg2)] text-sm mt-1">Создай суть заново.</p>
+        <p className="text-[var(--fg2)]">{t('No summary content available.')}</p>
+        <p className="text-[var(--fg2)] text-sm mt-1">{t('Try generating a new summary.')}</p>
       </div>
     );
   }
@@ -685,14 +687,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleCopyBlocks}
           >
             <Copy size={16} className="text-[var(--fg2)]" />
-            <span>Скопировать {selectedBlocks.length > 1 ? `${selectedBlocks.length} фрагмента` : 'фрагмент'}</span>
+            <span>{t('Copy')} {selectedBlocks.length > 1 ? `${selectedBlocks.length} ${t('blocks')}` : t('block')}</span>
           </button>
           <button
             className="w-full px-4 py-2 text-left hover:bg-[var(--bg-elevated)] text-[var(--danger)] flex items-center space-x-2"
             onClick={handleDeleteBlocks}
           >
             <Trash2 size={16} />
-            <span>Удалить {selectedBlocks.length > 1 ? `${selectedBlocks.length} фрагмента` : 'фрагмент'}</span>
+            <span>{t('Delete')} {selectedBlocks.length > 1 ? `${selectedBlocks.length} ${t('blocks')}` : t('block')}</span>
           </button>
         </div>
       )}

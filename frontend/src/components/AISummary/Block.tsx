@@ -2,6 +2,7 @@
 
 import { Block } from '@/types';
 import { useRef, useState, useEffect } from 'react';
+import { useT } from '@/lib/i18n';
 
 interface BlockProps {
   block: Block;
@@ -71,6 +72,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
   onNavigate,
   onCreateNewBlock,
 }) => {
+  const t = useT();
   const [showCommands, setShowCommands] = useState(false);
   const [commandFilter, setCommandFilter] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -250,7 +252,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
             ${block.type === 'heading1' ? 'text-xl font-bold' : ''}
             ${block.type === 'heading2' ? 'text-lg font-semibold' : ''}
           `}
-          placeholder="Type '/' for commands..."
+          placeholder={t("Type '/' for commands...")}
         />
 
         {showCommands && (
@@ -273,8 +275,8 @@ export const BlockComponent: React.FC<BlockProps> = ({
                   {cmd.icon}
                 </span>
                 <div className="flex-1">
-                  <div className="font-medium">{cmd.label}</div>
-                  <div className="text-sm text-[var(--fg2)]">{cmd.description}</div>
+                  <div className="font-medium">{t(cmd.label)}</div>
+                  <div className="text-sm text-[var(--fg2)]">{t(cmd.description)}</div>
                 </div>
               </button>
             ))}

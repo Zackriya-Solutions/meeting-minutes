@@ -67,3 +67,18 @@ export function useLanguage(): LanguageContextValue {
 export function useT(): (en: string) => string {
   return useLanguage().t;
 }
+
+/**
+ * Non-hook translation for MODULE SCOPE (toast helpers, services) where the
+ * React context/hook isn't available. Reads the persisted language directly, so
+ * it reflects the current toggle at call time. Inside React components use
+ * `useT()` instead so they re-render when the language changes.
+ */
+export function translate(en: string): string {
+  let lang: Lang = 'ru';
+  if (typeof window !== 'undefined') {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === 'en' || stored === 'ru') lang = stored;
+  }
+  return lang === 'en' ? en : RU[en] ?? en;
+}

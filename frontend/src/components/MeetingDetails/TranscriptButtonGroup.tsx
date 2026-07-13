@@ -8,6 +8,7 @@ import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { DetectSpeakersButton } from './DetectSpeakersButton';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 
 interface TranscriptButtonGroupProps {
@@ -31,6 +32,7 @@ export function TranscriptButtonGroup({
   onRefetchTranscripts,
   onSpeakersDetected,
 }: TranscriptButtonGroupProps) {
+  const t = useT();
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
 
@@ -52,10 +54,10 @@ export function TranscriptButtonGroup({
             onCopyTranscript();
           }}
           disabled={transcriptCount === 0}
-          title={transcriptCount === 0 ? 'No transcript available' : 'Copy Transcript'}
+          title={transcriptCount === 0 ? t('No transcript available') : t('Copy Transcript')}
         >
           <Copy />
-          <span className="hidden lg:inline">Copy</span>
+          <span className="hidden lg:inline">{t('Copy')}</span>
         </Button>
 
         <Button
@@ -66,10 +68,10 @@ export function TranscriptButtonGroup({
             Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
             onOpenMeetingFolder();
           }}
-          title="Открыть папку записи"
+          title={t('Open Recording Folder')}
         >
           <FolderOpen className="xl:mr-2" size={18} />
-          <span className="hidden lg:inline">Запись</span>
+          <span className="hidden lg:inline">{t('Recording')}</span>
         </Button>
 
         {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
@@ -81,10 +83,10 @@ export function TranscriptButtonGroup({
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
-            title="Расшифровать запись заново"
+            title={t('Retranscribe to enhance your recorded audio')}
           >
             <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">Улучшить</span>
+            <span className="hidden lg:inline">{t('Enhance')}</span>
           </Button>
         )}
 

@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { translate } from '@/lib/i18n';
 
 /**
  * Shows the recording notification toast with compliance message.
@@ -19,11 +20,11 @@ export async function showRecordingNotification(): Promise<void> {
     if (showNotification) {
       let dontShowAgain = false;
 
-      const toastId = toast.info('Запись началась', {
+      const toastId = toast.info(translate('🔴 Recording Started'), {
         description: (
           <div className="space-y-3 min-w-[280px]">
             <p className="text-sm font-medium text-[var(--fg1)]">
-              Предупреди участников встречи о записи.
+              {translate('Inform all participants this meeting is being recorded.')}
             </p>
             <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-[var(--gold-soft)] p-2 rounded transition-colors">
               <input
@@ -33,7 +34,7 @@ export async function showRecordingNotification(): Promise<void> {
                 }}
                 className="rounded border-[var(--border-strong)] text-[var(--gold)] ring-[var(--gold-ring)] focus:ring-2"
               />
-              <span className="select-none text-[var(--fg2)]">Больше не показывать</span>
+              <span className="select-none text-[var(--fg2)]">{translate("Don't show this again")}</span>
             </label>
             <button
               onClick={async () => {
@@ -48,7 +49,7 @@ export async function showRecordingNotification(): Promise<void> {
               }}
               className="w-full rounded-full bg-[var(--gold)] px-3 py-1.5 text-xs font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
             >
-              Участники предупреждены
+              {translate("I've Notified Participants")}
             </button>
           </div>
         ),

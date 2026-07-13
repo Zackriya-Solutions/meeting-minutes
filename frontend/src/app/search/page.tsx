@@ -8,6 +8,7 @@ import { Loader2 } from '@/components/memento/LucideCompat';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
+import { useT } from '@/lib/i18n';
 
 // Mirrors the Rust `SearchHit` (search::hybrid).
 interface SearchHit {
@@ -43,6 +44,7 @@ function fmtTime(ms: number): string {
 
 export default function SearchPage() {
   const router = useRouter();
+  const t = useT();
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -93,7 +95,7 @@ export default function SearchPage() {
         });
         setResults(Array.isArray(hits) ? hits : []);
       } catch (e) {
-        setError(typeof e === 'string' ? e : 'Поиск не удался.');
+        setError(typeof e === 'string' ? e : t('Search failed.'));
         setResults([]);
       } finally {
         setSearching(false);
@@ -128,11 +130,11 @@ export default function SearchPage() {
           <button
             onClick={() => router.push('/')}
             className="mm-icon-button mm-hover"
-            aria-label="Назад"
+            aria-label={t('Back')}
           >
             <Icon name="back" />
           </button>
-          <h1 className="mm-page-title">Поиск по встречам</h1>
+          <h1 className="mm-page-title">{t('Search meetings')}</h1>
         </div>
 
         <div className="mt-3 flex items-center gap-2">
@@ -143,11 +145,11 @@ export default function SearchPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSearch(query)}
-              placeholder="Найдите что угодно из ваших встреч…"
+              placeholder={t('Search anything from your meetings…')}
               className="h-11 flex-1 border-0 bg-transparent text-sm outline-none"
             />
             {query && (
-              <button onClick={() => setQuery('')} className="text-[var(--fg3)] hover:text-[var(--fg2)]" aria-label="Очистить">
+              <button onClick={() => setQuery('')} className="text-[var(--fg3)] hover:text-[var(--fg2)]" aria-label={t('Clear')}>
                 <Icon name="close" size={16} />
               </button>
             )}
@@ -162,7 +164,7 @@ export default function SearchPage() {
             )}
           >
             <Icon name="filter" size={17} />
-            Фильтры
+            {t('Filters')}
             {activeFilterCount > 0 && (
               <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--gold)] px-1 text-[10px] font-medium text-[var(--fg-inverse)]">
                 {activeFilterCount}
@@ -174,14 +176,14 @@ export default function SearchPage() {
             disabled={searching || !query.trim()}
             className="h-11 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {searching ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Найти'}
+            {searching ? <Loader2 className="h-5 w-5 animate-spin" /> : t('Find')}
           </Button>
         </div>
 
         {showFilters && (
           <div className="mt-3 flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
             <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
-              С даты
+              {t('From date')}
               <input
                 type="date"
                 value={dateFrom}
@@ -190,7 +192,7 @@ export default function SearchPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
-              По дату
+              {t('To date')}
               <input
                 type="date"
                 value={dateTo}
@@ -199,13 +201,13 @@ export default function SearchPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
-              Коллекция
+              {t('Collection')}
               <select
                 value={collectionId ?? ''}
                 onChange={(e) => setCollectionId(e.target.value ? Number(e.target.value) : null)}
                 className="mm-select"
               >
-                <option value="">Любая</option>
+                <option value="">{t('Any')}</option>
                 {collections.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -222,11 +224,11 @@ export default function SearchPage() {
                 }}
                 className="mb-1 text-xs text-[var(--fg2)] underline hover:text-[var(--fg1)]"
               >
-                Сбросить
+                {t('Reset')}
               </button>
             )}
             <span className="mb-1 text-xs text-[var(--fg3)]">
-              Фильтр по спикеру появится после диаризации (Фаза&nbsp;2).
+              {t('Speaker filter will appear after diarization (Phase 2).')}
             </span>
           </div>
         )}
@@ -246,12 +248,12 @@ export default function SearchPage() {
           </Centered>
         ) : groups.length === 0 ? (
           <Centered>
-            <p className="text-sm text-[var(--fg2)]">Ничего не найдено. Попробуйте другие слова или ослабьте фильтры.</p>
+            <p className="text-sm text-[var(--fg2)]">{t('Nothing found. Try different words or loosen the filters.')}</p>
           </Centered>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
             <p className="text-xs text-[var(--fg3)]">
-              {results.length} совпадени{plural(results.length)} в {groups.length} встреч{pluralMeet(groups.length)}
+              {results.length} {t('matches')}{plural(results.length)} {t('in')} {groups.length} {t('meetings')}{pluralMeet(groups.length)}
             </p>
             {groups.map((g) => (
               <div key={g.meeting_id}>
@@ -259,7 +261,7 @@ export default function SearchPage() {
                   onClick={() => router.push(`/meeting-details?id=${encodeURIComponent(g.meeting_id)}`)}
                   className="mb-2 text-left text-sm font-semibold text-[var(--fg1)] hover:text-[var(--gold)]"
                 >
-                  {g.title || 'Без названия'}
+                  {g.title || t('Untitled')}
                 </button>
                 <div className="flex flex-col gap-2">
                   {g.hits.map((h) => (
@@ -275,7 +277,7 @@ export default function SearchPage() {
                         <Icon name="clock" size={13} />
                         {fmtTime(h.start_ms)}
                         <Icon name="transcript" size={13} className="ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
-                        <span className="opacity-0 transition-opacity group-hover:opacity-100">открыть</span>
+                        <span className="opacity-0 transition-opacity group-hover:opacity-100">{t('open')}</span>
                       </div>
                       <p className="line-clamp-3 text-sm leading-relaxed text-[var(--fg2)]">
                         <Highlighted text={h.text} terms={h.matched_terms} />
@@ -321,15 +323,15 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 function EmptyPrompt() {
+  const t = useT();
   return (
     <div className="mx-auto flex max-w-md flex-col items-center pt-24 text-center">
       <div className="mm-empty-icon mb-4">
         <Icon name="search" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-[var(--fg1)]">Поиск по всем встречам</h2>
+      <h2 className="text-xl font-semibold text-[var(--fg1)]">{t('Search across all meetings')}</h2>
       <p className="mt-2 text-sm text-[var(--fg2)]">
-        Гибридный поиск (по ключевым словам и по смыслу) находит нужный момент в любой записи.
-        Нажмите на результат, чтобы открыть встречу на этом месте.
+        {t('Hybrid search (keyword and semantic) finds the right moment in any recording. Click a result to open the meeting at that point.')}
       </p>
     </div>
   );

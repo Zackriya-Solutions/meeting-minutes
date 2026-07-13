@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
+import { useT } from '@/lib/i18n';
 
 // Mirrors the Rust `Citation` (search::rag).
 interface Citation {
@@ -49,13 +50,14 @@ interface CollectionRef {
 }
 
 const SUGGESTIONS = [
-  'Что мы решили по бюджету за последний месяц?',
-  'Какие открытые задачи у команды?',
-  'О чём договорились с клиентом на последней встрече?',
+  'What did we decide about the budget over the last month?',
+  'What open tasks does the team have?',
+  'What did we agree with the client at the last meeting?',
 ];
 
 export default function ChatPage() {
   const router = useRouter();
+  const t = useT();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -111,11 +113,11 @@ export default function ChatPage() {
       if (!query || sending) return;
 
       if (scopeKind === 'collection' && collectionId == null) {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Выберите коллекцию для поиска.', error: true }]);
+        setMessages((m) => [...m, { role: 'assistant', content: t('Select a collection to search.'), error: true }]);
         return;
       }
       if (scopeKind === 'meeting' && !meetingId) {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Выберите встречу для поиска.', error: true }]);
+        setMessages((m) => [...m, { role: 'assistant', content: t('Select a meeting to search.'), error: true }]);
         return;
       }
 
@@ -152,7 +154,7 @@ export default function ChatPage() {
             content:
               typeof e === 'string'
                 ? e
-                : 'Не удалось получить ответ. Проверьте, что настроен провайдер LLM (GigaChat или DeepSeek) в настройках.',
+                : t('Failed to get an answer. Make sure an LLM provider (GigaChat or DeepSeek) is configured in settings.'),
             error: true,
           },
         ]);
@@ -179,12 +181,12 @@ export default function ChatPage() {
         <button
           onClick={() => router.push('/')}
           className="mm-icon-button mm-hover"
-          aria-label="Назад"
+          aria-label={t('Back')}
         >
           <Icon name="back" />
         </button>
         <Icon name="library" size={24} className="text-[var(--gold)]" />
-        <h1 className="mm-page-title">База знаний</h1>
+        <h1 className="mm-page-title">{t('Chat with archive')}</h1>
 
         <div className="ml-auto flex items-center gap-2">
           {/* Scope selector */}
@@ -193,9 +195,9 @@ export default function ChatPage() {
             onChange={(e) => changeScope(e.target.value as ScopeKind)}
             className="mm-select"
           >
-            <option value="archive">Весь архив</option>
-            <option value="collection">Коллекция</option>
-            <option value="meeting">Встреча</option>
+            <option value="archive">{t('Entire archive')}</option>
+            <option value="collection">{t('Collection')}</option>
+            <option value="meeting">{t('Meeting')}</option>
           </select>
 
           {scopeKind === 'collection' && (
@@ -204,7 +206,7 @@ export default function ChatPage() {
               onChange={(e) => setCollectionId(e.target.value ? Number(e.target.value) : null)}
               className="mm-select max-w-[200px]"
             >
-              <option value="">Выберите коллекцию…</option>
+              <option value="">{t('Select a collection…')}</option>
               {collections.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -219,7 +221,7 @@ export default function ChatPage() {
               onChange={(e) => setMeetingId(e.target.value || null)}
               className="mm-select max-w-[220px]"
             >
-              <option value="">Выберите встречу…</option>
+              <option value="">{t('Select a meeting…')}</option>
               {meetings.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.title}
@@ -234,7 +236,7 @@ export default function ChatPage() {
             size="sm"
             icon={<Icon name="plus" size={16} />}
           >
-            Новый чат
+            {t('New chat')}
           </Button>
         </div>
       </div>
@@ -262,7 +264,7 @@ export default function ChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder="Спросите о ваших встречах…"
+            placeholder={t('Ask about your meetings…')}
             className="mm-field max-h-40 min-h-[48px] flex-1 resize-none py-3 text-sm outline-none"
           />
           <button
@@ -272,13 +274,13 @@ export default function ChatPage() {
               'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
               sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
             )}
-            aria-label="Отправить"
+            aria-label={t('Send')}
           >
             {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon name="send" />}
           </button>
         </div>
         <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--fg3)]">
-          Ответы формируются только из ваших записей, со ссылками на источники.
+          {t('Answers are drawn only from your recordings, with links to the sources.')}
         </p>
       </div>
     </div>
@@ -294,6 +296,7 @@ function MessageBubble({
   meetingTitle: (id: string) => string;
   onCite: (c: Citation) => void;
 }) {
+  const t = useT();
   const isUser = msg.role === 'user';
   const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
 
@@ -319,7 +322,7 @@ function MessageBubble({
         {notFound && (
           <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
             <Icon name="search" size={14} />
-            Не найдено в ваших встречах
+            {t('Not found in your meetings')}
           </div>
         )}
         <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
@@ -337,7 +340,7 @@ function MessageBubble({
               <button
                 key={c.index}
                 onClick={() => onCite(c)}
-                title="Открыть встречу на этом месте"
+                title={t('Open the meeting at this moment')}
                 className="flex items-center gap-1 rounded-full bg-[var(--bg-canvas)]/70 px-2 py-0.5 text-xs text-[var(--gold)] ring-1 ring-[var(--gold-ring)] transition-colors hover:bg-[var(--gold-soft)]"
               >
                 <Icon name="transcript" size={12} />
@@ -369,24 +372,25 @@ function TypingIndicator() {
 }
 
 function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disabled: boolean }) {
+  const t = useT();
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
       <div className="mm-empty-icon mb-4">
         <Icon name="library" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-[var(--fg1)]">Спросите свой архив встреч</h2>
+      <h2 className="text-xl font-semibold text-[var(--fg1)]">{t('Ask your meeting archive')}</h2>
       <p className="mt-2 text-sm text-[var(--fg2)]">
-        Задавайте вопросы на естественном языке — ответы приходят со ссылками на конкретные моменты записей.
+        {t('Ask questions in natural language — answers come with links to specific moments in your recordings.')}
       </p>
       <div className="mt-8 flex w-full flex-col gap-2">
         {SUGGESTIONS.map((s) => (
           <button
             key={s}
             disabled={disabled}
-            onClick={() => onPick(s)}
+            onClick={() => onPick(t(s))}
             className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-left text-sm text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] hover:bg-[var(--gold-soft)] disabled:opacity-50"
           >
-            {s}
+            {t(s)}
           </button>
         ))}
       </div>

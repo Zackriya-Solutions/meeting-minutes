@@ -18,6 +18,7 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 export default function PageContent({
   meeting,
@@ -63,6 +64,8 @@ export default function PageContent({
     summaryDataKeys: summaryData ? Object.keys(summaryData) : null,
     transcriptsCount: meeting.transcripts?.length
   });
+
+  const t = useT();
 
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
@@ -130,10 +133,10 @@ export default function PageContent({
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Настройки модели сохранены');
+      toast.success(t('Model settings saved successfully'));
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error('Не удалось сохранить настройки модели');
+      toast.error(t('Failed to save model settings'));
     }
   };
 

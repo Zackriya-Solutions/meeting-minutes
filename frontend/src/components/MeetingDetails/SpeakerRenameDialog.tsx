@@ -9,6 +9,7 @@ import {
 } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { useT } from "@/lib/i18n";
 
 interface SpeakerRenameDialogProps {
     open: boolean;
@@ -26,6 +27,7 @@ export function SpeakerRenameDialog({
     onOpenChange,
     onRename,
 }: SpeakerRenameDialogProps) {
+    const t = useT();
     const [name, setName] = useState(currentName);
     const [saving, setSaving] = useState(false);
 
@@ -42,7 +44,7 @@ export function SpeakerRenameDialog({
             onOpenChange(false);
         } catch (err) {
             toast.error(
-                typeof err === "string" ? err : (err as any)?.message || "Failed to rename speaker"
+                typeof err === "string" ? err : (err as any)?.message || t("Failed to rename speaker")
             );
         } finally {
             setSaving(false);
@@ -53,7 +55,7 @@ export function SpeakerRenameDialog({
         <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
             <DialogContent className="sm:max-w-[360px]">
                 <DialogHeader>
-                    <DialogTitle>Rename speaker</DialogTitle>
+                    <DialogTitle>{t('Rename speaker')}</DialogTitle>
                 </DialogHeader>
                 <div className="py-1">
                     <Input
@@ -66,19 +68,19 @@ export function SpeakerRenameDialog({
                                 handleSave();
                             }
                         }}
-                        placeholder="Speaker name"
+                        placeholder={t('Speaker name')}
                     />
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-                        Cancel
+                        {t('Cancel')}
                     </Button>
                     <Button
                         onClick={handleSave}
                         disabled={saving || !name.trim()}
                         className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
                     >
-                        {saving ? "Saving..." : "Save"}
+                        {saving ? t('Saving...') : t('Save')}
                     </Button>
                 </DialogFooter>
             </DialogContent>
