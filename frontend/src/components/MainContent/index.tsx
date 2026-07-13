@@ -13,10 +13,10 @@ const MainContent: React.FC<MainContentProps> = ({ children }) => {
   return (
     <main 
       className={`flex-1 transition-all duration-300 ${
-        isCollapsed ? 'ml-16' : 'ml-64'
+        isCollapsed ? 'ml-16' : 'ml-[232px]'
       }`}
     >
-      <div className="pl-8">
+      <div>
         {children}
       </div>
     </main>

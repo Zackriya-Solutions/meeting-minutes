@@ -708,7 +708,7 @@ const Sidebar: React.FC = () => {
       </button>
 
       <div
-        className={`h-screen bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'
+        className={`memento-sidebar h-screen border-r flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-[232px]'
           }`}
       >
         {/*  Header with traffic light spacing */}
@@ -757,7 +757,7 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className={`memento-nav-item items-center h-10 flex mx-3 mt-3 cursor-pointer ${pathname === '/' ? 'is-active' : ''}`}
               >
                 <Home className="w-4 h-4 mr-2" />
                 <span>Home</span>
@@ -809,17 +809,17 @@ const Sidebar: React.FC = () => {
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
-              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm`}
+              className={`memento-primary-action w-full flex items-center justify-center px-3 py-2 text-sm font-medium ${isRecording ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {isRecording ? (
                 <>
                   <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
+                  <span>Recording in progress</span>
                 </>
               ) : (
                 <>
                   <Mic className="w-4 h-4 mr-2" />
-                  <span>Start Recording</span>
+                  <span>Record meeting</span>
                 </>
               )}
             </button>

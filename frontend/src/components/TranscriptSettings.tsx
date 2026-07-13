@@ -39,7 +39,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             <div>
                 <Label className="block text-sm font-medium text-gray-700 mb-1">Transcription</Label>
                 <p className="text-sm text-gray-500">
-                    Meetily transcribes with <span className="font-medium text-gray-700">GigaAM v3</span> (Sber) —
+                    Memento transcribes with <span className="font-medium text-gray-700">GigaAM v3</span> (Sber) —
                     on-device Russian speech recognition with punctuation and capitalization.
                 </p>
             </div>

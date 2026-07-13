@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -78,26 +80,39 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
+    --background: 40 14% 4%;
+    --foreground: 39 43% 93%;
+    --card: 30 17% 8%;
+    --card-foreground: 39 43% 93%;
+    --popover: 30 17% 8%;
+    --popover-foreground: 39 43% 93%;
+    --primary: 35 73% 53%;
+    --primary-foreground: 40 14% 4%;
+    --secondary: 30 17% 8%;
+    --secondary-foreground: 39 43% 93%;
+    --muted: 30 12% 10%;
+    --muted-foreground: 39 16% 68%;
+    --accent: 35 73% 53%;
+    --accent-foreground: 40 14% 4%;
+    --destructive: 9 42% 58%;
+    --destructive-foreground: 39 43% 93%;
+    --border: 39 18% 15%;
+    --input: 39 18% 15%;
+    --ring: 35 73% 53%;
+    --radius: 1rem;
+    --mm-canvas: #0c0b09;
+    --mm-sheet: #0e0d0b;
+    --mm-elevated: #141210;
+    --mm-surface: #17140f;
+    --mm-ivory: #f5f0e6;
+    --mm-ivory-68: rgba(245, 240, 230, 0.68);
+    --mm-ivory-38: rgba(245, 240, 230, 0.38);
+    --mm-border: rgba(245, 240, 230, 0.06);
+    --mm-border-strong: rgba(245, 240, 230, 0.12);
+    --mm-hover: rgba(245, 240, 230, 0.05);
+    --mm-gold: #e09830;
+    --mm-gold-active: #f0ac48;
+    --mm-gold-soft: rgba(224, 152, 48, 0.12);
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -141,6 +156,9 @@
   /* html, */
   body {
     @apply bg-background text-foreground;
+    font-family: 'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--mm-canvas);
+    color: var(--mm-ivory);
     overflow: hidden;
     height: 100%;
   }
@@ -166,18 +184,18 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: rgba(245, 240, 230, 0.16);
     border-radius: 3px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: rgba(245, 240, 230, 0.28);
   }
 
   /* Firefox scrollbar */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
+    scrollbar-color: rgba(245, 240, 230, 0.16) transparent;
   }
 
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
@@ -212,3 +230,37 @@
     overflow: visible !important;
   }
 }
+
+@layer components {
+  .memento-shell { background: var(--mm-canvas); color: var(--mm-ivory); }
+  .memento-sidebar { background: var(--mm-sheet); border-color: var(--mm-border); }
+  .memento-logo { color: var(--mm-ivory); font-size: 21px; font-weight: 600; letter-spacing: -0.04em; }
+  .memento-nav-item { position: relative; border-radius: 12px; padding: 0 12px; color: var(--mm-ivory-68); font-size: 14px; font-weight: 500; transition: background 180ms ease, color 180ms ease; }
+  .memento-nav-item:hover { background: var(--mm-hover); color: var(--mm-ivory); }
+  .memento-nav-item.is-active { background: var(--mm-hover); color: var(--mm-ivory); }
+  .memento-nav-item.is-active::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--mm-gold); margin-right: 10px; }
+  .memento-primary-action { min-height: 42px; border-radius: 999px; background: var(--mm-gold); color: var(--mm-canvas); transition: background 180ms ease, transform 180ms ease; }
+  .memento-primary-action:hover { background: var(--mm-gold-active); }
+  .memento-primary-action:active { transform: scale(.985); }
+  .memento-record-dock { padding: 6px; border: 1px solid var(--mm-border-strong); border-radius: 999px; background: var(--mm-elevated); }
+}
+
+/* Bridge legacy utility styling onto the Memento dark system. */
+.bg-white, .bg-gray-50 { background-color: var(--mm-canvas) !important; }
+.bg-gray-100, .bg-gray-200, .bg-gray-300, .bg-blue-50, .bg-blue-100 { background-color: var(--mm-hover) !important; }
+.hover\:bg-gray-50:hover, .hover\:bg-gray-100:hover, .hover\:bg-gray-200:hover, .hover\:bg-gray-300:hover,
+.hover\:bg-blue-100:hover, .hover\:bg-blue-200:hover { background-color: var(--mm-hover) !important; }
+.bg-red-500, .bg-orange-500, .bg-blue-500, .bg-blue-600 { background-color: var(--mm-gold) !important; }
+.hover\:bg-red-600:hover, .hover\:bg-blue-600:hover, .hover\:bg-blue-700:hover { background-color: var(--mm-gold-active) !important; }
+.text-gray-900, .text-gray-800, .text-gray-700, .text-gray-600, .text-white { color: var(--mm-ivory) !important; }
+.text-gray-500, .text-gray-400, .text-blue-500, .text-blue-600, .text-blue-700 { color: var(--mm-ivory-68) !important; }
+.border-gray-100, .border-gray-200, .border-gray-300, .border-white, .border-blue-100 { border-color: var(--mm-border) !important; }
+.shadow-sm, .shadow-lg, .shadow-md, .hover\:shadow-md:hover { box-shadow: none !important; }
+input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font-family: inherit; }
+input, textarea { background: var(--mm-elevated) !important; color: var(--mm-ivory) !important; border-color: var(--mm-border-strong) !important; }
+input::placeholder, textarea::placeholder { color: var(--mm-ivory-38) !important; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid var(--mm-gold); outline-offset: 2px; }
+.rounded-lg { border-radius: 12px; }
+.rounded-xl { border-radius: 16px; }
+.rounded-2xl { border-radius: 24px; }
+.font-mono, time { font-family: 'Space Grotesk', 'Onest', sans-serif; font-variant-numeric: tabular-nums; }

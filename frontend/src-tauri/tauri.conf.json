@@ -1,6 +1,6 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "Memento",
     "version": "0.4.0",
     "identifier": "com.meetily.ai",
     "build": {
@@ -12,12 +12,12 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "Memento",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,
                 "fullscreen": false,
-                "theme": "Light",
+                "theme": "Dark",
                 "decorations": true
             }
         ],
