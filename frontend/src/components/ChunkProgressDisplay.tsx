@@ -1,4 +1,5 @@
 import React from 'react';
+import { CheckCircle, Clock, Loader2, XCircle } from '@/components/memento/LucideCompat';
 
 export interface ChunkStatus {
   chunk_id: number;
@@ -46,30 +47,30 @@ export function ChunkProgressDisplay({
     const hours = Math.floor(minutes / 60);
 
     if (hours > 0) {
-      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+      return `${hours} ч ${minutes % 60} мин ${seconds % 60} с`;
     } else if (minutes > 0) {
-      return `${minutes}m ${seconds % 60}s`;
+      return `${minutes} мин ${seconds % 60} с`;
     } else {
-      return `${seconds}s`;
+      return `${seconds} с`;
     }
   };
 
   const formatTimeRemaining = (ms?: number) => {
-    if (!ms || ms <= 0) return 'Calculating...';
+    if (!ms || ms <= 0) return 'Считаем…';
     return formatDuration(ms);
   };
 
   const getChunkStatusIcon = (status: ChunkStatus['status']) => {
     switch (status) {
       case 'completed':
-        return '✅';
+        return <CheckCircle size={14} />;
       case 'processing':
-        return '⚡';
+        return <Loader2 size={14} className="animate-spin" />;
       case 'failed':
-        return '❌';
+        return <XCircle size={14} />;
       case 'pending':
       default:
-        return '⏳';
+        return <Clock size={14} />;
     }
   };
 
@@ -93,11 +94,11 @@ export function ChunkProgressDisplay({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">
           <h3 className="text-lg font-semibold text-[var(--fg1)]">
-            Processing Progress
+            Ход обработки
           </h3>
           {isPaused && (
             <span className="bg-[var(--gold-soft)] text-[var(--gold)] px-2 py-1 rounded-full text-xs font-medium">
-              Paused
+              На паузе
             </span>
           )}
         </div>
@@ -106,7 +107,7 @@ export function ChunkProgressDisplay({
           {!isPaused ? (
             <button
               onClick={onPause}
-              className="bg-[var(--gold-soft)]0 hover:bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
+              className="bg-[var(--gold)] hover:bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
               disabled={progress.processing_chunks === 0 && progress.completed_chunks === progress.total_chunks}
             >
               Pause
@@ -114,7 +115,7 @@ export function ChunkProgressDisplay({
           ) : (
             <button
               onClick={onResume}
-              className="bg-[color-mix(in_srgb,var(--success)_12%,transparent)]0 hover:bg-[var(--success)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
+              className="bg-[var(--success)] hover:bg-[var(--success)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
             >
               Resume
             </button>
@@ -122,7 +123,7 @@ export function ChunkProgressDisplay({
 
           <button
             onClick={onCancel}
-            className="bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 hover:bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
+            className="bg-[var(--danger)] hover:bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
           >
             Cancel
           </button>
@@ -154,28 +155,28 @@ export function ChunkProgressDisplay({
           <div className="text-lg font-semibold text-[var(--success)]">
             {progress.completed_chunks}
           </div>
-          <div className="text-[var(--fg2)]">Completed</div>
+          <div className="text-[var(--fg2)]">Готово</div>
         </div>
 
         <div className="text-center">
           <div className="text-lg font-semibold text-[var(--gold)]">
             {progress.processing_chunks}
           </div>
-          <div className="text-[var(--fg2)]">Processing</div>
+          <div className="text-[var(--fg2)]">В работе</div>
         </div>
 
         <div className="text-center">
           <div className="text-lg font-semibold text-[var(--fg2)]">
             {progress.total_chunks - progress.completed_chunks - progress.processing_chunks - progress.failed_chunks}
           </div>
-          <div className="text-[var(--fg2)]">Pending</div>
+          <div className="text-[var(--fg2)]">В очереди</div>
         </div>
 
         <div className="text-center">
           <div className="text-lg font-semibold text-[var(--danger)]">
             {progress.failed_chunks}
           </div>
-          <div className="text-[var(--fg2)]">Failed</div>
+          <div className="text-[var(--fg2)]">Ошибки</div>
         </div>
       </div>
 
@@ -183,9 +184,9 @@ export function ChunkProgressDisplay({
       {progress.estimated_remaining_ms && progress.estimated_remaining_ms > 0 && (
         <div className="bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded-lg p-3 mb-4">
           <div className="flex items-center space-x-2">
-            <span className="text-[var(--gold)]">⏱️</span>
+            <Clock size={16} className="text-[var(--gold)]" />
             <span className="text-sm text-[var(--gold)]">
-              Estimated time remaining: {formatTimeRemaining(progress.estimated_remaining_ms)}
+              Осталось примерно {formatTimeRemaining(progress.estimated_remaining_ms)}
             </span>
           </div>
         </div>
@@ -194,7 +195,7 @@ export function ChunkProgressDisplay({
       {/* Recent Chunks Grid */}
       <div className="space-y-2">
         <h4 className="text-sm font-medium text-[var(--fg2)] mb-2">
-          Recent Chunks ({Math.min(progress.chunks.length, 10)} of {progress.total_chunks})
+          Последние фрагменты: {Math.min(progress.chunks.length, 10)} из {progress.total_chunks}
         </h4>
 
         <div className="max-h-48 overflow-y-auto space-y-1">
@@ -210,7 +211,7 @@ export function ChunkProgressDisplay({
                   <div className="flex items-center space-x-2">
                     <span>{getChunkStatusIcon(chunk.status)}</span>
                     <span className="font-medium">
-                      Chunk {chunk.chunk_id}
+                      Фрагмент {chunk.chunk_id}
                     </span>
                     {chunk.duration_ms && (
                       <span className="text-[var(--fg2)]">
@@ -234,7 +235,7 @@ export function ChunkProgressDisplay({
 
                 {chunk.error_message && (
                   <div className="mt-1 text-[var(--danger)] text-xs">
-                    Error: {chunk.error_message}
+                    Ошибка: {chunk.error_message}
                   </div>
                 )}
               </div>
@@ -246,9 +247,9 @@ export function ChunkProgressDisplay({
       {progress.completed_chunks === progress.total_chunks && progress.total_chunks > 0 && (
         <div className="mt-4 bg-[color-mix(in_srgb,var(--success)_12%,transparent)] border border-[color-mix(in_srgb,var(--success)_42%,transparent)] rounded-lg p-3">
           <div className="flex items-center space-x-2">
-            <span className="text-[var(--success)]">🎉</span>
+            <CheckCircle size={16} className="text-[var(--success)]" />
             <span className="text-sm font-medium text-[var(--success)]">
-              Processing completed! All {progress.total_chunks} chunks have been transcribed.
+              Обработка завершена. Расшифровано фрагментов: {progress.total_chunks}.
             </span>
           </div>
         </div>

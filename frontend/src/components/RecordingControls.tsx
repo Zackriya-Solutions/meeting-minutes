@@ -342,7 +342,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   return (
     <TooltipProvider>
       <div className="flex flex-col space-y-2">
-        <div className="flex items-center space-x-2 bg-[var(--bg-canvas)] rounded-full shadow-none-none px-4 py-2">
+        <div className="flex items-center space-x-2 bg-[var(--bg-canvas)] rounded-full shadow-none px-4 py-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--border-strong)]"></div>
@@ -354,7 +354,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 <>
                   <button
                     onClick={handleStartRecording}
-                    className="w-10 h-10 flex items-center justify-center bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 rounded-full text-[var(--fg-inverse)] hover:bg-[var(--danger)] transition-colors"
+                    className="w-10 h-10 flex items-center justify-center bg-[var(--danger)] rounded-full text-[var(--fg-inverse)] hover:bg-[var(--danger)] transition-colors"
                   >
                     <Mic size={16} />
                   </button>
@@ -369,7 +369,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                       className="relative w-24 h-1 bg-[var(--bg-elevated)] rounded-full"
                     >
                       <div
-                        className="absolute h-full bg-[var(--gold-soft)]0 rounded-full"
+                        className="absolute h-full bg-[var(--gold)] rounded-full"
                         style={{ width: `${progress}%` }}
                       />
                     </div>
@@ -397,11 +397,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                             handleStartRecording();
                           }}
                           disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
-                          className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-[var(--fg3)]' : 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 hover:bg-[var(--danger)]'
+                          className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-[var(--fg3)]' : 'bg-[var(--danger)] hover:bg-[var(--danger)]'
                             } rounded-full text-[var(--fg-inverse)] transition-colors relative`}
                         >
                           {isValidatingModel ? (
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                            <div className="h-5 w-5 animate-spin rounded-full border-b-2 border-[var(--fg1)]"></div>
                           ) : (
                             <Mic size={20} />
                           )}
@@ -453,7 +453,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                               handleStopRecording();
                             }}
                             disabled={isStopping || isPausing || isResuming}
-                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming ? 'bg-[var(--fg3)]' : 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 hover:bg-[var(--danger)]'
+                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming ? 'bg-[var(--fg3)]' : 'bg-[var(--danger)] hover:bg-[var(--danger)]'
                               } rounded-full text-[var(--fg-inverse)] transition-colors relative`}
                           >
                             <Square size={16} />
@@ -475,7 +475,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                     {barHeights.map((height, index) => (
                       <div
                         key={index}
-                        className={`w-1 rounded-full transition-all duration-200 ${isPaused ? 'bg-[var(--gold-soft)]0' : 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0'
+                        className={`w-1 rounded-full transition-all duration-200 ${isPaused ? 'bg-[var(--gold)]' : 'bg-[var(--danger)]'
                           }`}
                         style={{
                           height: isRecording && !isPaused ? height : '4px',

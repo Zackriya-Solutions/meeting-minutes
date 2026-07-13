@@ -221,7 +221,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
   return (
     <div 
       className={`group relative min-h-[24px] flex items-start rounded transition-all duration-150 ease-in-out
-        ${isSelected ? 'bg-[var(--gold-soft)] ring-1 ring-[var(--gold-ring)] shadow-none-none' : 'hover:bg-[var(--bg-sheet)]'}`}
+        ${isSelected ? 'bg-[var(--gold-soft)] ring-1 ring-[var(--gold-ring)] shadow-none' : 'hover:bg-[var(--bg-sheet)]'}`}
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
       onMouseUp={onMouseUp}
@@ -256,7 +256,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
         {showCommands && (
           <div 
             ref={commandsRef}
-            className="absolute left-0 top-full mt-1 w-64 bg-[var(--bg-canvas)] rounded-lg shadow-none-none border border-[var(--border-subtle)] py-2 z-50
+            className="absolute left-0 top-full mt-1 w-64 bg-[var(--bg-canvas)] rounded-lg shadow-none border border-[var(--border-subtle)] py-2 z-50
                        animate-in fade-in slide-in-from-top-2 duration-150"
           >
             {filteredCommands.map((cmd, index) => (

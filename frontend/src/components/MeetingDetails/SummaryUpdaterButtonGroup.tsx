@@ -41,12 +41,12 @@ export function SummaryUpdaterButtonGroup({
         {isSaving ? (
           <>
             <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">Saving...</span>
+            <span className="hidden lg:inline">Сохранение…</span>
           </>
         ) : (
           <>
             <Save />
-            <span className="hidden lg:inline">Save</span>
+            <span className="hidden lg:inline">Сохранить</span>
           </>
         )}
       </Button>
@@ -55,7 +55,7 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        title="Copy Summary"
+        title="Скопировать суть"
         onClick={() => {
           Analytics.trackButtonClick('copy_summary', 'meeting_details');
           onCopy();
@@ -72,7 +72,7 @@ export function SummaryUpdaterButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          title="Find in Summary"
+          title="Найти в сути"
           onClick={() => {
             Analytics.trackButtonClick('find_in_summary', 'meeting_details');
             onFind();
@@ -81,7 +81,7 @@ export function SummaryUpdaterButtonGroup({
           className="cursor-pointer"
         >
           <Search />
-          <span className="hidden lg:inline">Find</span>
+          <span className="hidden lg:inline">Найти</span>
         </Button>
       )} */}
     </ButtonGroup>

@@ -112,7 +112,7 @@ export default function RootLayout({
       console.log('[Layout] Received request-recording-toggle from tray');
 
       if (showOnboarding) {
-        toast.error("Please complete setup first", {
+        toast.error("Сначала заверши настройку", {
           description: "You need to finish onboarding before you can start recording."
         });
       } else {
@@ -133,7 +133,7 @@ export default function RootLayout({
     const betaFeatures = loadBetaFeatures();
 
     if (!betaFeatures.importAndRetranscribe) {
-      toast.error('Beta feature disabled', {
+      toast.error('Экспериментальная функция выключена', {
         description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
       });
       return;
@@ -150,7 +150,7 @@ export default function RootLayout({
       setImportFilePath(audioFile);
       setShowImportDialog(true);
     } else if (paths.length > 0) {
-      toast.error('Please drop an audio file', {
+      toast.error('Перетащи аудиофайл', {
         description: `Supported formats: ${getAudioFormatsDisplayList()}`
       });
     }

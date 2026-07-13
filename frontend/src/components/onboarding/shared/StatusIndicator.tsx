@@ -12,8 +12,8 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
   const statusColors = {
     idle: 'bg-neutral-300',
     checking: 'bg-[var(--gold)] animate-pulse',
-    success: 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]0',
-    error: 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0',
+    success: 'bg-[var(--success)]',
+    error: 'bg-[var(--danger)]',
   };
 
   return <span className={cn('rounded-full inline-block', sizeClasses[size], statusColors[status])} />;

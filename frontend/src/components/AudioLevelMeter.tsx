@@ -31,9 +31,9 @@ export function AudioLevelMeter({
 
   // Color coding based on level
   const getLevelColor = (level: number) => {
-    if (level < 0.3) return 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]0';
-    if (level < 0.7) return 'bg-[var(--gold-soft)]0';
-    return 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0';
+    if (level < 0.3) return 'bg-[var(--success)]';
+    if (level < 0.7) return 'bg-[var(--gold)]';
+    return 'bg-[var(--danger)]';
   };
 
   const rmsColor = getLevelColor(logRms);

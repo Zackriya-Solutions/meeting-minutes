@@ -352,7 +352,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           exit={{ opacity: 0 }}
           className="flex items-center gap-2 mt-4 text-[var(--fg2)]"
         >
-          <div className="w-2 h-2 bg-[var(--gold-soft)]0 rounded-full animate-pulse"></div>
+          <div className="w-2 h-2 bg-[var(--gold)] rounded-full animate-pulse"></div>
           <span className="text-sm">Listening...</span>
         </motion.div>
       )}
@@ -367,7 +367,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           {isRecording ? (
             <>
               <div className="flex items-center justify-center mb-3">
-                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-[var(--gold-soft)]0' : 'bg-[var(--gold-soft)]0 animate-pulse'}`}></div>
+                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-[var(--gold)]' : 'bg-[var(--gold)] animate-pulse'}`}></div>
               </div>
               <p className="text-sm text-[var(--fg2)]">
                 {isPaused ? 'Recording paused' : 'Listening for speech...'}

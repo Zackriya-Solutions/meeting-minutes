@@ -106,8 +106,8 @@ export function ModelManager({
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize Whisper:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load models');
-        toast.error('Failed to load transcription models', {
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить модели');
+        toast.error('Не удалось загрузить список моделей расшифровки', {
           description: err instanceof Error ? err.message : 'Unknown error',
           duration: 5000
         });
@@ -281,8 +281,8 @@ export function ModelManager({
         duration: 3000
       });
     } catch (err) {
-      console.error('Failed to cancel download:', err);
-      toast.error('Failed to cancel download', {
+      console.error('Не удалось отменить загрузку:', err);
+      toast.error('Не удалось отменить загрузку', {
         description: err instanceof Error ? err.message : 'Unknown error',
         duration: 4000
       });
@@ -404,7 +404,7 @@ export function ModelManager({
   if (error) {
     return (
       <div className={`bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-4 ${className}`}>
-        <p className="text-sm text-[var(--danger)]">Failed to load models</p>
+        <p className="text-sm text-[var(--danger)]">Не удалось загрузить модели</p>
         <p className="text-xs text-[var(--danger)] mt-1">{error}</p>
       </div>
     );
@@ -442,12 +442,12 @@ export function ModelManager({
         })}
       </div>
 
-      {/* Advanced Models */}
+      {/* Расширенные модели */}
       {advancedModels.length > 0 && (
         <Accordion type="single" collapsible className="w-full">
           <AccordionItem value="advanced-models">
             <AccordionTrigger>
-              <span className='text-lg'>Advanced Models</span>
+              <span className='text-lg'>Расширенные модели</span>
             </AccordionTrigger>
             <AccordionContent>
               <div className="space-y-3 pt-4">
@@ -604,8 +604,8 @@ function ModelCard({
             {isAvailable && (
               <>
                 <div className="flex items-center gap-1.5 text-[var(--success)]">
-                  <div className="w-2 h-2 bg-[color-mix(in_srgb,var(--success)_12%,transparent)]0 rounded-full"></div>
-                  <span className="text-xs font-medium">Ready</span>
+                  <div className="w-2 h-2 bg-[var(--success)] rounded-full"></div>
+                  <span className="text-xs font-medium">Готово</span>
                 </div>
                 <AnimatePresence>
                   {isHovered && (
@@ -619,7 +619,7 @@ function ModelCard({
                         onDelete();
                       }}
                       className="text-[var(--fg3)] hover:text-[var(--danger)] transition-colors p-1"
-                      title="Delete model to free up space"
+                      title="Удалить модель и освободить место"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -689,7 +689,7 @@ function ModelCard({
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[var(--gold)]">Downloading...</span>
+                <span className="text-sm font-medium text-[var(--gold)]">Загрузка…</span>
                 <span className="text-sm font-semibold text-[var(--gold)]">{Math.round(downloadProgress)}%</span>
               </div>
               <button
@@ -698,7 +698,7 @@ function ModelCard({
                   onCancel();
                 }}
                 className="text-xs text-[var(--fg2)] hover:text-[var(--danger)] font-medium transition-colors px-2 py-1 rounded hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
-                title="Cancel download"
+                title="Отменить загрузку"
               >
                 Cancel
               </button>
@@ -717,7 +717,7 @@ function ModelCard({
                   {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}
                 </>
               ) : (
-                'Downloading...'
+                'Загрузка…'
               )}
             </p>
           </motion.div>

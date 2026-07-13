@@ -48,7 +48,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
           </TooltipTrigger>
           {!hasModel && (
             <TooltipContent>
-              <p>Please select a model in Settings first</p>
+              <p>Сначала выбери модель в настройках</p>
             </TooltipContent>
           )}
         </Tooltip>
@@ -56,7 +56,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
 
       {!hasModel && (
         <p className="text-xs text-amber-600 mt-3">
-          Please select a model in Settings first
+          Сначала выбери модель в настройках
         </p>
       )}
     </motion.div>

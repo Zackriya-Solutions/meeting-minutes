@@ -136,7 +136,7 @@ export function SummaryPanel({
         }
       } catch (err) {
         console.error('Failed to load summary language:', err);
-        toast.warning('Could not load saved summary language', {
+        toast.warning('Не удалось загрузить язык сути', {
           description: 'Using Auto until meeting metadata can be read.',
         });
         if (!cancelled && languageLoadVersionRef.current === loadVersion) setSummaryLang(null);
@@ -169,7 +169,7 @@ export function SummaryPanel({
             setSummaryLang(saved.language);
             setSummaryLangStorage(saved.storage);
             if (saved.storage === 'local_fallback') {
-              toast.info('Summary language saved on this device', {
+              toast.info('Язык сути сохранён на устройстве', {
                 description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
               });
             }
@@ -187,7 +187,7 @@ export function SummaryPanel({
             activeMeetingIdRef.current === request.meetingId
           ) {
             console.error('Failed to persist summary language:', err);
-            toast.error('Failed to save summary language');
+            toast.error('Не удалось сохранить язык сути');
             setSummaryLang(request.rollback.language);
             setSummaryLangStorage(request.rollback.storage);
             return;
@@ -331,7 +331,7 @@ export function SummaryPanel({
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[var(--gold-border)] mb-4"></div>
-              <p className="text-[var(--fg2)]">Generating AI Summary...</p>
+              <p className="text-[var(--fg2)]">Создаём суть встречи…</p>
             </div>
           </div>
         </div>
@@ -368,10 +368,10 @@ export function SummaryPanel({
         <div className="flex-1 overflow-y-auto min-h-0">
           {summaryResponse && (
             <div className="fixed bottom-0 left-0 right-0 bg-[var(--bg-canvas)] shadow-none p-4 max-h-1/3 overflow-y-auto">
-              <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
+              <h3 className="text-lg font-semibold mb-2">Суть встречи</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none">
-                  <h4 className="font-medium mb-1">Key Points</h4>
+                  <h4 className="font-medium mb-1">Главное</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.key_points.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -379,7 +379,7 @@ export function SummaryPanel({
                   </ul>
                 </div>
                 <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none mt-4">
-                  <h4 className="font-medium mb-1">Action Items</h4>
+                  <h4 className="font-medium mb-1">Задачи</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.action_items.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -387,7 +387,7 @@ export function SummaryPanel({
                   </ul>
                 </div>
                 <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none mt-4">
-                  <h4 className="font-medium mb-1">Decisions</h4>
+                  <h4 className="font-medium mb-1">Решения</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.decisions.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -395,7 +395,7 @@ export function SummaryPanel({
                   </ul>
                 </div>
                 <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none mt-4">
-                  <h4 className="font-medium mb-1">Main Topics</h4>
+                  <h4 className="font-medium mb-1">Темы</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.main_topics.blocks.map((block, i) => (
                       <li key={i} className="text-sm">{block.content}</li>
@@ -405,7 +405,7 @@ export function SummaryPanel({
               </div>
               {summaryResponse.raw_summary ? (
                 <div className="mt-4">
-                  <h4 className="font-medium mb-1">Full Summary</h4>
+                  <h4 className="font-medium mb-1">Полная суть</h4>
                   <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
                 </div>
               ) : null}

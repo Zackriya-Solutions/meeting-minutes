@@ -62,10 +62,10 @@ export function SettingsModals({
     {/* Legacy Settings Modal */}
     {modals.modelSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none-none max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="flex justify-between items-center p-6 border-b">
-            <h3 className="text-xl font-semibold text-[var(--fg1)]">Preferences</h3>
+            <h3 className="text-xl font-semibold text-[var(--fg1)]">Настройки</h3>
             <button
               onClick={() => onClose("modelSettings")
               }
@@ -79,12 +79,12 @@ export function SettingsModals({
 
           {/* Content - Scrollable */}
           <div className="flex-1 overflow-y-auto p-6 space-y-8">
-            {/* General Preferences Section */}
+            {/* General Настройки Section */}
             <PreferenceSettings />
 
             {/* Divider */}
             <div className="border-t pt-8">
-              <h4 className="text-lg font-semibold text-[var(--fg1)] mb-4">AI Model Configuration</h4>
+              <h4 className="text-lg font-semibold text-[var(--fg1)] mb-4">Модель для создания сути</h4>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-[var(--fg2)] mb-1">
@@ -92,7 +92,7 @@ export function SettingsModals({
                   </label>
                   <div className="flex space-x-2">
                     <select
-                      className="px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none-none focus:outline-none focus:ring-1 ring-[var(--gold-ring)] focus:border-[var(--gold-border)]"
+                      className="px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none focus:outline-none focus:ring-1 focus:ring-[var(--gold-ring)] focus:border-[var(--gold-border)]"
                       value={modelConfig.provider}
                       onChange={(e) => {
                         const provider = e.target.value as ModelConfig['provider'];
@@ -112,7 +112,7 @@ export function SettingsModals({
                     </select>
 
                     <select
-                      className="flex-1 px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none-none focus:outline-none focus:ring-1 ring-[var(--gold-ring)] focus:border-[var(--gold-border)]"
+                      className="flex-1 px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none focus:outline-none focus:ring-1 focus:ring-[var(--gold-ring)] focus:border-[var(--gold-border)]"
                       value={modelConfig.model}
                       onChange={(e) => setModelConfig((prev: ModelConfig) => ({ ...prev, model: e.target.value }))}
                     >
@@ -126,7 +126,7 @@ export function SettingsModals({
                 </div>
                 {modelConfig.provider === 'ollama' && (
                   <div>
-                    <h4 className="text-lg font-bold mb-4">Available Ollama Models</h4>
+                    <h4 className="text-lg font-bold mb-4">Доступные модели Ollama</h4>
                     {error && (
                       <div className="bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] text-[var(--danger)] px-4 py-3 rounded mb-4">
                         {error}
@@ -168,9 +168,9 @@ export function SettingsModals({
     {/* Device Settings Modal */}
     {modals.deviceSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-[var(--bg-canvas)] rounded-lg p-6 max-w-md w-full mx-4 shadow-none-none">
+        <div className="bg-[var(--bg-canvas)] rounded-lg p-6 max-w-md w-full mx-4 shadow-none">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-[var(--fg1)]">Audio Device Settings</h3>
+            <h3 className="text-lg font-semibold text-[var(--fg1)]">Аудиоустройства</h3>
             <button
               onClick={() => onClose('deviceSettings')}
               className="text-[var(--fg2)] hover:text-[var(--fg2)]"
@@ -192,7 +192,7 @@ export function SettingsModals({
               onClick={() => {
                 const micDevice = selectedDevices.micDevice || 'Default';
                 const systemDevice = selectedDevices.systemDevice || 'Default';
-                toast.success("Devices selected", {
+                toast.success("Устройства выбраны", {
                   description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
                 });
                 onClose('deviceSettings');
@@ -206,12 +206,12 @@ export function SettingsModals({
       </div>
     )}
 
-    {/* Language Settings Modal */}
+    {/* Настройки языка Modal */}
     {modals.languageSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-[var(--bg-canvas)] rounded-lg p-6 max-w-md w-full mx-4 shadow-none-none">
+        <div className="bg-[var(--bg-canvas)] rounded-lg p-6 max-w-md w-full mx-4 shadow-none">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-[var(--fg1)]">Language Settings</h3>
+            <h3 className="text-lg font-semibold text-[var(--fg1)]">Настройки языка</h3>
             <button
               onClick={() => onClose('languageSettings')}
               className="text-[var(--fg2)] hover:text-[var(--fg2)]"
@@ -244,7 +244,7 @@ export function SettingsModals({
     {/* Model Selection Modal */}
     {modals.modelSelector && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-[var(--bg-canvas)] rounded-lg max-w-4xl w-full mx-4 shadow-none-none max-h-[90vh] flex flex-col">
+        <div className="bg-[var(--bg-canvas)] rounded-lg max-w-4xl w-full mx-4 shadow-none max-h-[90vh] flex flex-col">
           {/* Fixed Header */}
           <div className="flex justify-between items-center p-6 pb-4 border-b border-[var(--border-subtle)]">
             <h3 className="text-lg font-semibold text-[var(--fg1)]">
@@ -280,11 +280,11 @@ export function SettingsModals({
                   onChange={(e) => toggleConfidenceIndicator(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-[var(--bg-elevated)] peer-focus:outline-none peer-focus:ring-2 ring-[var(--gold-ring)] rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-[var(--bg-canvas)] after:border-[var(--border-strong)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--gold)]"></div>
+                <div className="w-11 h-6 bg-[var(--bg-elevated)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--gold-ring)] rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-[var(--fg1)] after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-[var(--bg-canvas)] after:border-[var(--border-strong)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--gold)]"></div>
               </label>
               <div>
-                <p className="text-sm font-medium text-[var(--fg2)]">Show Confidence Indicators</p>
-                <p className="text-xs text-[var(--fg2)]">Display colored dots showing transcription confidence quality</p>
+                <p className="text-sm font-medium text-[var(--fg2)]">Показывать уверенность распознавания</p>
+                <p className="text-xs text-[var(--fg2)]">Показывать качество распознавания рядом с фрагментами</p>
               </div>
             </div>
 
@@ -302,8 +302,8 @@ export function SettingsModals({
     {/* Error Alert Modal */}
     {modals.errorAlert && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <Alert className="max-w-md mx-4 border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[var(--bg-canvas)] shadow-none-none">
-          <AlertTitle className="text-[var(--danger)]">Recording Stopped</AlertTitle>
+        <Alert className="max-w-md mx-4 border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[var(--bg-canvas)] shadow-none">
+          <AlertTitle className="text-[var(--danger)]">Запись завершена</AlertTitle>
           <AlertDescription className="text-[var(--danger)]">
             {messages.errorAlert}
             <button
@@ -320,8 +320,8 @@ export function SettingsModals({
     {/* Chunk Drop Warning Modal */}
     {modals.chunkDropWarning && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <Alert className="max-w-lg mx-4 border-[var(--gold-border)] bg-[var(--bg-canvas)] shadow-none-none">
-          <AlertTitle className="text-[var(--gold)]">Transcription Performance Warning</AlertTitle>
+        <Alert className="max-w-lg mx-4 border-[var(--gold-border)] bg-[var(--bg-canvas)] shadow-none">
+          <AlertTitle className="text-[var(--gold)]">Расшифровка может работать медленно</AlertTitle>
           <AlertDescription className="text-[var(--gold)]">
             {messages.chunkDropWarning}
             <button

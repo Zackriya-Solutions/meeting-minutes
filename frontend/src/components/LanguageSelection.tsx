@@ -142,7 +142,7 @@ export function LanguageSelection({
       // Save language preference to localStorage and sync to backend
       setSelectedLanguage(languageCode);
       onLanguageChange(languageCode);
-      console.log('Language preference saved:', languageCode);
+      console.log('Язык сохранён:', languageCode);
 
       // Track language selection analytics
       const selectedLang = LANGUAGES.find(lang => lang.code === languageCode);
@@ -155,12 +155,12 @@ export function LanguageSelection({
 
       // Show success toast
       const languageName = selectedLang?.name || languageCode;
-      toast.success("Language preference saved", {
+      toast.success("Язык сохранён", {
         description: `Transcription language set to ${languageName}`
       });
     } catch (error) {
-      console.error('Failed to save language preference:', error);
-      toast.error("Failed to save language preference", {
+      console.error('Не удалось сохранить язык:', error);
+      toast.error("Не удалось сохранить язык", {
         description: error instanceof Error ? error.message : String(error)
       });
     } finally {
@@ -178,7 +178,7 @@ export function LanguageSelection({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-[var(--fg2)]" />
-          <h4 className="text-sm font-medium text-[var(--fg1)]">Transcription Language</h4>
+          <h4 className="text-sm font-medium text-[var(--fg1)]">Язык расшифровки</h4>
         </div>
       </div>
 
@@ -187,7 +187,7 @@ export function LanguageSelection({
           value={selectedLanguage}
           onChange={(e) => handleLanguageChange(e.target.value)}
           disabled={disabled || saving}
-          className="w-full px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none-none focus:outline-none focus:ring-1 ring-[var(--gold-ring)] focus:border-[var(--gold-border)] disabled:bg-[var(--bg-sheet)] disabled:text-[var(--fg2)]"
+          className="w-full px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none focus:outline-none focus:ring-1 focus:ring-[var(--gold-ring)] focus:border-[var(--gold-border)] disabled:bg-[var(--bg-sheet)] disabled:text-[var(--fg2)]"
         >
           {availableLanguages.map((language) => (
             <option key={language.code} value={language.code}>
@@ -208,7 +208,7 @@ export function LanguageSelection({
         {/* Info text */}
         <div className="text-xs space-y-2 pt-2">
           <p className="text-[var(--fg2)]">
-            <strong>Current:</strong> {selectedLanguageName}
+            <strong>Сейчас:</strong> {selectedLanguageName}
           </p>
           {selectedLanguage === 'auto' && (
             <div className="p-2 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded text-[var(--gold)]">

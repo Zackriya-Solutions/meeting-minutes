@@ -324,7 +324,7 @@ export function BuiltInModelManager({
                       <>
                         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--success)]">
                           <span className="h-2 w-2 rounded-full bg-[var(--success)]"></span>
-                          Ready
+                          Готово
                         </span>
                         {selectedModel === model.name && (
                           <span className="shrink-0 rounded bg-[var(--gold-soft)] px-2 py-0.5 text-xs font-medium text-[var(--gold)]">
@@ -426,7 +426,7 @@ export function BuiltInModelManager({
                         e.stopPropagation();
                         deleteModel(model.name);
                       }}
-                      title="Delete model"
+                      title="Удалить модель"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -456,7 +456,7 @@ export function BuiltInModelManager({
               {modelIsDownloading && progress !== undefined && (
                 <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-[var(--fg1)]">Downloading...</span>
+                    <span className="text-sm font-medium text-[var(--fg1)]">Загрузка…</span>
                     <span className="text-sm font-semibold text-[var(--fg1)]">
                       {Math.round(progress)}%
                     </span>

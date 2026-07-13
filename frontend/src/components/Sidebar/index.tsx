@@ -330,7 +330,7 @@ const Sidebar: React.FC = () => {
       await invoke('api_delete_meeting', {
         meetingId: itemId,
       });
-      console.log('Meeting deleted successfully');
+      console.log('Встреча удалена');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
       setMeetings(updatedMeetings);
 
@@ -338,7 +338,7 @@ const Sidebar: React.FC = () => {
       Analytics.trackMeetingDeleted(itemId);
 
       // Show success toast
-      toast.success("Meeting deleted successfully", {
+      toast.success("Встреча удалена", {
         description: "All associated data has been removed"
       });
 
@@ -348,8 +348,8 @@ const Sidebar: React.FC = () => {
         router.push('/');
       }
     } catch (error) {
-      console.error('Failed to delete meeting:', error);
-      toast.error("Failed to delete meeting", {
+      console.error('Не удалось удалить встречу:', error);
+      toast.error("Не удалось удалить встречу", {
         description: error instanceof Error ? error.message : String(error)
       });
     }
@@ -380,7 +380,7 @@ const Sidebar: React.FC = () => {
 
     // Prevent empty titles
     if (!newTitle) {
-      toast.error("Meeting title cannot be empty");
+      toast.error("Название встречи не может быть пустым");
       return;
     }
 
@@ -404,14 +404,14 @@ const Sidebar: React.FC = () => {
       // Track the edit
       Analytics.trackButtonClick('edit_meeting_title', 'sidebar');
 
-      toast.success("Meeting title updated successfully");
+      toast.success("Название встречи сохранено");
 
       // Close modal and reset state
       setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
       setEditingTitle('');
     } catch (error) {
-      console.error('Failed to update meeting title:', error);
-      toast.error("Failed to update meeting title", {
+      console.error('Не удалось сохранить название встречи:', error);
+      toast.error("Не удалось сохранить название встречи", {
         description: error instanceof Error ? error.message : String(error)
       });
     }
@@ -470,7 +470,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Home</p>
+              <p>Главная</p>
             </TooltipContent>
           </Tooltip>
 
@@ -479,7 +479,7 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleRecordingToggle}
                 disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 cursor-not-allowed' : 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 hover:bg-[var(--danger)]'} rounded-full transition-colors duration-150 shadow-none-none`}
+                className={`p-2 ${isRecording ? 'bg-[var(--danger)] cursor-not-allowed' : 'bg-[var(--danger)] hover:bg-[var(--danger)]'} rounded-full transition-colors duration-150 shadow-none`}
               >
                 {isRecording ? (
                   <MementoIcon name="stop" size={20} />
@@ -633,7 +633,7 @@ const Sidebar: React.FC = () => {
                 )}
               </div>
               {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Searching...</span>
+                <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Поиск…</span>
               )}
             </>
           ) : (
@@ -678,7 +678,7 @@ const Sidebar: React.FC = () => {
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
                 <div className="mt-1 ml-8 text-xs text-[var(--fg2)] bg-[var(--gold-soft)] p-1.5 rounded border border-[var(--gold-border)] line-clamp-2">
-                  <span className="font-medium text-[var(--gold)]">Match:</span> {matchingResult.matchContext}
+                  <span className="font-medium text-[var(--gold)]">Совпадение:</span> {matchingResult.matchContext}
                 </div>
               )}
             </div>
@@ -698,7 +698,7 @@ const Sidebar: React.FC = () => {
       {/* Floating collapse button */}
       <button
         onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] rounded-full shadow-none-none border"
+        className="absolute -right-6 top-20 z-50 p-1 bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] rounded-full shadow-none border"
         style={{ transform: 'translateX(50%)' }}
       >
         {isCollapsed ? (
@@ -729,7 +729,7 @@ const Sidebar: React.FC = () => {
 
                 <div className="relative mb-1">
                   <InputGroup >
-                    <InputGroupInput placeholder='Search meeting content...' value={searchQuery}
+                    <InputGroupInput placeholder='Поиск по встречам…' value={searchQuery}
                       onChange={(e) => handleSearchChange(e.target.value)}
                     />
                     <InputGroupAddon>
@@ -780,7 +780,7 @@ const Sidebar: React.FC = () => {
                       <MementoIcon name="transcript" size={17} />
                       <span className="text-[var(--fg2)]">Встречи</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Searching...</span>
+                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Поиск…</span>
                       )}
                     </div>
                   </div>
@@ -828,7 +828,7 @@ const Sidebar: React.FC = () => {
             {betaFeatures.importAndRetranscribe && (
               <button
                 onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)] rounded-lg transition-colors shadow-none-none"
+                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)] rounded-lg transition-colors shadow-none"
               >
                 <MementoIcon name="upload" size={17} />
                 <span>Импортировать аудио</span>
@@ -837,7 +837,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/search')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
             >
               <MementoIcon name="search" size={17} />
               <span>Поиск по встречам</span>
@@ -845,7 +845,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/chat')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
             >
               <MementoIcon name="library" size={17} />
               <span>База знаний</span>
@@ -853,7 +853,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-lg transition-colors shadow-none-none"
+              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-lg transition-colors shadow-none"
             >
               <MementoIcon name="settings" size={17} />
               <span>Настройки</span>
@@ -874,16 +874,16 @@ const Sidebar: React.FC = () => {
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
 
-      {/* Edit Meeting Title Modal */}
+      {/* Изменить название встречи Modal */}
       <Dialog open={editModalState.isOpen} onOpenChange={(open) => {
         if (!open) handleEditCancel();
       }}>
         <DialogContent className="sm:max-w-[425px]">
           <VisuallyHidden>
-            <DialogTitle>Edit Meeting Title</DialogTitle>
+            <DialogTitle>Изменить название встречи</DialogTitle>
           </VisuallyHidden>
           <div className="py-4">
-            <h3 className="text-lg font-semibold mb-4">Edit Meeting Title</h3>
+            <h3 className="text-lg font-semibold mb-4">Изменить название встречи</h3>
             <div className="space-y-4">
               <div>
                 <label htmlFor="meeting-title" className="block text-sm font-medium text-[var(--fg2)] mb-2">
@@ -902,7 +902,7 @@ const Sidebar: React.FC = () => {
                     }
                   }}
                   className="w-full px-3 py-2 border border-[var(--border-strong)] rounded-md focus:outline-none focus:ring-2 ring-[var(--gold-ring)] focus:border-transparent"
-                  placeholder="Enter meeting title"
+                  placeholder="Название встречи"
                   autoFocus
                 />
               </div>

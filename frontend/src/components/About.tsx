@@ -37,11 +37,11 @@ export function About() {
             if (info.available) {
                 setShowUpdateDialog(true);
             } else {
-                toast.success('You are running the latest version');
+                toast.success('Установлена последняя версия');
             }
         } catch (error: any) {
             console.error('Failed to check for updates:', error);
-            toast.error('Failed to check for updates: ' + (error.message || 'Unknown error'));
+            toast.error('Не удалось проверить обновления: ' + (error.message || 'неизвестная ошибка'));
         } finally {
             setIsChecking(false);
         }
@@ -63,7 +63,7 @@ export function About() {
                 <h1 className="text-xl font-semibold">memento</h1>
                 <span className="text-sm text-[var(--fg2)]"> v{currentVersion}</span>
                 <p className="text-medium text-[var(--fg2)] mt-1">
-                    Real-time notes and summaries that never leave your machine.
+                    Встречи, расшифровки и суть остаются на твоём устройстве.
                 </p>
                 <div className="mt-3">
                     <Button
@@ -76,18 +76,18 @@ export function About() {
                         {isChecking ? (
                             <>
                                 <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                                Checking...
+                                Проверяем…
                             </>
                         ) : (
                             <>
                                 <CheckCircle2 className="h-3 w-3 mr-2" />
-                                Check for Updates
+                                Проверить обновления
                             </>
                         )}
                     </Button>
                     {updateInfo?.available && (
                         <div className="mt-2 text-xs text-[var(--gold)]">
-                            Update available: v{updateInfo.version}
+                            Доступна версия {updateInfo.version}
                         </div>
                     )}
                 </div>
@@ -95,23 +95,23 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[var(--fg1)]">What makes Memento different</h2>
+                <h2 className="text-base font-semibold text-[var(--fg1)]">Почему Memento</h2>
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Privacy-first</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Локальные данные</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Записи и обработка могут полностью оставаться на твоём устройстве.</p>
                     </div>
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Use Any Model</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Любая модель</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Используй локальные модели или подключи выбранного облачного провайдера.</p>
                     </div>
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Cost-Smart</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Avoid pay-per-minute bills by running models locally (or pay only for the calls you choose).</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Без оплаты за минуты</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Локальные модели не требуют подписки или поминутной оплаты.</p>
                     </div>
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Works everywhere</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Google Meet, Zoom, Teams-online or offline.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Для любой встречи</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Google Meet, Zoom, Teams и разговоры офлайн.</p>
                     </div>
                 </div>
             </div>
@@ -119,28 +119,28 @@ export function About() {
             {/* Coming Soon - Compact */}
             <div className="bg-[var(--gold-soft)] rounded p-3">
                 <p className="text-s text-[var(--gold)]">
-                    <span className="font-bold">Coming soon:</span> A library of on-device AI agents-automating follow-ups, action tracking, and more.
+                    <span className="font-bold">Дальше:</span> локальные помощники для задач и договорённостей после встречи.
                 </p>
             </div>
 
             {/* CTA Section - Compact */}
             <div className="text-center space-y-2">
-                <h3 className="text-medium font-semibold text-[var(--fg1)]">Ready to push your business further?</h3>
+                <h3 className="text-medium font-semibold text-[var(--fg1)]">Нужен Memento для команды</h3>
                 <p className="text-s text-[var(--fg2)]">
-                    If you're planning to build privacy-first custom AI agents or a fully tailored product for your <span className="font-bold">business</span>, we can help you build it.
+                    Можно обсудить частное развёртывание и адаптацию продукта под процессы команды.
                 </p>
                 <button
                     onClick={handleContactClick}
                     className="inline-flex items-center px-4 py-2 bg-[var(--gold)] hover:bg-[var(--gold)] text-[var(--fg-inverse)] text-sm font-medium rounded transition-colors duration-200 shadow-none hover:shadow-none"
                 >
-                    Chat with the Zackriya team
+                    Связаться с командой
                 </button>
             </div>
 
             {/* Footer - Compact */}
             <div className="pt-2 border-t border-[var(--border-subtle)] text-center">
                 <p className="text-xs text-[var(--fg3)]">
-                    Built by Zackriya Solutions
+                    Сделано Zackriya Solutions
                 </p>
             </div>
             <AnalyticsConsentSwitch />

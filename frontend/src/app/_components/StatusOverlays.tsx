@@ -26,7 +26,7 @@ function StatusOverlay({ show, message, sidebarCollapsed }: StatusOverlayProps) 
         }}
       >
         <div className="w-2/3 max-w-[750px] flex justify-center">
-          <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none-none px-4 py-2 flex items-center space-x-2">
+          <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none px-4 py-2 flex items-center space-x-2">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--border-strong)]"></div>
             <span className="text-sm text-[var(--fg2)]">{message}</span>
           </div>

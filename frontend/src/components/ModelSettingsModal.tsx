@@ -102,7 +102,7 @@ const GROQ_FALLBACK_MODELS = [
 ];
 
 // GigaChat (Sber) and DeepSeek expose no public /models list to the app, so we offer
-// a curated set. Credentials for both are managed in Settings → Providers.
+// a curated set. Credentials for both are managed in Настройки → Провайдеры.
 const GIGACHAT_FALLBACK_MODELS = [
   'GigaChat-3-Ultra',
   'GigaChat-3.5-432B-A28B',
@@ -157,7 +157,7 @@ export function ModelSettingsModal({
   const [autoGenerateEnabled, setAutoGenerateEnabled] = useState<boolean>(true); // Default to true
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
-  const [ollamaNotInstalled, setOllamaNotInstalled] = useState<boolean>(false); // Track if Ollama is not installed
+  const [ollamaNotInstalled, setOllamaNotInstalled] = useState<boolean>(false); // Track if Ollama не установлена
 
   // Custom OpenAI state
   const [customOpenAIEndpoint, setCustomOpenAIEndpoint] = useState<string>(modelConfig.customOpenAIEndpoint || '');
@@ -460,7 +460,7 @@ export function ModelSettingsModal({
       const errorMsg = err instanceof Error ? err.message : 'Failed to load Ollama models';
       setError(errorMsg);
 
-      // Check if error indicates Ollama is not installed
+      // Check if error indicates Ollama не установлена
       if (isOllamaNotInstalledError(errorMsg)) {
         setOllamaNotInstalled(true);
       } else {
@@ -535,7 +535,7 @@ export function ModelSettingsModal({
       }
     } catch (err) {
       console.error('Error loading Built-in AI models:', err);
-      toast.error('Failed to load Built-in AI models');
+      toast.error('Не удалось загрузить список локальных моделей');
     }
   };
 
@@ -645,7 +645,7 @@ export function ModelSettingsModal({
         console.log('Custom OpenAI config saved successfully');
       } catch (err) {
         console.error('Failed to save custom OpenAI config:', err);
-        toast.error('Failed to save custom OpenAI configuration');
+        toast.error('Не удалось сохранить конфигурацию OpenAI');
         return;
       }
     }
@@ -687,7 +687,7 @@ export function ModelSettingsModal({
   // Test custom OpenAI connection
   const testCustomOpenAIConnection = async () => {
     if (!customOpenAIEndpoint.trim() || !customOpenAIModel.trim()) {
-      toast.error('Please enter endpoint URL and model name first');
+      toast.error('Сначала укажи адрес сервера и название модели');
       return;
     }
 
@@ -745,9 +745,9 @@ export function ModelSettingsModal({
       const errorMsg = err instanceof Error ? err.message : 'Failed to download model';
       console.error('Error downloading model:', err);
 
-      // Check if Ollama is not installed and show appropriate error
+      // Check if Ollama не установлена and show appropriate error
       if (isOllamaNotInstalledError(errorMsg)) {
-        toast.error('Ollama is not installed', {
+        toast.error('Ollama не установлена', {
           description: 'Please download and install Ollama before downloading models.',
           duration: 7000,
           action: {
@@ -820,12 +820,12 @@ export function ModelSettingsModal({
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Model Settings</h3>
+        <h3 className="text-lg font-semibold">Настройки модели</h3>
       </div>
 
       <div className="space-y-4">
         <div>
-          <Label>Summarization Model</Label>
+          <Label>Модель для создания сути</Label>
           <div className="flex space-x-2 mt-1">
             <Select
               value={modelConfig.provider}
@@ -887,12 +887,12 @@ export function ModelSettingsModal({
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select provider" />
+                <SelectValue placeholder="Выбери провайдера" />
               </SelectTrigger>
               <SelectContent className="max-h-64 overflow-y-auto">
-                <SelectItem value="builtin-ai">Built-in AI (Offline, No API needed)</SelectItem>
+                <SelectItem value="builtin-ai">Локальная модель (офлайн, без API)</SelectItem>
                 <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
+                <SelectItem value="custom-openai">Свой сервер (OpenAI)</SelectItem>
                 <SelectItem value="deepseek">DeepSeek</SelectItem>
                 <SelectItem value="gigachat">GigaChat (Sber)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
@@ -919,7 +919,7 @@ export function ModelSettingsModal({
                 </PopoverTrigger>
                 <PopoverContent className="w-[250px] p-0" align="start">
                   <Command>
-                    <CommandInput placeholder="Search models..." />
+                    <CommandInput placeholder="Поиск моделей…" />
                     <CommandList className="max-h-[300px]">
                       {(modelConfig.provider === 'openrouter' && isLoadingOpenRouter) ||
                        (modelConfig.provider === 'openai' && isLoadingOpenAI) ||
@@ -931,7 +931,7 @@ export function ModelSettingsModal({
                         </div>
                       ) : (
                         <>
-                          <CommandEmpty>No models found.</CommandEmpty>
+                          <CommandEmpty>Модели не найдены.</CommandEmpty>
                           <CommandGroup>
                             {modelOptions[modelConfig.provider]?.map((model) => (
                               <CommandItem
@@ -966,7 +966,7 @@ export function ModelSettingsModal({
           <Alert>
             <AlertDescription>
               {modelConfig.provider === 'gigachat' ? 'GigaChat' : 'DeepSeek'} credentials are managed
-              in <span className="font-medium">Settings → Providers</span>. Pick a model here; the key
+              in <span className="font-medium">Настройки → Провайдеры</span>. Pick a model here; the key
               you saved there is used automatically.
             </AlertDescription>
           </Alert>
@@ -976,7 +976,7 @@ export function ModelSettingsModal({
         {modelConfig.provider === 'custom-openai' && (
           <div className="space-y-4 border-t pt-4">
             <div>
-              <Label htmlFor="custom-endpoint">Endpoint URL *</Label>
+              <Label htmlFor="custom-endpoint">Адрес сервера *</Label>
               <Input
                 id="custom-endpoint"
                 value={customOpenAIEndpoint}
@@ -990,7 +990,7 @@ export function ModelSettingsModal({
             </div>
 
             <div>
-              <Label htmlFor="custom-model">Model Name *</Label>
+              <Label htmlFor="custom-model">Название модели *</Label>
               <Input
                 id="custom-model"
                 value={customOpenAIModel}
@@ -1004,24 +1004,24 @@ export function ModelSettingsModal({
             </div>
 
             <div>
-              <Label htmlFor="custom-api-key">API Key (optional)</Label>
+              <Label htmlFor="custom-api-key">API-ключ (необязательно)</Label>
               <Input
                 id="custom-api-key"
                 type="password"
                 value={customOpenAIApiKey}
                 onChange={(e) => setCustomOpenAIApiKey(e.target.value)}
-                placeholder="Leave empty if not required"
+                placeholder="Оставь пустым, если ключ не нужен"
                 className="mt-1"
               />
             </div>
 
-            {/* Advanced Options (Collapsible) */}
+            {/* Дополнительные параметры (Collapsible) */}
             <div>
               <div
                 className="flex items-center justify-between cursor-pointer py-2"
                 onClick={() => setIsCustomOpenAIAdvancedOpen(!isCustomOpenAIAdvancedOpen)}
               >
-                <Label className="cursor-pointer">Advanced Options</Label>
+                <Label className="cursor-pointer">Дополнительные параметры</Label>
                 {isCustomOpenAIAdvancedOpen ? (
                   <ChevronUp className="h-4 w-4 text-muted-foreground" />
                 ) : (
@@ -1032,7 +1032,7 @@ export function ModelSettingsModal({
               {isCustomOpenAIAdvancedOpen && (
                 <div className="space-y-3 pl-2 border-l-2 border-muted mt-2">
                   <div>
-                    <Label htmlFor="custom-max-tokens">Max Tokens</Label>
+                    <Label htmlFor="custom-max-tokens">Максимум токенов</Label>
                     <Input
                       id="custom-max-tokens"
                       type="number"
@@ -1043,7 +1043,7 @@ export function ModelSettingsModal({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="custom-temperature">Temperature (0.0-2.0)</Label>
+                    <Label htmlFor="custom-temperature">Температура (0.0–2.0)</Label>
                     <Input
                       id="custom-temperature"
                       type="number"
@@ -1057,7 +1057,7 @@ export function ModelSettingsModal({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="custom-top-p">Top P (0.0-1.0)</Label>
+                    <Label htmlFor="custom-top-p">Top P (0.0–1.0)</Label>
                     <Input
                       id="custom-top-p"
                       type="number"
@@ -1107,7 +1107,7 @@ export function ModelSettingsModal({
                 value={apiKey || ''}
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={isApiKeyLocked}
-                placeholder="Enter your API key"
+                placeholder="Введи API-ключ"
                 className="pr-24"
               />
               {isApiKeyLocked && apiKey?.trim() && (
@@ -1148,7 +1148,7 @@ export function ModelSettingsModal({
               className="flex items-center justify-between cursor-pointer py-2"
               onClick={() => setIsEndpointSectionCollapsed(!isEndpointSectionCollapsed)}
             >
-              <Label className="cursor-pointer">Custom Endpoint (optional)</Label>
+              <Label className="cursor-pointer">Свой адрес сервера (необязательно)</Label>
               {isEndpointSectionCollapsed ? (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               ) : (
@@ -1226,7 +1226,7 @@ export function ModelSettingsModal({
               <h4 className="text-sm font-bold">Available Ollama Models</h4>
               {lastFetchedEndpoint && models.length > 0 && (
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Using:</span>
+                  <span className="text-muted-foreground">Используется:</span>
                   <code className="px-2 py-1 bg-muted rounded text-xs">
                     {lastFetchedEndpoint || 'http://localhost:11434'}
                   </code>
@@ -1236,7 +1236,7 @@ export function ModelSettingsModal({
             {models.length > 0 && (
               <div className="mb-4">
                 <Input
-                  placeholder="Search models..."
+                  placeholder="Поиск моделей…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full"
@@ -1255,7 +1255,7 @@ export function ModelSettingsModal({
                   <div className="space-y-4">
                     <Alert className="border-[var(--gold-border)] bg-[var(--gold-soft)]">
                       <AlertDescription className="text-[var(--gold)]">
-                        Ollama is not installed or not running. Please download and install Ollama to use local models.
+                        Ollama не установлена or not running. Please download and install Ollama to use local models.
                       </AlertDescription>
                     </Alert>
                     <Button
@@ -1278,7 +1278,7 @@ export function ModelSettingsModal({
                       <AlertDescription>
                         {ollamaEndpointChanged
                           ? 'Endpoint changed. Click "Fetch Models" to load models from the new endpoint.'
-                          : 'No models found. Download a recommended model or click "Fetch Models" to load available Ollama models.'}
+                          : 'Модели не найдены. Download a recommended model or click "Fetch Models" to load available Ollama models.'}
                       </AlertDescription>
                     </Alert>
                     {!ollamaEndpointChanged && (
@@ -1293,7 +1293,7 @@ export function ModelSettingsModal({
                           {isDownloading('gemma3:1b') ? (
                             <>
                               <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                              Downloading gemma3:1b...
+                              Загрузка gemma3:1b...
                             </>
                           ) : (
                             <>
@@ -1307,7 +1307,7 @@ export function ModelSettingsModal({
                         {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
                           <div className="bg-[var(--bg-canvas)] rounded-md border p-3">
                             <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium text-[var(--gold)]">Downloading gemma3:1b</span>
+                              <span className="text-sm font-medium text-[var(--gold)]">Загрузка gemma3:1b</span>
                               <span className="text-sm font-semibold text-[var(--gold)]">
                                 {Math.round(getProgress('gemma3:1b')!)}%
                               </span>

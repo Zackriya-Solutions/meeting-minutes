@@ -246,7 +246,7 @@ function ProviderCard({
             <CheckCircle2 className="h-3.5 w-3.5" /> Configured
           </span>
         ) : (
-          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Not set</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Не настроено</span>
         )}
       </div>
       <div className="space-y-3">{children}</div>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
 import { useRecentLanguages } from "@/hooks/useRecentLanguages";
+import { Icon } from "@/components/memento/Icon";
 
 interface LanguagePickerPopoverProps {
   value: string | null;
@@ -81,18 +82,18 @@ export function LanguagePickerPopover({
   return (
     <div
       ref={containerRef}
-      className="w-72 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none-none overflow-hidden"
+      className="w-72 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none overflow-hidden"
       role="dialog"
       aria-label="Pick summary language"
     >
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--border-subtle)]">
-        <span className="text-[var(--fg3)] text-sm">🔍</span>
+        <Icon name="search" size={16} className="text-[var(--fg3)]" />
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search language..."
+          placeholder="Найти язык…"
           className="flex-1 text-sm text-[var(--fg1)] bg-transparent border-none outline-none placeholder:text-[var(--fg3)]"
         />
       </div>

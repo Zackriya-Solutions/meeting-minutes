@@ -398,7 +398,7 @@ export function DownloadProgressStep() {
                 Download
               </button>
             ) : (
-              <span className="text-xs text-[var(--fg3)]">Optional</span>
+              <span className="text-xs text-[var(--fg3)]">Необязательно</span>
             )
           )}
           {state.status === 'downloading' && (
@@ -410,7 +410,7 @@ export function DownloadProgressStep() {
             </div>
           )}
           {state.status === 'error' && (
-            <span className="text-sm text-[var(--danger)]">Failed</span>
+            <span className="text-sm text-[var(--danger)]">Ошибка</span>
           )}
         </div>
       </div>
@@ -444,7 +444,7 @@ export function DownloadProgressStep() {
 
       {state.status === 'error' && state.error && (
         <div className="mt-2 p-3 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-md">
-          <p className="text-sm text-[var(--danger)] font-medium">Download Error</p>
+          <p className="text-sm text-[var(--danger)] font-medium">Ошибка загрузки</p>
           <p className="text-xs text-[var(--danger)] mt-1">{state.error}</p>
           {(title === 'Transcription Engine' || title === 'Summary Engine') && (
             <button
@@ -465,7 +465,7 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title="Getting things ready"
+      title="Подготовим модели"
       description="These local models are optional — download them now, or skip and configure transcription and cloud providers (GigaChat / DeepSeek) in Settings."
       step={3}
       totalSteps={isMac ? 4 : 3}
@@ -480,7 +480,7 @@ export function DownloadProgressStep() {
             'Parakeet · ~670 MB',
             'MB',
             startParakeetDownload,
-            'Optional — or choose a model later in Settings → Transcription'
+            'Необязательно — or choose a model later in Settings → Transcription'
           )}
 
           {renderDownloadCard(
@@ -490,7 +490,7 @@ export function DownloadProgressStep() {
             getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
             'MiB',
             startSummaryDownload,
-            'Optional — or use GigaChat / DeepSeek (Settings → Providers)'
+            'Необязательно — or use GigaChat / DeepSeek (Settings → Providers)'
           )}
         </div>
 
@@ -507,8 +507,8 @@ export function DownloadProgressStep() {
               <div className="flex items-start gap-3">
                 <Download className="w-5 h-5 text-[var(--fg2)] flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">You can continue while this finishes</p>
-                  <p className="text-[var(--fg2)] mt-1">Downloads continue in the background.</p>
+                  <p className="font-medium">Можно продолжить настройку</p>
+                  <p className="text-[var(--fg2)] mt-1">Загрузка продолжится в фоне.</p>
                 </div>
               </div>
             </motion.div>

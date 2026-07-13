@@ -40,10 +40,10 @@ export function EmbeddingModelSettings() {
   useEffect(() => {
     refresh();
     let unProgress: (() => void) | undefined;
-    let unReady: (() => void) | undefined;
+    let unГотово: (() => void) | undefined;
     (async () => {
       unProgress = await listen<DownloadProgress>('embedder-download-progress', (e) => setProgress(e.payload));
-      unReady = await listen('embedder-ready', () => {
+      unГотово = await listen('embedder-ready', () => {
         setDownloading(false);
         setProgress(null);
         refresh();
@@ -51,7 +51,7 @@ export function EmbeddingModelSettings() {
     })();
     return () => {
       unProgress?.();
-      unReady?.();
+      unГотово?.();
     };
   }, [refresh]);
 
@@ -82,7 +82,7 @@ export function EmbeddingModelSettings() {
             <Search className="h-5 w-5 text-[var(--gold)]" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-[var(--fg1)]">Semantic search model</h3>
+            <h3 className="text-sm font-semibold text-[var(--fg1)]">Модель смыслового поиска</h3>
             <p className="mt-1 text-sm leading-relaxed text-[var(--fg2)]">
               Powers meaning-based (vector) search and Chat with archive. Runs fully locally —{' '}
               <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}-dim), ~470&nbsp;MB.
@@ -105,7 +105,7 @@ export function EmbeddingModelSettings() {
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
                     <div
-                      className="h-full rounded-full bg-[var(--gold-soft)]0 transition-all"
+                      className="h-full rounded-full bg-[var(--gold)] transition-all"
                       style={{ width: `${progress?.percent ?? 0}%` }}
                     />
                   </div>

@@ -50,10 +50,10 @@ export function GigaamModelManager() {
   useEffect(() => {
     refresh();
     let unProgress: (() => void) | undefined;
-    let unReady: (() => void) | undefined;
+    let unГотово: (() => void) | undefined;
     (async () => {
       unProgress = await listen<DownloadProgress>('gigaam-download-progress', (e) => setProgress(e.payload));
-      unReady = await listen('gigaam-ready', () => {
+      unГотово = await listen('gigaam-ready', () => {
         setDownloading(false);
         setSwitching(false);
         setProgress(null);
@@ -62,7 +62,7 @@ export function GigaamModelManager() {
     })();
     return () => {
       unProgress?.();
-      unReady?.();
+      unГотово?.();
     };
   }, [refresh]);
 
@@ -115,15 +115,15 @@ export function GigaamModelManager() {
             <CheckCircle2 className="h-3.5 w-3.5" /> Active
           </span>
         ) : present ? (
-          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Installed — restart to load</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Установлено — перезапусти приложение</span>
         ) : (
-          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Not downloaded</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Не загружено</span>
         )}
       </div>
 
       {/* Variant selector for A/B quality testing */}
       <div className="mt-4">
-        <label className="mb-1 block text-xs font-medium text-[var(--fg2)]">Model variant</label>
+        <label className="mb-1 block text-xs font-medium text-[var(--fg2)]">Вариант модели</label>
         <select
           value={status?.selected ?? 'e2e-rnnt-fp32'}
           onChange={(e) => selectVariant(e.target.value)}
@@ -157,7 +157,7 @@ export function GigaamModelManager() {
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
               <div
-                className="h-full rounded-full bg-[var(--gold-soft)]0 transition-all"
+                className="h-full rounded-full bg-[var(--gold)] transition-all"
                 style={{ width: `${progress?.percent ?? 0}%` }}
               />
             </div>
@@ -170,7 +170,7 @@ export function GigaamModelManager() {
         ) : selectedActive ? (
           <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
             <CheckCircle2 className="h-4 w-4" />
-            Ready — recordings will transcribe with this variant
+            Готово — recordings will transcribe with this variant
           </div>
         ) : (
           <button

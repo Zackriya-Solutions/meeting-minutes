@@ -81,7 +81,7 @@ export function PermissionWarning({
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold)] rounded-md transition-colors"
               >
                 <Speaker className="h-4 w-4" />
-                Open Screen Recording Settings
+                Open Screen Настройки записи
               </button>
             )}
             <button
@@ -101,11 +101,11 @@ export function PermissionWarning({
                   Memento needs access to your microphone to record meetings. No microphone devices were detected.
                 </p>
                 <div className="space-y-2 text-sm mb-4">
-                  <p className="font-medium">Please check:</p>
+                  <p className="font-medium">Проверь:</p>
                   <ul className="list-disc list-inside ml-2 space-y-1">
-                    <li>Your microphone is connected and powered on</li>
-                    <li>Microphone permission is granted in System Settings</li>
-                    <li>No other app is exclusively using the microphone</li>
+                    <li>Микрофон подключён и включён</li>
+                    <li>Доступ к микрофону разрешён в системных настройках</li>
+                    <li>Другое приложение не заняло микрофон</li>
                   </ul>
                 </div>
               </>
@@ -121,11 +121,11 @@ export function PermissionWarning({
                 </p>
                 {isMacOS && (
                   <div className="space-y-2 text-sm mb-4">
-                    <p className="font-medium">To enable system audio on macOS:</p>
+                    <p className="font-medium">Чтобы включить системный звук в macOS:</p>
                     <ul className="list-disc list-inside ml-2 space-y-1">
-                      <li>Install a virtual audio device (e.g., BlackHole 2ch)</li>
-                      <li>Grant Screen Recording permission to Memento</li>
-                      <li>Configure your audio routing in Audio MIDI Setup</li>
+                      <li>Установи виртуальное аудиоустройство, например BlackHole 2ch</li>
+                      <li>Разреши Memento запись экрана</li>
+                      <li>Настрой маршрутизацию в Audio MIDI Setup</li>
                     </ul>
                   </div>
                 )}

@@ -124,7 +124,7 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success('Meeting recovered successfully!', {
+        toast.success('Встреча восстановлена', {
           description: result.audioRecoveryStatus?.status === 'success'
             ? 'Transcripts and audio recovered'
             : 'Transcripts recovered (no audio available)',
@@ -153,7 +153,7 @@ export default function Home() {
         }
       }
     } catch (error) {
-      toast.error('Failed to recover meeting', {
+      toast.error('Не удалось восстановить встречу', {
         description: error instanceof Error ? error.message : 'Unknown error occurred',
       });
       throw error;

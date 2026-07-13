@@ -118,7 +118,7 @@ export function TranscriptRecovery({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl h-[80vh] flex flex-col p-0">
         <DialogHeader className="px-6 pt-6">
-          <DialogTitle className="text-2xl">Recover Interrupted Meetings</DialogTitle>
+          <DialogTitle className="text-2xl">Восстановить прерванные встречи</DialogTitle>
           <DialogDescription>
             We found {recoverableMeetings.length} meeting{recoverableMeetings.length !== 1 ? 's' : ''} that {recoverableMeetings.length !== 1 ? 'were' : 'was'} interrupted. Select a meeting to preview and recover it.
           </DialogDescription>
@@ -127,7 +127,7 @@ export function TranscriptRecovery({
         <div className="flex-1 flex gap-4 px-6 pb-6 overflow-hidden">
           {/* Meeting List */}
           <div className="w-1/3 flex flex-col">
-            <h3 className="text-sm font-medium mb-2">Interrupted Meetings</h3>
+            <h3 className="text-sm font-medium mb-2">Прерванные встречи</h3>
             <ScrollArea className="flex-1 border rounded-lg">
               <div className="p-2 space-y-2">
                 {recoverableMeetings.map((meeting) => (
@@ -154,11 +154,11 @@ export function TranscriptRecovery({
                         </p>
                       </div>
                       {meeting.folderPath ? (
-                        <span title="Audio available">
+                        <span title="Аудио доступно">
                           <CheckCircle2 className="w-4 h-4 text-[var(--success)] flex-shrink-0" />
                         </span>
                       ) : (
-                        <span title="No audio">
+                        <span title="Без аудио">
                           <AlertCircle className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
                         </span>
                       )}
@@ -171,7 +171,7 @@ export function TranscriptRecovery({
 
           {/* Preview Panel */}
           <div className="flex-1 flex flex-col">
-            <h3 className="text-sm font-medium mb-2">Preview</h3>
+            <h3 className="text-sm font-medium mb-2">Предпросмотр</h3>
             <div className="flex-1 border rounded-lg overflow-hidden flex flex-col">
               {selectedMeeting ? (
                 <>
@@ -189,12 +189,12 @@ export function TranscriptRecovery({
                       {selectedMeeting.folderPath ? (
                         <span className="flex items-center gap-1 text-[var(--success)]">
                           <CheckCircle2 className="w-4 h-4" />
-                          Audio available
+                          Аудио доступно
                         </span>
                       ) : (
                         <span className="flex items-center gap-1 text-[var(--gold)]">
                           <AlertCircle className="w-4 h-4" />
-                          No audio
+                          Без аудио
                         </span>
                       )}
                     </div>

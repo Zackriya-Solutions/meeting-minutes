@@ -135,12 +135,12 @@ export function PreferenceSettings() {
 
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
+    return <div className="max-w-2xl mx-auto p-6">Загружаем настройки…</div>
   }
 
   // Show loading if notificationsEnabled hasn't been determined yet
   if (notificationsEnabled === null && !isLoadingPreferences) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
+    return <div className="max-w-2xl mx-auto p-6">Загружаем настройки…</div>
   }
 
   // Ensure we have a boolean value for the Switch component
@@ -148,20 +148,20 @@ export function PreferenceSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Notifications Section */}
+      {/* Уведомления Section */}
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">Notifications</h3>
-            <p className="text-sm text-[var(--fg2)]">Enable or disable notifications of start and end of meeting</p>
+            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">Уведомления</h3>
+            <p className="text-sm text-[var(--fg2)]">Уведомлять о начале и завершении записи</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
       </div>
 
-      {/* Data Storage Locations Section */}
+      {/* Хранение данных Section */}
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-4">Data Storage Locations</h3>
+        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-4">Хранение данных</h3>
         <p className="text-sm text-[var(--fg2)] mb-6">
           View and access where Memento stores your data
         </p>
@@ -169,7 +169,7 @@ export function PreferenceSettings() {
         <div className="space-y-4">
           {/* Database Location */}
           {/* <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">Database</div>
+            <div className="font-medium mb-2">База данных</div>
             <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
             </div>
@@ -184,7 +184,7 @@ export function PreferenceSettings() {
 
           {/* Models Location */}
           {/* <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">Whisper Models</div>
+            <div className="font-medium mb-2">Модели Whisper</div>
             <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
             </div>
@@ -199,7 +199,7 @@ export function PreferenceSettings() {
 
           {/* Recordings Location */}
           <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">Meeting Recordings</div>
+            <div className="font-medium mb-2">Записи встреч</div>
             <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
               {storageLocations?.recordings || 'Loading...'}
             </div>
@@ -215,7 +215,7 @@ export function PreferenceSettings() {
 
         <div className="mt-4 p-3 bg-[var(--gold-soft)] rounded-md">
           <p className="text-xs text-[var(--gold)]">
-            <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
+            <strong>Примечание:</strong> База данных и модели хранятся в системной папке приложения.
           </p>
         </div>
       </div>

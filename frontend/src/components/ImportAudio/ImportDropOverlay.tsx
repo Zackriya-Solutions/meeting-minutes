@@ -16,7 +16,7 @@ export function ImportDropOverlay({ visible }: ImportDropOverlayProps) {
                  transition-opacity duration-200"
     >
       <div className="border-2 border-dashed border-[var(--gold-border)] rounded-2xl
-                      p-12 text-center bg-[var(--gold-soft)] shadow-none-none
+                      p-12 text-center bg-[var(--gold-soft)] shadow-none
                       transform scale-100 transition-transform">
         <Upload className="h-16 w-16 text-[var(--gold)] mx-auto mb-4" />
         <p className="text-xl font-medium text-[var(--fg-inverse)]">Drop audio file to import</p>

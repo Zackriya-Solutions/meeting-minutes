@@ -129,7 +129,7 @@ Quarterly product review session with stakeholders.
   const note = sampleData[params.id as keyof typeof sampleData];
 
   if (!note) {
-    return <div className="p-8">Note not found</div>;
+    return <div className="p-8">Заметка не найдена</div>;
   }
 
   return (
