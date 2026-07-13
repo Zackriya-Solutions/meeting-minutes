@@ -20,6 +20,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { listen } from '@tauri-apps/api/event';
 import { RecordOverlay } from '@/components/memento/RecordOverlay';
 
 export default function Home() {
@@ -29,7 +30,7 @@ export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle } = useTranscripts();
+  const { meetingTitle, currentMeetingId } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -126,8 +127,8 @@ export default function Home() {
       if (result.success) {
         toast.success('Встреча восстановлена', {
           description: result.audioRecoveryStatus?.status === 'success'
-            ? 'Transcripts and audio recovered'
-            : 'Transcripts recovered (no audio available)',
+            ? 'Расшифровка и аудио восстановлены'
+            : 'Расшифровка восстановлена (без аудио)',
           action: result.meetingId ? {
             label: 'Открыть встречу',
             onClick: () => {
@@ -186,6 +187,52 @@ export default function Home() {
     }
   }, [recordingState.isRecording]);
 
+  // Recording error handling.
+  // These listeners previously lived inside <RecordingControls>, which is no
+  // longer rendered. They must stay registered so a fatal transcription error
+  // still tears the recording down (parity with the old behavior). The
+  // structured `transcription-error` event is additionally surfaced to the user
+  // (toast / model selector) by useModalState, so here we only stop recording;
+  // the plain `transcript-error` string event is surfaced via the error alert.
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
+
+    const setupListeners = async () => {
+      try {
+        const unlistenTranscriptError = await listen<string>('transcript-error', (event) => {
+          const errorMessage = String(event.payload);
+          console.error('transcript-error received:', errorMessage);
+          Analytics.trackTranscriptionError(errorMessage);
+          handleRecordingStop(false);
+          showModal('errorAlert', errorMessage);
+        });
+        unlisteners.push(unlistenTranscriptError);
+
+        const unlistenTranscriptionError = await listen('transcription-error', (event) => {
+          const payload = event.payload;
+          const errorMessage =
+            typeof payload === 'object' && payload !== null
+              ? ((payload as { userMessage?: string; error?: string }).userMessage ??
+                 (payload as { error?: string }).error ??
+                 'Transcription error')
+              : String(payload);
+          console.error('transcription-error received:', errorMessage);
+          Analytics.trackTranscriptionError(errorMessage);
+          handleRecordingStop(false);
+        });
+        unlisteners.push(unlistenTranscriptionError);
+      } catch (error) {
+        console.error('Failed to set up recording error listeners:', error);
+      }
+    };
+
+    setupListeners();
+
+    return () => {
+      unlisteners.forEach((unlisten) => unlisten && unlisten());
+    };
+  }, [handleRecordingStop, showModal]);
+
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
@@ -227,6 +274,7 @@ export default function Home() {
               <RecordOverlay
                 title={meetingTitle || 'Новая встреча'}
                 bars={barHeights}
+                meetingId={currentMeetingId}
                 onStop={() => {
                   setIsStopping(true);
                   handleRecordingStop(true);

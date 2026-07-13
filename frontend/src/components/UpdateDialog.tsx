@@ -280,7 +280,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
                 Later
               </Button>
-              <Button onClick={handleDownloadAndInstall} className="bg-[var(--gold)] hover:bg-[var(--gold)]">
+              <Button onClick={handleDownloadAndInstall} className="bg-[var(--gold)] hover:bg-[var(--gold-active)]">
                 <Download className="h-4 w-4 mr-2" />
                 Download & Install
               </Button>

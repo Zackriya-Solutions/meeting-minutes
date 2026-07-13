@@ -354,7 +354,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 <>
                   <button
                     onClick={handleStartRecording}
-                    className="w-10 h-10 flex items-center justify-center bg-[var(--danger)] rounded-full text-[var(--fg-inverse)] hover:bg-[var(--danger)] transition-colors"
+                    className="w-10 h-10 flex items-center justify-center bg-[var(--danger)] rounded-full text-[var(--fg-inverse)] hover:opacity-90 transition-colors"
                   >
                     <Mic size={16} />
                   </button>
@@ -397,7 +397,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                             handleStartRecording();
                           }}
                           disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
-                          className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-[var(--fg3)]' : 'bg-[var(--danger)] hover:bg-[var(--danger)]'
+                          className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-[var(--fg3)]' : 'bg-[var(--danger)] hover:opacity-90'
                             } rounded-full text-[var(--fg-inverse)] transition-colors relative`}
                         >
                           {isValidatingModel ? (
@@ -429,7 +429,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                             disabled={isPausing || isResuming || isStopping}
                             className={`w-10 h-10 flex items-center justify-center ${isPausing || isResuming || isStopping
                               ? 'bg-[var(--bg-elevated)] border-2 border-[var(--border-strong)] text-[var(--fg3)]'
-                              : 'bg-[var(--bg-canvas)] border-2 border-[var(--border-strong)] text-[var(--fg2)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-sheet)]'
+                              : 'bg-[var(--bg-canvas)] border-2 border-[var(--border-strong)] text-[var(--fg2)] hover:border-[var(--gold-border)] hover:bg-[var(--bg-sheet)]'
                               } rounded-full transition-colors relative`}
                           >
                             {isPaused ? <Play size={16} /> : <Pause size={16} />}
@@ -453,7 +453,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                               handleStopRecording();
                             }}
                             disabled={isStopping || isPausing || isResuming}
-                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming ? 'bg-[var(--fg3)]' : 'bg-[var(--danger)] hover:bg-[var(--danger)]'
+                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming ? 'bg-[var(--fg3)]' : 'bg-[var(--danger)] hover:opacity-90'
                               } rounded-full text-[var(--fg-inverse)] transition-colors relative`}
                           >
                             <Square size={16} />
@@ -503,7 +503,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             <AlertCircle className="h-5 w-5 text-[var(--danger)]" />
             <button
               onClick={() => setDeviceError(null)}
-              className="absolute right-3 top-3 text-[var(--danger)] hover:text-[var(--danger)] transition-colors"
+              className="absolute right-3 top-3 text-[var(--danger)] hover:opacity-80 transition-colors"
               aria-label="Закрыть предупреждение"
             >
               <X className="h-4 w-4" />

@@ -113,7 +113,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
           <Button
             size="sm"
             onClick={handleAcknowledge}
-            className="text-xs px-2 py-0.5 h-6 bg-[var(--success)] hover:bg-[var(--success)] flex-1"
+            className="text-xs px-2 py-0.5 h-6 bg-[var(--success)] hover:brightness-110 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
             Done

@@ -120,7 +120,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
             <button
               onClick={handleYes}
               disabled={isImporting}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-[var(--success)] text-[var(--fg-inverse)] rounded-lg hover:bg-[var(--success)] disabled:bg-[var(--fg3)] disabled:cursor-not-allowed transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-[var(--success)] text-[var(--fg-inverse)] rounded-lg hover:brightness-110 disabled:bg-[var(--fg3)] disabled:cursor-not-allowed transition-colors"
             >
               {isImporting ? (
                 <>

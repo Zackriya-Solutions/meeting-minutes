@@ -107,7 +107,7 @@ export function ChunkProgressDisplay({
           {!isPaused ? (
             <button
               onClick={onPause}
-              className="bg-[var(--gold)] hover:bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
+              className="bg-[var(--gold)] hover:bg-[var(--gold-active)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
               disabled={progress.processing_chunks === 0 && progress.completed_chunks === progress.total_chunks}
             >
               Pause
@@ -115,7 +115,7 @@ export function ChunkProgressDisplay({
           ) : (
             <button
               onClick={onResume}
-              className="bg-[var(--success)] hover:bg-[var(--success)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
+              className="bg-[var(--success)] hover:brightness-110 text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
             >
               Resume
             </button>
@@ -123,7 +123,7 @@ export function ChunkProgressDisplay({
 
           <button
             onClick={onCancel}
-            className="bg-[var(--danger)] hover:bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
+            className="bg-[var(--danger)] hover:opacity-90 text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
           >
             Cancel
           </button>

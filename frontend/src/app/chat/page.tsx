@@ -270,7 +270,7 @@ export default function ChatPage() {
             disabled={sending || !input.trim()}
             className={cn(
               'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
-              sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold)]',
+              sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
             )}
             aria-label="Отправить"
           >

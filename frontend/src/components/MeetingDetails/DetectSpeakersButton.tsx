@@ -136,7 +136,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                         <Button
                             onClick={handleDownloadAndDetect}
                             disabled={downloading}
-                            className="bg-[var(--gold)] hover:bg-[var(--gold)]"
+                            className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
                         >
                             {downloading ? (
                                 <>

@@ -141,7 +141,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
             <button
               onClick={handleBrowse}
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--gold)] text-[var(--fg-inverse)] rounded-lg hover:bg-[var(--gold)] disabled:bg-[var(--fg3)] disabled:cursor-not-allowed transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--gold)] text-[var(--fg-inverse)] rounded-lg hover:bg-[var(--gold-active)] disabled:bg-[var(--fg3)] disabled:cursor-not-allowed transition-colors"
             >
               {importState === 'selecting' || importState === 'detecting' ? (
                 <>
@@ -187,7 +187,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
             <button
               onClick={handleImport}
               disabled={!canImport || isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--success)] text-[var(--fg-inverse)] rounded-lg hover:bg-[var(--success)] disabled:bg-[var(--bg-elevated)] disabled:cursor-not-allowed transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--success)] text-[var(--fg-inverse)] rounded-lg hover:brightness-110 disabled:bg-[var(--bg-elevated)] disabled:cursor-not-allowed transition-colors"
             >
               {importState === 'importing' ? (
                 <>

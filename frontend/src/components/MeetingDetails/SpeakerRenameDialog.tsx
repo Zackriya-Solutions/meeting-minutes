@@ -76,7 +76,7 @@ export function SpeakerRenameDialog({
                     <Button
                         onClick={handleSave}
                         disabled={saving || !name.trim()}
-                        className="bg-[var(--gold)] hover:bg-[var(--gold)]"
+                        className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
                     >
                         {saving ? "Saving..." : "Save"}
                     </Button>

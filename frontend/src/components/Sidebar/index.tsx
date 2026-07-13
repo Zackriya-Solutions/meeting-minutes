@@ -499,7 +499,7 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleRecordingToggle}
                 disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-[var(--danger)] cursor-not-allowed' : 'bg-[var(--danger)] hover:bg-[var(--danger)]'} rounded-full transition-colors duration-150 shadow-none`}
+                className={`p-2 ${isRecording ? 'bg-[var(--danger)] cursor-not-allowed' : 'bg-[var(--danger)] hover:opacity-90'} rounded-full transition-colors duration-150 shadow-none`}
               >
                 {isRecording ? (
                   <MementoIcon name="stop" size={20} />
@@ -518,7 +518,7 @@ const Sidebar: React.FC = () => {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-[var(--gold-soft)] bg-[var(--gold-soft)]"
+                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-[var(--gold-soft-strong)] bg-[var(--gold-soft)]"
                 >
                   <MementoIcon name="upload" size={20} />
                 </button>
@@ -677,7 +677,7 @@ const Sidebar: React.FC = () => {
                         handleEditStart(item.id, item.title);
                       }}
                       className="hover:text-[var(--gold)] p-1 rounded-md hover:bg-[var(--gold-soft)] flex-shrink-0"
-                      aria-label="Edit meeting title"
+                      aria-label="Изменить название встречи"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -848,7 +848,7 @@ const Sidebar: React.FC = () => {
             {betaFeatures.importAndRetranscribe && (
               <button
                 onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)] rounded-lg transition-colors shadow-none"
+                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)] rounded-lg transition-colors shadow-none"
               >
                 <MementoIcon name="upload" size={17} />
                 <span>Импортировать аудио</span>
@@ -857,7 +857,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/search')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
             >
               <MementoIcon name="search" size={17} />
               <span>Поиск по встречам</span>
@@ -865,7 +865,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/chat')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
             >
               <MementoIcon name="library" size={17} />
               <span>База знаний</span>
@@ -873,7 +873,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-lg transition-colors shadow-none"
+              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg transition-colors shadow-none"
             >
               <MementoIcon name="settings" size={17} />
               <span>Настройки</span>
@@ -907,7 +907,7 @@ const Sidebar: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <label htmlFor="meeting-title" className="block text-sm font-medium text-[var(--fg2)] mb-2">
-                  Meeting Title
+                  Название встречи
                 </label>
                 <input
                   id="meeting-title"
@@ -931,13 +931,13 @@ const Sidebar: React.FC = () => {
           <DialogFooter>
             <button
               onClick={handleEditCancel}
-              className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-md transition-colors"
             >
               Отмена
             </button>
             <button
               onClick={handleEditConfirm}
-              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold)] rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold-active)] rounded-md transition-colors"
             >
               Сохранить
             </button>

@@ -536,7 +536,7 @@ function ModelCard({
                   e.stopPropagation();
                   onDownload();
                 }}
-                className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold)] transition-colors"
+                className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
               >
                 Загрузить
               </button>
@@ -548,7 +548,7 @@ function ModelCard({
                   e.stopPropagation();
                   onDownload();
                 }}
-                className="bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--danger)] transition-colors"
+                className="bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-colors"
               >
                 Повторить
               </button>
@@ -561,7 +561,7 @@ function ModelCard({
                     e.stopPropagation();
                     onDelete();
                   }}
-                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold)] transition-colors"
+                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
                 >
                   Удалить
                 </button>
@@ -570,7 +570,7 @@ function ModelCard({
                     e.stopPropagation();
                     onDownload();
                   }}
-                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold)] transition-colors"
+                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
                 >
                   Re-download
                 </button>

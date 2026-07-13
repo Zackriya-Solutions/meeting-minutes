@@ -86,11 +86,11 @@ function DownloadToastContent({
         </div>
 
         {hasError ? (
-          <p className="text-xs text-[var(--danger)]">{download.error || 'Download failed'}</p>
+          <p className="text-xs text-[var(--danger)]">{download.error || 'Не удалось загрузить'}</p>
         ) : isComplete ? (
-          <p className="text-xs text-[var(--success)]">Download complete</p>
+          <p className="text-xs text-[var(--success)]">Загрузка завершена</p>
         ) : isCancelled ? (
-          <p className="text-xs text-[var(--fg2)]">Download cancelled</p>
+          <p className="text-xs text-[var(--fg2)]">Загрузка отменена</p>
         ) : (
           <>
             {/* Progress bar */}

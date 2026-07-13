@@ -1262,7 +1262,7 @@ export function ModelSettingsModal({
                       variant="default"
                       size="sm"
                       onClick={() => invoke('open_external_url', { url: 'https://ollama.com/download' })}
-                      className="w-full bg-[var(--gold)] hover:bg-[var(--gold)]"
+                      className="w-full bg-[var(--gold)] hover:bg-[var(--gold-active)]"
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
                       Download Ollama
@@ -1423,7 +1423,7 @@ export function ModelSettingsModal({
         <Button
           className={cn(
             'px-4 text-sm font-medium text-[var(--fg-inverse)] rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]',
-            isDoneDisabled ? 'bg-[var(--fg3)] cursor-not-allowed' : 'bg-[var(--gold)] hover:bg-[var(--gold)]'
+            isDoneDisabled ? 'bg-[var(--fg3)] cursor-not-allowed' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]'
           )}
           onClick={handleSave}
           disabled={isDoneDisabled}

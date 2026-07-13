@@ -228,7 +228,7 @@ export default function AnalyticsConsentSwitch() {
             </p>
             <button
               onClick={handlePrivacyPolicyClick}
-              className="text-[var(--gold)] hover:text-[var(--gold)] underline hover:no-underline"
+              className="text-[var(--gold)] hover:text-[var(--gold-active)] underline hover:no-underline"
             >
               View Privacy Policy
             </button>

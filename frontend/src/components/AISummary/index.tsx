@@ -622,12 +622,12 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         <div className="animate-spin rounded-full h-5 w-5 border-2 border-[var(--gold-border)] border-t-transparent"></div>
         <div>
           <h3 className="text-[var(--gold)] font-medium">
-            {status === 'processing' ? 'Processing Transcript' : 'Generating Summary'}
+            {status === 'processing' ? 'Обработка расшифровки' : 'Создание сути'}
           </h3>
           <p className="text-[var(--gold)] text-sm">
             {status === 'processing' 
-              ? 'Analyzing your transcript...' 
-              : 'Creating a detailed summary of your meeting...'}
+              ? 'Анализируем расшифровку…' 
+              : 'Создаём подробную суть встречи…'}
           </p>
         </div>
       </div>
@@ -772,14 +772,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
               const markdown = convertToMarkdown();
               navigator.clipboard.writeText(markdown);
             }}
-            className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-md flex items-center space-x-1"
+            className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:brightness-125 rounded-md flex items-center space-x-1"
           >
             <Copy className="h-4 w-4" />
             <span>Скопировать</span>
           </button>
           <button
             onClick={onRegenerateSummary}
-            className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-md flex items-center space-x-1"
+            className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:brightness-125 rounded-md flex items-center space-x-1"
             title="Создать суть заново"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -400,7 +400,7 @@ export function RetranscribeDialog({
               </Button>
               <Button
                 onClick={handleStartRetranscription}
-                className="bg-[var(--gold)] hover:bg-[var(--gold)]"
+                className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
                 disabled={!meetingFolderPath}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />

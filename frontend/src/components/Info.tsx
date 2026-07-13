@@ -17,7 +17,7 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
           className={`flex items-center justify-center mb-2 cursor-pointer border-none transition-colors ${
             isCollapsed
               ? "bg-transparent p-2 hover:bg-[var(--bg-elevated)] rounded-lg"
-              : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-lg shadow-none"
+              : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg shadow-none"
           }`}
           title="О Memento"
         >

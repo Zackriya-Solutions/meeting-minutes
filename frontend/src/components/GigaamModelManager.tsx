@@ -175,7 +175,7 @@ export function GigaamModelManager() {
         ) : (
           <button
             onClick={download}
-            className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold)]"
+            className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
           >
             <Download className="h-4 w-4" />
             {present ? 'Загрузить вариант снова' : `Загрузить вариант (~${selected?.size_mb ?? '?'} МБ)`}

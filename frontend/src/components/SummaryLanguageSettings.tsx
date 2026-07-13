@@ -59,7 +59,7 @@ export function SummaryLanguageSettings() {
                 type="button"
                 aria-label={`Remove ${labelForCode(code)}`}
                 onClick={() => removeRecent(code)}
-                className={`pr-2.5 pl-0.5 py-1 leading-none ${isPinned ? 'text-[var(--gold)] hover:text-[var(--gold)]' : 'text-[var(--fg3)] hover:text-[var(--fg2)]'}`}
+                className={`pr-2.5 pl-0.5 py-1 leading-none ${isPinned ? 'text-[var(--gold)] hover:text-[var(--gold-active)]' : 'text-[var(--fg3)] hover:text-[var(--fg2)]'}`}
               >
                 ×
               </button>
@@ -72,7 +72,7 @@ export function SummaryLanguageSettings() {
             <button
               type="button"
               disabled={recents.length >= 5}
-              className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] px-3 py-1 text-sm text-[var(--fg2)] hover:border-[var(--border-strong)] hover:text-[var(--fg1)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] px-3 py-1 text-sm text-[var(--fg2)] hover:border-[var(--gold-border)] hover:text-[var(--fg1)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               ＋ Add language
             </button>

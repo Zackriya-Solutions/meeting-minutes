@@ -362,7 +362,7 @@ function MeetingDetailsContent() {
           <p className="text-[var(--danger)] mb-4">{error}</p>
           <button
             onClick={() => router.push('/')}
-            className="px-4 py-2 bg-[var(--gold)] text-[var(--fg-inverse)] rounded hover:bg-[var(--gold)]"
+            className="px-4 py-2 bg-[var(--gold)] text-[var(--fg-inverse)] rounded hover:bg-[var(--gold-active)]"
           >
             Назад
           </button>

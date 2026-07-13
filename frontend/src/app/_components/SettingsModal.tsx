@@ -69,7 +69,7 @@ export function SettingsModals({
             <button
               onClick={() => onClose("modelSettings")
               }
-              className="text-[var(--fg2)] hover:text-[var(--fg2)]"
+              className="text-[var(--fg2)] hover:text-[var(--fg1)]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -88,7 +88,7 @@ export function SettingsModals({
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-[var(--fg2)] mb-1">
-                    Summarization Model
+                    Модель для сути
                   </label>
                   <div className="flex space-x-2">
                     <select
@@ -156,9 +156,9 @@ export function SettingsModals({
           <div className="border-t p-6 flex justify-end">
             <button
               onClick={() => onClose('modelSettings')}
-              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold-active)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
             >
-              Done
+              Готово
             </button>
           </div>
         </div>
@@ -173,7 +173,7 @@ export function SettingsModals({
             <h3 className="text-lg font-semibold text-[var(--fg1)]">Аудиоустройства</h3>
             <button
               onClick={() => onClose('deviceSettings')}
-              className="text-[var(--fg2)] hover:text-[var(--fg2)]"
+              className="text-[var(--fg2)] hover:text-[var(--fg1)]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -197,9 +197,9 @@ export function SettingsModals({
                 });
                 onClose('deviceSettings');
               }}
-              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold-active)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
             >
-              Done
+              Готово
             </button>
           </div>
         </div>
@@ -214,7 +214,7 @@ export function SettingsModals({
             <h3 className="text-lg font-semibold text-[var(--fg1)]">Настройки языка</h3>
             <button
               onClick={() => onClose('languageSettings')}
-              className="text-[var(--fg2)] hover:text-[var(--fg2)]"
+              className="text-[var(--fg2)] hover:text-[var(--fg1)]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -232,9 +232,9 @@ export function SettingsModals({
           <div className="mt-6 flex justify-end">
             <button
               onClick={() => onClose('languageSettings')}
-              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold-active)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
             >
-              Done
+              Готово
             </button>
           </div>
         </div>
@@ -248,11 +248,11 @@ export function SettingsModals({
           {/* Fixed Header */}
           <div className="flex justify-between items-center p-6 pb-4 border-b border-[var(--border-subtle)]">
             <h3 className="text-lg font-semibold text-[var(--fg1)]">
-              {messages.modelSelector ? 'Speech Recognition Setup Required' : 'Transcription Model Settings'}
+              {messages.modelSelector ? 'Нужно настроить распознавание речи' : 'Настройки модели расшифровки'}
             </h3>
             <button
               onClick={() => onClose('modelSelector')}
-              className="text-[var(--fg2)] hover:text-[var(--fg2)]"
+              className="text-[var(--fg2)] hover:text-[var(--fg1)]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -290,7 +290,7 @@ export function SettingsModals({
 
             <button
               onClick={() => onClose('modelSelector')}
-              className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] rounded-md hover:bg-[var(--bg-elevated)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--border-strong)]"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] rounded-md hover:brightness-125 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--border-strong)]"
             >
               {messages.modelSelector ? 'Отмена' : 'Готово'}
             </button>
@@ -308,9 +308,9 @@ export function SettingsModals({
             {messages.errorAlert}
             <button
               onClick={() => onClose('errorAlert')}
-              className="ml-2 text-[var(--danger)] hover:text-[var(--danger)] underline"
+              className="ml-2 text-[var(--danger)] hover:opacity-80 underline"
             >
-              Dismiss
+              Закрыть
             </button>
           </AlertDescription>
         </Alert>
@@ -326,9 +326,9 @@ export function SettingsModals({
             {messages.chunkDropWarning}
             <button
               onClick={() => onClose('chunkDropWarning')}
-              className="ml-2 text-[var(--gold)] hover:text-[var(--gold)] underline"
+              className="ml-2 text-[var(--gold)] hover:text-[var(--gold-active)] underline"
             >
-              Dismiss
+              Закрыть
             </button>
           </AlertDescription>
         </Alert>

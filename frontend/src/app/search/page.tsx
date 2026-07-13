@@ -220,7 +220,7 @@ export default function SearchPage() {
                   setDateTo('');
                   setCollectionId(null);
                 }}
-                className="mb-1 text-xs text-[var(--fg2)] underline hover:text-[var(--fg2)]"
+                className="mb-1 text-xs text-[var(--fg2)] underline hover:text-[var(--fg1)]"
               >
                 Сбросить
               </button>

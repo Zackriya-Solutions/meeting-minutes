@@ -161,7 +161,7 @@ export function ProviderSettings() {
         <button
           type="button"
           onClick={() => setShowGcLogin((v) => !v)}
-          className="mt-1 flex items-center gap-1 text-xs text-[var(--fg2)] hover:text-[var(--fg2)]"
+          className="mt-1 flex items-center gap-1 text-xs text-[var(--fg2)] hover:text-[var(--fg1)]"
         >
           {showGcLogin ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           Or use login &amp; password instead
@@ -195,7 +195,7 @@ export function ProviderSettings() {
         <button
           onClick={save}
           disabled={saving}
-          className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold)] disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)]"
+          className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)]"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
           Save credentials
