@@ -129,7 +129,7 @@ export default function Home() {
             ? 'Transcripts and audio recovered'
             : 'Transcripts recovered (no audio available)',
           action: result.meetingId ? {
-            label: 'View Meeting',
+            label: 'Открыть встречу',
             onClick: () => {
               router.push(`/meeting-details?id=${result.meetingId}`);
             }
@@ -154,7 +154,7 @@ export default function Home() {
       }
     } catch (error) {
       toast.error('Не удалось восстановить встречу', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+        description: error instanceof Error ? error.message : 'Произошла неизвестная ошибка',
       });
       throw error;
     }

@@ -21,9 +21,9 @@ export function BetaSettings() {
       <div className="flex items-start gap-3 p-4 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded-lg">
         <AlertCircle className="h-5 w-5 text-[var(--gold)] flex-shrink-0 mt-0.5" />
         <div className="text-sm text-[var(--gold)]">
-          <p className="font-medium">Beta Features</p>
+          <p className="font-medium">Экспериментальные функции</p>
           <p className="mt-1">
-            These features are still being tested. You may encounter issues, and we appreciate your feedback.
+            Эти функции ещё тестируются и могут работать нестабильно.
           </p>
         </div>
       </div>
@@ -42,7 +42,7 @@ export function BetaSettings() {
                   {BETA_FEATURE_NAMES[featureKey]}
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-medium bg-[var(--gold-soft)] text-[var(--gold)] rounded-full">
-                  BETA
+                  ТЕСТ
                 </span>
               </div>
               <p className="text-sm text-[var(--fg2)]">
@@ -63,7 +63,7 @@ export function BetaSettings() {
       {/* Info Box */}
       <div className="p-4 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded-lg">
         <p className="text-sm text-[var(--gold)]">
-          <strong>Note:</strong> When disabled, beta features will be hidden. Your existing meetings remain unaffected.
+          После отключения экспериментальные функции будут скрыты. Сохранённые встречи останутся без изменений.
         </p>
       </div>
     </div>

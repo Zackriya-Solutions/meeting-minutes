@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import {
   ModelInfo,
   ModelStatus,
-  getModelIcon,
   formatFileSize,
   getModelPerformanceBadge,
   isQuantizedModel,
@@ -14,6 +13,7 @@ import {
   WhisperAPI
 } from '../lib/whisper';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Icon } from '@/components/memento/Icon';
 
 interface ModelManagerProps {
   selectedModel?: string;
@@ -181,8 +181,8 @@ export function ModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.success(`${getModelIcon(model?.accuracy || 'Good')} ${displayName} ready!`, {
-            description: 'Model downloaded and ready to use',
+          toast.success(`${displayName} готова`, {
+            description: 'Модель загружена и готова к работе',
             duration: 4000
           });
 
@@ -557,7 +557,7 @@ function ModelCard({
           <div className="flex-1">
             {/* Model Name and Tagline */}
             <div className="flex items-center gap-2 flex-wrap mb-2">
-              <span className="text-2xl">{getModelIcon(model.accuracy)}</span>
+              <Icon name="spark" size={22} className="text-[var(--fg2)]" />
               <h3 className="font-semibold text-[var(--fg1)]">{displayName}</h3>
               <span className="text-sm text-[var(--fg2)]">•</span>
               <span className="text-sm text-[var(--fg2)]">{getModelTagline(model.name, model.speed, model.accuracy)}</span>
@@ -567,7 +567,7 @@ function ModelCard({
                   animate={{ scale: 1 }}
                   className="bg-[var(--gold)] text-[var(--fg-inverse)] px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
                 >
-                  ✓
+                  <Icon name="check" size={13} />
                 </motion.span>
               )}
               {isQuantizedModel(model.name) && (
@@ -585,15 +585,15 @@ function ModelCard({
             {/* Model Specs */}
             <div className="flex items-center space-x-4 text-sm text-[var(--fg2)] ml-9 mt-1.5">
               <span className="flex items-center space-x-1">
-                <span>📦</span>
+                <Icon name="database" size={14} />
                 <span>{formatFileSize(model.size_mb)}</span>
               </span>
               <span className="flex items-center space-x-1">
-                <span>🎯</span>
+                <Icon name="tag" size={14} />
                 <span>{model.accuracy} accuracy</span>
               </span>
               <span className="flex items-center space-x-1">
-                <span>⚡</span>
+                <Icon name="clock" size={14} />
                 <span>{model.speed} processing</span>
               </span>
             </div>
@@ -705,7 +705,7 @@ function ModelCard({
             </div>
             <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
               <motion.div
-                className="h-full bg-gradient-to-r from-[var(--gold)] to-[var(--gold)] rounded-full"
+                className="h-full rounded-full bg-[var(--gold)]"
                 initial={{ width: 0 }}
                 animate={{ width: `${downloadProgress}%` }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}

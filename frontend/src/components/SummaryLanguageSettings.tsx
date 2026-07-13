@@ -19,11 +19,11 @@ export function SummaryLanguageSettings() {
     <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none relative">
       <div className="flex items-center gap-2 mb-2">
         <Globe size={18} className="text-[var(--fg2)]" />
-        <h3 className="text-lg font-semibold text-[var(--fg1)]">Summary Language</h3>
+        <h3 className="text-lg font-semibold text-[var(--fg1)]">Язык сути</h3>
       </div>
       <p className="text-sm text-[var(--fg2)] mb-4">
-        Pin one language as the default for new meetings. Unpinned languages remain as
-        quick-switch options in the summary generator. Auto uses the dominant transcript language.
+        Закрепи язык для новых встреч. Остальные недавние языки останутся доступны для быстрого переключения.
+        Автовыбор использует основной язык расшифровки.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -40,9 +40,9 @@ export function SummaryLanguageSettings() {
             >
               <button
                 type="button"
-                aria-label={isPinned ? `Unpin ${labelForCode(code)} as default` : `Pin ${labelForCode(code)} as default`}
+                aria-label={isPinned ? `Открепить ${labelForCode(code)}` : `Закрепить ${labelForCode(code)}`}
                 aria-pressed={isPinned}
-                title={isPinned ? 'Click to unset as default' : 'Click to set as default'}
+                title={isPinned ? 'Убрать язык по умолчанию' : 'Сделать языком по умолчанию'}
                 onClick={() => togglePin(code)}
                 className={`flex items-center gap-1.5 pl-3 pr-2 py-1 hover:brightness-95 active:brightness-90 ${
                   isPinned ? 'text-[var(--gold)]' : 'text-[var(--fg1)]'

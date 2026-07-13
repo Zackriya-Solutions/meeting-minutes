@@ -95,7 +95,7 @@ export function ImportAudioDialog({
   } = useTranscriptionModels(transcriptModelConfig);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
-    toast.success(`Import complete! ${result.segments_count} segments created.`);
+    toast.success(`Импорт завершён. Создано фрагментов: ${result.segments_count}.`);
 
     // Refresh meetings list then navigate to the imported meeting
     refetchMeetings();
@@ -244,7 +244,7 @@ export function ImportAudioDialog({
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-[var(--danger)]" />
-                Import Failed
+                Не удалось импортировать
               </>
             ) : status === 'complete' ? (
               <>
@@ -392,7 +392,7 @@ export function ImportAudioDialog({
                             disabled={loadingModels}
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder={loadingModels ? 'Loading models...' : 'Select model'} />
+                              <SelectValue placeholder={loadingModels ? 'Загружаю модели…' : 'Выбери модель'} />
                             </SelectTrigger>
                             <SelectContent>
                               {availableModels.map((model) => (
@@ -445,7 +445,7 @@ export function ImportAudioDialog({
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                Отмена
               </Button>
               <Button
                 onClick={handleStartImport}
@@ -460,13 +460,13 @@ export function ImportAudioDialog({
           {isProcessing && (
             <Button variant="outline" onClick={handleCancel}>
               <X className="h-4 w-4 mr-2" />
-              Cancel
+              Отмена
             </Button>
           )}
           {error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Close
+                Закрыть
               </Button>
               <Button onClick={reset} variant="outline">
                 Try Again

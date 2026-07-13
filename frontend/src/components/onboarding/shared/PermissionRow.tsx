@@ -29,15 +29,15 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
         <div
           className={cn(
             'flex size-10 items-center justify-center rounded-full flex-shrink-0',
-            isAuthorized ? 'bg-[var(--bg-elevated)]' : isDenied ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]' : 'bg-neutral-50'
+            isAuthorized ? 'bg-[var(--bg-elevated)]' : isDenied ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]' : 'bg-[var(--bg-sheet)]'
           )}
         >
-          <div className={cn(isAuthorized ? 'text-[var(--fg1)]' : isDenied ? 'text-[var(--danger)]' : 'text-neutral-500')}>{icon}</div>
+          <div className={cn(isAuthorized ? 'text-[var(--fg1)]' : isDenied ? 'text-[var(--danger)]' : 'text-[var(--fg2)]')}>{icon}</div>
         </div>
 
         {/* Title + Description */}
         <div className="min-w-0 flex-1">
-          <div className="font-medium truncate text-neutral-900">{title}</div>
+          <div className="truncate font-medium text-[var(--fg1)]">{title}</div>
           <div className="text-sm text-muted-foreground">
             {isAuthorized ? (
               <span className="text-[var(--success)] flex items-center gap-1">
@@ -47,7 +47,7 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
             ) : isDenied ? (
               <span className="text-[var(--danger)] flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" />
-                Access Denied - Please grant in System Settings
+                Доступ запрещён — разреши его в настройках системы
               </span>
             ) : (
               <span>{description}</span>

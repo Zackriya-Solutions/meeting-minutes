@@ -199,9 +199,9 @@ export function LanguageSelection({
 
         {/* Parakeet language limitation warning */}
         {isParakeet && (
-          <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
-            <p className="font-medium">ℹ️ Parakeet Language Support</p>
-            <p className="mt-1 text-xs">Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.</p>
+          <div className="rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] p-2 text-[var(--gold)]">
+            <p className="font-medium">Языки Parakeet</p>
+            <p className="mt-1 text-xs">Parakeet поддерживает только автоматическое определение языка. Чтобы выбрать язык вручную, используй Whisper.</p>
           </div>
         )}
 
@@ -212,19 +212,19 @@ export function LanguageSelection({
           </p>
           {selectedLanguage === 'auto' && (
             <div className="p-2 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded text-[var(--gold)]">
-              <p className="font-medium">⚠️ Auto Detect may produce incorrect results</p>
-              <p className="mt-1">For best accuracy, select your specific language (e.g., English, Spanish, etc.)</p>
+              <p className="font-medium">Автоопределение может ошибаться</p>
+              <p className="mt-1">Для лучшей точности выбери язык встречи вручную.</p>
             </div>
           )}
           {selectedLanguage === 'auto-translate' && (
             <div className="p-2 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded text-[var(--gold)]">
-              <p className="font-medium">🌐 Translation Mode Active</p>
-              <p className="mt-1">All audio will be automatically translated to English. Best for multilingual meetings where you need English output.</p>
+              <p className="font-medium">Режим перевода включён</p>
+              <p className="mt-1">Вся речь будет автоматически переведена на английский.</p>
             </div>
           )}
           {selectedLanguage !== 'auto' && selectedLanguage !== 'auto-translate' && (
             <p className="text-[var(--fg2)]">
-              Transcription will be optimized for <strong>{selectedLanguageName}</strong>
+              Расшифровка будет настроена для языка: <strong>{selectedLanguageName}</strong>
             </p>
           )}
         </div>

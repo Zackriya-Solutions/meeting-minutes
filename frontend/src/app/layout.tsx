@@ -113,7 +113,7 @@ export default function RootLayout({
 
       if (showOnboarding) {
         toast.error("Сначала заверши настройку", {
-          description: "You need to finish onboarding before you can start recording."
+          description: "Заверши первые шаги, затем начни запись."
         });
       } else {
         // If in main app, forward to useRecordingStart via window event
@@ -134,7 +134,7 @@ export default function RootLayout({
 
     if (!betaFeatures.importAndRetranscribe) {
       toast.error('Экспериментальная функция выключена', {
-        description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
+        description: 'Включи «Импорт аудио» в разделе «Настройки → Экспериментальные функции».'
       });
       return;
     }
@@ -151,7 +151,7 @@ export default function RootLayout({
       setShowImportDialog(true);
     } else if (paths.length > 0) {
       toast.error('Перетащи аудиофайл', {
-        description: `Supported formats: ${getAudioFormatsDisplayList()}`
+        description: `Поддерживаемые форматы: ${getAudioFormatsDisplayList()}`
       });
     }
   }, []);
@@ -232,7 +232,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className="font-sans antialiased">
+      <body className="antialiased">
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>

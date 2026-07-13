@@ -62,7 +62,7 @@ export function ProviderSettings() {
     if (gcPassword.trim()) updates.push(['gigachat.password', gcPassword.trim()]);
 
     if (updates.length === 0) {
-      setError('Nothing to save — enter a key or value first.');
+      setError('Нечего сохранять — сначала введи ключ или значение.');
       return;
     }
 

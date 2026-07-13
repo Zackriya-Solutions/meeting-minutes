@@ -325,7 +325,7 @@ function MessageBubble({
         <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
 
         {msg.warning && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-600">
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
             <Icon name="alert" size={14} />
             {msg.warning}
           </div>

@@ -76,7 +76,7 @@ export function TranscriptButtonGroup({
           <Button
             size="sm"
             variant="outline"
-            className="bg-gradient-to-r from-[var(--gold)] to-[var(--gold)] hover:bg-[var(--gold-soft)] border-[var(--gold-border)] xl:px-4"
+            className="border-[var(--gold-border)] bg-[var(--gold)] hover:bg-[var(--gold-active)] xl:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);

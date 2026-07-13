@@ -19,11 +19,11 @@ export async function showRecordingNotification(): Promise<void> {
     if (showNotification) {
       let dontShowAgain = false;
 
-      const toastId = toast.info('🔴 Recording Started', {
+      const toastId = toast.info('Запись началась', {
         description: (
           <div className="space-y-3 min-w-[280px]">
             <p className="text-sm font-medium text-[var(--fg1)]">
-              Inform all participants this meeting is being recorded.
+              Предупреди участников встречи о записи.
             </p>
             <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-[var(--gold-soft)] p-2 rounded transition-colors">
               <input
@@ -46,9 +46,9 @@ export async function showRecordingNotification(): Promise<void> {
                 Analytics.trackButtonClick('recording_notification_acknowledged', 'toast');
                 toast.dismiss(toastId);
               }}
-              className="w-full px-3 py-1.5 bg-[var(--fg3)] text-[var(--fg-inverse)] text-xs rounded hover:bg-[var(--fg3)] transition-colors font-medium"
+              className="w-full rounded-full bg-[var(--gold)] px-3 py-1.5 text-xs font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
             >
-              I've Notified Participants
+              Участники предупреждены
             </button>
           </div>
         ),

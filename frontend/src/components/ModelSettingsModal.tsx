@@ -721,7 +721,7 @@ export function ModelSettingsModal({
     // Prevent duplicate downloads (defense in depth - backend also checks)
     if (isDownloading(recommendedModel)) {
       toast.info(`${recommendedModel} is already downloading`, {
-        description: `Progress: ${Math.round(getProgress(recommendedModel) || 0)}%`
+        description: `Прогресс: ${Math.round(getProgress(recommendedModel) || 0)}%`
       });
       return;
     }
@@ -748,10 +748,10 @@ export function ModelSettingsModal({
       // Check if Ollama не установлена and show appropriate error
       if (isOllamaNotInstalledError(errorMsg)) {
         toast.error('Ollama не установлена', {
-          description: 'Please download and install Ollama before downloading models.',
+          description: 'Установи Ollama перед загрузкой моделей.',
           duration: 7000,
           action: {
-            label: 'Download',
+            label: 'Загрузить',
             onClick: () => invoke('open_external_url', { url: 'https://ollama.com/download' })
           }
         });
@@ -771,7 +771,7 @@ export function ModelSettingsModal({
         endpoint
       });
 
-      toast.success(`Model ${modelName} deleted`);
+      toast.success(`Модель ${modelName} удалена`);
       await fetchOllamaModels(true); // Refresh list
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to delete model';
@@ -1100,7 +1100,7 @@ export function ModelSettingsModal({
 
         {requiresApiKey && (
           <div>
-            <Label>API Key</Label>
+            <Label>API-ключ</Label>
             <div className="relative mt-1">
               <Input
                 type={showApiKey ? 'text' : 'password'}
@@ -1223,7 +1223,7 @@ export function ModelSettingsModal({
         {modelConfig.provider === 'ollama' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h4 className="text-sm font-bold">Available Ollama Models</h4>
+              <h4 className="text-sm font-bold">Доступные модели Ollama</h4>
               {lastFetchedEndpoint && models.length > 0 && (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted-foreground">Используется:</span>
@@ -1314,7 +1314,7 @@ export function ModelSettingsModal({
                             </div>
                             <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-gradient-to-r from-[var(--gold)] to-[var(--gold)] rounded-full transition-all duration-300"
+                                className="h-full rounded-full bg-[var(--gold)] transition-all duration-300"
                                 style={{ width: `${getProgress('gemma3:1b')}%` }}
                               />
                             </div>
@@ -1357,7 +1357,7 @@ export function ModelSettingsModal({
                         >
                           <div>
                             <b className="font-bold">{model.name}&nbsp;</b>
-                            <span className="text-muted-foreground">with a size of </span>
+                            <span className="text-muted-foreground">размером </span>
                             <span className="font-mono font-bold text-sm">{model.size}</span>
                           </div>
 
@@ -1365,12 +1365,12 @@ export function ModelSettingsModal({
                           {modelIsDownloading && progress !== undefined && (
                             <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
                               <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-[var(--gold)]">Downloading...</span>
+                                <span className="text-sm font-medium text-[var(--gold)]">Загрузка…</span>
                                 <span className="text-sm font-semibold text-[var(--gold)]">{Math.round(progress)}%</span>
                               </div>
                               <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-gradient-to-r from-[var(--gold)] to-[var(--gold)] rounded-full transition-all duration-300"
+                                  className="h-full rounded-full bg-[var(--gold)] transition-all duration-300"
                                   style={{ width: `${progress}%` }}
                                 />
                               </div>

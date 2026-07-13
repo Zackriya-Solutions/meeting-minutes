@@ -62,7 +62,7 @@ export function BuiltInModelManager({
       }
     } catch (error) {
       console.error('Failed to fetch built-in AI models:', error);
-      toast.error('Failed to load models');
+      toast.error('Не удалось загрузить модели');
     } finally {
       setIsLoading(false);
       setHasFetched(true);
@@ -127,7 +127,7 @@ export function BuiltInModelManager({
           });
           // Refresh models list
           fetchModels();
-          toast.success(`Model ${model} downloaded successfully`);
+          toast.success(`Модель ${model} загружена`);
         }
 
         // Handle cancelled status
@@ -216,7 +216,7 @@ export function BuiltInModelManager({
       }
 
       // For real errors, show toast and remove from downloading
-      toast.error(`Failed to download ${modelName}`);
+      toast.error(`Не удалось загрузить ${modelName}`);
 
       setDownloadingModels((prev) => {
         const newSet = new Set(prev);
@@ -232,7 +232,7 @@ export function BuiltInModelManager({
   const cancelDownload = async (modelName: string) => {
     try {
       await invoke('builtin_ai_cancel_download', { modelName });
-      toast.info(`Download of ${modelName} cancelled`);
+      toast.info(`Загрузка ${modelName} отменена`);
       setDownloadingModels((prev) => {
         const newSet = new Set(prev);
         newSet.delete(modelName);
@@ -246,11 +246,11 @@ export function BuiltInModelManager({
   const deleteModel = async (modelName: string) => {
     try {
       await invoke('builtin_ai_delete_model', { modelName });
-      toast.success(`Model ${modelName} deleted`);
+      toast.success(`Модель ${modelName} удалена`);
       fetchModels();
     } catch (error) {
       console.error('Failed to delete model:', error);
-      toast.error(`Failed to delete ${modelName}`);
+      toast.error(`Не удалось удалить ${modelName}`);
     }
   };
 
@@ -259,7 +259,7 @@ export function BuiltInModelManager({
     return (
       <div className="text-center py-8 text-muted-foreground">
         <RefreshCw className="mx-auto h-8 w-8 animate-spin mb-2" />
-        Loading models...
+        Загружаю модели…
       </div>
     );
   }
@@ -269,7 +269,7 @@ export function BuiltInModelManager({
     return (
       <Alert>
         <AlertDescription>
-          No models found. Download a model to get started with Built-in AI.
+          Модели не найдены. Загрузи модель для локальной работы.
         </AlertDescription>
       </Alert>
     );
@@ -278,7 +278,7 @@ export function BuiltInModelManager({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h4 className="text-sm font-bold">Built-in AI Models</h4>
+        <h4 className="text-sm font-bold">Локальные модели</h4>
       </div>
 
       <div
@@ -328,7 +328,7 @@ export function BuiltInModelManager({
                         </span>
                         {selectedModel === model.name && (
                           <span className="shrink-0 rounded bg-[var(--gold-soft)] px-2 py-0.5 text-xs font-medium text-[var(--gold)]">
-                            Selected
+                            Выбрана
                           </span>
                         )}
                       </>
@@ -336,12 +336,12 @@ export function BuiltInModelManager({
                     {isCorrupted && (
                       <span className="flex shrink-0 items-center gap-1 rounded bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--danger)]">
                         <BadgeAlert className="h-3 w-3" />
-                        Corrupted
+                        Повреждена
                       </span>
                     )}
                     {isError && (
                       <span className="shrink-0 rounded bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--danger)]">
-                        Error
+                        Ошибка
                       </span>
                     )}
                   </div>
@@ -359,7 +359,7 @@ export function BuiltInModelManager({
                       }}
                     >
                       <Download className="mr-2 h-4 w-4" />
-                      Download
+                      Загрузить
                     </Button>
                   )}
                   {/* Downloading - Show Cancel button */}
@@ -373,7 +373,7 @@ export function BuiltInModelManager({
                         cancelDownload(model.name);
                       }}
                     >
-                      Cancel
+                      Отмена
                     </Button>
                   )}
                   {/* Error - Show Retry button */}
@@ -388,7 +388,7 @@ export function BuiltInModelManager({
                       }}
                     >
                       <RefreshCw className="mr-2 h-4 w-4" />
-                      Retry
+                      Повторить
                     </Button>
                   )}
                   {/* Corrupted - Show both Retry and Delete buttons */}
@@ -403,7 +403,7 @@ export function BuiltInModelManager({
                         }}
                       >
                         <RefreshCw className="mr-2 h-4 w-4" />
-                        Retry
+                        Повторить
                       </Button>
                       <Button
                         variant="outline"
@@ -414,7 +414,7 @@ export function BuiltInModelManager({
                         }}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
+                        Удалить
                       </Button>
                     </>
                   )}
@@ -442,12 +442,12 @@ export function BuiltInModelManager({
                     {isError && typeof model.status === 'object' && 'Error' in model.status
                       ? (model.status as any).Error
                       : isCorrupted
-                      ? 'File is corrupted. Retry download or delete.'
-                      : 'An error occurred'}
+                      ? 'Файл повреждён. Повтори загрузку или удали модель.'
+                      : 'Произошла ошибка'}
                   </p>
                 )}
                 <div className="text-xs text-[var(--fg2)]">
-                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
+                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} · {model.context_size} токенов</span>
                 </div>
                 </div>
               </div>
@@ -477,7 +477,7 @@ export function BuiltInModelManager({
                   </div>
                   <div className="w-full h-2.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-[var(--fg3)] to-[var(--fg2)] rounded-full transition-all duration-300"
+                      className="h-full rounded-full bg-[var(--fg2)] transition-all duration-300"
                       style={{ width: `${progress}%` }}
                     />
                   </div>

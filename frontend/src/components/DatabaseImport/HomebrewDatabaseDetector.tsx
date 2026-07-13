@@ -61,7 +61,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
         legacyDbPath: detectedPath,
       });
 
-      toast.success('Database imported successfully! Reloading...');
+      toast.success('Данные импортированы. Перезапускаю…');
 
       // Wait 1 second for user to see success, then reload window to refresh all data
       setTimeout(() => {
@@ -69,7 +69,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
       }, 1000);
     } catch (error) {
       console.error('Error importing database:', error);
-      toast.error(`Import failed: ${error}`);
+      toast.error(`Не удалось импортировать данные: ${error}`);
       setIsImporting(false);
     }
   };
@@ -97,18 +97,18 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
           <div className="flex items-center gap-2 mb-1">
             <AlertCircle className="h-4 w-4 text-[var(--gold)]" />
             <h3 className="text-sm font-semibold text-[var(--gold)]">
-              Previous Meetily Installation Detected!
+              Найдены данные Meetily
             </h3>
           </div>
           <p className="text-sm text-[var(--gold)] mb-2">
-            We found an existing database from your previous Meetily installation (Python backend version).
+            Найдена база данных из предыдущей версии Meetily.
           </p>
           <div className="bg-[var(--bg-canvas)]/50 rounded p-2 mb-3">
             <p className="text-xs text-[var(--gold)] font-mono break-all">
               {detectedPath}
             </p>
             <p className="text-xs text-[var(--gold)] mt-1">
-              Size: {formatFileSize(dbSize)}
+              Размер: {formatFileSize(dbSize)}
             </p>
           </div>
           <p className="text-sm text-[var(--gold)] mb-3">
@@ -125,12 +125,12 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
               {isImporting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Importing...</span>
+                  <span>Импортирую…</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="h-4 w-4" />
-                  <span>Yes, Import</span>
+                  <span>Импортировать</span>
                 </>
               )}
             </button>
@@ -148,4 +148,3 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
     </div>
   );
 }
-

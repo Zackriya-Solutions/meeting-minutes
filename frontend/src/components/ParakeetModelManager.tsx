@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { Icon } from '@/components/memento/Icon';
 import {
   ParakeetModelInfo,
   ModelStatus,
@@ -58,9 +59,9 @@ export function ParakeetModelManager({
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize Parakeet:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load models');
-        toast.error('Failed to load transcription models', {
-          description: err instanceof Error ? err.message : 'Unknown error',
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить модели');
+        toast.error('Не удалось загрузить модели расшифровки', {
+          description: err instanceof Error ? err.message : 'Неизвестная ошибка',
           duration: 5000
         });
       } finally {
@@ -133,8 +134,8 @@ export function ParakeetModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.success(`${displayInfo?.icon || '✓'} ${displayName} ready!`, {
-            description: 'Model downloaded and ready to use',
+          toast.success(`${displayName} готова`, {
+            description: 'Модель загружена и готова к работе',
             duration: 4000
           });
 
@@ -173,11 +174,11 @@ export function ParakeetModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.error(`Failed to download ${displayName}`, {
+          toast.error(`Не удалось загрузить ${displayName}`, {
             description: error,
             duration: 6000,
             action: {
-              label: 'Retry',
+              label: 'Повторить',
               onClick: () => downloadModel(modelName)
             }
           });
@@ -231,13 +232,13 @@ export function ParakeetModelManager({
       // Clean up throttle data
       progressThrottleRef.current.delete(modelName);
 
-      toast.info(`${displayName} download cancelled`, {
+      toast.info(`Загрузка ${displayName} отменена`, {
         duration: 3000
       });
     } catch (err) {
       console.error('Failed to cancel download:', err);
-      toast.error('Failed to cancel download', {
-        description: err instanceof Error ? err.message : 'Unknown error',
+      toast.error('Не удалось отменить загрузку', {
+        description: err instanceof Error ? err.message : 'Неизвестная ошибка',
         duration: 4000
       });
     }
@@ -260,8 +261,8 @@ export function ParakeetModelManager({
         )
       );
 
-      toast.info(`Downloading ${displayName}...`, {
-        description: 'This may take a few minutes',
+      toast.info(`Загружаю ${displayName}…`, {
+        description: 'Это займёт несколько минут',
         duration: 5000  // Auto-dismiss after 5 seconds
       });
 
@@ -274,7 +275,7 @@ export function ParakeetModelManager({
         return newSet;
       });
 
-      const errorMessage = err instanceof Error ? err.message : 'Download failed';
+      const errorMessage = err instanceof Error ? err.message : 'Не удалось загрузить модель';
       setModels(prev =>
         prev.map(model =>
           model.name === modelName ? { ...model, status: { Error: errorMessage } } : model
@@ -294,7 +295,7 @@ export function ParakeetModelManager({
 
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;
-    toast.success(`Switched to ${displayName}`, {
+    toast.success(`Выбрана ${displayName}`, {
       duration: 3000
     });
   };
@@ -310,8 +311,8 @@ export function ParakeetModelManager({
       const modelList = await ParakeetAPI.getAvailableModels();
       setModels(modelList);
 
-      toast.success(`${displayName} deleted`, {
-        description: 'Model removed to free up space',
+      toast.success(`${displayName} удалена`, {
+        description: 'Освободили место на устройстве',
         duration: 3000
       });
 
@@ -321,8 +322,8 @@ export function ParakeetModelManager({
       }
     } catch (err) {
       console.error('Failed to delete model:', err);
-      toast.error(`Failed to delete ${displayName}`, {
-        description: err instanceof Error ? err.message : 'Delete failed',
+      toast.error(`Не удалось удалить ${displayName}`, {
+        description: err instanceof Error ? err.message : 'Ошибка удаления',
         duration: 4000
       });
     }
@@ -342,7 +343,7 @@ export function ParakeetModelManager({
   if (error) {
     return (
       <div className={`bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-4 ${className}`}>
-        <p className="text-sm text-[var(--danger)]">Failed to load models</p>
+        <p className="text-sm text-[var(--danger)]">Не удалось загрузить модели</p>
         <p className="text-xs text-[var(--danger)] mt-1">{error}</p>
       </div>
     );
@@ -437,7 +438,6 @@ function ModelCard({
   const [isHovered, setIsHovered] = useState(false);
   const displayInfo = getModelDisplayInfo(model.name);
   const displayName = displayInfo?.friendlyName || model.name;
-  const icon = displayInfo?.icon || '📦';
   const tagline = displayInfo?.tagline || model.description || '';
 
   const isAvailable = model.status === 'Available';
@@ -473,7 +473,7 @@ function ModelCard({
       {/* Recommended Badge */}
       {isRecommended && (
         <div className="absolute -top-2 -right-2 bg-[var(--gold)] text-[var(--fg-inverse)] text-xs px-2 py-0.5 rounded-full font-medium">
-          Recommended
+          Рекомендуемая
         </div>
       )}
 
@@ -482,7 +482,7 @@ function ModelCard({
           <div className="flex-1">
             {/* Model Name */}
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-2xl">{icon}</span>
+              <Icon name="spark" size={22} className="text-[var(--fg2)]" />
               <h3 className="font-semibold text-[var(--fg1)]">{displayName}</h3>
               {isSelected && isAvailable && (
                 <motion.span
@@ -490,7 +490,7 @@ function ModelCard({
                   animate={{ scale: 1 }}
                   className="bg-[var(--gold)] text-[var(--fg-inverse)] px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
                 >
-                  ✓
+                  <Icon name="check" size={13} />
                 </motion.span>
               )}
             </div>
@@ -538,7 +538,7 @@ function ModelCard({
                 }}
                 className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold)] transition-colors"
               >
-                Download
+                Загрузить
               </button>
             )}
 
@@ -550,7 +550,7 @@ function ModelCard({
                 }}
                 className="bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--danger)] transition-colors"
               >
-                Retry
+                Повторить
               </button>
             )}
 
@@ -563,7 +563,7 @@ function ModelCard({
                   }}
                   className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold)] transition-colors"
                 >
-                  Delete
+                  Удалить
                 </button>
                 <button
                   onClick={(e) => {
@@ -600,12 +600,12 @@ function ModelCard({
                 className="text-xs text-[var(--fg2)] hover:text-[var(--danger)] font-medium transition-colors px-2 py-1 rounded hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
                 title="Отменить загрузку"
               >
-                Cancel
+                Отмена
               </button>
             </div>
             <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
               <motion.div
-                className="h-full bg-gradient-to-r from-[var(--gold)] to-[var(--gold)] rounded-full"
+                className="h-full rounded-full bg-[var(--gold)]"
                 initial={{ width: 0 }}
                 animate={{ width: `${downloadProgress}%` }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}

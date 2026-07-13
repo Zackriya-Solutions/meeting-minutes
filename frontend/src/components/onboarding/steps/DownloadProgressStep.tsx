@@ -91,8 +91,8 @@ export function DownloadProgressStep() {
         error: error instanceof Error ? error.message : 'Retry failed',
       }));
 
-      toast.error('Download retry failed', {
-        description: 'Please check your connection and try again.',
+      toast.error('Не удалось повторить загрузку', {
+        description: 'Проверь соединение и попробуй снова.',
       });
     } finally {
       // Allow retry again after 2 seconds
@@ -139,8 +139,8 @@ export function DownloadProgressStep() {
         error: error instanceof Error ? error.message : 'Retry failed',
       }));
 
-      toast.error('Summary model download retry failed', {
-        description: 'Please check your connection and try again.',
+      toast.error('Не удалось повторить загрузку модели', {
+        description: 'Проверь соединение и попробуй снова.',
       });
     } finally {
       // Allow retry again after 2 seconds
@@ -298,7 +298,7 @@ export function DownloadProgressStep() {
   const startSummaryDownload = async () => {
     if (summaryModelDownloaded) return;
     if (!selectedSummaryModel) {
-      toast.info('Summary model not ready yet', { description: 'Please try again in a moment.' });
+      toast.info('Модель ещё не готова', { description: 'Попробуй снова через несколько секунд.' });
       return;
     }
     if (summaryDownloadStartedRef.current) return;
@@ -337,8 +337,8 @@ export function DownloadProgressStep() {
 
     // If a download is still running, let the user know it continues in the background.
     if (parakeetState.status === 'downloading' || summaryState.status === 'downloading') {
-      toast.info('Downloads will continue in the background', {
-        description: 'You can start using the app now.',
+      toast.info('Загрузка продолжится в фоне', {
+        description: 'Memento уже можно использовать.',
         duration: 5000,
       });
     }
@@ -358,8 +358,8 @@ export function DownloadProgressStep() {
         window.location.reload();
       } catch (error) {
         console.error('Failed to complete onboarding:', error);
-        toast.error('Failed to complete setup', {
-          description: 'Please try again.',
+        toast.error('Не удалось завершить настройку', {
+          description: 'Попробуй снова.',
         });
         setIsCompleting(false);
       }
@@ -395,7 +395,7 @@ export function DownloadProgressStep() {
                 className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-[var(--border-subtle)] text-sm text-[var(--fg2)] hover:bg-[var(--bg-elevated)] transition-colors"
               >
                 <Download className="w-4 h-4" />
-                Download
+                Загрузить
               </button>
             ) : (
               <span className="text-xs text-[var(--fg3)]">Необязательно</span>
@@ -420,7 +420,7 @@ export function DownloadProgressStep() {
         <div className="space-y-2">
           <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-[var(--fg3)] to-[var(--fg2)] rounded-full transition-all duration-300"
+              className="h-full rounded-full bg-[var(--fg2)] transition-all duration-300"
               style={{ width: `${state.progress}%` }}
             />
           </div>
@@ -446,10 +446,10 @@ export function DownloadProgressStep() {
         <div className="mt-2 p-3 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-md">
           <p className="text-sm text-[var(--danger)] font-medium">Ошибка загрузки</p>
           <p className="text-xs text-[var(--danger)] mt-1">{state.error}</p>
-          {(title === 'Transcription Engine' || title === 'Summary Engine') && (
+          {(title === 'Модель расшифровки' || title === 'Модель для сути') && (
             <button
-              onClick={title === 'Transcription Engine' ? handleRetryDownload : handleRetrySummaryDownload}
-              className="mt-3 w-full h-9 px-4 bg-[var(--fg3)] hover:bg-[var(--fg3)] text-[var(--fg-inverse)] text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
+              onClick={title === 'Модель расшифровки' ? handleRetryDownload : handleRetrySummaryDownload}
+              className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-full bg-[var(--gold)] px-4 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -474,23 +474,23 @@ export function DownloadProgressStep() {
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
           {renderDownloadCard(
-            'Transcription Engine',
+            'Модель расшифровки',
             <Mic className="w-5 h-5 text-[var(--fg2)]" />,
             parakeetState,
             'Parakeet · ~670 MB',
             'MB',
             startParakeetDownload,
-            'Необязательно — or choose a model later in Settings → Transcription'
+            'Необязательно — модель можно выбрать позже в настройках расшифровки'
           )}
 
           {renderDownloadCard(
-            'Summary Engine',
+            'Модель для сути',
             <Sparkles className="w-5 h-5 text-[var(--fg2)]" />,
             summaryState,
             getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
             'MiB',
             startSummaryDownload,
-            'Необязательно — or use GigaChat / DeepSeek (Settings → Providers)'
+            'Необязательно — можно использовать GigaChat или DeepSeek из раздела «Провайдеры»'
           )}
         </div>
 
@@ -520,16 +520,16 @@ export function DownloadProgressStep() {
           <Button
             onClick={handleContinue}
             disabled={isCompleting}
-            className="w-full h-11 bg-[var(--fg3)] hover:bg-[var(--fg3)] text-[var(--fg-inverse)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-11 w-full rounded-full bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isCompleting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : parakeetState.status === 'downloading' || summaryState.status === 'downloading' ? (
-              'Continue in background'
+              'Продолжить в фоне'
             ) : parakeetDownloaded || summaryModelDownloaded ? (
-              'Continue'
+              'Продолжить'
             ) : (
-              'Skip & continue'
+              'Пропустить и продолжить'
             )}
           </Button>
         </div>

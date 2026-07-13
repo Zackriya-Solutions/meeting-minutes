@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -146,6 +144,9 @@
     font-family: 'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--bg-canvas);
     color: var(--fg1);
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.45;
     overflow: hidden;
     height: 100%;
   }

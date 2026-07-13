@@ -42,7 +42,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
         setDetectedPath(dbPath);
         setImportState('idle');
       } else {
-        setErrorMessage('No database found at selected location. Please select the Meetily folder, backend folder, or the database file directly.');
+        setErrorMessage('База данных не найдена. Выбери папку Meetily, каталог backend или сам файл базы данных.');
         setDetectedPath(null);
         setImportState('error');
         setTimeout(() => setImportState('idle'), 3000);
@@ -66,7 +66,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       });
 
       setImportState('success');
-      toast.success('Database imported successfully! Reloading...');
+      toast.success('Данные импортированы. Перезапускаю…');
 
       // Wait 1 second for user to see success, then reload window to refresh all data
       setTimeout(() => {
@@ -76,7 +76,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       console.error('Error importing database:', error);
       setErrorMessage(String(error));
       setImportState('error');
-      toast.error(`Import failed: ${error}`);
+      toast.error(`Не удалось импортировать данные: ${error}`);
       setTimeout(() => setImportState('idle'), 3000);
     }
   };
@@ -88,7 +88,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       await invoke('initialize_fresh_database');
 
       setImportState('success');
-      toast.success('Database initialized successfully! Starting app...');
+      toast.success('Хранилище подготовлено. Запускаю Memento…');
 
       // Wait 1 second for user to see success, then reload window to start fresh
       setTimeout(() => {
@@ -98,7 +98,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
       console.error('Error initializing database:', error);
       setErrorMessage(String(error));
       setImportState('error');
-      toast.error(`Initialization failed: ${error}`);
+      toast.error(`Не удалось подготовить хранилище: ${error}`);
       setTimeout(() => setImportState('idle'), 3000);
     }
   };
@@ -119,9 +119,9 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
     <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-[600px]" onPointerDownOutside={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle className="text-2xl">Welcome to Meetily!</DialogTitle>
+          <DialogTitle className="text-2xl">Импорт данных Meetily</DialogTitle>
           <DialogDescription className="text-base pt-2">
-            Do you have data from a previous Meetily installation?
+            Если раньше ты пользовался Meetily, перенеси сохранённые встречи в Memento.
           </DialogDescription>
         </DialogHeader>
 
@@ -135,7 +135,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
           {/* Browse Section */}
           <div className="space-y-3">
             <p className="text-sm text-[var(--fg2)]">
-              Select your previous Meetily folder, backend directory, or database file:
+              Выбери старую папку Meetily, каталог backend или файл базы данных.
             </p>
 
             <button
@@ -151,7 +151,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
               ) : (
                 <>
                   <FolderOpen className="h-5 w-5" />
-                  <span>Browse for Database</span>
+                  <span>Выбрать базу данных</span>
                 </>
               )}
             </button>
@@ -163,7 +163,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
               <div className="flex items-start gap-2">
                 <CheckCircle2 className="h-5 w-5 text-[var(--success)] mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--success)]">Database found!</p>
+                  <p className="text-sm font-medium text-[var(--success)]">База данных найдена</p>
                   <p className="text-xs text-[var(--success)] mt-1 break-all">{detectedPath}</p>
                 </div>
               </div>
@@ -192,17 +192,17 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
               {importState === 'importing' ? (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>Importing...</span>
+                  <span>Импортирую…</span>
                 </>
               ) : importState === 'success' ? (
                 <>
                   <CheckCircle2 className="h-5 w-5" />
-                  <span>Success!</span>
+                  <span>Готово</span>
                 </>
               ) : (
                 <>
                   <Database className="h-5 w-5" />
-                  <span>Import Database</span>
+                  <span>Импортировать данные</span>
                 </>
               )}
             </button>
@@ -212,7 +212,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
                 <div className="w-full border-t border-[var(--border-strong)]"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-[var(--bg-canvas)] text-[var(--fg2)]">or</span>
+                <span className="bg-[var(--bg-canvas)] px-2 text-[var(--fg2)]">или</span>
               </div>
             </div>
 

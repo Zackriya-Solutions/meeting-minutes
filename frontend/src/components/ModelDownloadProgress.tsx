@@ -22,7 +22,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
         <div className="flex items-center space-x-2">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--gold-border)]"></div>
           <span className="text-sm font-medium text-[var(--gold)]">
-            {isCompleted ? 'Finalizing...' : `Downloading ${modelName}`}
+            {isCompleted ? 'Завершаю…' : `Загружаю ${modelName}`}
           </span>
         </div>
       </div>
@@ -44,7 +44,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
       
       {isCompleted && (
         <div className="mt-2 text-xs text-[var(--success)]">
-          ✓ Download completed, loading model...
+          Загрузка завершена, запускаю модель…
         </div>
       )}
     </div>
@@ -114,15 +114,15 @@ export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: 
     <div className="bg-[var(--bg-sheet)] rounded-lg p-3 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-[var(--fg2)]">
-          📦 {downloadedModels} of {totalModels} models available
+          Доступно моделей: {downloadedModels} из {totalModels}
         </span>
         <span className="text-[var(--fg2)]">
-          💾 {formatSize(totalSizeMb)} total
+          Всего {formatSize(totalSizeMb)}
         </span>
       </div>
       {downloadedModels > 0 && (
         <div className="mt-1 text-xs text-[var(--success)]">
-          ✓ Models run locally - no internet required for transcription
+          Модели работают локально — интернет для расшифровки не нужен
         </div>
       )}
     </div>

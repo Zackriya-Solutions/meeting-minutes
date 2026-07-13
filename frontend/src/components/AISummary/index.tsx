@@ -700,7 +700,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       {/* <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <span className="text-2xl">✨</span>
-          <h2 className="text-2xl font-semibold bg-gradient-to-r from-[var(--fg1)] to-[var(--fg1)] bg-clip-text text-transparent">
+          <h2 className="text-2xl font-semibold text-[var(--fg1)]">
             AI Enhanced Summary
           </h2>
         </div>
@@ -774,7 +774,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             }}
             className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-md flex items-center space-x-1"
           >
-            <span>📋</span>
+            <Copy className="h-4 w-4" />
             <span>Скопировать</span>
           </button>
           <button

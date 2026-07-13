@@ -30,12 +30,12 @@ export function SetupOverviewStep() {
     {
       number: 1,
       type: 'transcription',
-      title: 'Download Transcription Engine',
+      title: 'Модель расшифровки',
     },
     {
       number: 2,
       type: 'summarization',
-      title: 'Download Summarization Engine',
+      title: 'Модель для создания сути',
     },
   ];
 
@@ -45,8 +45,8 @@ export function SetupOverviewStep() {
 
   return (
     <OnboardingContainer
-      title="Setup Overview"
-      description="Memento requires local transcription and summarization models to work."
+      title="Подготовим Memento"
+      description="Выбери локальные модели для расшифровки и создания сути."
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
@@ -62,7 +62,7 @@ export function SetupOverviewStep() {
                 >
                   <div className="flex-1 ml-1">
                     <h3 className="font-medium text-[var(--fg1)] flex items-center gap-2">
-                        Step {step.number} :  {step.title}
+                        Шаг {step.number} · {step.title}
 
                         {step.type === "summarization" && (
                             <TooltipProvider>
@@ -73,8 +73,7 @@ export function SetupOverviewStep() {
                                 </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
-                                You can also select external AI providers like OpenAI, Claude, or
-                                Ollama for summary generation in settings.
+                                Позже в настройках можно выбрать внешнего провайдера, например GigaChat, OpenAI или Ollama.
                                 </TooltipContent>
                             </Tooltip>
                             </TooltipProvider>
@@ -92,18 +91,18 @@ export function SetupOverviewStep() {
         <div className="w-full max-w-xs space-y-4">
           <Button
             onClick={handleContinue}
-            className="w-full h-11 bg-[var(--fg3)] hover:bg-[var(--fg3)] text-[var(--fg-inverse)]"
+            className="h-11 w-full rounded-full bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
           >
-            Let's Go
+            Продолжить
           </Button>
           <div className="text-center">
             <a
-              href="https://github.com/Zackriya-Solutions/meeting-minutes"
+              href="https://github.com/andyzt/meet_at_giga/issues"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-[var(--fg2)] hover:underline"
             >
-              Report issues on GitHub
+              Сообщить о проблеме на GitHub
             </a>
           </div>
         </div>

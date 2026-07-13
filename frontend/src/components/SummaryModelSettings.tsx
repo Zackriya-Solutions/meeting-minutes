@@ -68,7 +68,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       }
     } catch (error) {
       console.error('Failed to fetch model config:', error);
-      toast.error('Failed to load model settings');
+      toast.error('Не удалось загрузить настройки модели');
     }
   }, []);
 
@@ -121,10 +121,10 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Model settings saved successfully');
+      toast.success('Настройки модели сохранены');
     } catch (error) {
       console.error('Error saving model config:', error);
-      toast.error('Failed to save model settings');
+      toast.error('Не удалось сохранить настройки модели');
     }
   };
 
@@ -133,8 +133,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">Auto Summary</h3>
-            <p className="text-sm text-[var(--fg2)]">Auto Generating summary after meeting completion(Stopping)</p>
+            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">Автоматическая суть</h3>
+            <p className="text-sm text-[var(--fg2)]">Создавать суть после завершения встречи</p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
@@ -143,9 +143,9 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       <SummaryLanguageSettings />
 
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <h3 className="text-lg font-semibold mb-4">Summary Model Configuration</h3>
+        <h3 className="text-lg font-semibold mb-4">Модель для сути</h3>
         <p className="text-sm text-[var(--fg2)] mb-6">
-          Configure the AI model used for generating meeting summaries.
+          Выбери модель, которая будет создавать суть встречи.
         </p>
 
         <ModelSettingsModal

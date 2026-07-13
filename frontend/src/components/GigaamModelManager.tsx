@@ -50,10 +50,10 @@ export function GigaamModelManager() {
   useEffect(() => {
     refresh();
     let unProgress: (() => void) | undefined;
-    let unГотово: (() => void) | undefined;
+    let unReady: (() => void) | undefined;
     (async () => {
       unProgress = await listen<DownloadProgress>('gigaam-download-progress', (e) => setProgress(e.payload));
-      unГотово = await listen('gigaam-ready', () => {
+      unReady = await listen('gigaam-ready', () => {
         setDownloading(false);
         setSwitching(false);
         setProgress(null);
@@ -62,7 +62,7 @@ export function GigaamModelManager() {
     })();
     return () => {
       unProgress?.();
-      unГотово?.();
+      unReady?.();
     };
   }, [refresh]);
 
@@ -74,7 +74,7 @@ export function GigaamModelManager() {
         await invoke('gigaam_select_variant', { variant });
         refresh();
       } catch (e) {
-        setError(typeof e === 'string' ? e : 'Failed to switch variant.');
+        setError(typeof e === 'string' ? e : 'Не удалось сменить вариант.');
       } finally {
         setSwitching(false);
       }
@@ -90,7 +90,7 @@ export function GigaamModelManager() {
       await invoke('gigaam_download_model');
       refresh();
     } catch (e) {
-      setError(typeof e === 'string' ? e : 'Download failed.');
+      setError(typeof e === 'string' ? e : 'Не удалось загрузить модель.');
       setDownloading(false);
     }
   }, [refresh]);
@@ -105,14 +105,14 @@ export function GigaamModelManager() {
     <div className="rounded-xl border border-[var(--border-subtle)] p-5">
       <div className="mb-1 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--fg1)]">GigaAM v3 (Russian)</h3>
+          <h3 className="text-sm font-semibold text-[var(--fg1)]">GigaAM v3 (русский)</h3>
           <p className="text-xs text-[var(--fg3)]">
-            Sber ASR · punctuated &amp; capitalized · fully local
+            Распознавание Сбера · пунктуация и регистр · полностью локально
           </p>
         </div>
         {selectedActive ? (
           <span className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--success)]">
-            <CheckCircle2 className="h-3.5 w-3.5" /> Active
+            <CheckCircle2 className="h-3.5 w-3.5" /> Активна
           </span>
         ) : present ? (
           <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Установлено — перезапусти приложение</span>
@@ -132,12 +132,12 @@ export function GigaamModelManager() {
         >
           {(status?.variants ?? []).map((v) => (
             <option key={v.id} value={v.id}>
-              {v.label} · ~{v.size_mb} MB{v.present ? ' · installed' : ''}
+              {v.label} · ~{v.size_mb} МБ{v.present ? ' · установлена' : ''}
             </option>
           ))}
         </select>
         <p className="mt-1 text-xs text-[var(--fg3)]">
-          RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger &amp; slower).
+          RNN-T обычно точнее CTC; fp32 не теряет качество при квантовании, но занимает больше места и работает медленнее.
         </p>
       </div>
 
@@ -147,7 +147,7 @@ export function GigaamModelManager() {
             <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Downloading{progress ? ` ${progress.file}` : '…'}
+                Загружаю{progress ? ` ${progress.file}` : '…'}
               </span>
               {progress && progress.total > 0 && (
                 <span>
@@ -165,12 +165,12 @@ export function GigaamModelManager() {
         ) : switching ? (
           <div className="flex items-center gap-2 text-sm text-[var(--fg2)]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading {selected?.label ?? 'variant'}…
+            Загружаю {selected?.label ?? 'вариант'}…
           </div>
         ) : selectedActive ? (
           <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
             <CheckCircle2 className="h-4 w-4" />
-            Готово — recordings will transcribe with this variant
+            Готово — новые записи будут расшифрованы этим вариантом
           </div>
         ) : (
           <button
@@ -178,15 +178,15 @@ export function GigaamModelManager() {
             className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold)]"
           >
             <Download className="h-4 w-4" />
-            {present ? 'Re-download variant' : `Download variant (~${selected?.size_mb ?? '?'} MB)`}
+            {present ? 'Загрузить вариант снова' : `Загрузить вариант (~${selected?.size_mb ?? '?'} МБ)`}
           </button>
         )}
 
         {/* Loaded-vs-selected mismatch hint (e.g. selected a new variant that still needs a download) */}
         {!switching && !downloading && loaded && !selectedActive && (
-          <p className="mt-2 text-xs text-amber-600">
-            Currently running <span className="font-medium">{status?.loaded_variant}</span>.
-            {present ? ' Restart to load the selected variant.' : ' Download the selected variant to switch.'}
+          <p className="mt-2 text-xs text-[var(--gold)]">
+            Сейчас работает <span className="font-medium">{status?.loaded_variant}</span>.
+            {present ? ' Перезапусти приложение, чтобы применить выбранный вариант.' : ' Загрузи выбранный вариант для переключения.'}
           </p>
         )}
 

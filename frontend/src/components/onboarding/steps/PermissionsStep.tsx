@@ -32,7 +32,7 @@ export function PermissionsStep() {
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Please enable microphone access in System Preferences > Security & Privacy > Microphone');
+        alert('Разреши доступ к микрофону в настройках конфиденциальности системы.');
       }
       return;
     }
@@ -64,7 +64,7 @@ export function PermissionsStep() {
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture');
+        alert('Разреши захват аудио в настройках конфиденциальности системы.');
       }
       return;
     }
@@ -152,7 +152,7 @@ export function PermissionsStep() {
 
           <button
             onClick={handleSkip}
-            className="text-sm text-neutral-500 hover:text-neutral-700 transition-colors"
+            className="text-sm text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
           >
             Сделать позже
           </button>

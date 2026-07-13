@@ -249,7 +249,7 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="bg-gradient-to-r from-[var(--gold-soft)] to-[var(--gold-soft)] hover:bg-[var(--gold-soft)] border-[color-mix(in_srgb,var(--danger)_42%,transparent)] xl:px-4"
+          className="border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[var(--gold-soft)] hover:bg-[var(--state-hover-bg)] xl:px-4"
           onClick={() => {
             Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
@@ -263,7 +263,7 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="bg-gradient-to-r from-[var(--gold)] to-[var(--gold)] hover:bg-[var(--gold-soft)] border-[var(--gold-border)] xl:px-4"
+          className="border-[var(--gold-border)] bg-[var(--gold)] hover:bg-[var(--gold-active)] xl:px-4"
           onClick={() => {
             Analytics.trackButtonClick('generate_summary', 'meeting_details');
             checkOllamaModelsAndGenerate();

@@ -292,7 +292,7 @@ export function SettingsModals({
               onClick={() => onClose('modelSelector')}
               className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] rounded-md hover:bg-[var(--bg-elevated)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--border-strong)]"
             >
-              {messages.modelSelector ? 'Cancel' : 'Done'}
+              {messages.modelSelector ? 'Отмена' : 'Готово'}
             </button>
           </div>
         </div>

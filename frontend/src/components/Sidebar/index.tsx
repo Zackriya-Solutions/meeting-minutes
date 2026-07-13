@@ -78,6 +78,26 @@ const Sidebar: React.FC = () => {
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (!['r', 'k', 'm'].includes(key)) return;
+      event.preventDefault();
+
+      if (key === 'k') {
+        router.push('/search');
+      } else if (key === 'r' && !isRecording) {
+        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+      } else if (key === 'm' && isRecording) {
+        window.dispatchEvent(new CustomEvent('memento-mark-moment'));
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [isRecording, router]);
+
   // State for edit modal
   const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
     isOpen: false,
@@ -667,7 +687,7 @@ const Sidebar: React.FC = () => {
                         setDeleteModalState({ isOpen: true, itemId: item.id });
                       }}
                       className="hover:text-[var(--danger)] p-1 rounded-md hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] flex-shrink-0"
-                      aria-label="Delete meeting"
+                      aria-label="Удалить встречу"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -913,13 +933,13 @@ const Sidebar: React.FC = () => {
               onClick={handleEditCancel}
               className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-md transition-colors"
             >
-              Cancel
+              Отмена
             </button>
             <button
               onClick={handleEditConfirm}
               className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold)] rounded-md transition-colors"
             >
-              Save
+              Сохранить
             </button>
           </DialogFooter>
         </DialogContent>

@@ -40,10 +40,10 @@ export function EmbeddingModelSettings() {
   useEffect(() => {
     refresh();
     let unProgress: (() => void) | undefined;
-    let unГотово: (() => void) | undefined;
+    let unReady: (() => void) | undefined;
     (async () => {
       unProgress = await listen<DownloadProgress>('embedder-download-progress', (e) => setProgress(e.payload));
-      unГотово = await listen('embedder-ready', () => {
+      unReady = await listen('embedder-ready', () => {
         setDownloading(false);
         setProgress(null);
         refresh();
@@ -51,7 +51,7 @@ export function EmbeddingModelSettings() {
     })();
     return () => {
       unProgress?.();
-      unГотово?.();
+      unReady?.();
     };
   }, [refresh]);
 
@@ -64,7 +64,7 @@ export function EmbeddingModelSettings() {
       // Success is also signalled by the `embedder-ready` event; refresh defensively.
       refresh();
     } catch (e) {
-      setError(typeof e === 'string' ? e : 'Download failed.');
+      setError(typeof e === 'string' ? e : 'Не удалось загрузить модель.');
       setDownloading(false);
     }
   }, [refresh]);
@@ -84,9 +84,9 @@ export function EmbeddingModelSettings() {
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold text-[var(--fg1)]">Модель смыслового поиска</h3>
             <p className="mt-1 text-sm leading-relaxed text-[var(--fg2)]">
-              Powers meaning-based (vector) search and Chat with archive. Runs fully locally —{' '}
-              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}-dim), ~470&nbsp;MB.
-              Until it&apos;s installed, Search and Chat use keyword (FTS) matching only.
+              Нужна для смыслового поиска и чата с архивом. Работает локально —{' '}
+              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim} измерений), ~470&nbsp;МБ.
+              До установки поиск и чат используют только совпадения по словам.
             </p>
 
             <div className="mt-4">
@@ -95,7 +95,7 @@ export function EmbeddingModelSettings() {
                   <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
                     <span className="flex items-center gap-1.5">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Downloading{progress ? ` ${progress.file}` : '…'}
+                      Загружаю{progress ? ` ${progress.file}` : '…'}
                     </span>
                     {progress && progress.total > 0 && (
                       <span>
@@ -113,20 +113,20 @@ export function EmbeddingModelSettings() {
               ) : loaded ? (
                 <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
                   <CheckCircle2 className="h-4 w-4" />
-                  Active — semantic search enabled
+                  Активна — смысловой поиск включён
                 </div>
               ) : present ? (
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="flex items-center gap-2 text-sm text-[var(--fg2)]">
                     <CheckCircle2 className="h-4 w-4 text-[var(--fg3)]" />
-                    Installed — restart the app to activate
+                    Установлена — перезапусти приложение для активации
                   </span>
                   <button
                     onClick={download}
                     className="flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--fg2)] hover:bg-[var(--bg-elevated)]"
                   >
                     <RotateCw className="h-3.5 w-3.5" />
-                    Re-download
+                    Загрузить снова
                   </button>
                 </div>
               ) : (
@@ -135,7 +135,7 @@ export function EmbeddingModelSettings() {
                   className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold)]"
                 >
                   <Download className="h-4 w-4" />
-                  Download model
+                  Загрузить модель
                 </button>
               )}
 
@@ -151,8 +151,8 @@ export function EmbeddingModelSettings() {
       </div>
 
       <p className="mt-3 px-1 text-xs text-[var(--fg3)]">
-        Embeddings and search stay on-device. Only summaries, extraction, and chat prompts are sent to your
-        configured LLM provider (GigaChat / DeepSeek).
+        Индексы и поиск остаются на устройстве. Настроенному провайдеру модели отправляются только запросы
+        для сводок, извлечения данных и чата.
       </p>
     </div>
   );

@@ -55,13 +55,13 @@ export function PermissionWarning({
     <div className="max-w-md mb-4 space-y-3">
       {/* Combined Permission Warning - Show when either permission is missing */}
       {(!hasMicrophone || !hasSystemAudio) && (
-        <Alert variant="destructive" className="border-amber-400 bg-amber-50">
-          <AlertTriangle className="h-5 w-5 text-amber-600" />
-          <AlertTitle className="text-amber-900 font-semibold">
+        <Alert variant="destructive" className="border-[var(--gold-border)] bg-[var(--gold-soft)]">
+          <AlertTriangle className="h-5 w-5 text-[var(--gold)]" />
+          <AlertTitle className="font-semibold text-[var(--fg1)]">
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Permissions Required' : !hasMicrophone ? 'Microphone Permission Required' : 'System Audio Permission Required'}
+              {!hasMicrophone && !hasSystemAudio ? 'Нужны разрешения' : !hasMicrophone ? 'Нужен доступ к микрофону' : 'Нужен доступ к системному звуку'}
             </div>
           </AlertTitle>
           {/* Action Buttons */}
@@ -69,10 +69,10 @@ export function PermissionWarning({
             {isMacOS && !hasMicrophone && (
               <button
                 onClick={openMicrophoneSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
               >
                 <Mic className="h-4 w-4" />
-                Open Microphone Settings
+                Открыть настройки микрофона
               </button>
             )}
             {isMacOS && !hasSystemAudio && (
@@ -81,24 +81,24 @@ export function PermissionWarning({
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold)] rounded-md transition-colors"
               >
                 <Speaker className="h-4 w-4" />
-                Open Screen Настройки записи
+                Открыть настройки записи экрана
               </button>
             )}
             <button
               onClick={onRecheck}
               disabled={isRechecking}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--fg1)] transition-colors hover:bg-[var(--state-hover-bg)] disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
-              Recheck
+              Проверить снова
             </button>
           </div>
-          <AlertDescription className="text-amber-800 mt-2">
+          <AlertDescription className="mt-2 text-[var(--fg2)]">
             {/* Microphone Warning */}
             {!hasMicrophone && (
               <>
                 <p className="mb-3">
-                  Memento needs access to your microphone to record meetings. No microphone devices were detected.
+                  Memento нужен доступ к микрофону для записи встреч. Микрофон не обнаружен.
                 </p>
                 <div className="space-y-2 text-sm mb-4">
                   <p className="font-medium">Проверь:</p>
@@ -116,8 +116,8 @@ export function PermissionWarning({
               <>
                 <p className="mb-3">
                   {hasMicrophone
-                    ? 'System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.'
-                    : 'System audio capture is also not available.'}
+                    ? 'Системный звук недоступен. Можно записывать с микрофона, но звук компьютера не попадёт в запись.'
+                    : 'Системный звук тоже недоступен.'}
                 </p>
                 {isMacOS && (
                   <div className="space-y-2 text-sm mb-4">
