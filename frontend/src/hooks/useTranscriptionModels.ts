@@ -8,11 +8,15 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet' | 'gigaam';
+  provider: 'whisper' | 'parakeet' | 'gigaam' | 'salutespeech';
   name: string;
   displayName: string;
   size_mb: number;
 }
+
+// Must match SALUTE_MODEL in TranscriptSettings.tsx (the model string persisted for the
+// SaluteSpeech provider). The actual recognition model is chosen in Settings.
+const SALUTE_MODEL_NAME = 'salutespeech-stream-v2';
 
 interface GigaamStatus {
   model: string;
@@ -66,6 +70,21 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch GigaAM status:', err);
     }
 
+    // SaluteSpeech (cloud) — only offered when a Sber Authorization Key is configured.
+    try {
+      const settings = await invoke<Record<string, string>>('get_app_settings');
+      if (settings?.['salutespeech.auth_key'] && settings['salutespeech.auth_key'].length > 0) {
+        allModels.push({
+          provider: 'salutespeech' as const,
+          name: SALUTE_MODEL_NAME,
+          displayName: '☁️ SaluteSpeech (Sber cloud)',
+          size_mb: 0,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch SaluteSpeech settings:', err);
+    }
+
     // Fetch Whisper models
     try {
       const whisperModels = await invoke<RawModelInfo[]>('whisper_get_available_models');
@@ -111,7 +130,8 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
         (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
-        (configuredProvider === 'gigaam' && m.provider === 'gigaam')
+        (configuredProvider === 'gigaam' && m.provider === 'gigaam') ||
+        (configuredProvider === 'salutespeech' && m.provider === 'salutespeech')
     );
 
     // Only set default model if user hasn't manually selected one

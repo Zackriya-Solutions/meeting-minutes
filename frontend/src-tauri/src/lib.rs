@@ -54,6 +54,7 @@ pub mod openrouter;
 pub mod gigaam_engine;
 pub mod parakeet_engine;
 pub mod pipeline;
+pub mod salutespeech;
 pub mod search;
 pub mod state;
 pub mod summary;

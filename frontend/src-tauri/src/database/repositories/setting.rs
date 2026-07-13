@@ -219,6 +219,7 @@ impl SettingsRepository {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(None), // Parakeet doesn't need an API key
             "gigaam" => return Ok(None),   // GigaAM is a local model — no API key
+            "salutespeech" => return Ok(None), // Cloud; auth key lives in app_settings_kv
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
