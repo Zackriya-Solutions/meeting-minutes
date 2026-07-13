@@ -13,21 +13,24 @@ import { ProviderSettings } from '@/components/ProviderSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Icon, MementoIconName } from '@/components/memento/Icon';
+import { useLanguage, type Lang } from '@/lib/i18n';
 
-// Tabs configuration (constant)
+// Tabs configuration (constant). `label` is the English key; it is translated at
+// render time via `t()`.
 const TABS = [
-  { value: 'general', label: 'Основное', icon: 'settings' },
-  { value: 'recording', label: 'Запись', icon: 'mic' },
-  { value: 'Transcriptionmodels', label: 'Расшифровка', icon: 'transcript' },
-  { value: 'summaryModels', label: 'Суть', icon: 'spark' },
-  { value: 'providers', label: 'Провайдеры', icon: 'library' },
-  { value: 'search', label: 'Поиск', icon: 'search' },
-  { value: 'beta', label: 'Эксперименты', icon: 'plus' }
+  { value: 'general', label: 'General', icon: 'settings' },
+  { value: 'recording', label: 'Recordings', icon: 'mic' },
+  { value: 'Transcriptionmodels', label: 'Transcription', icon: 'transcript' },
+  { value: 'summaryModels', label: 'Summary', icon: 'spark' },
+  { value: 'providers', label: 'Providers', icon: 'library' },
+  { value: 'search', label: 'Search', icon: 'search' },
+  { value: 'beta', label: 'Beta', icon: 'plus' }
 ] as const satisfies ReadonlyArray<{ value: string; label: string; icon: MementoIconName }>;
 
 export default function SettingsPage() {
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const { t, lang, setLang } = useLanguage();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
@@ -61,11 +64,33 @@ export default function SettingsPage() {
             <button
               onClick={() => router.back()}
               className="mm-icon-button mm-hover"
-              aria-label="Назад"
+              aria-label={t('Back')}
             >
               <Icon name="back" />
             </button>
-            <h1 className="mm-page-title">Настройки</h1>
+            <h1 className="mm-page-title">{t('Settings')}</h1>
+
+            {/* Interface language toggle */}
+            <div
+              className="ml-auto flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1"
+              role="group"
+              aria-label={t('Interface language')}
+            >
+              {(['ru', 'en'] as const).map((l: Lang) => (
+                <button
+                  key={l}
+                  onClick={() => setLang(l)}
+                  aria-pressed={lang === l}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    lang === l
+                      ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
+                      : 'text-[var(--fg2)] hover:text-[var(--fg1)]'
+                  }`}
+                >
+                  {l === 'ru' ? 'Рус' : 'Eng'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -84,7 +109,7 @@ export default function SettingsPage() {
                     className="mm-tab"
                   >
                     <Icon name={tab.icon} size={16} />
-                    {tab.label}
+                    {t(tab.label)}
                   </TabsTrigger>
                 );
               })}

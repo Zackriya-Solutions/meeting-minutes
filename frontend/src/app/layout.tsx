@@ -9,6 +9,7 @@ import '@fontsource/onest/700.css'
 import '@fontsource/space-grotesk/500.css'
 import '@fontsource/space-grotesk/600.css'
 import Sidebar from '@/components/Sidebar'
+import { LanguageProvider } from '@/lib/i18n'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
@@ -233,6 +234,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
+        <LanguageProvider>
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
@@ -277,6 +279,7 @@ export default function RootLayout({
         </AnalyticsProvider>
 
         <Toaster position="bottom-center" richColors closeButton />
+        </LanguageProvider>
       </body>
     </html>
   )

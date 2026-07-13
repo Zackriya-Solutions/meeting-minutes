@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { useT } from '@/lib/i18n';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -19,6 +20,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const t = useT();
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -111,13 +113,13 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       const store = await Store.load('preferences.json');
       await store.set('show_recording_notification', enabled);
       await store.save();
-      toast.success('Настройка сохранена');
+      toast.success(t('Preference saved'));
       await Analytics.track('recording_notification_preference_changed', {
         enabled: enabled.toString()
       });
     } catch (error) {
       console.error('Failed to save notification preference:', error);
-      toast.error('Не удалось сохранить настройку');
+      toast.error(t('Failed to save preference'));
     }
   };
 
@@ -128,14 +130,14 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       onSave?.(prefs);
 
       // Show success toast with device details
-      const micDevice = prefs.preferred_mic_device || 'Default';
-      const systemDevice = prefs.preferred_system_device || 'Default';
-      toast.success("Аудиоустройства сохранены", {
-        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+      const micDevice = prefs.preferred_mic_device || t('Default');
+      const systemDevice = prefs.preferred_system_device || t('Default');
+      toast.success(t("Device preferences saved"), {
+        description: `${t('Microphone:')} ${micDevice}, ${t('System Audio:')} ${systemDevice}`
       });
     } catch (error) {
       console.error('Failed to save recording preferences:', error);
-      toast.error("Не удалось сохранить аудиоустройства", {
+      toast.error(t("Failed to save device preferences"), {
         description: error instanceof Error ? error.message : String(error)
       });
     } finally {
@@ -155,18 +157,18 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold mb-4">Настройки записи</h3>
+        <h3 className="text-lg font-semibold mb-4">{t('Recording Settings')}</h3>
         <p className="text-sm text-[var(--fg2)] mb-6">
-          Configure how your audio recordings are saved during meetings.
+          {t('Configure how your audio recordings are saved during meetings.')}
         </p>
       </div>
 
       {/* Auto Save Toggle */}
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
-          <div className="font-medium">Сохранять аудиозаписи</div>
+          <div className="font-medium">{t('Save Audio Recordings')}</div>
           <div className="text-sm text-[var(--fg2)]">
-            Automatically save audio files when recording stops
+            {t('Automatically save audio files when recording stops')}
           </div>
         </div>
         <Switch
@@ -180,25 +182,25 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {preferences.auto_save && (
         <div className="space-y-4">
           <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">Папка сохранения</div>
+            <div className="font-medium mb-2">{t('Save Location')}</div>
             <div className="text-sm text-[var(--fg2)] mb-3 break-all">
-              {preferences.save_folder || 'Default folder'}
+              {preferences.save_folder || t('Default folder')}
             </div>
             <button
               onClick={handleOpenFolder}
               className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-sheet)] transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
-              Open Folder
+              {t('Open Folder')}
             </button>
           </div>
 
           <div className="p-4 border rounded-lg bg-[var(--gold-soft)]">
             <div className="text-sm text-[var(--gold)]">
-              <strong>Формат файла:</strong> {preferences.file_format.toUpperCase()} files
+              <strong>{t('File Format:')}</strong> {preferences.file_format.toUpperCase()} {t('files')}
             </div>
             <div className="text-xs text-[var(--gold)] mt-1">
-              Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.{preferences.file_format}
+              {t('Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.')}{preferences.file_format}
             </div>
           </div>
         </div>
@@ -208,7 +210,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {!preferences.auto_save && (
         <div className="p-4 border rounded-lg bg-[var(--gold-soft)]">
           <div className="text-sm text-[var(--gold)]">
-            Audio recording is disabled. Enable "Сохранять аудиозаписи" to automatically save your meeting audio.
+            {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
           </div>
         </div>
       )}
@@ -216,9 +218,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Recording Notification Toggle */}
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
-          <div className="font-medium">Уведомление о начале записи</div>
+          <div className="font-medium">{t('Recording Start Notification')}</div>
           <div className="text-sm text-[var(--fg2)]">
-            Show reminder to inform participants when recording starts
+            {t('Show reminder to inform participants when recording starts')}
           </div>
         </div>
         <Switch
@@ -230,9 +232,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Device Настройки */}
       <div className="space-y-4">
         <div className="border-t pt-6">
-          <h4 className="text-base font-medium text-[var(--fg1)] mb-4">Default Аудиоустройства</h4>
+          <h4 className="text-base font-medium text-[var(--fg1)] mb-4">{t('Default Audio Devices')}</h4>
           <p className="text-sm text-[var(--fg2)] mb-4">
-            Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
+            {t('Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.')}
           </p>
 
           <div className="border rounded-lg p-4 bg-[var(--bg-sheet)]">

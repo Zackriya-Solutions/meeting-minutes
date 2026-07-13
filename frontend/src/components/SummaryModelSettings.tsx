@@ -7,6 +7,7 @@ import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
@@ -22,6 +23,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
   });
 
   const { isAutoSummary, toggleIsAutoSummary } = useConfig();
+  const t = useT();
 
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
@@ -68,7 +70,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       }
     } catch (error) {
       console.error('Failed to fetch model config:', error);
-      toast.error('Не удалось загрузить настройки модели');
+      toast.error(t('Failed to load model settings'));
     }
   }, []);
 
@@ -121,10 +123,10 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Настройки модели сохранены');
+      toast.success(t('Model settings saved successfully'));
     } catch (error) {
       console.error('Error saving model config:', error);
-      toast.error('Не удалось сохранить настройки модели');
+      toast.error(t('Failed to save model settings'));
     }
   };
 
@@ -133,8 +135,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">Автоматическая суть</h3>
-            <p className="text-sm text-[var(--fg2)]">Создавать суть после завершения встречи</p>
+            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Auto Summary')}</h3>
+            <p className="text-sm text-[var(--fg2)]">{t('Auto Generating summary after meeting completion(Stopping)')}</p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
@@ -143,9 +145,9 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       <SummaryLanguageSettings />
 
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <h3 className="text-lg font-semibold mb-4">Модель для сути</h3>
+        <h3 className="text-lg font-semibold mb-4">{t('Summary Model Configuration')}</h3>
         <p className="text-sm text-[var(--fg2)] mb-6">
-          Выбери модель, которая будет создавать суть встречи.
+          {t('Configure the AI model used for generating meeting summaries.')}
         </p>
 
         <ModelSettingsModal

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Label } from './ui/label';
 import { GigaamModelManager } from './GigaamModelManager';
+import { useT } from '@/lib/i18n';
 
 export interface TranscriptModelProps {
     // Union kept broad for backward compatibility with stored configs; the UI only
@@ -25,6 +26,7 @@ const GIGAAM_MODEL = 'gigaam-v3-e2e-ctc';
  * provider (Whisper/Parakeet/…) is migrated to GigaAM on mount.
  */
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig }: TranscriptSettingsProps) {
+    const t = useT();
     useEffect(() => {
         if (transcriptModelConfig.provider !== 'gigaam') {
             const cfg: TranscriptModelProps = { provider: 'gigaam', model: GIGAAM_MODEL, apiKey: null };
@@ -37,10 +39,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     return (
         <div className="space-y-4 pb-6">
             <div>
-                <Label className="mb-1 block text-sm font-medium text-[var(--fg2)]">Расшифровка</Label>
+                <Label className="mb-1 block text-sm font-medium text-[var(--fg2)]">{t('Transcription')}</Label>
                 <p className="text-sm text-[var(--fg2)]">
-                    Memento расшифровывает через <span className="font-medium text-[var(--fg2)]">GigaAM v3</span> от Сбера —
-                    on-device Russian speech recognition with punctuation and capitalization.
+                    {t('Memento transcribes with ')}
+                    <span className="font-medium text-[var(--fg2)]">GigaAM v3</span>
+                    {t(' by Sber — on-device Russian speech recognition with punctuation and capitalization.')}
                 </p>
             </div>
             <GigaamModelManager />
