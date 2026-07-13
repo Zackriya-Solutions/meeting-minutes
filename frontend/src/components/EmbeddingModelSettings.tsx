@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Search, Download, CheckCircle2, Loader2, AlertTriangle, RotateCw } from 'lucide-react';
+import { Search, Download, CheckCircle2, Loader2, AlertTriangle, RotateCw } from '@/components/memento/LucideCompat';
 
 // Mirrors the Rust `embedder_status` payload (pipeline::commands).
 interface EmbedderStatus {

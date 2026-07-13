@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { FileQuestion, Sparkles } from 'lucide-react';
+import { FileQuestion, Sparkles } from '@/components/memento/LucideCompat';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,

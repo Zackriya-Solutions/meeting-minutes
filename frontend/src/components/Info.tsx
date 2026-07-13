@@ -1,5 +1,5 @@
 import React from "react";
-import { Info as InfoIcon } from "lucide-react";
+import { Info as InfoIcon } from '@/components/memento/LucideCompat';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";

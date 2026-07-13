@@ -1,7 +1,7 @@
 "use client"
 
 import { Switch } from "./ui/switch"
-import { FlaskConical, AlertCircle } from "lucide-react"
+import { FlaskConical, AlertCircle } from '@/components/memento/LucideCompat'
 import { useConfig } from "@/contexts/ConfigContext"
 import {
   BetaFeatureKey,

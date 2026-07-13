@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Speaker, X } from 'lucide-react';
+import { Speaker, X } from '@/components/memento/LucideCompat';
 import { Button } from '@/components/ui/button';
 
 interface AudioOutputInfo {

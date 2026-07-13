@@ -12,7 +12,7 @@ import {
   HardDrive,
   ChevronDown,
   ChevronUp,
-} from 'lucide-react';
+} from '@/components/memento/LucideCompat';
 import {
   Dialog,
   DialogContent,

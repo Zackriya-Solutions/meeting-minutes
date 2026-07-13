@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Info } from 'lucide-react';
+import { Info } from '@/components/memento/LucideCompat';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';

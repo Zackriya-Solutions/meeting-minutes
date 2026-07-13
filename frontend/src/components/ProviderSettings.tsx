@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from '@/components/memento/LucideCompat';
 
 type Settings = Record<string, string>;
 

@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertCircle, CheckCircle2, Clock, FileText, Trash2, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, FileText, Trash2, XCircle } from '@/components/memento/LucideCompat';
 import {
   Dialog,
   DialogContent,

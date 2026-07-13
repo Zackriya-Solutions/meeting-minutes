@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Lock, Download, CheckCircle2, BrainCircuit } from 'lucide-react';
+import { Check, Lock, Download, CheckCircle2, BrainCircuit } from '@/components/memento/LucideCompat';
 
 interface ProgressIndicatorProps {
   current: number;

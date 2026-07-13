@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Users, Loader2, Download } from "lucide-react";
+import { Users, Loader2, Download } from '@/components/memento/LucideCompat';
 import { Button } from "../ui/button";
 import {
     Dialog,

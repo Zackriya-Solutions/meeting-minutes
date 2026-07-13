@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Download, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { Download, CheckCircle2, Loader2, AlertTriangle } from '@/components/memento/LucideCompat';
 
 interface VariantInfo {
   id: string;

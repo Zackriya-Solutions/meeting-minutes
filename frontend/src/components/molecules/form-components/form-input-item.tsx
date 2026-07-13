@@ -6,7 +6,7 @@ import {
   FormLabel,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from '@/components/memento/LucideCompat';
 import { Control } from 'react-hook-form'; // Import Control type
 import { Textarea } from '@/components/ui/textarea';
 

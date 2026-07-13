@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Users, Calendar, Tag } from 'lucide-react';
+import { Clock, Users, Calendar, Tag } from '@/components/memento/LucideCompat';
 
 interface PageProps {
   params: {

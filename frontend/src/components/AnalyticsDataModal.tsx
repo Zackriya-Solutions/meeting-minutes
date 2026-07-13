@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { X, Info, Shield } from 'lucide-react';
+import { X, Info, Shield } from '@/components/memento/LucideCompat';
 
 interface AnalyticsDataModalProps {
   isOpen: boolean;

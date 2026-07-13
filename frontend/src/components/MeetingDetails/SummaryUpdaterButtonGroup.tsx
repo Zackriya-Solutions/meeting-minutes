@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
+import { Copy, Save, Loader2, Search, FolderOpen } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
 
 interface SummaryUpdaterButtonGroupProps {

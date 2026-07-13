@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Download, X, CheckCircle2, AlertCircle, Loader2 } from '@/components/memento/LucideCompat';
 import {
   Dialog,
   DialogContent,

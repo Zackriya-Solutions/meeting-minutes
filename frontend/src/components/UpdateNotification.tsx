@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download } from 'lucide-react';
+import { Download } from '@/components/memento/LucideCompat';
 import { toast } from 'sonner';
 import { UpdateInfo } from '@/services/updateService';
 

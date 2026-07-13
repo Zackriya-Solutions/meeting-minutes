@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
-import { ExclamationTriangleIcon, CheckCircleIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
+import { AlertTriangle } from '@/components/memento/LucideCompat';
 
 interface Props {
   summary: Summary | null;
@@ -608,7 +608,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   const renderErrorState = () => (
     <div className="w-full p-4 bg-red-50 border border-red-200 rounded-lg">
       <div className="flex items-center mb-2">
-        <ExclamationTriangleIcon className="h-5 w-5 text-red-500 mr-2" />
+        <AlertTriangle className="mr-2 h-5 w-5 text-[var(--danger)]" />
         <h3 className="text-red-700 font-medium">Error Generating Summary</h3>
       </div>
       <p className="text-red-600 text-sm">{error}</p>

@@ -6,7 +6,7 @@ import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
-import { LoaderIcon } from "lucide-react";
+import { LoaderIcon } from '@/components/memento/LucideCompat';
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";

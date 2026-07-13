@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { Database, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Database, AlertCircle, Loader2, CheckCircle2 } from '@/components/memento/LucideCompat';
 
 interface HomebrewDatabaseDetectorProps {
   onImportSuccess: () => void;

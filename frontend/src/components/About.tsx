@@ -6,7 +6,7 @@ import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { UpdateDialog } from "./UpdateDialog";
 import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2 } from '@/components/memento/LucideCompat';
 import { toast } from 'sonner';
 
 

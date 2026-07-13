@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
-import { AlertTriangle, CheckCircle, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, X } from '@/components/memento/LucideCompat';
 
 interface ComplianceNotificationProps {
   isOpen: boolean;

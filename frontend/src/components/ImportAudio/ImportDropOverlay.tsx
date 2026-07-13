@@ -1,5 +1,5 @@
 import React from 'react';
-import { Upload } from 'lucide-react';
+import { Upload } from '@/components/memento/LucideCompat';
 import { getAudioFormatsDisplayList } from '@/constants/audioFormats';
 
 interface ImportDropOverlayProps {
