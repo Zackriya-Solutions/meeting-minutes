@@ -20,6 +20,10 @@
 pub mod parakeet_engine;
 pub mod model;
 pub mod commands;
+pub mod ctc;
+mod loaded_model;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod coreml_ctc;
 
 pub use parakeet_engine::{ParakeetEngine, ParakeetEngineError, QuantizationType, ModelInfo, ModelStatus, DownloadProgress};
 pub use model::{ParakeetModel, ParakeetError, TimestampedResult};

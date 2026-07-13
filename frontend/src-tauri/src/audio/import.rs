@@ -522,18 +522,21 @@ async fn run_import<R: Runtime>(
     // Split very long segments at silence boundaries for better transcription quality.
     // Hard cuts at arbitrary sample positions lose words at boundaries. Instead, scan
     // for the lowest-energy window near the target split point and cut there.
-    const MAX_SEGMENT_SAMPLES: usize = 25 * 16000; // 25 seconds at 16kHz
+    let max_segment_samples = match parakeet_engine.as_ref() {
+        Some(engine) => engine.max_segment_samples().await,
+        None => 25 * 16_000,
+    };
 
     let mut processable_segments: Vec<crate::audio::vad::SpeechSegment> = Vec::new();
     for segment in &speech_segments {
-        if segment.samples.len() > MAX_SEGMENT_SAMPLES {
+        if segment.samples.len() > max_segment_samples {
             debug!(
                 "Splitting large segment ({:.0}ms, {} samples) at silence boundaries",
                 segment.end_timestamp_ms - segment.start_timestamp_ms,
                 segment.samples.len()
             );
 
-            let sub_segments = split_segment_at_silence(segment, MAX_SEGMENT_SAMPLES);
+            let sub_segments = split_segment_at_silence(segment, max_segment_samples);
             debug!("Split into {} sub-segments", sub_segments.len());
             processable_segments.extend(sub_segments);
         } else {
@@ -1153,8 +1156,8 @@ mod tests {
     }
 
     #[test]
-    fn test_split_segment_at_silence_no_silence_uses_overlap() {
-        // Continuous speech (constant energy) — should still split with overlap
+    fn test_split_segment_at_silence_never_exceeds_maximum() {
+        // Continuous speech has no silence boundary, so it is cut at the hard limit.
         let segment = crate::audio::vad::SpeechSegment {
             samples: vec![0.5f32; 60 * 16000], // 60 seconds of "speech"
             start_timestamp_ms: 0.0,
@@ -1165,9 +1168,11 @@ mod tests {
         let result = split_segment_at_silence(&segment, 25 * 16000);
         assert!(result.len() >= 2);
 
-        // Total samples should exceed input due to overlap
+        assert!(result
+            .iter()
+            .all(|segment| segment.samples.len() <= 25 * 16000));
         let total_samples: usize = result.iter().map(|s| s.samples.len()).sum();
-        assert!(total_samples >= 60 * 16000, "Overlap should not lose samples");
+        assert_eq!(total_samples, 60 * 16000, "Splitting should not lose samples");
     }
 
     #[test]

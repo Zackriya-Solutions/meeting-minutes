@@ -201,8 +201,15 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     if engine.is_model_loaded().await {
                         let model_name = engine.get_current_model().await
                             .unwrap_or_else(|| "unknown".to_string());
-                        info!("✅ Parakeet model '{}' already loaded", model_name);
-                        Ok(TranscriptionEngine::Parakeet(engine))
+                        if model_name != config.model {
+                            Err(format!(
+                                "Loaded Parakeet model '{}' does not match configured model '{}'",
+                                model_name, config.model
+                            ))
+                        } else {
+                            info!("✅ Parakeet model '{}' already loaded", model_name);
+                            Ok(TranscriptionEngine::Parakeet(engine))
+                        }
                     } else {
                         Err("Parakeet engine initialized but no model loaded. This should not happen after validation.".to_string())
                     }

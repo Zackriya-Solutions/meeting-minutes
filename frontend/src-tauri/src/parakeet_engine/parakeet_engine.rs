@@ -1,4 +1,5 @@
-use crate::parakeet_engine::model::ParakeetModel;
+use crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL;
+use crate::parakeet_engine::loaded_model::LoadedParakeetModel;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -10,11 +11,63 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 
+const COREML_CTC_BASE_URL: &str = "https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml/resolve/ad0da3a453ce93ae53263f9a757ad365ce90bd58";
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn coreml_ctc_is_supported() -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        std::process::Command::new("/usr/bin/sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .and_then(|version| version.trim().split('.').next()?.parse::<u32>().ok())
+            .is_some_and(|major| major >= 14)
+    })
+}
+
+fn coreml_ctc_file_sizes() -> Vec<(&'static str, u64)> {
+    vec![
+        ("Preprocessor.mlmodelc/analytics/coremldata.bin", 243),
+        ("Preprocessor.mlmodelc/coremldata.bin", 502),
+        ("Preprocessor.mlmodelc/metadata.json", 2_827),
+        ("Preprocessor.mlmodelc/model.mil", 27_134),
+        ("Preprocessor.mlmodelc/weights/weight.bin", 807_968),
+        ("Encoder-v2-int8.mlmodelc/analytics/coremldata.bin", 243),
+        ("Encoder-v2-int8.mlmodelc/coremldata.bin", 513),
+        ("Encoder-v2-int8.mlmodelc/metadata.json", 2_943),
+        ("Encoder-v2-int8.mlmodelc/model.mil", 1_098_426),
+        ("Encoder-v2-int8.mlmodelc/weights/weight.bin", 593_429_888),
+        ("Decoder.mlmodelc/analytics/coremldata.bin", 243),
+        ("Decoder.mlmodelc/coremldata.bin", 471),
+        ("Decoder.mlmodelc/metadata.json", 1_850),
+        ("Decoder.mlmodelc/model.mil", 3_610),
+        ("Decoder.mlmodelc/weights/weight.bin", 14_352_242),
+        ("vocab.json", 67_395),
+        ("pipeline_metadata.json", 2_170),
+    ]
+}
+
+fn coreml_ctc_required_files() -> Vec<&'static str> {
+    coreml_ctc_file_sizes()
+        .into_iter()
+        .map(|(filename, _)| filename)
+        .collect()
+}
+
 /// Quantization type for Parakeet models
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum QuantizationType {
     FP32,   // Full precision
     Int8,   // 8-bit integer quantization (faster)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ModelArchitecture {
+    Tdt,
+    Ctc,
 }
 
 impl Default for QuantizationType {
@@ -75,6 +128,7 @@ pub struct ModelInfo {
     pub path: PathBuf,
     pub size_mb: u32,
     pub quantization: QuantizationType,
+    pub architecture: ModelArchitecture,
     pub speed: String,     // Performance description
     pub status: ModelStatus,
     pub description: String,
@@ -113,7 +167,7 @@ impl From<std::io::Error> for ParakeetEngineError {
 
 pub struct ParakeetEngine {
     models_dir: PathBuf,
-    current_model: Arc<RwLock<Option<ParakeetModel>>>,
+    current_model: Arc<RwLock<Option<LoadedParakeetModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
     pub(crate) available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
@@ -171,15 +225,26 @@ impl ParakeetEngine {
         // Parakeet model configurations
         // Model name format: parakeet-tdt-0.6b-v{version}-{quantization}
         // Sizes match actual download sizes (encoder + decoder + preprocessor + vocab)
-        let model_configs = [
-            ("parakeet-tdt-0.6b-v3-int8", 670, QuantizationType::Int8, "Ultra Fast (v3)", "Real time on M4 Max, latest version with int8 quantization"),
-            ("parakeet-tdt-0.6b-v2-int8", 661, QuantizationType::Int8, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
+        let mut model_configs = vec![
+            ("parakeet-tdt-0.6b-v3-int8", 670, QuantizationType::Int8, ModelArchitecture::Tdt, "Ultra Fast (v3)", "Real time on M4 Max, latest version with int8 quantization"),
+            ("parakeet-tdt-0.6b-v2-int8", 661, QuantizationType::Int8, ModelArchitecture::Tdt, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
         ];
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        if coreml_ctc_is_supported() {
+            model_configs.push((
+                PARAKEET_CTC_ZH_CN_MODEL,
+                582,
+                QuantizationType::Int8,
+                ModelArchitecture::Ctc,
+                "Apple Neural Engine",
+                "Mandarin Chinese, English, and code-switching via CoreML",
+            ));
+        }
 
         // Get active downloads to override status
         let active_downloads = self.active_downloads.read().await;
 
-        for (name, size_mb, quantization, speed, description) in model_configs {
+        for (name, size_mb, quantization, architecture, speed, description) in model_configs {
             let model_path = models_dir.join(name);
 
             // Check if model is currently downloading
@@ -190,19 +255,23 @@ impl ParakeetEngine {
                 ModelStatus::Downloading { progress: 0 }
             } else if model_path.exists() {
                 // Check for required ONNX files
-                let required_files = match quantization {
-                    QuantizationType::Int8 => vec![
-                        "encoder-model.int8.onnx",
-                        "decoder_joint-model.int8.onnx",
-                        "nemo128.onnx",
-                        "vocab.txt",
-                    ],
-                    QuantizationType::FP32 => vec![
-                        "encoder-model.onnx",
-                        "decoder_joint-model.onnx",
-                        "nemo128.onnx",
-                        "vocab.txt",
-                    ],
+                let required_files = if architecture == ModelArchitecture::Ctc {
+                    coreml_ctc_required_files()
+                } else {
+                    match quantization {
+                        QuantizationType::Int8 => vec![
+                            "encoder-model.int8.onnx",
+                            "decoder_joint-model.int8.onnx",
+                            "nemo128.onnx",
+                            "vocab.txt",
+                        ],
+                        QuantizationType::FP32 => vec![
+                            "encoder-model.onnx",
+                            "decoder_joint-model.onnx",
+                            "nemo128.onnx",
+                            "vocab.txt",
+                        ],
+                    }
                 };
 
                 let all_files_exist = required_files.iter().all(|file| {
@@ -211,7 +280,7 @@ impl ParakeetEngine {
 
                 if all_files_exist {
                     // Validate model by checking file sizes
-                    match self.validate_model_directory(&model_path).await {
+                    match self.validate_model_directory(name, &model_path).await {
                         Ok(_) => ModelStatus::Available,
                         Err(_) => {
                             log::warn!("Model directory {} appears corrupted", name);
@@ -240,6 +309,7 @@ impl ParakeetEngine {
                 path: model_path,
                 size_mb: size_mb as u32,
                 quantization: quantization.clone(),
+                architecture,
                 speed: speed.to_string(),
                 status,
                 description: description.to_string(),
@@ -259,7 +329,25 @@ impl ParakeetEngine {
     }
 
     /// Validate model directory by checking if all required files exist AND have valid sizes
-    async fn validate_model_directory(&self, model_dir: &PathBuf) -> Result<()> {
+    async fn validate_model_directory(&self, model_name: &str, model_dir: &PathBuf) -> Result<()> {
+        if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+            for (filename, expected_size) in coreml_ctc_file_sizes() {
+                let file_path = model_dir.join(filename);
+                let actual_size = std::fs::metadata(&file_path)
+                    .map_err(|error| anyhow!("{} not found or unreadable: {}", filename, error))?
+                    .len();
+                if actual_size != expected_size {
+                    return Err(anyhow!(
+                        "{} has {} bytes; expected {}",
+                        filename,
+                        actual_size,
+                        expected_size
+                    ));
+                }
+            }
+            return Ok(());
+        }
+
         // Check if vocab.txt exists and is readable
         let vocab_path = model_dir.join("vocab.txt");
         if !vocab_path.exists() {
@@ -327,13 +415,38 @@ impl ParakeetEngine {
 
     /// Clean incomplete model directory before download
     /// Removes all files if directory exists but model is not Available
-    async fn clean_incomplete_model_directory(&self, model_dir: &PathBuf) -> Result<()> {
+    async fn clean_incomplete_model_directory(
+        &self,
+        model_name: &str,
+        model_dir: &PathBuf,
+    ) -> Result<()> {
         if !model_dir.exists() {
             return Ok(()); // Nothing to clean
         }
 
+        // Preserve partial files for the revision-pinned CoreML model so the large
+        // encoder can resume with HTTP Range requests. Only oversized files cannot
+        // be valid prefixes and need to be restarted.
+        if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+            for (filename, expected_size) in coreml_ctc_file_sizes() {
+                let file_path = model_dir.join(filename);
+                if let Ok(metadata) = fs::metadata(&file_path).await {
+                    if metadata.len() > expected_size {
+                        fs::remove_file(&file_path).await.map_err(|error| {
+                            anyhow!(
+                                "Failed to remove invalid partial file {}: {}",
+                                filename,
+                                error
+                            )
+                        })?;
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         // Validate the directory
-        match self.validate_model_directory(model_dir).await {
+        match self.validate_model_directory(model_name, model_dir).await {
             Ok(_) => {
                 log::info!("Model directory is valid, no cleanup needed");
                 return Ok(());
@@ -374,15 +487,19 @@ impl ParakeetEngine {
 
     /// Load a Parakeet model
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
-        let models = self.available_models.read().await;
-        let model_info = models
-            .get(model_name)
-            .ok_or_else(|| anyhow!("Model {} not found", model_name))?;
+        let model_info = {
+            let models = self.available_models.read().await;
+            models
+                .get(model_name)
+                .cloned()
+                .ok_or_else(|| anyhow!("Model {} not found", model_name))?
+        };
 
         match model_info.status {
             ModelStatus::Available => {
                 // Check if this model is already loaded
-                if let Some(current_model) = self.current_model_name.read().await.as_ref() {
+                let current_model = self.current_model_name.read().await.clone();
+                if let Some(current_model) = current_model {
                     if current_model == model_name {
                         log::info!("Parakeet model {} is already loaded, skipping reload", model_name);
                         return Ok(());
@@ -397,8 +514,23 @@ impl ParakeetEngine {
 
                 // Load model based on quantization type
                 let quantized = model_info.quantization == QuantizationType::Int8;
-                let model = ParakeetModel::new(&model_info.path, quantized)
-                    .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
+                let model = match model_info.architecture {
+                    ModelArchitecture::Tdt => LoadedParakeetModel::load_tdt(&model_info.path, quantized),
+                    ModelArchitecture::Ctc => {
+                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                        {
+                            LoadedParakeetModel::load_coreml_ctc(&model_info.path)
+                        }
+                        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                        {
+                            Err(crate::parakeet_engine::model::ParakeetError::Other(
+                                "Parakeet CTC zh-CN currently requires Apple Silicon and macOS 14 or newer"
+                                    .to_string(),
+                            ))
+                        }
+                    }
+                }
+                .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
 
                 // Update current model and model name
                 *self.current_model.write().await = Some(model);
@@ -448,6 +580,15 @@ impl ParakeetEngine {
     /// Check if a model is loaded
     pub async fn is_model_loaded(&self) -> bool {
         self.current_model.read().await.is_some()
+    }
+
+    pub async fn max_segment_samples(&self) -> usize {
+        self.current_model
+            .read()
+            .await
+            .as_ref()
+            .map(LoadedParakeetModel::max_segment_samples)
+            .unwrap_or(25 * 16_000)
     }
 
     /// Transcribe audio samples using the loaded Parakeet model
@@ -590,8 +731,10 @@ impl ParakeetEngine {
             }
         }
 
-        // HuggingFace base URL for Parakeet models (version-specific)
-        let base_url = if model_name.contains("-v2-") {
+        // Model artifacts are pinned to immutable revisions where available.
+        let base_url = if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+            COREML_CTC_BASE_URL
+        } else if model_name.contains("-v2-") {
             "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main"
         } else {
             // Default to v3 for v3 models
@@ -599,19 +742,23 @@ impl ParakeetEngine {
         };
 
         // Determine which files to download based on quantization
-        let files_to_download = match model_info.quantization {
-            QuantizationType::Int8 => vec![
-                "encoder-model.int8.onnx",
-                "decoder_joint-model.int8.onnx",
-                "nemo128.onnx",
-                "vocab.txt",
-            ],
-            QuantizationType::FP32 => vec![
-                "encoder-model.onnx",
-                "decoder_joint-model.onnx",
-                "nemo128.onnx",
-                "vocab.txt",
-            ],
+        let files_to_download = if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+            coreml_ctc_required_files()
+        } else {
+            match model_info.quantization {
+                QuantizationType::Int8 => vec![
+                    "encoder-model.int8.onnx",
+                    "decoder_joint-model.int8.onnx",
+                    "nemo128.onnx",
+                    "vocab.txt",
+                ],
+                QuantizationType::FP32 => vec![
+                    "encoder-model.onnx",
+                    "decoder_joint-model.onnx",
+                    "nemo128.onnx",
+                    "vocab.txt",
+                ],
+            }
         };
 
         // Create model directory
@@ -627,7 +774,10 @@ impl ParakeetEngine {
 
         // Clean up incomplete downloads before starting
         log::info!("Checking for incomplete model files to clean up...");
-        if let Err(e) = self.clean_incomplete_model_directory(model_dir).await {
+        if let Err(e) = self
+            .clean_incomplete_model_directory(model_name, model_dir)
+            .await
+        {
             log::warn!("Failed to clean incomplete model directory: {}", e);
             // Continue anyway - we'll handle errors during download
         }
@@ -645,34 +795,33 @@ impl ParakeetEngine {
 
         // Calculate total download size for weighted progress
         // Note: These are approximate sizes based on HuggingFace repo inspection
-        let file_sizes: std::collections::HashMap<&str, u64> = match model_info.quantization {
-            QuantizationType::Int8 => {
-                if model_name.contains("-v2-") {
-                    // V2 model sizes
-                    [
-                        ("encoder-model.int8.onnx", 652_000_000u64),       // 652 MB
-                        ("decoder_joint-model.int8.onnx", 9_000_000u64),   // 9 MB
-                        ("nemo128.onnx", 140_000u64),                      // 140 KB
-                        ("vocab.txt", 9_380u64),                           // 9.38 KB
-                    ].iter().cloned().collect()
-                } else {
-                    // V3 model sizes (default)
-                    [
-                        ("encoder-model.int8.onnx", 652_000_000u64),       // 652 MB
-                        ("decoder_joint-model.int8.onnx", 18_200_000u64),  // 18.2 MB
-                        ("nemo128.onnx", 140_000u64),                      // 140 KB
-                        ("vocab.txt", 93_900u64),                          // 93.9 KB
-                    ].iter().cloned().collect()
+        let file_sizes: std::collections::HashMap<&str, u64> = if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+            coreml_ctc_file_sizes().into_iter().collect()
+        } else {
+            match model_info.quantization {
+                QuantizationType::Int8 => {
+                    if model_name.contains("-v2-") {
+                        [
+                            ("encoder-model.int8.onnx", 652_000_000u64),
+                            ("decoder_joint-model.int8.onnx", 9_000_000u64),
+                            ("nemo128.onnx", 140_000u64),
+                            ("vocab.txt", 9_380u64),
+                        ].iter().cloned().collect()
+                    } else {
+                        [
+                            ("encoder-model.int8.onnx", 652_000_000u64),
+                            ("decoder_joint-model.int8.onnx", 18_200_000u64),
+                            ("nemo128.onnx", 140_000u64),
+                            ("vocab.txt", 93_900u64),
+                        ].iter().cloned().collect()
+                    }
                 }
-            }
-            QuantizationType::FP32 => {
-                // FP32 model sizes (encoder has .onnx + .onnx.data)
-                [
-                    ("encoder-model.onnx", 41_800_000u64 + 2_440_000_000u64), // 41.8 MB + 2.44 GB
-                    ("decoder_joint-model.onnx", 72_500_000u64),               // 72.5 MB
-                    ("nemo128.onnx", 140_000u64),                              // 140 KB
-                    ("vocab.txt", 93_900u64),                                  // 93.9 KB
-                ].iter().cloned().collect()
+                QuantizationType::FP32 => [
+                    ("encoder-model.onnx", 41_800_000u64 + 2_440_000_000u64),
+                    ("decoder_joint-model.onnx", 72_500_000u64),
+                    ("nemo128.onnx", 140_000u64),
+                    ("vocab.txt", 93_900u64),
+                ].iter().cloned().collect(),
             }
         };
 
@@ -725,9 +874,14 @@ impl ParakeetEngine {
 
             let expected_size = file_sizes.get(*filename).copied().unwrap_or(0);
 
-            // Skip if file is already complete (with 1% tolerance for size variations)
-            let size_tolerance = (expected_size as f64 * 0.99) as u64;
-            if existing_size >= size_tolerance && expected_size > 0 {
+            // CoreML bundles use exact, revision-pinned file sizes. Legacy mirrors
+            // retain their historical tolerance because they are not revision-pinned.
+            let complete_size = if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+                expected_size
+            } else {
+                (expected_size as f64 * 0.99) as u64
+            };
+            if existing_size >= complete_size && expected_size > 0 {
                 log::info!(
                     "Skipping complete file: {} ({:.2} MB, expected: {:.2} MB)",
                     filename,
@@ -738,6 +892,12 @@ impl ParakeetEngine {
             }
 
             log::info!("Downloading file {}/{}: {} (resuming from {} bytes)", index + 1, total_files, filename, existing_size);
+
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| anyhow!("Failed to create directory for {}: {}", filename, e))?;
+            }
 
             // Build request with optional Range header for resume
             let mut request = client.get(&file_url);
@@ -767,8 +927,12 @@ impl ParakeetEngine {
                 // 416: Range not satisfiable - file complete or invalid range
                 log::warn!("Server returned 416 Range Not Satisfiable for {}", filename);
 
-                let size_tolerance = (expected_size as f64 * 0.99) as u64;
-                if existing_size >= size_tolerance && expected_size > 0 {
+                let complete_size = if model_name == PARAKEET_CTC_ZH_CN_MODEL {
+                    expected_size
+                } else {
+                    (expected_size as f64 * 0.99) as u64
+                };
+                if existing_size >= complete_size && expected_size > 0 {
                     // File is complete - skip it
                     log::info!("File {} complete ({} bytes). Skipping.", filename, existing_size);
                     continue;
@@ -778,7 +942,6 @@ impl ParakeetEngine {
                         "File {} incomplete ({}/{} bytes). Deleting and retrying.",
                         filename, existing_size, expected_size
                     );
-
                     if let Err(e) = fs::remove_file(&file_path).await {
                         let mut active = self.active_downloads.write().await;
                         active.remove(model_name);
@@ -1006,6 +1169,18 @@ impl ParakeetEngine {
                 file_downloaded as f64 / 1_048_576.0,
                 (total_downloaded as f64 / total_size_bytes as f64) * 100.0
             );
+        }
+
+        if let Err(error) = self.validate_model_directory(model_name, model_dir).await {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+            drop(active);
+
+            let mut models = self.available_models.write().await;
+            if let Some(model) = models.get_mut(model_name) {
+                model.status = ModelStatus::Missing;
+            }
+            return Err(anyhow!("Downloaded model validation failed: {}", error));
         }
 
         // Report 100% progress with final speed

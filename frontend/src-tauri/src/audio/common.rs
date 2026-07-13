@@ -104,9 +104,9 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
 
 /// Split a long speech segment at the lowest-energy (silence) point near the target size.
 ///
-/// Scans for 100ms windows with minimal RMS energy within +/-3 seconds of each target
-/// split point. If no clear silence is found, falls back to a 1-second overlap split
-/// to avoid cutting words at boundaries.
+/// Scans for 100ms windows with minimal RMS energy in the three seconds before each
+/// target split point. Every returned segment is bounded by `max_samples`; if no clear
+/// silence is found, the segment is cut at the target.
 pub(crate) fn split_segment_at_silence(
     segment: &crate::audio::vad::SpeechSegment,
     max_samples: usize,
@@ -114,12 +114,10 @@ pub(crate) fn split_segment_at_silence(
     const SAMPLE_RATE: usize = 16000;
     // 100ms window for energy measurement (1600 samples at 16kHz)
     const ENERGY_WINDOW: usize = SAMPLE_RATE / 10;
-    // Search +/-3 seconds around the target split point
+    // Search up to 3 seconds before the target split point.
     const SEARCH_RADIUS: usize = SAMPLE_RATE * 3;
     // RMS threshold below which we consider a window "silent"
     const SILENCE_RMS_THRESHOLD: f32 = 0.02;
-    // Overlap to use when no silence boundary is found (1 second)
-    const FALLBACK_OVERLAP: usize = SAMPLE_RATE;
 
     let total = segment.samples.len();
     if total <= max_samples {
@@ -150,9 +148,9 @@ pub(crate) fn split_segment_at_silence(
         // Target split point
         let target = pos + max_samples;
 
-        // Search window: [target - SEARCH_RADIUS, target + SEARCH_RADIUS]
+        // Search only before the target so `max_samples` remains a hard upper bound.
         let search_start = target.saturating_sub(SEARCH_RADIUS).max(pos + SAMPLE_RATE);
-        let search_end = (target + SEARCH_RADIUS).min(total.saturating_sub(ENERGY_WINDOW));
+        let search_end = target.min(total.saturating_sub(ENERGY_WINDOW));
 
         // Find the lowest-energy 100ms window in the search range
         let mut best_split = target.min(total); // fallback: exact target
@@ -180,16 +178,15 @@ pub(crate) fn split_segment_at_silence(
             );
         } else {
             debug!(
-                "No silence found near target (best RMS={:.4}), splitting with overlap at sample {}",
-                best_rms, split_at
+                "No silence found before target (best RMS={:.4}), splitting at sample {}",
+                best_rms, target
             );
         }
 
-        // Determine the actual end of this chunk (with overlap if no silence)
-        let chunk_end = if best_rms > SILENCE_RMS_THRESHOLD {
-            (split_at + FALLBACK_OVERLAP).min(total)
+        let chunk_end = if best_rms <= SILENCE_RMS_THRESHOLD {
+            split_at.min(target)
         } else {
-            split_at
+            target
         };
 
         let chunk_samples = segment.samples[pos..chunk_end].to_vec();
@@ -203,8 +200,6 @@ pub(crate) fn split_segment_at_silence(
             confidence: segment.confidence,
         });
 
-        // Advance position to where the current chunk actually ends
-        // to avoid transcribing the overlap region twice
         pos = chunk_end;
     }
 

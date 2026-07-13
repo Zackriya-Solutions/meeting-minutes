@@ -265,6 +265,7 @@ MIT License - Feel free to use this project for your own purposes.
 - We borrowed some code from [transcribe-rs](https://crates.io/crates/transcribe-rs).
 - Thanks to **NVIDIA** for developing the **Parakeet** model.
 - Thanks to [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) for providing the **ONNX conversion** of the Parakeet model.
+- See [Third-Party Model Notices](THIRD_PARTY_MODELS.md) for downloadable model sources and license terms.
 
 ## Star History
 

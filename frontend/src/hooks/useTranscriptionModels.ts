@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getModelDisplayName } from '@/lib/parakeet';
 
 export interface RawModelInfo {
   name: string;
@@ -69,7 +70,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         .map((m) => ({
           provider: 'parakeet' as const,
           name: m.name,
-          displayName: `⚡ Parakeet: ${m.name}`,
+          displayName: `⚡ Parakeet: ${getModelDisplayName(m.name)}`,
           size_mb: m.size_mb,
         }));
       allModels.push(...availableParakeet);

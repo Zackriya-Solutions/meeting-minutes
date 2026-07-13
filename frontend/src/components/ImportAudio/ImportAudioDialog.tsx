@@ -37,6 +37,7 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import { getTranscriptionLanguageCapability } from '@/lib/parakeet';
 
 
 interface ImportAudioDialogProps {
@@ -170,12 +171,16 @@ export function ImportAudioDialog({
     return availableModels.find((m) => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
   const isParakeetModel = selectedModel?.provider === 'parakeet';
+  const languageCapability = useMemo(
+    () => getTranscriptionLanguageCapability(selectedModel?.provider, selectedModel?.name),
+    [selectedModel?.provider, selectedModel?.name]
+  );
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
+    if (!languageCapability.allowsLanguageSelection && selectedLang !== 'auto') {
       setSelectedLang('auto');
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [languageCapability.allowsLanguageSelection, selectedLang]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -343,7 +348,7 @@ export function ImportAudioDialog({
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
                       {/* Language selector */}
-                      {!isParakeetModel ? (
+                      {languageCapability.allowsLanguageSelection ? (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
@@ -369,7 +374,7 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">Language</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                            {languageCapability.description}
                           </p>
                         </div>
                       )}

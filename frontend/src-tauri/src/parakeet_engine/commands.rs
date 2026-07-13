@@ -236,15 +236,7 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
     };
 
     if let Some(engine) = engine {
-        // Check if a model is currently loaded
-        if engine.is_model_loaded().await {
-            if let Some(current_model) = engine.get_current_model().await {
-                log::info!("Parakeet model already loaded: {}", current_model);
-                return Ok(current_model);
-            }
-        }
-
-        // No model loaded - try to load user's configured model from transcript config
+        // Resolve the configured model before deciding whether an existing model can be reused.
         let model_to_load = match crate::api::api::api_get_transcript_config(
             app.clone(),
             app.state(),
@@ -282,6 +274,33 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
             }
         };
 
+        if let Some(current_model) = engine.get_current_model().await {
+            match model_to_load.as_ref() {
+                Some(configured_model) if configured_model == &current_model => {
+                    log::info!(
+                        "Configured Parakeet model already loaded: {}",
+                        current_model
+                    );
+                    return Ok(current_model);
+                }
+                Some(configured_model) => {
+                    log::info!(
+                        "Reloading Parakeet model: configured={}, loaded={}",
+                        configured_model,
+                        current_model
+                    );
+                    engine.unload_model().await;
+                }
+                None => {
+                    log::info!(
+                        "No model configured; reusing loaded Parakeet model: {}",
+                        current_model
+                    );
+                    return Ok(current_model);
+                }
+            }
+        }
+
         // Check available models
         let models = engine
             .discover_models()
@@ -307,18 +326,10 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
                 log::info!("Loading user's configured Parakeet model: {}", configured_model);
                 configured_model
             } else {
-                log::warn!(
-                    "Configured Parakeet model '{}' not found, falling back to first available int8 model",
+                return Err(format!(
+                    "Configured Parakeet model '{}' is not downloaded. Download it from Transcript Settings before recording.",
                     configured_model
-                );
-                // Prefer int8 quantization for best speed/quality tradeoff
-                available_models
-                    .iter()
-                    .find(|m| m.quantization == crate::parakeet_engine::QuantizationType::Int8)
-                    .or_else(|| available_models.first())
-                    .unwrap()
-                    .name
-                    .clone()
+                ));
             }
         } else {
             // No configured model, prefer int8 for best speed/quality balance
@@ -445,6 +456,19 @@ pub async fn parakeet_download_model<R: Runtime>(
                 Ok(())
             }
             Err(e) => {
+                // Reset transient state for every failure path so the normal Download
+                // button can retry without requiring the separate retry command.
+                {
+                    let mut active = engine.active_downloads.write().await;
+                    active.remove(&model_name);
+                }
+                {
+                    let mut models = engine.available_models.write().await;
+                    if let Some(model) = models.get_mut(&model_name) {
+                        model.status = ModelStatus::Missing;
+                    }
+                }
+
                 // Emit error event
                 if let Err(emit_e) = app_handle.emit(
                     "parakeet-model-download-error",
