@@ -4,6 +4,7 @@ import { Button } from './Button';
 import { Icon } from './Icon';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { recordingService } from '@/services/recordingService';
+import { addMarkedMoment, getMarkedMoments } from '@/lib/markedMoments';
 
 interface RecordOverlayProps {
   title?: string;
@@ -21,27 +22,25 @@ function formatTime(totalSeconds: number): string {
 export function RecordOverlay({ title = 'Новая встреча', bars, onStop, meetingId = null }: RecordOverlayProps) {
   // Duration and pause state come from the backend-synced context, so the timer
   // reflects the real recording (and survives navigation / remount) instead of a
-  // local counter that resets to 0:00.
-  const { recordingDuration, isPaused } = useRecordingState();
-  const [marks, setMarks] = useState<number[]>([]);
+  // local counter that resets to 0:00. Use activeDuration (excludes paused time)
+  // to match RecordingStatusBar and the transcript audio timeline, so a marked
+  // moment lands on the right transcript segment in meeting-details.
+  const { activeDuration, isPaused } = useRecordingState();
+  const [marks, setMarks] = useState<number[]>(() => getMarkedMoments(meetingId));
   const [pauseBusy, setPauseBusy] = useState(false);
 
-  const elapsed = Math.max(0, Math.floor(recordingDuration ?? 0));
+  const elapsed = Math.max(0, Math.floor(activeDuration ?? 0));
 
-  // Record a real timestamp (elapsed seconds) and persist it so it can be used
-  // after the meeting, rather than incrementing a cosmetic counter.
+  // Reload any persisted marks once the meeting id becomes available (it is set
+  // by the recording-started event, which may land just after this mounts).
+  useEffect(() => {
+    setMarks(getMarkedMoments(meetingId));
+  }, [meetingId]);
+
+  // Record a real timestamp (elapsed seconds) and persist it (keyed by meeting)
+  // so meeting-details can surface it later, rather than a cosmetic counter.
   const markMoment = useCallback(() => {
-    setMarks((prev) => {
-      const next = [...prev, elapsed];
-      if (meetingId) {
-        try {
-          localStorage.setItem(`memento:marks:${meetingId}`, JSON.stringify(next));
-        } catch (error) {
-          console.warn('Failed to persist marked moment:', error);
-        }
-      }
-      return next;
-    });
+    setMarks(addMarkedMoment(meetingId, elapsed));
     toast.success('Момент отмечен', { description: formatTime(elapsed), duration: 2000 });
   }, [elapsed, meetingId]);
 

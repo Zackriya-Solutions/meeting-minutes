@@ -4,7 +4,14 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
+import { Icon } from '@/components/memento/Icon';
 import { useMemo } from 'react';
+
+function formatClock(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.floor(totalSeconds % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -32,6 +39,11 @@ interface TranscriptPanelProps {
   /** Jump-to-timestamp (seconds) from search results / RAG citations. */
   scrollToTimestamp?: number | null;
 
+  /** Marked moments (elapsed seconds) captured during recording. */
+  markedMoments?: number[];
+  /** Jump the transcript to a marked moment. */
+  onSeekToMoment?: (seconds: number) => void;
+
   // Speaker diarization props
   speakersById?: Map<number, string> | null;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
@@ -58,6 +70,8 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
   scrollToTimestamp = null,
+  markedMoments = [],
+  onSeekToMoment,
   speakersById = null,
   onRenameSpeaker,
   onSpeakersDetected,
@@ -93,6 +107,25 @@ export function TranscriptPanel({
           onSpeakersDetected={onSpeakersDetected}
         />
       </div>
+
+      {/* Marked moments — click to jump the transcript to that point */}
+      {markedMoments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
+          <span className="mm-eyebrow mr-1">Моменты</span>
+          {markedMoments.map((seconds) => (
+            <button
+              key={seconds}
+              type="button"
+              onClick={() => onSeekToMoment?.(seconds)}
+              title="Открыть этот момент в расшифровке"
+              className="mm-numeric inline-flex items-center gap-1 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-2 py-0.5 text-xs text-[var(--gold)] transition-colors hover:bg-[var(--gold-soft-strong)]"
+            >
+              <Icon name="dot" size={12} />
+              {formatClock(seconds)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">

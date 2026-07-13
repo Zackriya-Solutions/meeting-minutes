@@ -7,6 +7,7 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
+import { migrateMarkedMoments } from '@/lib/markedMoments';
 import Analytics from '@/lib/analytics';
 import {
   applyPinnedSummaryLanguageToMeeting,
@@ -292,6 +293,12 @@ export function useRecordingStop(
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
           console.log('   Transcripts:', freshTranscripts.length);
           console.log('   folder_path:', folderPath);
+
+          // Move marked moments from the temporary recording id onto the saved
+          // meeting id so meeting-details can find them. Must run before
+          // markMeetingAsSaved(), which clears the temporary id.
+          const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          migrateMarkedMoments(tempMeetingId, meetingId);
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();

@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
+import { getMarkedMoments } from '@/lib/markedMoments';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
@@ -67,6 +68,22 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+
+  // Marked moments captured during recording (elapsed seconds), keyed by the
+  // saved meeting id in localStorage.
+  const markedMoments = useMemo(() => getMarkedMoments(meeting.id), [meeting.id]);
+
+  // Transcript jump target (seconds). Driven by the ?t= deep link and by
+  // clicking a marked-moment chip. A tiny jitter is added per click so tapping
+  // the same moment twice still re-triggers the scroll (the transcript view
+  // dedupes identical values).
+  const [seekTarget, setSeekTarget] = useState<number | null>(seekToSeconds);
+  useEffect(() => {
+    if (seekToSeconds != null) setSeekTarget(seekToSeconds);
+  }, [seekToSeconds]);
+  const handleSeekToMoment = (seconds: number) => {
+    setSeekTarget(seconds + Math.random() * 0.02);
+  };
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -201,8 +218,10 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
-          // Jump-to-timestamp deep link (?t= from search/RAG)
-          scrollToTimestamp={seekToSeconds}
+          // Jump-to-timestamp: ?t= deep link (search/RAG) and marked moments
+          scrollToTimestamp={seekTarget}
+          markedMoments={markedMoments}
+          onSeekToMoment={handleSeekToMoment}
           // Speaker diarization props
           speakersById={speakersById}
           onRenameSpeaker={onRenameSpeaker}
