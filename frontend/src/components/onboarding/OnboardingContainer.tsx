@@ -1,9 +1,10 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProgressIndicator } from './shared/ProgressIndicator';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import type { OnboardingContainerProps } from '@/types/onboarding';
+import Image from 'next/image';
+import { Icon } from '@/components/memento/Icon';
 
 export function OnboardingContainer({
   title,
@@ -43,8 +44,12 @@ export function OnboardingContainer({
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-50 flex items-center justify-center z-50 overflow-hidden">
-      <div className={cn('w-full max-w-2xl h-full max-h-screen flex flex-col px-6 py-6', className)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-[var(--bg-canvas)]">
+      <div className={cn('flex h-full max-h-screen w-full max-w-2xl flex-col px-6 py-6', className)}>
+        <div className="mb-5 flex items-center justify-center gap-3 text-xl font-semibold tracking-[-.04em]">
+          <Image src="/memento-mark.svg" alt="" width={30} height={30} />
+          <span>memento</span>
+        </div>
         {/* Progress Indicator with Navigation - Fixed */}
         {step && !hideProgress && (
           <div className="mb-2 relative flex-shrink-0">
@@ -61,7 +66,7 @@ export function OnboardingContainer({
                       : 'opacity-0 cursor-not-allowed'
                   )}
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <Icon name="back" size={16} />
                 </button>
 
                 <button
@@ -74,7 +79,7 @@ export function OnboardingContainer({
                       : 'opacity-0 cursor-not-allowed'
                   )}
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <Icon name="chevron-right" size={16} />
                 </button>
               </div>
             )}
@@ -86,7 +91,7 @@ export function OnboardingContainer({
 
         {/* Header - Fixed */}
         <div className="mb-4 text-center space-y-3 flex-shrink-0">
-          <h1 className="text-4xl font-semibold text-gray-900 animate-fade-in-up">{title}</h1>
+          <h1 className="animate-fade-in-up text-[31px] font-semibold leading-[.96] tracking-[-.04em] text-[var(--fg1)]">{title}</h1>
           {description && (
             <p className="text-base text-gray-600 max-w-md mx-auto animate-fade-in-up delay-75">
               {description}

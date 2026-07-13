@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Mic, Volume2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/memento/Button';
+import { Icon } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -113,8 +113,8 @@ export function PermissionsStep() {
 
   return (
     <OnboardingContainer
-      title="Grant Permissions"
-      description="Memento needs access to your microphone and system audio to record meetings"
+      title="Разреши запись звука"
+      description="Memento использует микрофон и системный звук только во время записи встречи"
       step={4}
       hideProgress={true}
       showNavigation={allPermissionsGranted}
@@ -125,9 +125,9 @@ export function PermissionsStep() {
         <div className="space-y-4">
           {/* Microphone */}
           <PermissionRow
-            icon={<Mic className="w-5 h-5" />}
-            title="Microphone"
-            description="Required to capture your voice during meetings"
+            icon={<Icon name="mic" />}
+            title="Микрофон"
+            description="Записывает твой голос"
             status={permissions.microphone}
             isPending={isPending}
             onAction={handleMicrophoneAction}
@@ -135,9 +135,9 @@ export function PermissionsStep() {
 
           {/* System Audio */}
           <PermissionRow
-            icon={<Volume2 className="w-5 h-5" />}
-            title="System Audio"
-            description="Click Enable to grant Audio Capture permission"
+            icon={<Icon name="wave" />}
+            title="Системный звук"
+            description="Записывает голоса собеседников"
             status={permissions.systemAudio}
             isPending={isPending}
             onAction={handleSystemAudioAction}
@@ -147,19 +147,19 @@ export function PermissionsStep() {
         {/* Action Buttons */}
         <div className="flex flex-col gap-3 pt-4">
           <Button onClick={handleFinish} disabled={!allPermissionsGranted} className="w-full h-11">
-            Finish Setup
+            Завершить настройку
           </Button>
 
           <button
             onClick={handleSkip}
             className="text-sm text-neutral-500 hover:text-neutral-700 transition-colors"
           >
-            I'll do this later
+            Сделать позже
           </button>
 
           {!allPermissionsGranted && (
             <p className="text-xs text-center text-muted-foreground">
-              Recording won't work without permissions. You can grant them later in settings.
+              Без разрешений запись не начнётся. Их можно выдать позже в настройках.
             </p>
           )}
         </div>
