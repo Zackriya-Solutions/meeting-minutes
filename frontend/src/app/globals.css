@@ -243,7 +243,26 @@
   .memento-primary-action:hover { background: var(--mm-gold-active); }
   .memento-primary-action:active { transform: scale(.985); }
   .memento-record-dock { padding: 6px; border: 1px solid var(--mm-border-strong); border-radius: 999px; background: var(--mm-elevated); }
+  .mm-button { display: inline-flex; height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 20px; border: 1px solid transparent; border-radius: var(--radius-pill); font-size: 15px; font-weight: 600; line-height: 1; }
+  .mm-button-sm { height: 36px; padding: 0 16px; font-size: 14px; }
+  .mm-button-primary { background: var(--gold); color: var(--fg-inverse); }
+  .mm-button-primary:hover { background: var(--gold-active); }
+  .mm-button-secondary { background: transparent; border-color: var(--border-strong); color: var(--fg1); }
+  .mm-button-secondary:hover, .mm-button-ghost:hover { background: var(--state-hover-bg); }
+  .mm-button-ghost { background: transparent; color: var(--fg2); }
+  .mm-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-24); background: var(--surface-card); padding: 16px; }
+  .mm-record-overlay { width: 320px; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-20); background: var(--bg-elevated); animation: mmOverlayIn 300ms var(--ease-enter); }
+  .mm-record-header, .mm-record-meta, .mm-record-actions { display: flex; align-items: center; gap: 8px; }
+  .mm-record-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--gold); animation: mmPulse 1.4s var(--ease-standard) infinite; }
+  .mm-record-time { margin-left: auto; color: var(--gold); font-family: var(--font-numeric); font-size: 22px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .mm-equalizer { height: 30px; display: flex; align-items: center; gap: 4px; }
+  .mm-equalizer span { flex: 1; min-height: 3px; border-radius: 2px; background: var(--fg2); transition: height 180ms var(--ease-standard); }
+  .mm-record-meta { min-width: 0; color: var(--fg3); font-size: 12px; }
+  .mm-record-meta > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-record-actions > button { flex: 1; }
 }
+
+@keyframes mmOverlayIn { from { opacity: 0; transform: translateY(12px) scale(.98); } }
 
 /* Bridge legacy utility styling onto the Memento dark system. */
 .bg-white, .bg-gray-50 { background-color: var(--mm-canvas) !important; }

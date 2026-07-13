@@ -31,6 +31,7 @@ import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
+import { Icon as MementoIcon } from '../memento/Icon';
 
 interface SidebarItem {
   id: string;
@@ -465,7 +466,7 @@ const Sidebar: React.FC = () => {
                 className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
-                <Home className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="home" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -481,14 +482,14 @@ const Sidebar: React.FC = () => {
                 className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
               >
                 {isRecording ? (
-                  <Square className="w-5 h-5 text-white" />
+                  <MementoIcon name="stop" size={20} />
                 ) : (
-                  <Mic className="w-5 h-5 text-white" />
+                  <MementoIcon name="mic" size={20} />
                 )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
+              <p>{isRecording ? 'Запись идёт' : 'Записать встречу'}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -499,11 +500,11 @@ const Sidebar: React.FC = () => {
                   onClick={() => openImportDialog()}
                   className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
                 >
-                  <Upload className="w-5 h-5 text-blue-600" />
+                  <MementoIcon name="upload" size={20} />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">
-                <p>Import Audio</p>
+                <p>Импортировать аудио</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -518,11 +519,11 @@ const Sidebar: React.FC = () => {
                 className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
-                <NotebookPen className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="transcript" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Meeting Notes</p>
+              <p>Встречи</p>
             </TooltipContent>
           </Tooltip>
 
@@ -533,11 +534,11 @@ const Sidebar: React.FC = () => {
                 className={`p-2 rounded-lg transition-colors duration-150 ${isSearchPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
-                <SearchIcon className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="search" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Search meetings</p>
+              <p>Поиск</p>
             </TooltipContent>
           </Tooltip>
 
@@ -548,11 +549,11 @@ const Sidebar: React.FC = () => {
                 className={`p-2 rounded-lg transition-colors duration-150 ${isChatPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
-                <MessageSquare className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="chat" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Chat with archive</p>
+              <p>База знаний</p>
             </TooltipContent>
           </Tooltip>
 
@@ -563,11 +564,11 @@ const Sidebar: React.FC = () => {
                 className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
-                <Settings className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="settings" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Settings</p>
+              <p>Настройки</p>
             </TooltipContent>
           </Tooltip>
 
@@ -759,8 +760,8 @@ const Sidebar: React.FC = () => {
                 onClick={() => router.push('/')}
                 className={`memento-nav-item items-center h-10 flex mx-3 mt-3 cursor-pointer ${pathname === '/' ? 'is-active' : ''}`}
               >
-                <Home className="w-4 h-4 mr-2" />
-                <span>Home</span>
+                <MementoIcon name="home" size={17} />
+                <span>Главная</span>
               </div>
             )}
           </div>
@@ -776,8 +777,8 @@ const Sidebar: React.FC = () => {
                     <div
                       className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
                     >
-                      <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
+                      <MementoIcon name="transcript" size={17} />
+                      <span className="text-gray-700">Встречи</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
                       )}
@@ -813,13 +814,13 @@ const Sidebar: React.FC = () => {
             >
               {isRecording ? (
                 <>
-                  <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress</span>
+                  <MementoIcon name="stop" size={17} />
+                  <span>Запись идёт</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-4 h-4 mr-2" />
-                  <span>Record meeting</span>
+                  <MementoIcon name="mic" size={17} />
+                  <span>Записать встречу</span>
                 </>
               )}
             </button>
@@ -829,8 +830,8 @@ const Sidebar: React.FC = () => {
                 onClick={() => openImportDialog()}
                 className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
               >
-                <Upload className="w-4 h-4 mr-2" />
-                <span>Import Audio</span>
+                <MementoIcon name="upload" size={17} />
+                <span>Импортировать аудио</span>
               </button>
             )}
 
@@ -838,24 +839,24 @@ const Sidebar: React.FC = () => {
               onClick={() => router.push('/search')}
               className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/search' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
             >
-              <SearchIcon className="w-4 h-4 mr-2" />
-              <span>Search meetings</span>
+              <MementoIcon name="search" size={17} />
+              <span>Поиск по встречам</span>
             </button>
 
             <button
               onClick={() => router.push('/chat')}
               className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/chat' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
             >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              <span>Chat with archive</span>
+              <MementoIcon name="library" size={17} />
+              <span>База знаний</span>
             </button>
 
             <button
               onClick={() => router.push('/settings')}
               className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
             >
-              <Settings className="w-4 h-4 mr-2" />
-              <span>Settings</span>
+              <MementoIcon name="settings" size={17} />
+              <span>Настройки</span>
             </button>
             <Info isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
