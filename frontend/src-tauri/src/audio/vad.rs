@@ -236,8 +236,11 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // Silero's timestamp_ms is already session-absolute (derived from its own
+                    // processed_duration), so it must NOT be offset by processed_samples —
+                    // adding them double-counts and yields start times past the end of the audio.
+                    // Convert ms to samples at the 16kHz VAD processing rate.
+                    self.speech_start_sample = timestamp_ms * 16000 / 1000;
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
