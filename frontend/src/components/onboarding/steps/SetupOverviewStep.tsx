@@ -3,6 +3,7 @@ import { Info } from '@/components/memento/LucideCompat';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useT } from '@/lib/i18n';
 import {
   Tooltip,
   TooltipContent,
@@ -12,6 +13,7 @@ import {
 
 export function SetupOverviewStep() {
   const { goNext } = useOnboarding();
+  const t = useT();
   const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
@@ -30,12 +32,12 @@ export function SetupOverviewStep() {
     {
       number: 1,
       type: 'transcription',
-      title: 'Модель расшифровки',
+      title: 'Download Transcription Engine',
     },
     {
       number: 2,
       type: 'summarization',
-      title: 'Модель для создания сути',
+      title: 'Download Summarization Engine',
     },
   ];
 
@@ -45,8 +47,8 @@ export function SetupOverviewStep() {
 
   return (
     <OnboardingContainer
-      title="Подготовим Memento"
-      description="Выбери локальные модели для расшифровки и создания сути."
+      title={t('Setup Overview')}
+      description={t('Meetily requires that you download the Transcription & Summarization AI models for the software to work.')}
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
@@ -62,7 +64,7 @@ export function SetupOverviewStep() {
                 >
                   <div className="flex-1 ml-1">
                     <h3 className="font-medium text-[var(--fg1)] flex items-center gap-2">
-                        Шаг {step.number} · {step.title}
+                        {t('Step')} {step.number} · {t(step.title)}
 
                         {step.type === "summarization" && (
                             <TooltipProvider>
@@ -73,7 +75,7 @@ export function SetupOverviewStep() {
                                 </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
-                                Позже в настройках можно выбрать внешнего провайдера, например GigaChat, OpenAI или Ollama.
+                                {t('You can also select external AI providers like OpenAI, Claude, or Ollama for summary generation in settings.')}
                                 </TooltipContent>
                             </Tooltip>
                             </TooltipProvider>
@@ -93,7 +95,7 @@ export function SetupOverviewStep() {
             onClick={handleContinue}
             className="h-11 w-full rounded-full bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
           >
-            Продолжить
+            {t("Let's Go")}
           </Button>
           <div className="text-center">
             <a
@@ -102,7 +104,7 @@ export function SetupOverviewStep() {
               rel="noopener noreferrer"
               className="text-xs text-[var(--fg2)] hover:underline"
             >
-              Сообщить о проблеме на GitHub
+              {t('Report issues on GitHub')}
             </a>
           </div>
         </div>

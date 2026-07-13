@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 import {
   Dialog,
@@ -62,6 +63,7 @@ const Sidebar: React.FC = () => {
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
+  const t = useT();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -358,8 +360,8 @@ const Sidebar: React.FC = () => {
       Analytics.trackMeetingDeleted(itemId);
 
       // Show success toast
-      toast.success("Встреча удалена", {
-        description: "All associated data has been removed"
+      toast.success(t("Meeting deleted successfully"), {
+        description: t("All associated data has been removed")
       });
 
       // If deleting the active meeting, navigate to home
@@ -369,7 +371,7 @@ const Sidebar: React.FC = () => {
       }
     } catch (error) {
       console.error('Не удалось удалить встречу:', error);
-      toast.error("Не удалось удалить встречу", {
+      toast.error(t("Failed to delete meeting"), {
         description: error instanceof Error ? error.message : String(error)
       });
     }
@@ -400,7 +402,7 @@ const Sidebar: React.FC = () => {
 
     // Prevent empty titles
     if (!newTitle) {
-      toast.error("Название встречи не может быть пустым");
+      toast.error(t("Meeting title cannot be empty"));
       return;
     }
 
@@ -424,14 +426,14 @@ const Sidebar: React.FC = () => {
       // Track the edit
       Analytics.trackButtonClick('edit_meeting_title', 'sidebar');
 
-      toast.success("Название встречи сохранено");
+      toast.success(t("Meeting title updated successfully"));
 
       // Close modal and reset state
       setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
       setEditingTitle('');
     } catch (error) {
       console.error('Не удалось сохранить название встречи:', error);
-      toast.error("Не удалось сохранить название встречи", {
+      toast.error(t("Failed to update meeting title"), {
         description: error instanceof Error ? error.message : String(error)
       });
     }
@@ -490,7 +492,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Главная</p>
+              <p>{t('Home')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -509,7 +511,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>{isRecording ? 'Запись идёт' : 'Записать встречу'}</p>
+              <p>{isRecording ? t('Recording in progress...') : t('Start Recording')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -524,7 +526,7 @@ const Sidebar: React.FC = () => {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">
-                <p>Импортировать аудио</p>
+                <p>{t('Import Audio')}</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -543,7 +545,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Встречи</p>
+              <p>{t('Meeting Notes')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -558,7 +560,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Поиск</p>
+              <p>{t('Search meetings')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -573,7 +575,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>База знаний</p>
+              <p>{t('Chat with archive')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -588,7 +590,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Настройки</p>
+              <p>{t('Settings')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -653,7 +655,7 @@ const Sidebar: React.FC = () => {
                 )}
               </div>
               {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Поиск…</span>
+                <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">{t('Searching...')}</span>
               )}
             </>
           ) : (
@@ -677,7 +679,7 @@ const Sidebar: React.FC = () => {
                         handleEditStart(item.id, item.title);
                       }}
                       className="hover:text-[var(--gold)] p-1 rounded-md hover:bg-[var(--gold-soft)] flex-shrink-0"
-                      aria-label="Изменить название встречи"
+                      aria-label={t("Edit meeting title")}
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -687,7 +689,7 @@ const Sidebar: React.FC = () => {
                         setDeleteModalState({ isOpen: true, itemId: item.id });
                       }}
                       className="hover:text-[var(--danger)] p-1 rounded-md hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] flex-shrink-0"
-                      aria-label="Удалить встречу"
+                      aria-label={t("Delete meeting")}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -698,7 +700,7 @@ const Sidebar: React.FC = () => {
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
                 <div className="mt-1 ml-8 text-xs text-[var(--fg2)] bg-[var(--gold-soft)] p-1.5 rounded border border-[var(--gold-border)] line-clamp-2">
-                  <span className="font-medium text-[var(--gold)]">Совпадение:</span> {matchingResult.matchContext}
+                  <span className="font-medium text-[var(--gold)]">{t('Match:')}</span> {matchingResult.matchContext}
                 </div>
               )}
             </div>
@@ -749,7 +751,7 @@ const Sidebar: React.FC = () => {
 
                 <div className="relative mb-1">
                   <InputGroup >
-                    <InputGroupInput placeholder='Поиск по встречам…' value={searchQuery}
+                    <InputGroupInput placeholder={t('Search meeting content...')} value={searchQuery}
                       onChange={(e) => handleSearchChange(e.target.value)}
                     />
                     <InputGroupAddon>
@@ -781,7 +783,7 @@ const Sidebar: React.FC = () => {
                 className={`memento-nav-item items-center h-10 flex mx-3 mt-3 cursor-pointer ${pathname === '/' ? 'is-active' : ''}`}
               >
                 <MementoIcon name="home" size={17} />
-                <span>Главная</span>
+                <span>{t('Home')}</span>
               </div>
             )}
           </div>
@@ -798,9 +800,9 @@ const Sidebar: React.FC = () => {
                       className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
                     >
                       <MementoIcon name="transcript" size={17} />
-                      <span className="text-[var(--fg2)]">Встречи</span>
+                      <span className="text-[var(--fg2)]">{t('Meeting Notes')}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Поиск…</span>
+                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">{t('Searching...')}</span>
                       )}
                     </div>
                   </div>
@@ -835,12 +837,12 @@ const Sidebar: React.FC = () => {
               {isRecording ? (
                 <>
                   <MementoIcon name="stop" size={17} />
-                  <span>Запись идёт</span>
+                  <span>{t('Recording in progress...')}</span>
                 </>
               ) : (
                 <>
                   <MementoIcon name="mic" size={17} />
-                  <span>Записать встречу</span>
+                  <span>{t('Start Recording')}</span>
                 </>
               )}
             </button>
@@ -851,7 +853,7 @@ const Sidebar: React.FC = () => {
                 className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)] rounded-lg transition-colors shadow-none"
               >
                 <MementoIcon name="upload" size={17} />
-                <span>Импортировать аудио</span>
+                <span>{t('Import Audio')}</span>
               </button>
             )}
 
@@ -860,7 +862,7 @@ const Sidebar: React.FC = () => {
               className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
             >
               <MementoIcon name="search" size={17} />
-              <span>Поиск по встречам</span>
+              <span>{t('Search meetings')}</span>
             </button>
 
             <button
@@ -868,7 +870,7 @@ const Sidebar: React.FC = () => {
               className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
             >
               <MementoIcon name="library" size={17} />
-              <span>База знаний</span>
+              <span>{t('Chat with archive')}</span>
             </button>
 
             <button
@@ -876,7 +878,7 @@ const Sidebar: React.FC = () => {
               className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg transition-colors shadow-none"
             >
               <MementoIcon name="settings" size={17} />
-              <span>Настройки</span>
+              <span>{t('Settings')}</span>
             </button>
             <Info isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-[var(--fg3)]">
@@ -889,7 +891,7 @@ const Sidebar: React.FC = () => {
       {/* Confirmation Modal for Delete */}
       <ConfirmationModal
         isOpen={deleteModalState.isOpen}
-        text="Are you sure you want to delete this meeting? This action cannot be undone."
+        text={t("Are you sure you want to delete this meeting? This action cannot be undone.")}
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
@@ -900,14 +902,14 @@ const Sidebar: React.FC = () => {
       }}>
         <DialogContent className="sm:max-w-[425px]">
           <VisuallyHidden>
-            <DialogTitle>Изменить название встречи</DialogTitle>
+            <DialogTitle>{t('Edit Meeting Title')}</DialogTitle>
           </VisuallyHidden>
           <div className="py-4">
-            <h3 className="text-lg font-semibold mb-4">Изменить название встречи</h3>
+            <h3 className="text-lg font-semibold mb-4">{t('Edit Meeting Title')}</h3>
             <div className="space-y-4">
               <div>
                 <label htmlFor="meeting-title" className="block text-sm font-medium text-[var(--fg2)] mb-2">
-                  Название встречи
+                  {t('Meeting Title')}
                 </label>
                 <input
                   id="meeting-title"
@@ -922,7 +924,7 @@ const Sidebar: React.FC = () => {
                     }
                   }}
                   className="w-full px-3 py-2 border border-[var(--border-strong)] rounded-md focus:outline-none focus:ring-2 ring-[var(--gold-ring)] focus:border-transparent"
-                  placeholder="Название встречи"
+                  placeholder={t("Enter meeting title")}
                   autoFocus
                 />
               </div>
@@ -933,13 +935,13 @@ const Sidebar: React.FC = () => {
               onClick={handleEditCancel}
               className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-md transition-colors"
             >
-              Отмена
+              {t('Cancel')}
             </button>
             <button
               onClick={handleEditConfirm}
               className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold-active)] rounded-md transition-colors"
             >
-              Сохранить
+              {t('Save')}
             </button>
           </DialogFooter>
         </DialogContent>

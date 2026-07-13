@@ -3,12 +3,14 @@ import Image from "next/image";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
+import { useT } from '@/lib/i18n';
 
 interface LogoProps {
     isCollapsed: boolean;
 }
 
 const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, ref) => {
+  const t = useT();
   return (
     <Dialog aria-describedby={undefined}>
       {isCollapsed ? (
@@ -27,7 +29,7 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
       )}
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>О Memento</DialogTitle>
+          <DialogTitle>{t('About Memento')}</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>

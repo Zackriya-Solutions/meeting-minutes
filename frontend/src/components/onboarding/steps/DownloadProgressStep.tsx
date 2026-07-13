@@ -8,6 +8,7 @@ import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
+import { useT } from '@/lib/i18n';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -23,6 +24,7 @@ interface DownloadState {
 }
 
 export function DownloadProgressStep() {
+  const t = useT();
   const {
     goNext,
     selectedSummaryModel,
@@ -91,8 +93,8 @@ export function DownloadProgressStep() {
         error: error instanceof Error ? error.message : 'Retry failed',
       }));
 
-      toast.error('Не удалось повторить загрузку', {
-        description: 'Проверь соединение и попробуй снова.',
+      toast.error(t('Download retry failed'), {
+        description: t('Please check your connection and try again.'),
       });
     } finally {
       // Allow retry again after 2 seconds
@@ -139,8 +141,8 @@ export function DownloadProgressStep() {
         error: error instanceof Error ? error.message : 'Retry failed',
       }));
 
-      toast.error('Не удалось повторить загрузку модели', {
-        description: 'Проверь соединение и попробуй снова.',
+      toast.error(t('Summary model download retry failed'), {
+        description: t('Please check your connection and try again.'),
       });
     } finally {
       // Allow retry again after 2 seconds
@@ -298,7 +300,7 @@ export function DownloadProgressStep() {
   const startSummaryDownload = async () => {
     if (summaryModelDownloaded) return;
     if (!selectedSummaryModel) {
-      toast.info('Модель ещё не готова', { description: 'Попробуй снова через несколько секунд.' });
+      toast.info(t('Summary model not ready yet'), { description: t('Please try again in a moment.') });
       return;
     }
     if (summaryDownloadStartedRef.current) return;
@@ -337,8 +339,8 @@ export function DownloadProgressStep() {
 
     // If a download is still running, let the user know it continues in the background.
     if (parakeetState.status === 'downloading' || summaryState.status === 'downloading') {
-      toast.info('Загрузка продолжится в фоне', {
-        description: 'Memento уже можно использовать.',
+      toast.info(t('Downloads will continue in the background'), {
+        description: t('You can start using the app now.'),
         duration: 5000,
       });
     }
@@ -358,8 +360,8 @@ export function DownloadProgressStep() {
         window.location.reload();
       } catch (error) {
         console.error('Failed to complete onboarding:', error);
-        toast.error('Не удалось завершить настройку', {
-          description: 'Попробуй снова.',
+        toast.error(t('Failed to complete setup'), {
+          description: t('Please try again.'),
         });
         setIsCompleting(false);
       }
@@ -367,6 +369,7 @@ export function DownloadProgressStep() {
   };
 
   const renderDownloadCard = (
+    type: 'transcription' | 'summary',
     title: string,
     icon: React.ReactNode,
     state: DownloadState,
@@ -395,10 +398,10 @@ export function DownloadProgressStep() {
                 className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-[var(--border-subtle)] text-sm text-[var(--fg2)] hover:bg-[var(--bg-elevated)] transition-colors"
               >
                 <Download className="w-4 h-4" />
-                Загрузить
+                {t('Download')}
               </button>
             ) : (
-              <span className="text-xs text-[var(--fg3)]">Необязательно</span>
+              <span className="text-xs text-[var(--fg3)]">{t('Optional')}</span>
             )
           )}
           {state.status === 'downloading' && (
@@ -410,7 +413,7 @@ export function DownloadProgressStep() {
             </div>
           )}
           {state.status === 'error' && (
-            <span className="text-sm text-[var(--danger)]">Ошибка</span>
+            <span className="text-sm text-[var(--danger)]">{t('Failed')}</span>
           )}
         </div>
       </div>
@@ -444,18 +447,18 @@ export function DownloadProgressStep() {
 
       {state.status === 'error' && state.error && (
         <div className="mt-2 p-3 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-md">
-          <p className="text-sm text-[var(--danger)] font-medium">Ошибка загрузки</p>
+          <p className="text-sm text-[var(--danger)] font-medium">{t('Download Error')}</p>
           <p className="text-xs text-[var(--danger)] mt-1">{state.error}</p>
-          {(title === 'Модель расшифровки' || title === 'Модель для сути') && (
+          {(type === 'transcription' || type === 'summary') && (
             <button
-              onClick={title === 'Модель расшифровки' ? handleRetryDownload : handleRetrySummaryDownload}
+              onClick={type === 'transcription' ? handleRetryDownload : handleRetrySummaryDownload}
               className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-full bg-[var(--gold)] px-4 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Try Again
+              {t('Try Again')}
             </button>
           )}
         </div>
@@ -465,8 +468,8 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title="Подготовим модели"
-      description="These local models are optional — download them now, or skip and configure transcription and cloud providers (GigaChat / DeepSeek) in Settings."
+      title={t('Getting things ready')}
+      description={t('These local models are optional — download them now, or skip and configure transcription and cloud providers (GigaChat / DeepSeek) in Settings.')}
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -474,23 +477,25 @@ export function DownloadProgressStep() {
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
           {renderDownloadCard(
-            'Модель расшифровки',
+            'transcription',
+            t('Transcription Engine'),
             <Mic className="w-5 h-5 text-[var(--fg2)]" />,
             parakeetState,
             'Parakeet · ~670 MB',
             'MB',
             startParakeetDownload,
-            'Необязательно — модель можно выбрать позже в настройках расшифровки'
+            t('Optional — or choose a model later in Settings → Transcription')
           )}
 
           {renderDownloadCard(
-            'Модель для сути',
+            'summary',
+            t('Summary Engine'),
             <Sparkles className="w-5 h-5 text-[var(--fg2)]" />,
             summaryState,
             getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
             'MiB',
             startSummaryDownload,
-            'Необязательно — можно использовать GigaChat или DeepSeek из раздела «Провайдеры»'
+            t('Optional — or use GigaChat / DeepSeek (Settings → Providers)')
           )}
         </div>
 
@@ -507,8 +512,8 @@ export function DownloadProgressStep() {
               <div className="flex items-start gap-3">
                 <Download className="w-5 h-5 text-[var(--fg2)] flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">Можно продолжить настройку</p>
-                  <p className="text-[var(--fg2)] mt-1">Загрузка продолжится в фоне.</p>
+                  <p className="font-medium">{t('You can continue while this finishes')}</p>
+                  <p className="text-[var(--fg2)] mt-1">{t('Downloads continue in the background.')}</p>
                 </div>
               </div>
             </motion.div>
@@ -525,11 +530,11 @@ export function DownloadProgressStep() {
             {isCompleting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : parakeetState.status === 'downloading' || summaryState.status === 'downloading' ? (
-              'Продолжить в фоне'
+              t('Continue in background')
             ) : parakeetDownloaded || summaryModelDownloaded ? (
-              'Продолжить'
+              t('Continue')
             ) : (
-              'Пропустить и продолжить'
+              t('Skip & continue')
             )}
           </Button>
         </div>

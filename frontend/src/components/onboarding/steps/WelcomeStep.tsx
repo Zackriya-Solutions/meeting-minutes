@@ -3,29 +3,31 @@ import { Button } from '@/components/memento/Button';
 import { Icon, MementoIconName } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useT } from '@/lib/i18n';
 
 export function WelcomeStep() {
   const { goNext } = useOnboarding();
+  const t = useT();
 
   const features = [
     {
       icon: 'check' as MementoIconName,
-      title: 'Данные остаются на твоём устройстве',
+      title: 'Your data never leaves your device',
     },
     {
       icon: 'spark' as MementoIconName,
-      title: 'Суть, выводы и задачи после встречи',
+      title: 'Intelligent summaries & insights',
     },
     {
       icon: 'library' as MementoIconName,
-      title: 'Локальная работа без обязательного облака',
+      title: 'Works offline, no cloud required',
     },
   ];
 
   return (
     <OnboardingContainer
-      title="Встречи остаются с тобой"
-      description="Записывай, расшифровывай и сохраняй суть на своём устройстве"
+      title={t('Welcome to Meetily')}
+      description={t('Record. Transcribe. Summarize. All on your device.')}
       step={1}
       hideProgress={true}
     >
@@ -43,7 +45,7 @@ export function WelcomeStep() {
                     <Icon name={feature.icon} size={14} />
                   </div>
                 </div>
-                <p className="text-sm text-[var(--fg2)] leading-relaxed">{feature.title}</p>
+                <p className="text-sm text-[var(--fg2)] leading-relaxed">{t(feature.title)}</p>
               </div>
             );
           })}
@@ -55,9 +57,9 @@ export function WelcomeStep() {
             onClick={goNext}
             className="w-full"
           >
-            Начать настройку
+            {t('Get Started')}
           </Button>
-          <p className="text-center text-xs text-[var(--fg2)]">Займёт меньше трёх минут</p>
+          <p className="text-center text-xs text-[var(--fg2)]">{t('Takes less than 3 minutes')}</p>
         </div>
       </div>
     </OnboardingContainer>

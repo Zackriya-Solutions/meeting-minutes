@@ -23,6 +23,7 @@ import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
 import { RecordOverlay } from '@/components/memento/RecordOverlay';
 import { Icon } from '@/components/memento/Icon';
+import { useT } from '@/lib/i18n';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -39,6 +40,7 @@ export default function Home() {
   const { status, isStopping, isProcessing, isSaving } = recordingState;
 
   // Hooks
+  const t = useT();
   const { hasMicrophone } = usePermissionCheck();
   const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
@@ -126,12 +128,12 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success('Встреча восстановлена', {
+        toast.success(t('Meeting recovered successfully!'), {
           description: result.audioRecoveryStatus?.status === 'success'
-            ? 'Расшифровка и аудио восстановлены'
-            : 'Расшифровка восстановлена (без аудио)',
+            ? t('Transcripts and audio recovered')
+            : t('Transcripts recovered (no audio available)'),
           action: result.meetingId ? {
-            label: 'Открыть встречу',
+            label: t('View Meeting'),
             onClick: () => {
               router.push(`/meeting-details?id=${result.meetingId}`);
             }
@@ -155,8 +157,8 @@ export default function Home() {
         }
       }
     } catch (error) {
-      toast.error('Не удалось восстановить встречу', {
-        description: error instanceof Error ? error.message : 'Произошла неизвестная ошибка',
+      toast.error(t('Failed to recover meeting'), {
+        description: error instanceof Error ? error.message : t('Unknown error occurred'),
       });
       throw error;
     }
@@ -273,7 +275,7 @@ export default function Home() {
           status !== RecordingStatus.SAVING && (
             <div className="fixed bottom-6 right-6 z-10">
               <RecordOverlay
-                title={meetingTitle || 'Новая встреча'}
+                title={meetingTitle || t('New meeting')}
                 bars={barHeights}
                 meetingId={currentMeetingId}
                 onStop={() => {
@@ -296,11 +298,11 @@ export default function Home() {
               <button
                 onClick={() => handleRecordingStart()}
                 disabled={isRecordingDisabled}
-                aria-label="Записать встречу"
+                aria-label={t('Record meeting')}
                 className="memento-primary-action mm-press pointer-events-auto inline-flex items-center gap-2 px-6 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="mic" size={18} />
-                Записать встречу
+                {t('Record meeting')}
               </button>
             </div>
           )}

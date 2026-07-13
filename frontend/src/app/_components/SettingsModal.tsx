@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
+import { useT } from "@/lib/i18n";
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
@@ -57,6 +58,7 @@ export function SettingsModals({
   } = useConfig();
 
   const { isRecording } = useRecordingState();
+  const t = useT();
 
   return <>
     {/* Legacy Settings Modal */}
@@ -65,7 +67,7 @@ export function SettingsModals({
         <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="flex justify-between items-center p-6 border-b">
-            <h3 className="text-xl font-semibold text-[var(--fg1)]">Настройки</h3>
+            <h3 className="text-xl font-semibold text-[var(--fg1)]">{t('Preferences')}</h3>
             <button
               onClick={() => onClose("modelSettings")
               }
@@ -84,11 +86,11 @@ export function SettingsModals({
 
             {/* Divider */}
             <div className="border-t pt-8">
-              <h4 className="text-lg font-semibold text-[var(--fg1)] mb-4">Модель для создания сути</h4>
+              <h4 className="text-lg font-semibold text-[var(--fg1)] mb-4">{t('AI Model Configuration')}</h4>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-[var(--fg2)] mb-1">
-                    Модель для сути
+                    {t('Summarization Model')}
                   </label>
                   <div className="flex space-x-2">
                     <select
@@ -103,7 +105,7 @@ export function SettingsModals({
                         });
                       }}
                     >
-                      <option value="builtin-ai">Built-in AI</option>
+                      <option value="builtin-ai">{t('Built-in AI')}</option>
                       <option value="claude">Claude</option>
                       <option value="groq">Groq</option>
                       <option value="ollama">Ollama</option>
@@ -126,7 +128,7 @@ export function SettingsModals({
                 </div>
                 {modelConfig.provider === 'ollama' && (
                   <div>
-                    <h4 className="text-lg font-bold mb-4">Доступные модели Ollama</h4>
+                    <h4 className="text-lg font-bold mb-4">{t('Available Ollama Models')}</h4>
                     {error && (
                       <div className="bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] text-[var(--danger)] px-4 py-3 rounded mb-4">
                         {error}
@@ -141,8 +143,8 @@ export function SettingsModals({
                           onClick={() => setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))}
                         >
                           <h3 className="font-bold">{model.name}</h3>
-                          <p className="text-[var(--fg2)]">Size: {model.size}</p>
-                          <p className="text-[var(--fg2)]">Modified: {model.modified}</p>
+                          <p className="text-[var(--fg2)]">{t('Size:')} {model.size}</p>
+                          <p className="text-[var(--fg2)]">{t('Modified:')} {model.modified}</p>
                         </div>
                       ))}
                     </div>
@@ -158,7 +160,7 @@ export function SettingsModals({
               onClick={() => onClose('modelSettings')}
               className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold-active)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
             >
-              Готово
+              {t('Done')}
             </button>
           </div>
         </div>
@@ -170,7 +172,7 @@ export function SettingsModals({
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div className="bg-[var(--bg-canvas)] rounded-lg p-6 max-w-md w-full mx-4 shadow-none">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-[var(--fg1)]">Аудиоустройства</h3>
+            <h3 className="text-lg font-semibold text-[var(--fg1)]">{t('Audio Device Settings')}</h3>
             <button
               onClick={() => onClose('deviceSettings')}
               className="text-[var(--fg2)] hover:text-[var(--fg1)]"
@@ -192,14 +194,14 @@ export function SettingsModals({
               onClick={() => {
                 const micDevice = selectedDevices.micDevice || 'Default';
                 const systemDevice = selectedDevices.systemDevice || 'Default';
-                toast.success("Устройства выбраны", {
-                  description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
+                toast.success(t("Devices selected"), {
+                  description: `${t('Microphone:')} ${micDevice}, ${t('System Audio:')} ${systemDevice}`
                 });
                 onClose('deviceSettings');
               }}
               className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold-active)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
             >
-              Готово
+              {t('Done')}
             </button>
           </div>
         </div>
@@ -211,7 +213,7 @@ export function SettingsModals({
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div className="bg-[var(--bg-canvas)] rounded-lg p-6 max-w-md w-full mx-4 shadow-none">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-[var(--fg1)]">Настройки языка</h3>
+            <h3 className="text-lg font-semibold text-[var(--fg1)]">{t('Language Settings')}</h3>
             <button
               onClick={() => onClose('languageSettings')}
               className="text-[var(--fg2)] hover:text-[var(--fg1)]"
@@ -234,7 +236,7 @@ export function SettingsModals({
               onClick={() => onClose('languageSettings')}
               className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] rounded-md hover:bg-[var(--gold-active)] focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]"
             >
-              Готово
+              {t('Done')}
             </button>
           </div>
         </div>
@@ -248,7 +250,7 @@ export function SettingsModals({
           {/* Fixed Header */}
           <div className="flex justify-between items-center p-6 pb-4 border-b border-[var(--border-subtle)]">
             <h3 className="text-lg font-semibold text-[var(--fg1)]">
-              {messages.modelSelector ? 'Нужно настроить распознавание речи' : 'Настройки модели расшифровки'}
+              {messages.modelSelector ? t('Speech Recognition Setup Required') : t('Transcription Model Settings')}
             </h3>
             <button
               onClick={() => onClose('modelSelector')}
@@ -283,8 +285,8 @@ export function SettingsModals({
                 <div className="w-11 h-6 bg-[var(--bg-elevated)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--gold-ring)] rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-[var(--fg1)] after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-[var(--bg-canvas)] after:border-[var(--border-strong)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--gold)]"></div>
               </label>
               <div>
-                <p className="text-sm font-medium text-[var(--fg2)]">Показывать уверенность распознавания</p>
-                <p className="text-xs text-[var(--fg2)]">Показывать качество распознавания рядом с фрагментами</p>
+                <p className="text-sm font-medium text-[var(--fg2)]">{t('Show Confidence Indicators')}</p>
+                <p className="text-xs text-[var(--fg2)]">{t('Display colored dots showing transcription confidence quality')}</p>
               </div>
             </div>
 
@@ -292,7 +294,7 @@ export function SettingsModals({
               onClick={() => onClose('modelSelector')}
               className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] rounded-md hover:brightness-125 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--border-strong)]"
             >
-              {messages.modelSelector ? 'Отмена' : 'Готово'}
+              {messages.modelSelector ? t('Cancel') : t('Done')}
             </button>
           </div>
         </div>
@@ -303,14 +305,14 @@ export function SettingsModals({
     {modals.errorAlert && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <Alert className="max-w-md mx-4 border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[var(--bg-canvas)] shadow-none">
-          <AlertTitle className="text-[var(--danger)]">Запись завершена</AlertTitle>
+          <AlertTitle className="text-[var(--danger)]">{t('Recording Stopped')}</AlertTitle>
           <AlertDescription className="text-[var(--danger)]">
             {messages.errorAlert}
             <button
               onClick={() => onClose('errorAlert')}
               className="ml-2 text-[var(--danger)] hover:opacity-80 underline"
             >
-              Закрыть
+              {t('Dismiss')}
             </button>
           </AlertDescription>
         </Alert>
@@ -321,14 +323,14 @@ export function SettingsModals({
     {modals.chunkDropWarning && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <Alert className="max-w-lg mx-4 border-[var(--gold-border)] bg-[var(--bg-canvas)] shadow-none">
-          <AlertTitle className="text-[var(--gold)]">Расшифровка может работать медленно</AlertTitle>
+          <AlertTitle className="text-[var(--gold)]">{t('Transcription Performance Warning')}</AlertTitle>
           <AlertDescription className="text-[var(--gold)]">
             {messages.chunkDropWarning}
             <button
               onClick={() => onClose('chunkDropWarning')}
               className="ml-2 text-[var(--gold)] hover:text-[var(--gold-active)] underline"
             >
-              Закрыть
+              {t('Dismiss')}
             </button>
           </AlertDescription>
         </Alert>

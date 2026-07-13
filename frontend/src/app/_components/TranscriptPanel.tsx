@@ -9,6 +9,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
+import { useT } from '@/lib/i18n';
 import { useMemo } from 'react';
 
 /**
@@ -30,6 +31,7 @@ export function TranscriptPanel({
   isStopping,
   showModal
 }: TranscriptPanelProps) {
+  const t = useT();
   // Contexts
   const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
@@ -62,11 +64,11 @@ export function TranscriptPanel({
                     variant="outline"
                     size="sm"
                     onClick={copyTranscript}
-                    title="Скопировать расшифровку"
+                    title={t('Copy Transcript')}
                   >
                     <Copy />
                     <span className='hidden md:inline'>
-                      Copy
+                      {t('Copy')}
                     </span>
                   </Button>
                 )}
@@ -75,11 +77,11 @@ export function TranscriptPanel({
                     variant="outline"
                     size="sm"
                     onClick={() => showModal('languageSettings')}
-                    title="Language"
+                    title={t('Language')}
                   >
                     <GlobeIcon />
                     <span className='hidden md:inline'>
-                      Language
+                      {t('Language')}
                     </span>
                   </Button>
                 }

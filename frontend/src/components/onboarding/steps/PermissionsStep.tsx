@@ -5,8 +5,10 @@ import { Icon } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useT } from '@/lib/i18n';
 
 export function PermissionsStep() {
+  const t = useT();
   const { setPermissionStatus, setPermissionsSkipped, permissions, completeOnboarding } = useOnboarding();
   const [isPending, setIsPending] = useState(false);
 
@@ -32,7 +34,7 @@ export function PermissionsStep() {
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Разреши доступ к микрофону в настройках конфиденциальности системы.');
+        alert(t('Please enable microphone access in System Preferences > Security & Privacy > Microphone'));
       }
       return;
     }
@@ -64,7 +66,7 @@ export function PermissionsStep() {
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Разреши захват аудио в настройках конфиденциальности системы.');
+        alert(t('Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture'));
       }
       return;
     }
@@ -113,8 +115,8 @@ export function PermissionsStep() {
 
   return (
     <OnboardingContainer
-      title="Разреши запись звука"
-      description="Memento использует микрофон и системный звук только во время записи встречи"
+      title={t('Grant Permissions')}
+      description={t('Meetily needs access to your microphone and system audio to record meetings')}
       step={4}
       hideProgress={true}
       showNavigation={allPermissionsGranted}
@@ -126,8 +128,8 @@ export function PermissionsStep() {
           {/* Microphone */}
           <PermissionRow
             icon={<Icon name="mic" />}
-            title="Микрофон"
-            description="Записывает твой голос"
+            title={t('Microphone')}
+            description={t('Required to capture your voice during meetings')}
             status={permissions.microphone}
             isPending={isPending}
             onAction={handleMicrophoneAction}
@@ -136,8 +138,8 @@ export function PermissionsStep() {
           {/* System Audio */}
           <PermissionRow
             icon={<Icon name="wave" />}
-            title="Системный звук"
-            description="Записывает голоса собеседников"
+            title={t('System Audio')}
+            description={t('Click Enable to grant Audio Capture permission')}
             status={permissions.systemAudio}
             isPending={isPending}
             onAction={handleSystemAudioAction}
@@ -147,19 +149,19 @@ export function PermissionsStep() {
         {/* Action Buttons */}
         <div className="flex flex-col gap-3 pt-4">
           <Button onClick={handleFinish} disabled={!allPermissionsGranted} className="w-full h-11">
-            Завершить настройку
+            {t('Finish Setup')}
           </Button>
 
           <button
             onClick={handleSkip}
             className="text-sm text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
           >
-            Сделать позже
+            {t("I'll do this later")}
           </button>
 
           {!allPermissionsGranted && (
             <p className="text-xs text-center text-muted-foreground">
-              Без разрешений запись не начнётся. Их можно выдать позже в настройках.
+              {t("Recording won't work without permissions. You can grant them later in settings.")}
             </p>
           )}
         </div>

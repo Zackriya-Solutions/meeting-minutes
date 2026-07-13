@@ -2,17 +2,19 @@ import React from 'react';
 import { CheckCircle2, Loader2, XCircle } from '@/components/memento/LucideCompat';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import type { PermissionRowProps } from '@/types/onboarding';
 
 export function PermissionRow({ icon, title, description, status, isPending = false, onAction }: PermissionRowProps) {
+  const t = useT();
   const isAuthorized = status === 'authorized';
   const isDenied = status === 'denied';
   const isChecking = isPending;
 
   const getButtonText = () => {
-    if (isChecking) return 'Checking...';
-    if (isDenied) return 'Open Settings';
-    return 'Enable';
+    if (isChecking) return t('Checking...');
+    if (isDenied) return t('Open Settings');
+    return t('Enable');
   };
 
   return (
@@ -42,12 +44,12 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
             {isAuthorized ? (
               <span className="text-[var(--success)] flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Access Granted
+                {t('Access Granted')}
               </span>
             ) : isDenied ? (
               <span className="text-[var(--danger)] flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" />
-                Доступ запрещён — разреши его в настройках системы
+                {t('Access Denied - Please grant in System Settings')}
               </span>
             ) : (
               <span>{description}</span>

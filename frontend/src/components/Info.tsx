@@ -3,12 +3,14 @@ import { Info as InfoIcon } from '@/components/memento/LucideCompat';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
+import { useT } from '@/lib/i18n';
 
 interface InfoProps {
     isCollapsed: boolean;
 }
 
 const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, ref) => {
+  const t = useT();
   return (
     <Dialog aria-describedby={undefined}>
       <DialogTrigger asChild>
@@ -19,17 +21,17 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
               ? "bg-transparent p-2 hover:bg-[var(--bg-elevated)] rounded-lg"
               : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg shadow-none"
           }`}
-          title="О Memento"
+          title={t('About Memento')}
         >
           <InfoIcon className={`text-[var(--fg2)] ${isCollapsed ? "w-5 h-5" : "w-4 h-4"}`} />
           {!isCollapsed && (
-            <span className="ml-2 text-sm text-[var(--fg2)]">О Memento</span>
+            <span className="ml-2 text-sm text-[var(--fg2)]">{t('About Memento')}</span>
           )}
         </button>
       </DialogTrigger>
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>О Memento</DialogTitle>
+          <DialogTitle>{t('About Memento')}</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>
