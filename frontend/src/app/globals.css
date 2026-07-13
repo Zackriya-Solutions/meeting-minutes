@@ -260,6 +260,20 @@
   .mm-record-meta { min-width: 0; color: var(--fg3); font-size: 12px; }
   .mm-record-meta > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mm-record-actions > button { flex: 1; }
+  .mm-page { height: 100vh; display: flex; flex-direction: column; padding: 24px 32px; background: var(--bg-canvas); color: var(--fg1); }
+  .mm-page-header { display: flex; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
+  .mm-page-title { font-size: 28px; font-weight: 600; line-height: .98; letter-spacing: -.045em; }
+  .mm-icon-button { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--radius-16); color: var(--fg2); }
+  .mm-icon-button:hover { color: var(--fg1); background: var(--state-hover-bg); }
+  .mm-field { min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-16); background: var(--surface-input); color: var(--fg2); }
+  .mm-field:focus-within { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(224, 152, 48, .12); }
+  .mm-select { min-height: 40px; border: 1px solid var(--border-strong); border-radius: var(--radius-12); background: var(--bg-elevated); padding: 0 12px; color: var(--fg1); font-size: 14px; }
+  .mm-result-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-16); background: var(--bg-surface); padding: 14px; color: var(--fg2); }
+  .mm-result-card:hover { border-color: var(--gold-border); background: var(--gold-soft); }
+  .mm-empty-icon { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle); border-radius: var(--radius-20); background: var(--bg-elevated); color: var(--gold); }
+  .mm-tab-list { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: var(--radius-16); background: var(--bg-sheet); }
+  .mm-tab { min-height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: var(--radius-12); color: var(--fg2); font-size: 13px; }
+  .mm-tab[data-state='active'] { background: var(--bg-elevated) !important; color: var(--fg1) !important; box-shadow: none !important; }
 }
 
 @keyframes mmOverlayIn { from { opacity: 0; transform: translateY(12px) scale(.98); } }

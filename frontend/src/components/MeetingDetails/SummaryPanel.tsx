@@ -253,9 +253,9 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-canvas)]">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="border-b border-[var(--border-subtle)] p-4">
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}

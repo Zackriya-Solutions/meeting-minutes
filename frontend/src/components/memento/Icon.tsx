@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react';
 
-export type MementoIconName = 'wave' | 'mic' | 'stop' | 'play' | 'pause' | 'transcript' | 'library' | 'search' | 'spark' | 'tag' | 'clock' | 'calendar' | 'users' | 'plus' | 'check' | 'chevron-right' | 'back' | 'close' | 'settings' | 'chat' | 'upload' | 'home' | 'dot';
+export type MementoIconName = 'wave' | 'mic' | 'stop' | 'play' | 'pause' | 'transcript' | 'library' | 'search' | 'spark' | 'tag' | 'clock' | 'calendar' | 'users' | 'plus' | 'check' | 'chevron-right' | 'back' | 'close' | 'settings' | 'chat' | 'upload' | 'home' | 'filter' | 'send' | 'alert' | 'dot';
 
 const glyphs: Record<MementoIconName, React.ReactNode> = {
   wave: <><path d="M2.5 12C3.4 3.8 5.8 3.8 6.8 12c.9 7.6 2.9 7.6 3.8 0 .8-6.2 2.3-6.2 3.1 0 .6 4.2 1.7 4.2 2.3 0h2.4" /><circle cx="21" cy="12" r="1.7" fill="currentColor" stroke="none" /></>,
@@ -25,6 +25,9 @@ const glyphs: Record<MementoIconName, React.ReactNode> = {
   chat: <path d="M5 5.5h14v10H9l-4 3v-13Z" />,
   upload: <path d="M12 16V4m-4 4 4-4 4 4M5 14v5h14v-5" />,
   home: <path d="m4 11 8-7 8 7v9h-6v-6h-4v6H4v-9Z" />,
+  filter: <><path d="M6 5v14M12 5v14M18 5v14M4 8h4M10 15h4M16 10h4" /><circle cx="6" cy="8" r="2" /><circle cx="12" cy="15" r="2" /><circle cx="18" cy="10" r="2" /></>,
+  send: <path d="m4 5 16 7-16 7 3-7-3-7Zm3 7h13" />,
+  alert: <><path d="M12 4 3.5 19h17L12 4Z" /><path d="M12 9v4m0 3v.1" /></>,
   dot: <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />,
 };
 

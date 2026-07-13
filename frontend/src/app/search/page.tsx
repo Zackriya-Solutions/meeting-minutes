@@ -4,8 +4,10 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Search, Loader2, SlidersHorizontal, X, Clock, FileText } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Icon } from '@/components/memento/Icon';
+import { Button } from '@/components/memento/Button';
 
 // Mirrors the Rust `SearchHit` (search::hybrid).
 interface SearchHit {
@@ -119,47 +121,47 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="flex h-screen flex-col pr-8 pt-4">
+    <div className="mm-page">
       {/* Header + search bar */}
-      <div className="border-b border-gray-100 pb-4">
+      <div className="border-b border-[var(--border-subtle)] pb-5">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push('/')}
-            className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100"
+            className="mm-icon-button mm-hover"
             aria-label="Назад"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <Icon name="back" />
           </button>
-          <h1 className="text-lg font-semibold text-gray-900">Поиск по встречам</h1>
+          <h1 className="mm-page-title">Поиск по встречам</h1>
         </div>
 
         <div className="mt-3 flex items-center gap-2">
-          <div className="flex flex-1 items-center gap-2 rounded-xl border border-gray-200 px-3 focus-within:border-blue-400">
-            <Search className="h-5 w-5 shrink-0 text-gray-400" />
+          <div className="mm-field flex-1">
+            <Icon name="search" />
             <input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSearch(query)}
               placeholder="Найдите что угодно из ваших встреч…"
-              className="h-11 flex-1 bg-transparent text-sm text-gray-800 outline-none"
+              className="h-11 flex-1 border-0 bg-transparent text-sm outline-none"
             />
             {query && (
               <button onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600" aria-label="Очистить">
-                <X className="h-4 w-4" />
+                <Icon name="close" size={16} />
               </button>
             )}
           </div>
           <button
             onClick={openFilters}
             className={cn(
-              'relative flex h-11 items-center gap-1.5 rounded-xl border px-3 text-sm transition-colors',
+              'mm-button mm-button-secondary relative h-11 px-3 text-sm',
               showFilters || activeFilterCount
                 ? 'border-blue-300 bg-blue-50 text-blue-700'
                 : 'border-gray-200 text-gray-700 hover:bg-gray-100',
             )}
           >
-            <SlidersHorizontal className="h-4 w-4" />
+            <Icon name="filter" size={17} />
             Фильтры
             {activeFilterCount > 0 && (
               <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-medium text-white">
@@ -167,27 +169,24 @@ export default function SearchPage() {
               </span>
             )}
           </button>
-          <button
+          <Button
             onClick={() => runSearch(query)}
             disabled={searching || !query.trim()}
-            className={cn(
-              'flex h-11 items-center justify-center rounded-xl px-5 text-sm font-medium text-white transition-colors',
-              searching || !query.trim() ? 'cursor-not-allowed bg-gray-300' : 'bg-blue-600 hover:bg-blue-700',
-            )}
+            className="h-11 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {searching ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Найти'}
-          </button>
+          </Button>
         </div>
 
         {showFilters && (
-          <div className="mt-3 flex flex-wrap items-end gap-4 rounded-xl bg-gray-50 p-3">
+          <div className="mt-3 flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
             <label className="flex flex-col gap-1 text-xs text-gray-500">
               С даты
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700"
+                className="mm-select"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-500">
@@ -196,7 +195,7 @@ export default function SearchPage() {
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700"
+                className="mm-select"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-gray-500">
@@ -204,7 +203,7 @@ export default function SearchPage() {
               <select
                 value={collectionId ?? ''}
                 onChange={(e) => setCollectionId(e.target.value ? Number(e.target.value) : null)}
-                className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-700"
+                className="mm-select"
               >
                 <option value="">Любая</option>
                 {collections.map((c) => (
@@ -270,12 +269,12 @@ export default function SearchPage() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.15 }}
                       onClick={() => openHit(h)}
-                      className="group rounded-xl border border-gray-100 bg-white p-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/40"
+                      className="mm-result-card group text-left"
                     >
                       <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-400">
-                        <Clock className="h-3 w-3" />
+                        <Icon name="clock" size={13} />
                         {fmtTime(h.start_ms)}
-                        <FileText className="ml-1 h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <Icon name="transcript" size={13} className="ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
                         <span className="opacity-0 transition-opacity group-hover:opacity-100">открыть</span>
                       </div>
                       <p className="line-clamp-3 text-sm leading-relaxed text-gray-700">
@@ -324,8 +323,8 @@ function Centered({ children }: { children: React.ReactNode }) {
 function EmptyPrompt() {
   return (
     <div className="mx-auto flex max-w-md flex-col items-center pt-24 text-center">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
-        <Search className="h-7 w-7 text-blue-600" />
+      <div className="mm-empty-icon mb-4">
+        <Icon name="search" size={28} />
       </div>
       <h2 className="text-xl font-semibold text-gray-900">Поиск по всем встречам</h2>
       <p className="mt-2 text-sm text-gray-500">

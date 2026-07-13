@@ -178,9 +178,9 @@ export default function PageContent({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="flex h-screen flex-col bg-[var(--bg-canvas)]"
     >
-      <div className="flex flex-1 overflow-hidden">
+      <div className="m-4 flex flex-1 overflow-hidden rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-sheet)]">
         <TranscriptPanel
           transcripts={meetingData.transcripts}
           customPrompt={customPrompt}
