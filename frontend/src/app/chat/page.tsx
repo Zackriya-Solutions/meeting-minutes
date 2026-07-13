@@ -269,15 +269,15 @@ export default function ChatPage() {
             onClick={() => send(input)}
             disabled={sending || !input.trim()}
             className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-xl text-white transition-colors',
-              sending || !input.trim() ? 'cursor-not-allowed bg-gray-300' : 'bg-blue-600 hover:bg-blue-700',
+              'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
+              sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold)]',
             )}
             aria-label="Отправить"
           >
             {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon name="send" />}
           </button>
         </div>
-        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-gray-400">
+        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--fg3)]">
           Ответы формируются только из ваших записей, со ссылками на источники.
         </p>
       </div>
@@ -308,16 +308,16 @@ function MessageBubble({
         className={cn(
           'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
           isUser
-            ? 'bg-blue-600 text-white'
+            ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
             : msg.error
-              ? 'border border-red-200 bg-red-50 text-red-700'
+              ? 'border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
               : notFound
-                ? 'border border-gray-200 bg-gray-50 text-gray-500'
-                : 'bg-gray-100 text-gray-800',
+                ? 'border border-[var(--border-subtle)] bg-[var(--bg-sheet)] text-[var(--fg2)]'
+                : 'bg-[var(--bg-elevated)] text-[var(--fg1)]',
         )}
       >
         {notFound && (
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
             <Icon name="search" size={14} />
             Не найдено в ваших встречах
           </div>
@@ -338,7 +338,7 @@ function MessageBubble({
                 key={c.index}
                 onClick={() => onCite(c)}
                 title="Открыть встречу на этом месте"
-                className="flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-xs text-blue-700 ring-1 ring-blue-200 transition-colors hover:bg-blue-50"
+                className="flex items-center gap-1 rounded-full bg-[var(--bg-canvas)]/70 px-2 py-0.5 text-xs text-[var(--gold)] ring-1 ring-[var(--gold-ring)] transition-colors hover:bg-[var(--gold-soft)]"
               >
                 <Icon name="transcript" size={12} />
                 <span className="font-medium">[{c.index}]</span>
@@ -355,11 +355,11 @@ function MessageBubble({
 function TypingIndicator() {
   return (
     <div className="flex justify-start">
-      <div className="flex items-center gap-1 rounded-2xl bg-gray-100 px-4 py-3">
+      <div className="flex items-center gap-1 rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+            className="h-2 w-2 animate-bounce rounded-full bg-[var(--fg3)]"
             style={{ animationDelay: `${i * 0.15}s` }}
           />
         ))}
@@ -374,8 +374,8 @@ function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disable
       <div className="mm-empty-icon mb-4">
         <Icon name="library" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-gray-900">Спросите свой архив встреч</h2>
-      <p className="mt-2 text-sm text-gray-500">
+      <h2 className="text-xl font-semibold text-[var(--fg1)]">Спросите свой архив встреч</h2>
+      <p className="mt-2 text-sm text-[var(--fg2)]">
         Задавайте вопросы на естественном языке — ответы приходят со ссылками на конкретные моменты записей.
       </p>
       <div className="mt-8 flex w-full flex-col gap-2">
@@ -384,7 +384,7 @@ function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disable
             key={s}
             disabled={disabled}
             onClick={() => onPick(s)}
-            className="rounded-xl border border-gray-200 px-4 py-3 text-left text-sm text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50"
+            className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-left text-sm text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] hover:bg-[var(--gold-soft)] disabled:opacity-50"
           >
             {s}
           </button>

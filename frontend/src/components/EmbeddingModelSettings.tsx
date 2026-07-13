@@ -76,23 +76,23 @@ export function EmbeddingModelSettings() {
 
   return (
     <div className="mt-6 max-w-2xl">
-      <div className="rounded-xl border border-gray-200 p-5">
+      <div className="rounded-xl border border-[var(--border-subtle)] p-5">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50">
-            <Search className="h-5 w-5 text-blue-600" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--gold-soft)]">
+            <Search className="h-5 w-5 text-[var(--gold)]" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-gray-900">Semantic search model</h3>
-            <p className="mt-1 text-sm leading-relaxed text-gray-500">
+            <h3 className="text-sm font-semibold text-[var(--fg1)]">Semantic search model</h3>
+            <p className="mt-1 text-sm leading-relaxed text-[var(--fg2)]">
               Powers meaning-based (vector) search and Chat with archive. Runs fully locally —{' '}
-              <span className="font-medium text-gray-600">{modelName}</span> ({dim}-dim), ~470&nbsp;MB.
+              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}-dim), ~470&nbsp;MB.
               Until it&apos;s installed, Search and Chat use keyword (FTS) matching only.
             </p>
 
             <div className="mt-4">
               {downloading ? (
                 <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
+                  <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
                     <span className="flex items-center gap-1.5">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       Downloading{progress ? ` ${progress.file}` : '…'}
@@ -103,27 +103,27 @@ export function EmbeddingModelSettings() {
                       </span>
                     )}
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
                     <div
-                      className="h-full rounded-full bg-blue-500 transition-all"
+                      className="h-full rounded-full bg-[var(--gold-soft)]0 transition-all"
                       style={{ width: `${progress?.percent ?? 0}%` }}
                     />
                   </div>
                 </div>
               ) : loaded ? (
-                <div className="flex items-center gap-2 text-sm font-medium text-green-600">
+                <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
                   <CheckCircle2 className="h-4 w-4" />
                   Active — semantic search enabled
                 </div>
               ) : present ? (
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="flex items-center gap-2 text-sm text-gray-600">
-                    <CheckCircle2 className="h-4 w-4 text-gray-400" />
+                  <span className="flex items-center gap-2 text-sm text-[var(--fg2)]">
+                    <CheckCircle2 className="h-4 w-4 text-[var(--fg3)]" />
                     Installed — restart the app to activate
                   </span>
                   <button
                     onClick={download}
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--fg2)] hover:bg-[var(--bg-elevated)]"
                   >
                     <RotateCw className="h-3.5 w-3.5" />
                     Re-download
@@ -132,7 +132,7 @@ export function EmbeddingModelSettings() {
               ) : (
                 <button
                   onClick={download}
-                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                  className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold)]"
                 >
                   <Download className="h-4 w-4" />
                   Download model
@@ -140,7 +140,7 @@ export function EmbeddingModelSettings() {
               )}
 
               {error && (
-                <div className="mt-3 flex items-start gap-1.5 text-sm text-red-600">
+                <div className="mt-3 flex items-start gap-1.5 text-sm text-[var(--danger)]">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -150,7 +150,7 @@ export function EmbeddingModelSettings() {
         </div>
       </div>
 
-      <p className="mt-3 px-1 text-xs text-gray-400">
+      <p className="mt-3 px-1 text-xs text-[var(--fg3)]">
         Embeddings and search stay on-device. Only summaries, extraction, and chat prompts are sent to your
         configured LLM provider (GigaChat / DeepSeek).
       </p>

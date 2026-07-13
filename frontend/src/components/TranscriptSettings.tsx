@@ -37,9 +37,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     return (
         <div className="space-y-4 pb-6">
             <div>
-                <Label className="block text-sm font-medium text-gray-700 mb-1">Transcription</Label>
-                <p className="text-sm text-gray-500">
-                    Memento transcribes with <span className="font-medium text-gray-700">GigaAM v3</span> (Sber) —
+                <Label className="block text-sm font-medium text-[var(--fg2)] mb-1">Transcription</Label>
+                <p className="text-sm text-[var(--fg2)]">
+                    Memento transcribes with <span className="font-medium text-[var(--fg2)]">GigaAM v3</span> (Sber) —
                     on-device Russian speech recognition with punctuation and capitalization.
                 </p>
             </div>

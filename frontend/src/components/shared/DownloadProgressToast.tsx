@@ -61,48 +61,48 @@ function DownloadToastContent({
   const unitLabel = download.unitLabel ?? 'MB';
 
   return (
-    <div className="flex items-center gap-3 w-full max-w-sm bg-white rounded-lg shadow-lg border border-gray-200 p-3 relative">
+    <div className="flex items-center gap-3 w-full max-w-sm bg-[var(--bg-canvas)] rounded-lg shadow-none border border-[var(--border-subtle)] p-3 relative">
 
       {/* Icon */}
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isComplete ? 'bg-green-100' : hasError ? 'bg-red-100' : isCancelled ? 'bg-gray-100' : 'bg-gray-100'
+      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isComplete ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]' : hasError ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]' : isCancelled ? 'bg-[var(--bg-elevated)]' : 'bg-[var(--bg-elevated)]'
         }`}>
         {isComplete ? (
-          <Check className="w-4 h-4 text-green-600" />
+          <Check className="w-4 h-4 text-[var(--success)]" />
         ) : hasError ? (
-          <X className="w-4 h-4 text-red-600" />
+          <X className="w-4 h-4 text-[var(--danger)]" />
         ) : isCancelled ? (
-          <X className="w-4 h-4 text-gray-600" />
+          <X className="w-4 h-4 text-[var(--fg2)]" />
         ) : (
-          <ArrowBigDownDash className="size-5 text-gray-600 " />
+          <ArrowBigDownDash className="size-5 text-[var(--fg2)] " />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-1">
-          <p className="text-sm font-medium text-gray-900 truncate">
+          <p className="text-sm font-medium text-[var(--fg1)] truncate">
             {download.displayName}
           </p>
         </div>
 
         {hasError ? (
-          <p className="text-xs text-red-600">{download.error || 'Download failed'}</p>
+          <p className="text-xs text-[var(--danger)]">{download.error || 'Download failed'}</p>
         ) : isComplete ? (
-          <p className="text-xs text-green-600">Download complete</p>
+          <p className="text-xs text-[var(--success)]">Download complete</p>
         ) : isCancelled ? (
-          <p className="text-xs text-gray-600">Download cancelled</p>
+          <p className="text-xs text-[var(--fg2)]">Download cancelled</p>
         ) : (
           <>
             {/* Progress bar */}
-            <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden mb-1.5">
+            <div className="w-full h-1.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden mb-1.5">
               <div
-                className="h-full bg-gray-900 rounded-full transition-all duration-300"
+                className="h-full bg-[var(--fg3)] rounded-full transition-all duration-300"
                 style={{ width: `${download.progress}%` }}
               />
             </div>
 
             {/* Progress text */}
-            <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="flex items-center justify-between text-xs text-[var(--fg2)]">
               <span>
                 {download.downloadedMb.toFixed(1)} / {download.totalMb.toFixed(1)} {unitLabel}
               </span>
@@ -110,7 +110,7 @@ function DownloadToastContent({
                 {download.speedMbps > 0 && (
                   <span>{download.speedMbps.toFixed(1)} {unitLabel}/s</span>
                 )}
-                <span className="text-gray-900 font-medium">
+                <span className="text-[var(--fg1)] font-medium">
                   {Math.round(download.progress)}%
                 </span>
               </span>

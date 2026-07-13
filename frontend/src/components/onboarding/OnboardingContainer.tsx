@@ -60,9 +60,9 @@ export function OnboardingContainer({
                   onClick={handlePrevious}
                   disabled={!canGoPrevious || step === 1}
                   className={cn(
-                    'pointer-events-auto w-8 h-8 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center transition-all duration-200',
+                    'pointer-events-auto w-8 h-8 rounded-full bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none flex items-center justify-center transition-all duration-200',
                     canGoPrevious && step !== 1
-                      ? 'hover:bg-gray-50 hover:shadow-md hover:scale-110 text-gray-700'
+                      ? 'hover:bg-[var(--bg-sheet)] hover:shadow-none hover:scale-110 text-[var(--fg2)]'
                       : 'opacity-0 cursor-not-allowed'
                   )}
                 >
@@ -73,9 +73,9 @@ export function OnboardingContainer({
                   onClick={handleNext}
                   disabled={!canGoNext || step === totalSteps}
                   className={cn(
-                    'pointer-events-auto w-8 h-8 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center transition-all duration-200',
+                    'pointer-events-auto w-8 h-8 rounded-full bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none flex items-center justify-center transition-all duration-200',
                     canGoNext && step !== totalSteps
-                      ? 'hover:bg-gray-50 hover:shadow-md hover:scale-110 text-gray-700'
+                      ? 'hover:bg-[var(--bg-sheet)] hover:shadow-none hover:scale-110 text-[var(--fg2)]'
                       : 'opacity-0 cursor-not-allowed'
                   )}
                 >
@@ -93,7 +93,7 @@ export function OnboardingContainer({
         <div className="mb-4 text-center space-y-3 flex-shrink-0">
           <h1 className="animate-fade-in-up text-[31px] font-semibold leading-[.96] tracking-[-.04em] text-[var(--fg1)]">{title}</h1>
           {description && (
-            <p className="text-base text-gray-600 max-w-md mx-auto animate-fade-in-up delay-75">
+            <p className="text-base text-[var(--fg2)] max-w-md mx-auto animate-fade-in-up delay-75">
               {description}
             </p>
           )}

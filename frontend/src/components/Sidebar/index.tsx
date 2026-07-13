@@ -463,7 +463,7 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
                 <MementoIcon name="home" size={20} />
@@ -479,7 +479,7 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleRecordingToggle}
                 disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
+                className={`p-2 ${isRecording ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 cursor-not-allowed' : 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]0 hover:bg-[var(--danger)]'} rounded-full transition-colors duration-150 shadow-none-none`}
               >
                 {isRecording ? (
                   <MementoIcon name="stop" size={20} />
@@ -498,7 +498,7 @@ const Sidebar: React.FC = () => {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
+                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-[var(--gold-soft)] bg-[var(--gold-soft)]"
                 >
                   <MementoIcon name="upload" size={20} />
                 </button>
@@ -516,7 +516,7 @@ const Sidebar: React.FC = () => {
                   if (isCollapsed) toggleCollapse();
                   toggleFolder('meetings');
                 }}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
                 <MementoIcon name="transcript" size={20} />
@@ -531,7 +531,7 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/search')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSearchPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isSearchPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
                 <MementoIcon name="search" size={20} />
@@ -546,7 +546,7 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/chat')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isChatPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isChatPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
                 <MementoIcon name="chat" size={20} />
@@ -561,7 +561,7 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/settings')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
                 <MementoIcon name="settings" size={20} />
@@ -601,8 +601,8 @@ const Sidebar: React.FC = () => {
         <div
           className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
             ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
-              hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
+            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-[var(--gold-soft)] text-[var(--gold)] font-medium' :
+              hasTranscriptMatch ? 'bg-[var(--gold-soft)]' : 'hover:bg-[var(--bg-sheet)]'
             } cursor-pointer`
             }`}
           style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
@@ -627,25 +627,25 @@ const Sidebar: React.FC = () => {
               <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
               <div className="ml-auto">
                 {isExpanded ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                  <ChevronDown className="w-4 h-4 text-[var(--fg2)]" />
                 ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
+                  <ChevronRight className="w-4 h-4 text-[var(--fg2)]" />
                 )}
               </div>
               {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+                <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Searching...</span>
               )}
             </>
           ) : (
             <div className="flex flex-col w-full">
               <div className="flex items-center w-full">
                 {isMeetingItem ? (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
-                    <File className="w-3.5 h-3.5 text-gray-600" />
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-[var(--bg-elevated)]">
+                    <File className="w-3.5 h-3.5 text-[var(--fg2)]" />
                   </div>
                 ) : (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-[var(--gold-soft)]">
+                    <Plus className="w-3.5 h-3.5 text-[var(--gold)]" />
                   </div>
                 )}
                 <span className="flex-1 break-words">{item.title}</span>
@@ -656,7 +656,7 @@ const Sidebar: React.FC = () => {
                         e.stopPropagation();
                         handleEditStart(item.id, item.title);
                       }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
+                      className="hover:text-[var(--gold)] p-1 rounded-md hover:bg-[var(--gold-soft)] flex-shrink-0"
                       aria-label="Edit meeting title"
                     >
                       <Pencil className="w-4 h-4" />
@@ -666,7 +666,7 @@ const Sidebar: React.FC = () => {
                         e.stopPropagation();
                         setDeleteModalState({ isOpen: true, itemId: item.id });
                       }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
+                      className="hover:text-[var(--danger)] p-1 rounded-md hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] flex-shrink-0"
                       aria-label="Delete meeting"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -677,8 +677,8 @@ const Sidebar: React.FC = () => {
 
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
-                <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
-                  <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
+                <div className="mt-1 ml-8 text-xs text-[var(--fg2)] bg-[var(--gold-soft)] p-1.5 rounded border border-[var(--gold-border)] line-clamp-2">
+                  <span className="font-medium text-[var(--gold)]">Match:</span> {matchingResult.matchContext}
                 </div>
               )}
             </div>
@@ -698,7 +698,7 @@ const Sidebar: React.FC = () => {
       {/* Floating collapse button */}
       <button
         onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-white hover:bg-gray-100 rounded-full shadow-lg border"
+        className="absolute -right-6 top-20 z-50 p-1 bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] rounded-full shadow-none-none border"
         style={{ transform: 'translateX(50%)' }}
       >
         {isCollapsed ? (
@@ -722,7 +722,7 @@ const Sidebar: React.FC = () => {
           <div className="flex-1">
             {!isCollapsed && (
               <div className="p-3">
-                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
+                {/* <span className="text-lg text-center border rounded-full bg-[var(--gold-soft)] border-white font-semibold text-[var(--fg2)] mb-2 block items-center">
                   <span>Meetily</span>
                 </span> */}
                 <Logo isCollapsed={isCollapsed} />
@@ -778,9 +778,9 @@ const Sidebar: React.FC = () => {
                       className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
                     >
                       <MementoIcon name="transcript" size={17} />
-                      <span className="text-gray-700">Встречи</span>
+                      <span className="text-[var(--fg2)]">Встречи</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">Searching...</span>
                       )}
                     </div>
                   </div>
@@ -806,7 +806,7 @@ const Sidebar: React.FC = () => {
         {/* Footer */}
         {!isCollapsed && (
 
-          <div className="flex-shrink-0 p-2 border-t border-gray-100">
+          <div className="flex-shrink-0 p-2 border-t border-[var(--border-subtle)]">
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
@@ -828,7 +828,7 @@ const Sidebar: React.FC = () => {
             {betaFeatures.importAndRetranscribe && (
               <button
                 onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)] rounded-lg transition-colors shadow-none-none"
               >
                 <MementoIcon name="upload" size={17} />
                 <span>Импортировать аудио</span>
@@ -837,7 +837,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/search')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/search' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
             >
               <MementoIcon name="search" size={17} />
               <span>Поиск по встречам</span>
@@ -845,7 +845,7 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/chat')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/chat' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]'}`}
             >
               <MementoIcon name="library" size={17} />
               <span>База знаний</span>
@@ -853,13 +853,13 @@ const Sidebar: React.FC = () => {
 
             <button
               onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
+              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-lg transition-colors shadow-none-none"
             >
               <MementoIcon name="settings" size={17} />
               <span>Настройки</span>
             </button>
             <Info isCollapsed={isCollapsed} />
-            <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
+            <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-[var(--fg3)]">
               v0.4.0
             </div>
           </div>
@@ -886,7 +886,7 @@ const Sidebar: React.FC = () => {
             <h3 className="text-lg font-semibold mb-4">Edit Meeting Title</h3>
             <div className="space-y-4">
               <div>
-                <label htmlFor="meeting-title" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="meeting-title" className="block text-sm font-medium text-[var(--fg2)] mb-2">
                   Meeting Title
                 </label>
                 <input
@@ -901,7 +901,7 @@ const Sidebar: React.FC = () => {
                       handleEditCancel();
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--border-strong)] rounded-md focus:outline-none focus:ring-2 ring-[var(--gold-ring)] focus:border-transparent"
                   placeholder="Enter meeting title"
                   autoFocus
                 />
@@ -911,13 +911,13 @@ const Sidebar: React.FC = () => {
           <DialogFooter>
             <button
               onClick={handleEditCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)] rounded-md transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleEditConfirm}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold)] rounded-md transition-colors"
             >
               Save
             </button>

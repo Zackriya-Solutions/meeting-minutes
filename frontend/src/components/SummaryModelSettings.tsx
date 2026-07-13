@@ -130,11 +130,11 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Auto Summary</h3>
-            <p className="text-sm text-gray-600">Auto Generating summary after meeting completion(Stopping)</p>
+            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">Auto Summary</h3>
+            <p className="text-sm text-[var(--fg2)]">Auto Generating summary after meeting completion(Stopping)</p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
@@ -142,9 +142,9 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
       <SummaryLanguageSettings />
 
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <h3 className="text-lg font-semibold mb-4">Summary Model Configuration</h3>
-        <p className="text-sm text-gray-600 mb-6">
+        <p className="text-sm text-[var(--fg2)] mb-6">
           Configure the AI model used for generating meeting summaries.
         </p>
 

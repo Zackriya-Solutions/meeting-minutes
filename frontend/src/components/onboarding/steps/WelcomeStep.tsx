@@ -43,7 +43,7 @@ export function WelcomeStep() {
                     <Icon name={feature.icon} size={14} />
                   </div>
                 </div>
-                <p className="text-sm text-gray-700 leading-relaxed">{feature.title}</p>
+                <p className="text-sm text-[var(--fg2)] leading-relaxed">{feature.title}</p>
               </div>
             );
           })}
@@ -57,7 +57,7 @@ export function WelcomeStep() {
           >
             Начать настройку
           </Button>
-          <p className="text-center text-xs text-gray-500">Займёт меньше трёх минут</p>
+          <p className="text-center text-xs text-[var(--fg2)]">Займёт меньше трёх минут</p>
         </div>
       </div>
     </OnboardingContainer>

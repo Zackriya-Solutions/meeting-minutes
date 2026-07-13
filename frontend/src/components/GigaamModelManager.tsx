@@ -102,33 +102,33 @@ export function GigaamModelManager() {
   const selectedActive = loaded && status?.loaded_variant === status?.selected;
 
   return (
-    <div className="rounded-xl border border-gray-200 p-5">
+    <div className="rounded-xl border border-[var(--border-subtle)] p-5">
       <div className="mb-1 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">GigaAM v3 (Russian)</h3>
-          <p className="text-xs text-gray-400">
+          <h3 className="text-sm font-semibold text-[var(--fg1)]">GigaAM v3 (Russian)</h3>
+          <p className="text-xs text-[var(--fg3)]">
             Sber ASR · punctuated &amp; capitalized · fully local
           </p>
         </div>
         {selectedActive ? (
-          <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+          <span className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--success)]">
             <CheckCircle2 className="h-3.5 w-3.5" /> Active
           </span>
         ) : present ? (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Installed — restart to load</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Installed — restart to load</span>
         ) : (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Not downloaded</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">Not downloaded</span>
         )}
       </div>
 
       {/* Variant selector for A/B quality testing */}
       <div className="mt-4">
-        <label className="mb-1 block text-xs font-medium text-gray-600">Model variant</label>
+        <label className="mb-1 block text-xs font-medium text-[var(--fg2)]">Model variant</label>
         <select
           value={status?.selected ?? 'e2e-rnnt-fp32'}
           onChange={(e) => selectVariant(e.target.value)}
           disabled={!status || downloading || switching}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none disabled:opacity-50"
+          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-sm text-[var(--fg1)] focus:border-[var(--gold-border)] focus:outline-none disabled:opacity-50"
         >
           {(status?.variants ?? []).map((v) => (
             <option key={v.id} value={v.id}>
@@ -136,7 +136,7 @@ export function GigaamModelManager() {
             </option>
           ))}
         </select>
-        <p className="mt-1 text-xs text-gray-400">
+        <p className="mt-1 text-xs text-[var(--fg3)]">
           RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger &amp; slower).
         </p>
       </div>
@@ -144,7 +144,7 @@ export function GigaamModelManager() {
       <div className="mt-4">
         {downloading ? (
           <div>
-            <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
+            <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Downloading{progress ? ` ${progress.file}` : '…'}
@@ -155,27 +155,27 @@ export function GigaamModelManager() {
                 </span>
               )}
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
               <div
-                className="h-full rounded-full bg-blue-500 transition-all"
+                className="h-full rounded-full bg-[var(--gold-soft)]0 transition-all"
                 style={{ width: `${progress?.percent ?? 0}%` }}
               />
             </div>
           </div>
         ) : switching ? (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-[var(--fg2)]">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading {selected?.label ?? 'variant'}…
           </div>
         ) : selectedActive ? (
-          <div className="flex items-center gap-2 text-sm font-medium text-green-600">
+          <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
             <CheckCircle2 className="h-4 w-4" />
             Ready — recordings will transcribe with this variant
           </div>
         ) : (
           <button
             onClick={download}
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold)]"
           >
             <Download className="h-4 w-4" />
             {present ? 'Re-download variant' : `Download variant (~${selected?.size_mb ?? '?'} MB)`}
@@ -191,7 +191,7 @@ export function GigaamModelManager() {
         )}
 
         {error && (
-          <div className="mt-3 flex items-start gap-1.5 text-sm text-red-600">
+          <div className="mt-3 flex items-start gap-1.5 text-sm text-[var(--danger)]">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>

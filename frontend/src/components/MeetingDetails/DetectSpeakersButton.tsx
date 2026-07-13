@@ -117,7 +117,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                 <DialogContent className="sm:max-w-[420px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Users className="h-5 w-5 text-blue-600" />
+                            <Users className="h-5 w-5 text-[var(--gold)]" />
                             Detect Speakers
                         </DialogTitle>
                         <DialogDescription>
@@ -136,7 +136,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                         <Button
                             onClick={handleDownloadAndDetect}
                             disabled={downloading}
-                            className="bg-blue-600 hover:bg-blue-700"
+                            className="bg-[var(--gold)] hover:bg-[var(--gold)]"
                         >
                             {downloading ? (
                                 <>

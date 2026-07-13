@@ -147,7 +147,7 @@ export default function SearchPage() {
               className="h-11 flex-1 border-0 bg-transparent text-sm outline-none"
             />
             {query && (
-              <button onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600" aria-label="Очистить">
+              <button onClick={() => setQuery('')} className="text-[var(--fg3)] hover:text-[var(--fg2)]" aria-label="Очистить">
                 <Icon name="close" size={16} />
               </button>
             )}
@@ -157,14 +157,14 @@ export default function SearchPage() {
             className={cn(
               'mm-button mm-button-secondary relative h-11 px-3 text-sm',
               showFilters || activeFilterCount
-                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                : 'border-gray-200 text-gray-700 hover:bg-gray-100',
+                ? 'border-[var(--gold-border)] bg-[var(--gold-soft)] text-[var(--gold)]'
+                : 'border-[var(--border-subtle)] text-[var(--fg2)] hover:bg-[var(--bg-elevated)]',
             )}
           >
             <Icon name="filter" size={17} />
             Фильтры
             {activeFilterCount > 0 && (
-              <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-medium text-white">
+              <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--gold)] px-1 text-[10px] font-medium text-[var(--fg-inverse)]">
                 {activeFilterCount}
               </span>
             )}
@@ -180,7 +180,7 @@ export default function SearchPage() {
 
         {showFilters && (
           <div className="mt-3 flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
               С даты
               <input
                 type="date"
@@ -189,7 +189,7 @@ export default function SearchPage() {
                 className="mm-select"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
               По дату
               <input
                 type="date"
@@ -198,7 +198,7 @@ export default function SearchPage() {
                 className="mm-select"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
               Коллекция
               <select
                 value={collectionId ?? ''}
@@ -220,12 +220,12 @@ export default function SearchPage() {
                   setDateTo('');
                   setCollectionId(null);
                 }}
-                className="mb-1 text-xs text-gray-500 underline hover:text-gray-700"
+                className="mb-1 text-xs text-[var(--fg2)] underline hover:text-[var(--fg2)]"
               >
                 Сбросить
               </button>
             )}
-            <span className="mb-1 text-xs text-gray-400">
+            <span className="mb-1 text-xs text-[var(--fg3)]">
               Фильтр по спикеру появится после диаризации (Фаза&nbsp;2).
             </span>
           </div>
@@ -238,26 +238,26 @@ export default function SearchPage() {
           <EmptyPrompt />
         ) : searching && results.length === 0 ? (
           <Centered>
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-[var(--fg3)]" />
           </Centered>
         ) : error ? (
           <Centered>
-            <p className="text-sm text-red-600">{error}</p>
+            <p className="text-sm text-[var(--danger)]">{error}</p>
           </Centered>
         ) : groups.length === 0 ? (
           <Centered>
-            <p className="text-sm text-gray-500">Ничего не найдено. Попробуйте другие слова или ослабьте фильтры.</p>
+            <p className="text-sm text-[var(--fg2)]">Ничего не найдено. Попробуйте другие слова или ослабьте фильтры.</p>
           </Centered>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-[var(--fg3)]">
               {results.length} совпадени{plural(results.length)} в {groups.length} встреч{pluralMeet(groups.length)}
             </p>
             {groups.map((g) => (
               <div key={g.meeting_id}>
                 <button
                   onClick={() => router.push(`/meeting-details?id=${encodeURIComponent(g.meeting_id)}`)}
-                  className="mb-2 text-left text-sm font-semibold text-gray-900 hover:text-blue-700"
+                  className="mb-2 text-left text-sm font-semibold text-[var(--fg1)] hover:text-[var(--gold)]"
                 >
                   {g.title || 'Без названия'}
                 </button>
@@ -271,13 +271,13 @@ export default function SearchPage() {
                       onClick={() => openHit(h)}
                       className="mm-result-card group text-left"
                     >
-                      <div className="mb-1 flex items-center gap-1.5 text-xs text-gray-400">
+                      <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--fg3)]">
                         <Icon name="clock" size={13} />
                         {fmtTime(h.start_ms)}
                         <Icon name="transcript" size={13} className="ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
                         <span className="opacity-0 transition-opacity group-hover:opacity-100">открыть</span>
                       </div>
-                      <p className="line-clamp-3 text-sm leading-relaxed text-gray-700">
+                      <p className="line-clamp-3 text-sm leading-relaxed text-[var(--fg2)]">
                         <Highlighted text={h.text} terms={h.matched_terms} />
                       </p>
                     </motion.button>
@@ -305,7 +305,7 @@ function Highlighted({ text, terms }: { text: string; terms: string[] }) {
     <>
       {parts.map((p, i) =>
         termSet.has(p.toLowerCase()) ? (
-          <mark key={i} className="rounded bg-yellow-200 px-0.5 text-gray-900">
+          <mark key={i} className="rounded bg-[var(--gold-soft)] px-0.5 text-[var(--fg1)]">
             {p}
           </mark>
         ) : (
@@ -326,8 +326,8 @@ function EmptyPrompt() {
       <div className="mm-empty-icon mb-4">
         <Icon name="search" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-gray-900">Поиск по всем встречам</h2>
-      <p className="mt-2 text-sm text-gray-500">
+      <h2 className="text-xl font-semibold text-[var(--fg1)]">Поиск по всем встречам</h2>
+      <p className="mt-2 text-sm text-[var(--fg2)]">
         Гибридный поиск (по ключевым словам и по смыслу) находит нужный момент в любой записи.
         Нажмите на результат, чтобы открыть встречу на этом месте.
       </p>
