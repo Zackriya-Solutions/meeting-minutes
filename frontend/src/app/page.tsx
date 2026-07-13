@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
 import { RecordOverlay } from '@/components/memento/RecordOverlay';
+import { Icon } from '@/components/memento/Icon';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -280,6 +281,27 @@ export default function Home() {
                   handleRecordingStop(true);
                 }}
               />
+            </div>
+          )}
+
+        {/* Start-recording button — bottom center of the content area when idle */}
+        {!recordingState.isRecording &&
+          status !== RecordingStatus.STARTING &&
+          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
+          status !== RecordingStatus.SAVING && (
+            <div
+              className="pointer-events-none fixed bottom-8 right-0 z-10 flex justify-center transition-[left] duration-300"
+              style={{ left: sidebarCollapsed ? '4rem' : '232px' }}
+            >
+              <button
+                onClick={() => handleRecordingStart()}
+                disabled={isRecordingDisabled}
+                aria-label="Записать встречу"
+                className="memento-primary-action mm-press pointer-events-auto inline-flex items-center gap-2 px-6 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Icon name="mic" size={18} />
+                Записать встречу
+              </button>
             </div>
           )}
 
