@@ -28,10 +28,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
   useEffect(() => {
     if (!ALLOWED.has(provider)) {
-      const config: TranscriptModelProps = { provider: 'gigaam', model: GIGAAM_MODEL, apiKey: null };
+      const config: TranscriptModelProps = { provider: 'salutespeech', model: SALUTE_MODEL, apiKey: null };
       setTranscriptModelConfig(config);
-      invoke('api_save_transcript_config', { provider: 'gigaam', model: GIGAAM_MODEL, apiKey: null })
-        .catch((error) => console.error('Failed to save GigaAM transcript config:', error));
+      invoke('api_save_transcript_config', { provider: 'salutespeech', model: SALUTE_MODEL, apiKey: null })
+        .catch((error) => console.error('Failed to save SaluteSpeech transcript config:', error));
     }
   }, [provider, setTranscriptModelConfig]);
 
@@ -161,6 +161,14 @@ function EngineOption({ active, onClick, title, subtitle }: {
 
 function SaluteSpeechSettings() {
   const t = useT();
+  return (
+    <div className="rounded-[var(--radius-24)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
+      <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('SaluteSpeech · managed')}</h3>
+      <p className="mt-1 text-xs text-[var(--fg3)]">{t('Ready to use through the Memento gateway. No Authorization Key is required.')}</p>
+    </div>
+  );
+  /* Legacy BYOK controls intentionally retained below for easy future opt-in. */
+  /* eslint-disable no-unreachable */
   const [configured, setConfigured] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [authKey, setAuthKey] = useState('');

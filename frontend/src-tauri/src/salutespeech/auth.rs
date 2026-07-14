@@ -61,16 +61,26 @@ impl SaluteSpeechAuth {
     }
 
     async fn mint_token(&self) -> Result<(String, SystemTime), String> {
+        let managed_gateway = self.oauth_url.ends_with("/salutespeech/token");
         let mut req = self
             .client
             .post(&self.oauth_url)
             .header("RqUID", uuid::Uuid::new_v4().to_string())
-            .header(reqwest::header::AUTHORIZATION, format!("Basic {}", self.auth_key))
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!(
+                    "{} {}",
+                    if managed_gateway { "Bearer" } else { "Basic" },
+                    self.auth_key
+                ),
+            )
             .header(reqwest::header::ACCEPT, "application/json")
             .header(reqwest::header::USER_AGENT, "GigaChat-Meetily");
 
-        if let Some(scope) = &self.scope {
-            req = req.form(&[("scope", scope.as_str())]);
+        if !managed_gateway {
+            if let Some(scope) = &self.scope {
+                req = req.form(&[("scope", scope.as_str())]);
+            }
         }
 
         let resp = req
@@ -138,7 +148,11 @@ mod tests {
     fn blank_scope_is_dropped() {
         let a = SaluteSpeechAuth::new("k".into(), "https://x/token".into(), Some("  ".into()));
         assert!(a.scope.is_none());
-        let b = SaluteSpeechAuth::new("k".into(), "https://x/token".into(), Some("SALUTE_SPEECH_PERS".into()));
+        let b = SaluteSpeechAuth::new(
+            "k".into(),
+            "https://x/token".into(),
+            Some("SALUTE_SPEECH_PERS".into()),
+        );
         assert_eq!(b.scope.as_deref(), Some("SALUTE_SPEECH_PERS"));
     }
 }

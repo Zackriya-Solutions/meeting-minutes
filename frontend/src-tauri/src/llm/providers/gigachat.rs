@@ -77,7 +77,10 @@ impl GigaChatClient {
         }
 
         let (token, expires_at) = self.mint_token().await?;
-        *guard = Some(CachedToken { value: token.clone(), expires_at });
+        *guard = Some(CachedToken {
+            value: token.clone(),
+            expires_at,
+        });
         Ok(token)
     }
 
@@ -91,7 +94,9 @@ impl GigaChatClient {
             .header(reqwest::header::USER_AGENT, USER_AGENT);
 
         req = match &self.auth {
-            GigaChatAuth::Key(key) => req.header(reqwest::header::AUTHORIZATION, format!("Basic {key}")),
+            GigaChatAuth::Key(key) => {
+                req.header(reqwest::header::AUTHORIZATION, format!("Basic {key}"))
+            }
             GigaChatAuth::UserPassword { user, password } => req.basic_auth(user, Some(password)),
         };
 
@@ -102,7 +107,10 @@ impl GigaChatClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("gigachat token error {status}: {}", text.chars().take(300).collect::<String>()));
+            return Err(format!(
+                "gigachat token error {status}: {}",
+                text.chars().take(300).collect::<String>()
+            ));
         }
 
         let v: serde_json::Value = resp
@@ -150,14 +158,18 @@ impl GigaChatClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("gigachat error {status}: {}", text.chars().take(300).collect::<String>()));
+            return Err(format!(
+                "gigachat error {status}: {}",
+                text.chars().take(300).collect::<String>()
+            ));
         }
 
         let v: serde_json::Value = resp
             .json()
             .await
             .map_err(|e| format!("gigachat response parse failed: {e}"))?;
-        extract_openai_content(&v).ok_or_else(|| "gigachat response missing choices[0].message.content".to_string())
+        extract_openai_content(&v)
+            .ok_or_else(|| "gigachat response missing choices[0].message.content".to_string())
     }
 }
 

@@ -99,16 +99,16 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'gigaam',
-    model: 'gigaam-v3-e2e-ctc',
+    provider: 'salutespeech',
+    model: 'salutespeech-stream-v2',
     apiKey: null
   });
 

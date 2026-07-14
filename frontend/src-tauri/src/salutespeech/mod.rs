@@ -68,15 +68,32 @@ async fn resolve(pool: &SqlitePool, key: &str, envs: &[&str], default: &str) -> 
 
 /// Resolve full config from settings/env. `None` when no Authorization Key is set.
 pub async fn resolve_config(pool: &SqlitePool) -> Option<SaluteSpeechConfig> {
-    let auth_key = match kv(pool, "salutespeech.auth_key").await {
-        Some(v) => v,
-        None => env("SALUTESPEECH_AUTH_KEY").or_else(|| env("SBER_SALUTE_AUTH_KEY"))?,
+    let configured_key = kv(pool, "salutespeech.auth_key")
+        .await
+        .or_else(|| env("SALUTESPEECH_AUTH_KEY"))
+        .or_else(|| env("SBER_SALUTE_AUTH_KEY"));
+    let managed = if configured_key.is_none() {
+        crate::gateway_identity::install_token().await.ok()
+    } else {
+        None
     };
+    let auth_key = configured_key.or_else(|| managed.as_ref().map(|v| v.0.clone()))?;
     let scope = kv(pool, "salutespeech.scope")
         .await
         .or_else(|| env("SALUTESPEECH_SCOPE"))
         .or_else(|| env("SBER_SALUTE_SCOPE"));
-    let oauth_url = resolve(pool, "salutespeech.oauth_url", &["SBER_SALUTE_OAUTH_URL"], DEFAULT_OAUTH_URL).await;
+    let oauth_url = match managed {
+        Some((_, base)) => format!("{}/salutespeech/token", base.trim_end_matches('/')),
+        None => {
+            resolve(
+                pool,
+                "salutespeech.oauth_url",
+                &["SBER_SALUTE_OAUTH_URL"],
+                DEFAULT_OAUTH_URL,
+            )
+            .await
+        }
+    };
     let recognize_url = resolve(
         pool,
         "salutespeech.recognize_url",
@@ -84,7 +101,13 @@ pub async fn resolve_config(pool: &SqlitePool) -> Option<SaluteSpeechConfig> {
         DEFAULT_RECOGNIZE_URL,
     )
     .await;
-    let model = resolve(pool, "salutespeech.model", &["SBER_SALUTE_RECOGNITION_MODEL"], DEFAULT_MODEL).await;
+    let model = resolve(
+        pool,
+        "salutespeech.model",
+        &["SBER_SALUTE_RECOGNITION_MODEL"],
+        DEFAULT_MODEL,
+    )
+    .await;
 
     Some(SaluteSpeechConfig {
         auth_key,

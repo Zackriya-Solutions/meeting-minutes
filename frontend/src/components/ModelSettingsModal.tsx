@@ -896,7 +896,6 @@ export function ModelSettingsModal({
                 <SelectItem value="claude">Claude</SelectItem>
                 <SelectItem value="custom-openai">{t('Custom Server (OpenAI)')}</SelectItem>
                 <SelectItem value="deepseek">DeepSeek</SelectItem>
-                <SelectItem value="gigachat">GigaChat (Sber)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>

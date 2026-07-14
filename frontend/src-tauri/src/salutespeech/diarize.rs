@@ -43,7 +43,10 @@ fn rest_base(recognize_url: &str) -> &str {
 /// it via `error_for_status()` reduced real causes to an opaque "400 Bad Request").
 async fn read_body_checked(resp: reqwest::Response, ctx: &str) -> Result<String, String> {
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("salutespeech {ctx} read: {e}"))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("salutespeech {ctx} read: {e}"))?;
     if status.is_success() {
         return Ok(text);
     }
@@ -56,7 +59,10 @@ async fn read_body_checked(resp: reqwest::Response, ctx: &str) -> Result<String,
 }
 
 /// [`read_body_checked`] + JSON parse.
-async fn read_json_checked(resp: reqwest::Response, ctx: &str) -> Result<serde_json::Value, String> {
+async fn read_json_checked(
+    resp: reqwest::Response,
+    ctx: &str,
+) -> Result<serde_json::Value, String> {
     let text = read_body_checked(resp, ctx).await?;
     serde_json::from_str(&text).map_err(|e| format!("salutespeech {ctx} parse: {e}"))
 }
@@ -75,7 +81,11 @@ pub async fn diarize_pcm16(
         return Ok(Vec::new());
     }
 
-    let auth = SaluteSpeechAuth::new(cfg.auth_key.clone(), cfg.oauth_url.clone(), cfg.scope.clone());
+    let auth = SaluteSpeechAuth::new(
+        cfg.auth_key.clone(),
+        cfg.oauth_url.clone(),
+        cfg.scope.clone(),
+    );
     let token = auth.access_token().await?;
     let base = rest_base(&cfg.recognize_url);
     let client = reqwest::Client::new();
@@ -84,7 +94,10 @@ pub async fn diarize_pcm16(
     let resp = client
         .post(format!("{base}/data:upload"))
         .bearer_auth(&token)
-        .header(reqwest::header::CONTENT_TYPE, "audio/x-pcm;bit=16;rate=16000")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "audio/x-pcm;bit=16;rate=16000",
+        )
         .header(reqwest::header::USER_AGENT, "GigaChat-Meetily")
         .body(pcm16)
         .send()
@@ -136,7 +149,11 @@ pub async fn diarize_pcm16(
             .await
             .map_err(|e| format!("salutespeech task:get failed: {e}"))?;
         let task = read_json_checked(resp, "task:get").await?;
-        match task.pointer("/result/status").and_then(|v| v.as_str()).unwrap_or("") {
+        match task
+            .pointer("/result/status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+        {
             "DONE" => {
                 response_file_id = task
                     .pointer("/result/response_file_id")
@@ -189,14 +206,23 @@ fn parse_turns(v: &serde_json::Value) -> Vec<CloudTurn> {
         return turns;
     };
     for entry in arr {
-        let Some(sid) = entry.pointer("/speaker_info/speaker_id").and_then(|s| s.as_i64()) else {
+        let Some(sid) = entry
+            .pointer("/speaker_info/speaker_id")
+            .and_then(|s| s.as_i64())
+        else {
             continue;
         };
         if sid < 0 {
             continue; // -1 = merged/unknown aggregate
         }
-        let start = entry.pointer("/results/0/start").and_then(|s| s.as_str()).and_then(parse_go_duration);
-        let end = entry.pointer("/results/0/end").and_then(|s| s.as_str()).and_then(parse_go_duration);
+        let start = entry
+            .pointer("/results/0/start")
+            .and_then(|s| s.as_str())
+            .and_then(parse_go_duration);
+        let end = entry
+            .pointer("/results/0/end")
+            .and_then(|s| s.as_str())
+            .and_then(parse_go_duration);
         if let (Some(start), Some(end)) = (start, end) {
             if end > start {
                 turns.push(CloudTurn {
@@ -212,7 +238,11 @@ fn parse_turns(v: &serde_json::Value) -> Vec<CloudTurn> {
 
 /// Parse a Go-style duration string ("2.280s", "2s", "0.040s") to seconds.
 fn parse_go_duration(s: &str) -> Option<f64> {
-    s.trim().strip_suffix('s').unwrap_or(s.trim()).parse::<f64>().ok()
+    s.trim()
+        .strip_suffix('s')
+        .unwrap_or(s.trim())
+        .parse::<f64>()
+        .ok()
 }
 
 #[cfg(test)]
@@ -236,7 +266,10 @@ mod tests {
             json!({ "enable": true, "count": 3 })
         );
         // A degenerate 0 hint is dropped rather than sent.
-        assert_eq!(speaker_separation_options(Some(0)), json!({ "enable": true }));
+        assert_eq!(
+            speaker_separation_options(Some(0)),
+            json!({ "enable": true })
+        );
     }
 
     #[test]
