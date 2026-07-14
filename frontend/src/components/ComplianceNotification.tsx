@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
-import { AlertTriangle, CheckCircle, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, X } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 interface ComplianceNotificationProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
   onAcknowledge,
   recordingButtonRef,
 }) => {
+  const t = useT();
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 192 }); // Default width
 
@@ -71,18 +73,18 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
         width: `${position.width}px`,
       }}
     >
-      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3">
+      <div className="bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-lg shadow-none p-3">
         {/* Header with close button */}
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center gap-1">
-            <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0" />
-            <h3 className="text-xs font-semibold text-gray-900">
-              Recording Notice
+            <AlertTriangle className="h-3 w-3 flex-shrink-0 text-[var(--gold)]" />
+            <h3 className="text-xs font-semibold text-[var(--fg1)]">
+              {t('Recording Notice')}
             </h3>
           </div>
           <button
             onClick={handleClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors p-0.5 rounded hover:bg-gray-100"
+            className="text-[var(--fg3)] hover:text-[var(--fg2)] transition-colors p-0.5 rounded hover:bg-[var(--bg-elevated)]"
           >
             <X className="h-3 w-3" />
           </button>
@@ -90,12 +92,12 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
 
         {/* Content */}
         <div className="mb-2">
-          <p className="text-xs text-gray-600 mb-1">
-            Inform participants about recording.
+          <p className="text-xs text-[var(--fg2)] mb-1">
+            {t('Inform participants about recording.')}
           </p>
-          <div className="bg-amber-50 border border-amber-200 rounded p-1">
-            <p className="text-xs text-amber-800 font-medium">
-              US compliance required
+          <div className="rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] p-1">
+            <p className="text-xs font-medium text-[var(--gold)]">
+              {t('US compliance required')}
             </p>
           </div>
         </div>
@@ -108,15 +110,15 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             onClick={handleClose}
             className="text-xs px-2 py-0.5 h-6 flex-1"
           >
-            Later
+            {t('Later')}
           </Button>
           <Button
             size="sm"
             onClick={handleAcknowledge}
-            className="text-xs px-2 py-0.5 h-6 bg-green-600 hover:bg-green-700 flex-1"
+            className="text-xs px-2 py-0.5 h-6 bg-[var(--success)] hover:brightness-110 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
-            Done
+            {t('Done')}
           </Button>
         </div>
       </div>

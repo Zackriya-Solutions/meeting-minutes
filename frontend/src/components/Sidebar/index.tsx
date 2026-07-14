@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, MessageSquare } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, MessageSquare } from '@/components/memento/LucideCompat';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 import {
   Dialog,
@@ -31,6 +32,7 @@ import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
+import { Icon as MementoIcon } from '../memento/Icon';
 
 interface SidebarItem {
   id: string;
@@ -61,6 +63,7 @@ const Sidebar: React.FC = () => {
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
+  const t = useT();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -76,6 +79,26 @@ const Sidebar: React.FC = () => {
     model: 'parakeet-tdt-0.6b-v3-int8',
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (!['r', 'k', 'm'].includes(key)) return;
+      event.preventDefault();
+
+      if (key === 'k') {
+        router.push('/search');
+      } else if (key === 'r' && !isRecording) {
+        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+      } else if (key === 'm' && isRecording) {
+        window.dispatchEvent(new CustomEvent('memento-mark-moment'));
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [isRecording, router]);
 
   // State for edit modal
   const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
@@ -329,7 +352,7 @@ const Sidebar: React.FC = () => {
       await invoke('api_delete_meeting', {
         meetingId: itemId,
       });
-      console.log('Meeting deleted successfully');
+      console.log('Встреча удалена');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
       setMeetings(updatedMeetings);
 
@@ -337,8 +360,8 @@ const Sidebar: React.FC = () => {
       Analytics.trackMeetingDeleted(itemId);
 
       // Show success toast
-      toast.success("Meeting deleted successfully", {
-        description: "All associated data has been removed"
+      toast.success(t("Meeting deleted successfully"), {
+        description: t("All associated data has been removed")
       });
 
       // If deleting the active meeting, navigate to home
@@ -347,8 +370,8 @@ const Sidebar: React.FC = () => {
         router.push('/');
       }
     } catch (error) {
-      console.error('Failed to delete meeting:', error);
-      toast.error("Failed to delete meeting", {
+      console.error('Не удалось удалить встречу:', error);
+      toast.error(t("Failed to delete meeting"), {
         description: error instanceof Error ? error.message : String(error)
       });
     }
@@ -379,7 +402,7 @@ const Sidebar: React.FC = () => {
 
     // Prevent empty titles
     if (!newTitle) {
-      toast.error("Meeting title cannot be empty");
+      toast.error(t("Meeting title cannot be empty"));
       return;
     }
 
@@ -403,14 +426,14 @@ const Sidebar: React.FC = () => {
       // Track the edit
       Analytics.trackButtonClick('edit_meeting_title', 'sidebar');
 
-      toast.success("Meeting title updated successfully");
+      toast.success(t("Meeting title updated successfully"));
 
       // Close modal and reset state
       setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
       setEditingTitle('');
     } catch (error) {
-      console.error('Failed to update meeting title:', error);
-      toast.error("Failed to update meeting title", {
+      console.error('Не удалось сохранить название встречи:', error);
+      toast.error(t("Failed to update meeting title"), {
         description: error instanceof Error ? error.message : String(error)
       });
     }
@@ -462,14 +485,14 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
-                <Home className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="home" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Home</p>
+              <p>{t('Home')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -478,17 +501,17 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleRecordingToggle}
                 disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
+                className={`p-2 text-[var(--fg-inverse)] ${isRecording ? 'bg-[var(--danger)] cursor-not-allowed' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]'} rounded-full transition-colors duration-150 shadow-none`}
               >
                 {isRecording ? (
-                  <Square className="w-5 h-5 text-white" />
+                  <MementoIcon name="stop" size={20} />
                 ) : (
-                  <Mic className="w-5 h-5 text-white" />
+                  <MementoIcon name="mic" size={20} />
                 )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
+              <p>{isRecording ? t('Recording in progress...') : t('Start Recording')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -497,13 +520,13 @@ const Sidebar: React.FC = () => {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
+                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-[var(--gold-soft-strong)] bg-[var(--gold-soft)]"
                 >
-                  <Upload className="w-5 h-5 text-blue-600" />
+                  <MementoIcon name="upload" size={20} />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">
-                <p>Import Audio</p>
+                <p>{t('Import Audio')}</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -515,14 +538,14 @@ const Sidebar: React.FC = () => {
                   if (isCollapsed) toggleCollapse();
                   toggleFolder('meetings');
                 }}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
-                <NotebookPen className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="transcript" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Meeting Notes</p>
+              <p>{t('Meeting Notes')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -530,14 +553,14 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/search')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSearchPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isSearchPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
-                <SearchIcon className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="search" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Search meetings</p>
+              <p>{t('Search meetings')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -545,14 +568,14 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/chat')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isChatPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isChatPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
-                <MessageSquare className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="chat" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Chat with archive</p>
+              <p>{t('Chat with archive')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -560,14 +583,14 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/settings')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
                   }`}
               >
-                <Settings className="w-5 h-5 text-gray-600" />
+                <MementoIcon name="settings" size={20} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Settings</p>
+              <p>{t('Settings')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -600,8 +623,8 @@ const Sidebar: React.FC = () => {
         <div
           className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
             ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
-              hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
+            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-[var(--gold-soft)] text-[var(--gold)] font-medium' :
+              hasTranscriptMatch ? 'bg-[var(--gold-soft)]' : 'hover:bg-[var(--bg-sheet)]'
             } cursor-pointer`
             }`}
           style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
@@ -626,25 +649,25 @@ const Sidebar: React.FC = () => {
               <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
               <div className="ml-auto">
                 {isExpanded ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                  <ChevronDown className="w-4 h-4 text-[var(--fg2)]" />
                 ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
+                  <ChevronRight className="w-4 h-4 text-[var(--fg2)]" />
                 )}
               </div>
               {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+                <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">{t('Searching...')}</span>
               )}
             </>
           ) : (
             <div className="flex flex-col w-full">
               <div className="flex items-center w-full">
                 {isMeetingItem ? (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
-                    <File className="w-3.5 h-3.5 text-gray-600" />
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-[var(--bg-elevated)]">
+                    <File className="w-3.5 h-3.5 text-[var(--fg2)]" />
                   </div>
                 ) : (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
+                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-[var(--gold-soft)]">
+                    <Plus className="w-3.5 h-3.5 text-[var(--gold)]" />
                   </div>
                 )}
                 <span className="flex-1 break-words">{item.title}</span>
@@ -655,8 +678,8 @@ const Sidebar: React.FC = () => {
                         e.stopPropagation();
                         handleEditStart(item.id, item.title);
                       }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
-                      aria-label="Edit meeting title"
+                      className="hover:text-[var(--gold)] p-1 rounded-md hover:bg-[var(--gold-soft)] flex-shrink-0"
+                      aria-label={t("Edit meeting title")}
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -665,8 +688,8 @@ const Sidebar: React.FC = () => {
                         e.stopPropagation();
                         setDeleteModalState({ isOpen: true, itemId: item.id });
                       }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
-                      aria-label="Delete meeting"
+                      className="hover:text-[var(--danger)] p-1 rounded-md hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] flex-shrink-0"
+                      aria-label={t("Delete meeting")}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -676,8 +699,8 @@ const Sidebar: React.FC = () => {
 
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
-                <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
-                  <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
+                <div className="mt-1 ml-8 text-xs text-[var(--fg2)] bg-[var(--gold-soft)] p-1.5 rounded border border-[var(--gold-border)] line-clamp-2">
+                  <span className="font-medium text-[var(--gold)]">{t('Match:')}</span> {matchingResult.matchContext}
                 </div>
               )}
             </div>
@@ -697,7 +720,7 @@ const Sidebar: React.FC = () => {
       {/* Floating collapse button */}
       <button
         onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-white hover:bg-gray-100 rounded-full shadow-lg border"
+        className="absolute -right-6 top-20 z-50 p-1 bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] rounded-full shadow-none border"
         style={{ transform: 'translateX(50%)' }}
       >
         {isCollapsed ? (
@@ -708,7 +731,7 @@ const Sidebar: React.FC = () => {
       </button>
 
       <div
-        className={`h-screen bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'
+        className={`memento-sidebar h-screen border-r flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-[232px]'
           }`}
       >
         {/*  Header with traffic light spacing */}
@@ -721,14 +744,14 @@ const Sidebar: React.FC = () => {
           <div className="flex-1">
             {!isCollapsed && (
               <div className="p-3">
-                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
+                {/* <span className="text-lg text-center border rounded-full bg-[var(--gold-soft)] border-white font-semibold text-[var(--fg2)] mb-2 block items-center">
                   <span>Meetily</span>
                 </span> */}
                 <Logo isCollapsed={isCollapsed} />
 
                 <div className="relative mb-1">
                   <InputGroup >
-                    <InputGroupInput placeholder='Search meeting content...' value={searchQuery}
+                    <InputGroupInput placeholder={t('Search meeting content...')} value={searchQuery}
                       onChange={(e) => handleSearchChange(e.target.value)}
                     />
                     <InputGroupAddon>
@@ -757,10 +780,10 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className={`memento-nav-item items-center h-10 flex mx-3 mt-3 cursor-pointer ${pathname === '/' ? 'is-active' : ''}`}
               >
-                <Home className="w-4 h-4 mr-2" />
-                <span>Home</span>
+                <MementoIcon name="home" size={17} />
+                <span>{t('Home')}</span>
               </div>
             )}
           </div>
@@ -776,10 +799,10 @@ const Sidebar: React.FC = () => {
                     <div
                       className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
                     >
-                      <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
+                      <MementoIcon name="transcript" size={17} />
+                      <span className="text-[var(--fg2)]">{t('Meeting Notes')}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">{t('Searching...')}</span>
                       )}
                     </div>
                   </div>
@@ -805,21 +828,21 @@ const Sidebar: React.FC = () => {
         {/* Footer */}
         {!isCollapsed && (
 
-          <div className="flex-shrink-0 p-2 border-t border-gray-100">
+          <div className="flex-shrink-0 p-2 border-t border-[var(--border-subtle)]">
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
-              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm`}
+              className={`memento-primary-action w-full flex items-center justify-center px-3 py-2 text-sm font-medium ${isRecording ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {isRecording ? (
                 <>
-                  <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
+                  <MementoIcon name="stop" size={17} />
+                  <span>{t('Recording in progress...')}</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-4 h-4 mr-2" />
-                  <span>Start Recording</span>
+                  <MementoIcon name="mic" size={17} />
+                  <span>{t('Start Recording')}</span>
                 </>
               )}
             </button>
@@ -827,38 +850,38 @@ const Sidebar: React.FC = () => {
             {betaFeatures.importAndRetranscribe && (
               <button
                 onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)] rounded-lg transition-colors shadow-none"
               >
-                <Upload className="w-4 h-4 mr-2" />
-                <span>Import Audio</span>
+                <MementoIcon name="upload" size={17} />
+                <span>{t('Import Audio')}</span>
               </button>
             )}
 
             <button
               onClick={() => router.push('/search')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/search' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
             >
-              <SearchIcon className="w-4 h-4 mr-2" />
-              <span>Search meetings</span>
+              <MementoIcon name="search" size={17} />
+              <span>{t('Search meetings')}</span>
             </button>
 
             <button
               onClick={() => router.push('/chat')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-sm ${pathname === '/chat' ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-700 bg-gray-200 hover:bg-gray-300'}`}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
             >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              <span>Chat with archive</span>
+              <MementoIcon name="library" size={17} />
+              <span>{t('Chat with archive')}</span>
             </button>
 
             <button
               onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
+              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg transition-colors shadow-none"
             >
-              <Settings className="w-4 h-4 mr-2" />
-              <span>Settings</span>
+              <MementoIcon name="settings" size={17} />
+              <span>{t('Settings')}</span>
             </button>
             <Info isCollapsed={isCollapsed} />
-            <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
+            <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-[var(--fg3)]">
               v0.4.0
             </div>
           </div>
@@ -868,25 +891,25 @@ const Sidebar: React.FC = () => {
       {/* Confirmation Modal for Delete */}
       <ConfirmationModal
         isOpen={deleteModalState.isOpen}
-        text="Are you sure you want to delete this meeting? This action cannot be undone."
+        text={t("Are you sure you want to delete this meeting? This action cannot be undone.")}
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
 
-      {/* Edit Meeting Title Modal */}
+      {/* Изменить название встречи Modal */}
       <Dialog open={editModalState.isOpen} onOpenChange={(open) => {
         if (!open) handleEditCancel();
       }}>
         <DialogContent className="sm:max-w-[425px]">
           <VisuallyHidden>
-            <DialogTitle>Edit Meeting Title</DialogTitle>
+            <DialogTitle>{t('Edit Meeting Title')}</DialogTitle>
           </VisuallyHidden>
           <div className="py-4">
-            <h3 className="text-lg font-semibold mb-4">Edit Meeting Title</h3>
+            <h3 className="text-lg font-semibold mb-4">{t('Edit Meeting Title')}</h3>
             <div className="space-y-4">
               <div>
-                <label htmlFor="meeting-title" className="block text-sm font-medium text-gray-700 mb-2">
-                  Meeting Title
+                <label htmlFor="meeting-title" className="block text-sm font-medium text-[var(--fg2)] mb-2">
+                  {t('Meeting Title')}
                 </label>
                 <input
                   id="meeting-title"
@@ -900,8 +923,8 @@ const Sidebar: React.FC = () => {
                       handleEditCancel();
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter meeting title"
+                  className="w-full px-3 py-2 border border-[var(--border-strong)] rounded-md focus:outline-none focus:ring-2 ring-[var(--gold-ring)] focus:border-transparent"
+                  placeholder={t("Enter meeting title")}
                   autoFocus
                 />
               </div>
@@ -910,15 +933,15 @@ const Sidebar: React.FC = () => {
           <DialogFooter>
             <button
               onClick={handleEditCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-md transition-colors"
             >
-              Cancel
+              {t('Cancel')}
             </button>
             <button
               onClick={handleEditConfirm}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold-active)] rounded-md transition-colors"
             >
-              Save
+              {t('Save')}
             </button>
           </DialogFooter>
         </DialogContent>

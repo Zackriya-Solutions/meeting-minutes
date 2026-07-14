@@ -1,12 +1,14 @@
 import React from 'react';
-import { Upload } from 'lucide-react';
+import { Upload } from '@/components/memento/LucideCompat';
 import { getAudioFormatsDisplayList } from '@/constants/audioFormats';
+import { useT } from '@/lib/i18n';
 
 interface ImportDropOverlayProps {
   visible: boolean;
 }
 
 export function ImportDropOverlay({ visible }: ImportDropOverlayProps) {
+  const t = useT();
   if (!visible) return null;
 
   return (
@@ -15,12 +17,12 @@ export function ImportDropOverlay({ visible }: ImportDropOverlayProps) {
                  flex items-center justify-center pointer-events-none
                  transition-opacity duration-200"
     >
-      <div className="border-2 border-dashed border-blue-400 rounded-2xl
-                      p-12 text-center bg-blue-950/50 shadow-2xl
+      <div className="border-2 border-dashed border-[var(--gold-border)] rounded-2xl
+                      p-12 text-center bg-[var(--gold-soft)] shadow-none
                       transform scale-100 transition-transform">
-        <Upload className="h-16 w-16 text-blue-400 mx-auto mb-4" />
-        <p className="text-xl font-medium text-white">Drop audio file to import</p>
-        <p className="text-sm text-blue-300 mt-2">{getAudioFormatsDisplayList()}</p>
+        <Upload className="h-16 w-16 text-[var(--gold)] mx-auto mb-4" />
+        <p className="text-xl font-medium text-[var(--fg-inverse)]">{t('Drop audio file to import')}</p>
+        <p className="text-sm text-[var(--gold)] mt-2">{getAudioFormatsDisplayList()}</p>
       </div>
     </div>
   );

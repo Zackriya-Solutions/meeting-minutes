@@ -1,10 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Search as SearchIcon, KeyRound } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
-import { motion } from 'framer-motion';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
@@ -14,26 +12,28 @@ import { EmbeddingModelSettings } from '@/components/EmbeddingModelSettings';
 import { ProviderSettings } from '@/components/ProviderSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Icon, MementoIconName } from '@/components/memento/Icon';
+import { useLanguage, type Lang } from '@/lib/i18n';
 
-// Tabs configuration (constant)
+// Tabs configuration (constant). `label` is the English key; it is translated at
+// render time via `t()`.
 const TABS = [
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'providers', label: 'Providers', icon: KeyRound },
-  { value: 'search', label: 'Search', icon: SearchIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
-] as const;
+  { value: 'general', label: 'General', icon: 'settings' },
+  { value: 'recording', label: 'Recordings', icon: 'mic' },
+  { value: 'Transcriptionmodels', label: 'Transcription', icon: 'transcript' },
+  { value: 'summaryModels', label: 'Summary', icon: 'spark' },
+  { value: 'providers', label: 'Providers', icon: 'library' },
+  { value: 'search', label: 'Search', icon: 'search' },
+  { value: 'beta', label: 'Beta', icon: 'plus' }
+] as const satisfies ReadonlyArray<{ value: string; label: string; icon: MementoIconName }>;
 
 export default function SettingsPage() {
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const { t, lang, setLang } = useLanguage();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
 
   // Load saved transcript configuration on mount
   useEffect(() => {
@@ -55,31 +55,42 @@ export default function SettingsPage() {
     loadTranscriptConfig();
   }, [setTranscriptModelConfig]);
 
-  // Update underline position when active tab changes
-  useLayoutEffect(() => {
-    const activeIndex = TABS.findIndex(tab => tab.value === activeTab);
-    const activeTabElement = tabRefs.current[activeIndex];
-
-    if (activeTabElement) {
-      const { offsetLeft, offsetWidth } = activeTabElement;
-      setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
-    }
-  }, [activeTab]);
-
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
+    <div className="mm-page !p-0">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
+        <div className="mx-auto max-w-6xl px-8 py-6">
           <div className="flex items-center gap-4">
             <button
               onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+              className="mm-icon-button mm-hover"
+              aria-label={t('Back')}
             >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
+              <Icon name="back" />
             </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
+            <h1 className="mm-page-title">{t('Settings')}</h1>
+
+            {/* Interface language toggle */}
+            <div
+              className="ml-auto flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1"
+              role="group"
+              aria-label={t('Interface language')}
+            >
+              {(['ru', 'en'] as const).map((l: Lang) => (
+                <button
+                  key={l}
+                  onClick={() => setLang(l)}
+                  aria-pressed={lang === l}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    lang === l
+                      ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
+                      : 'text-[var(--fg2)] hover:text-[var(--fg1)]'
+                  }`}
+                >
+                  {l === 'ru' ? 'Рус' : 'Eng'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -89,28 +100,19 @@ export default function SettingsPage() {
         <div className="max-w-6xl mx-auto p-8 pt-6">
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
-              {TABS.map((tab, index) => {
-                const Icon = tab.icon;
+            <TabsList className="mm-tab-list h-auto">
+              {TABS.map((tab) => {
                 return (
                   <TabsTrigger
                     key={tab.value}
                     value={tab.value}
-                    ref={el => { tabRefs.current[index] = el }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
+                    className="mm-tab"
                   >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
+                    <Icon name={tab.icon} size={16} />
+                    {t(tab.label)}
                   </TabsTrigger>
                 );
               })}
-
-              <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
-                layoutId="underline"
-                style={{ left: underlineStyle.left, width: underlineStyle.width }}
-                transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-              />
             </TabsList>
 
             <TabsContent value="general">

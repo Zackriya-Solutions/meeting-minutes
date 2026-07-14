@@ -5,16 +5,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft,
-  MessageSquare,
-  Send,
-  Plus,
   Loader2,
-  FileText,
-  AlertTriangle,
-  SearchX,
-} from 'lucide-react';
+} from '@/components/memento/LucideCompat';
 import { cn } from '@/lib/utils';
+import { Icon } from '@/components/memento/Icon';
+import { Button } from '@/components/memento/Button';
+import { useT } from '@/lib/i18n';
 
 // Mirrors the Rust `Citation` (search::rag).
 interface Citation {
@@ -54,13 +50,14 @@ interface CollectionRef {
 }
 
 const SUGGESTIONS = [
-  'Что мы решили по бюджету за последний месяц?',
-  'Какие открытые задачи у команды?',
-  'О чём договорились с клиентом на последней встрече?',
+  'What did we decide about the budget over the last month?',
+  'What open tasks does the team have?',
+  'What did we agree with the client at the last meeting?',
 ];
 
 export default function ChatPage() {
   const router = useRouter();
+  const t = useT();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -116,11 +113,11 @@ export default function ChatPage() {
       if (!query || sending) return;
 
       if (scopeKind === 'collection' && collectionId == null) {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Выберите коллекцию для поиска.', error: true }]);
+        setMessages((m) => [...m, { role: 'assistant', content: t('Select a collection to search.'), error: true }]);
         return;
       }
       if (scopeKind === 'meeting' && !meetingId) {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Выберите встречу для поиска.', error: true }]);
+        setMessages((m) => [...m, { role: 'assistant', content: t('Select a meeting to search.'), error: true }]);
         return;
       }
 
@@ -157,7 +154,7 @@ export default function ChatPage() {
             content:
               typeof e === 'string'
                 ? e
-                : 'Не удалось получить ответ. Проверьте, что настроен провайдер LLM (GigaChat или DeepSeek) в настройках.',
+                : t('Failed to get an answer. Make sure an LLM provider (GigaChat or DeepSeek) is configured in settings.'),
             error: true,
           },
         ]);
@@ -178,38 +175,38 @@ export default function ChatPage() {
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
 
   return (
-    <div className="flex h-screen flex-col pr-8 pt-4">
+    <div className="mm-page">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+      <div className="mm-page-header">
         <button
           onClick={() => router.push('/')}
-          className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100"
-          aria-label="Назад"
+          className="mm-icon-button mm-hover"
+          aria-label={t('Back')}
         >
-          <ArrowLeft className="h-5 w-5" />
+          <Icon name="back" />
         </button>
-        <MessageSquare className="h-6 w-6 text-blue-600" />
-        <h1 className="text-lg font-semibold text-gray-900">Чат с архивом</h1>
+        <Icon name="library" size={24} className="text-[var(--gold)]" />
+        <h1 className="mm-page-title">{t('Chat with archive')}</h1>
 
         <div className="ml-auto flex items-center gap-2">
           {/* Scope selector */}
           <select
             value={scopeKind}
             onChange={(e) => changeScope(e.target.value as ScopeKind)}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 focus:border-blue-400 focus:outline-none"
+            className="mm-select"
           >
-            <option value="archive">Весь архив</option>
-            <option value="collection">Коллекция</option>
-            <option value="meeting">Встреча</option>
+            <option value="archive">{t('Entire archive')}</option>
+            <option value="collection">{t('Collection')}</option>
+            <option value="meeting">{t('Meeting')}</option>
           </select>
 
           {scopeKind === 'collection' && (
             <select
               value={collectionId ?? ''}
               onChange={(e) => setCollectionId(e.target.value ? Number(e.target.value) : null)}
-              className="max-w-[200px] rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 focus:border-blue-400 focus:outline-none"
+              className="mm-select max-w-[200px]"
             >
-              <option value="">Выберите коллекцию…</option>
+              <option value="">{t('Select a collection…')}</option>
               {collections.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -222,9 +219,9 @@ export default function ChatPage() {
             <select
               value={meetingId ?? ''}
               onChange={(e) => setMeetingId(e.target.value || null)}
-              className="max-w-[220px] rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 focus:border-blue-400 focus:outline-none"
+              className="mm-select max-w-[220px]"
             >
-              <option value="">Выберите встречу…</option>
+              <option value="">{t('Select a meeting…')}</option>
               {meetings.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.title}
@@ -233,13 +230,14 @@ export default function ChatPage() {
             </select>
           )}
 
-          <button
+          <Button
             onClick={startNewChat}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-100"
+            variant="secondary"
+            size="sm"
+            icon={<Icon name="plus" size={16} />}
           >
-            <Plus className="h-4 w-4" />
-            Новый чат
-          </button>
+            {t('New chat')}
+          </Button>
         </div>
       </div>
 
@@ -258,7 +256,7 @@ export default function ChatPage() {
       </div>
 
       {/* Composer */}
-      <div className="border-t border-gray-100 py-4">
+      <div className="border-t border-[var(--border-subtle)] py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-2">
           <textarea
             ref={inputRef}
@@ -266,23 +264,23 @@ export default function ChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder="Спросите о ваших встречах…"
-            className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-800 focus:border-blue-400 focus:outline-none"
+            placeholder={t('Ask about your meetings…')}
+            className="mm-field max-h-40 min-h-[48px] flex-1 resize-none py-3 text-sm outline-none"
           />
           <button
             onClick={() => send(input)}
             disabled={sending || !input.trim()}
             className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-xl text-white transition-colors',
-              sending || !input.trim() ? 'cursor-not-allowed bg-gray-300' : 'bg-blue-600 hover:bg-blue-700',
+              'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
+              sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
             )}
-            aria-label="Отправить"
+            aria-label={t('Send')}
           >
-            {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon name="send" />}
           </button>
         </div>
-        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-gray-400">
-          Ответы формируются только из ваших записей, со ссылками на источники.
+        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--fg3)]">
+          {t('Answers are drawn only from your recordings, with links to the sources.')}
         </p>
       </div>
     </div>
@@ -298,6 +296,7 @@ function MessageBubble({
   meetingTitle: (id: string) => string;
   onCite: (c: Citation) => void;
 }) {
+  const t = useT();
   const isUser = msg.role === 'user';
   const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
 
@@ -312,25 +311,25 @@ function MessageBubble({
         className={cn(
           'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
           isUser
-            ? 'bg-blue-600 text-white'
+            ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
             : msg.error
-              ? 'border border-red-200 bg-red-50 text-red-700'
+              ? 'border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
               : notFound
-                ? 'border border-gray-200 bg-gray-50 text-gray-500'
-                : 'bg-gray-100 text-gray-800',
+                ? 'border border-[var(--border-subtle)] bg-[var(--bg-sheet)] text-[var(--fg2)]'
+                : 'bg-[var(--bg-elevated)] text-[var(--fg1)]',
         )}
       >
         {notFound && (
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-gray-500">
-            <SearchX className="h-3.5 w-3.5" />
-            Не найдено в ваших встречах
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
+            <Icon name="search" size={14} />
+            {t('Not found in your meetings')}
           </div>
         )}
         <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
 
         {msg.warning && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-600">
-            <AlertTriangle className="h-3.5 w-3.5" />
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
+            <Icon name="alert" size={14} />
             {msg.warning}
           </div>
         )}
@@ -341,10 +340,10 @@ function MessageBubble({
               <button
                 key={c.index}
                 onClick={() => onCite(c)}
-                title="Открыть встречу на этом месте"
-                className="flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-xs text-blue-700 ring-1 ring-blue-200 transition-colors hover:bg-blue-50"
+                title={t('Open the meeting at this moment')}
+                className="flex items-center gap-1 rounded-full bg-[var(--bg-canvas)]/70 px-2 py-0.5 text-xs text-[var(--gold)] ring-1 ring-[var(--gold-ring)] transition-colors hover:bg-[var(--gold-soft)]"
               >
-                <FileText className="h-3 w-3" />
+                <Icon name="transcript" size={12} />
                 <span className="font-medium">[{c.index}]</span>
                 <span className="max-w-[160px] truncate">{meetingTitle(c.meeting_id)}</span>
               </button>
@@ -359,11 +358,11 @@ function MessageBubble({
 function TypingIndicator() {
   return (
     <div className="flex justify-start">
-      <div className="flex items-center gap-1 rounded-2xl bg-gray-100 px-4 py-3">
+      <div className="flex items-center gap-1 rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+            className="h-2 w-2 animate-bounce rounded-full bg-[var(--fg3)]"
             style={{ animationDelay: `${i * 0.15}s` }}
           />
         ))}
@@ -373,24 +372,25 @@ function TypingIndicator() {
 }
 
 function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disabled: boolean }) {
+  const t = useT();
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
-        <MessageSquare className="h-7 w-7 text-blue-600" />
+      <div className="mm-empty-icon mb-4">
+        <Icon name="library" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-gray-900">Спросите свой архив встреч</h2>
-      <p className="mt-2 text-sm text-gray-500">
-        Задавайте вопросы на естественном языке — ответы приходят со ссылками на конкретные моменты записей.
+      <h2 className="text-xl font-semibold text-[var(--fg1)]">{t('Ask your meeting archive')}</h2>
+      <p className="mt-2 text-sm text-[var(--fg2)]">
+        {t('Ask questions in natural language — answers come with links to specific moments in your recordings.')}
       </p>
       <div className="mt-8 flex w-full flex-col gap-2">
         {SUGGESTIONS.map((s) => (
           <button
             key={s}
             disabled={disabled}
-            onClick={() => onPick(s)}
-            className="rounded-xl border border-gray-200 px-4 py-3 text-left text-sm text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50"
+            onClick={() => onPick(t(s))}
+            className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-left text-sm text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] hover:bg-[var(--gold-soft)] disabled:opacity-50"
           >
-            {s}
+            {t(s)}
           </button>
         ))}
       </div>

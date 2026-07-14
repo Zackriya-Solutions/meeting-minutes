@@ -1,3 +1,5 @@
+import { useT } from '@/lib/i18n';
+
 interface StatusOverlaysProps {
   // Status flags
   isProcessing: boolean;      // Processing transcription after recording stops
@@ -26,9 +28,9 @@ function StatusOverlay({ show, message, sidebarCollapsed }: StatusOverlayProps) 
         }}
       >
         <div className="w-2/3 max-w-[750px] flex justify-center">
-          <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-            <span className="text-sm text-gray-700">{message}</span>
+          <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none px-4 py-2 flex items-center space-x-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--border-strong)]"></div>
+            <span className="text-sm text-[var(--fg2)]">{message}</span>
           </div>
         </div>
       </div>
@@ -42,19 +44,20 @@ export function StatusOverlays({
   isSaving,
   sidebarCollapsed
 }: StatusOverlaysProps) {
+  const t = useT();
   return (
     <>
       {/* Processing status overlay - shown after recording stops while finalizing transcription */}
       <StatusOverlay
         show={isProcessing}
-        message="Finalizing transcription..."
+        message={t('Finalizing transcription...')}
         sidebarCollapsed={sidebarCollapsed}
       />
 
       {/* Saving status overlay - shown while saving transcript to database */}
       <StatusOverlay
         show={isSaving}
-        message="Saving transcript..."
+        message={t('Saving transcript...')}
         sidebarCollapsed={sidebarCollapsed}
       />
     </>

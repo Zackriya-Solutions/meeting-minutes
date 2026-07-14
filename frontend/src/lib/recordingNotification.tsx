@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { translate } from '@/lib/i18n';
 
 /**
  * Shows the recording notification toast with compliance message.
@@ -19,21 +20,21 @@ export async function showRecordingNotification(): Promise<void> {
     if (showNotification) {
       let dontShowAgain = false;
 
-      const toastId = toast.info('🔴 Recording Started', {
+      const toastId = toast.info(translate('🔴 Recording Started'), {
         description: (
           <div className="space-y-3 min-w-[280px]">
-            <p className="text-sm font-medium text-gray-900">
-              Inform all participants this meeting is being recorded.
+            <p className="text-sm font-medium text-[var(--fg1)]">
+              {translate('Inform all participants this meeting is being recorded.')}
             </p>
-            <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-blue-100 p-2 rounded transition-colors">
+            <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-[var(--gold-soft)] p-2 rounded transition-colors">
               <input
                 type="checkbox"
                 onChange={(e) => {
                   dontShowAgain = e.target.checked;
                 }}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                className="rounded border-[var(--border-strong)] text-[var(--gold)] ring-[var(--gold-ring)] focus:ring-2"
               />
-              <span className="select-none text-gray-700">Don't show this again</span>
+              <span className="select-none text-[var(--fg2)]">{translate("Don't show this again")}</span>
             </label>
             <button
               onClick={async () => {
@@ -46,9 +47,9 @@ export async function showRecordingNotification(): Promise<void> {
                 Analytics.trackButtonClick('recording_notification_acknowledged', 'toast');
                 toast.dismiss(toastId);
               }}
-              className="w-full px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 transition-colors font-medium"
+              className="w-full rounded-full bg-[var(--gold)] px-3 py-1.5 text-xs font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
             >
-              I've Notified Participants
+              {translate("I've Notified Participants")}
             </button>
           </div>
         ),

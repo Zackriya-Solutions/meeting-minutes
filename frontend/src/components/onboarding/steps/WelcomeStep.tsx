@@ -1,50 +1,51 @@
 import React from 'react';
-import { Lock, Sparkles, Cpu } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/memento/Button';
+import { Icon, MementoIconName } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useT } from '@/lib/i18n';
 
 export function WelcomeStep() {
   const { goNext } = useOnboarding();
+  const t = useT();
 
   const features = [
     {
-      icon: Lock,
+      icon: 'check' as MementoIconName,
       title: 'Your data never leaves your device',
     },
     {
-      icon: Sparkles,
+      icon: 'spark' as MementoIconName,
       title: 'Intelligent summaries & insights',
     },
     {
-      icon: Cpu,
+      icon: 'library' as MementoIconName,
       title: 'Works offline, no cloud required',
     },
   ];
 
   return (
     <OnboardingContainer
-      title="Welcome to Meetily"
-      description="Record. Transcribe. Summarize. All on your device."
+      title={t('Welcome to Meetily')}
+      description={t('Record. Transcribe. Summarize. All on your device.')}
       step={1}
       hideProgress={true}
     >
       <div className="flex flex-col items-center space-y-10">
         {/* Divider */}
-        <div className="w-16 h-px bg-gray-300" />
+        <div className="h-px w-16 bg-[var(--border-strong)]" />
 
         {/* Features Card */}
-        <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-4">
+        <div className="mm-card w-full max-w-md space-y-4 p-6">
           {features.map((feature, index) => {
-            const Icon = feature.icon;
             return (
               <div key={index} className="flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">
-                  <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Icon className="w-3 h-3 text-gray-700" />
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--gold-soft)] text-[var(--gold)]">
+                    <Icon name={feature.icon} size={14} />
                   </div>
                 </div>
-                <p className="text-sm text-gray-700 leading-relaxed">{feature.title}</p>
+                <p className="text-sm text-[var(--fg2)] leading-relaxed">{t(feature.title)}</p>
               </div>
             );
           })}
@@ -54,11 +55,11 @@ export function WelcomeStep() {
         <div className="w-full max-w-xs space-y-3">
           <Button
             onClick={goNext}
-            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
+            className="w-full"
           >
-            Get Started
+            {t('Get Started')}
           </Button>
-          <p className="text-xs text-center text-gray-500">Takes less than 3 minutes</p>
+          <p className="text-center text-xs text-[var(--fg2)]">{t('Takes less than 3 minutes')}</p>
         </div>
       </div>
     </OnboardingContainer>

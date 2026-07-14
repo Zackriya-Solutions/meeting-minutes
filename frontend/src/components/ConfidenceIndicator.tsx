@@ -1,5 +1,7 @@
 'use client';
 
+import { useT } from '@/lib/i18n';
+
 interface ConfidenceIndicatorProps {
   confidence: number;
   showIndicator?: boolean;
@@ -9,6 +11,8 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
   confidence,
   showIndicator = true,
 }) => {
+  const t = useT();
+
   // Don't render if preference is disabled
   if (!showIndicator) {
     return null;
@@ -16,18 +20,18 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
 
   // Get color class based on confidence threshold
   const getColorClass = (conf: number): string => {
-    if (conf >= 0.8) return 'bg-green-500'; // 80-100%: High confidence
-    if (conf >= 0.7) return 'bg-yellow-500'; // 70-79%: Good confidence
-    if (conf >= 0.4) return 'bg-orange-500'; // 40-79%: Medium confidence
-    return 'bg-red-500'; // Below 50%: Low confidence
+    if (conf >= 0.8) return 'bg-[var(--success)]'; // 80-100%: High confidence
+    if (conf >= 0.7) return 'bg-[var(--gold)]'; // 70-79%: Good confidence
+    if (conf >= 0.4) return 'bg-[var(--gold)]'; // 40-79%: Medium confidence
+    return 'bg-[var(--danger)]'; // Below 50%: Low confidence
   };
 
   // Get descriptive label for accessibility
   const getConfidenceLabel = (conf: number): string => {
-    if (conf >= 0.8) return 'High confidence';
-    if (conf >= 0.7) return 'Good confidence';
-    if (conf >= 0.4) return 'Medium confidence';
-    return 'Low confidence';
+    if (conf >= 0.8) return t('High confidence');
+    if (conf >= 0.7) return t('Good confidence');
+    if (conf >= 0.4) return t('Medium confidence');
+    return t('Low confidence');
   };
 
   const confidencePercent = (confidence * 100).toFixed(0);
@@ -37,8 +41,8 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
   return (
     <div
       className="flex items-center gap-1"
-      title={`${confidencePercent}% confidence - ${label}`}
-      aria-label={`Transcription confidence: ${confidencePercent}%`}
+      title={`${confidencePercent}% ${t('confidence')} - ${label}`}
+      aria-label={`${t('Transcription confidence')}: ${confidencePercent}%`}
     >
       <div
         className={`w-2 h-2 rounded-full ${colorClass} transition-colors duration-200`}

@@ -78,26 +78,26 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
+    --background: 40 14% 4%;
+    --foreground: 39 43% 93%;
+    --card: 30 17% 8%;
+    --card-foreground: 39 43% 93%;
+    --popover: 30 17% 8%;
+    --popover-foreground: 39 43% 93%;
+    --primary: 35 73% 53%;
+    --primary-foreground: 40 14% 4%;
+    --secondary: 30 17% 8%;
+    --secondary-foreground: 39 43% 93%;
+    --muted: 30 12% 10%;
+    --muted-foreground: 39 16% 68%;
+    --accent: 35 73% 53%;
+    --accent-foreground: 40 14% 4%;
+    --destructive: 9 42% 58%;
+    --destructive-foreground: 39 43% 93%;
+    --border: 39 18% 15%;
+    --input: 39 18% 15%;
+    --ring: 35 73% 53%;
+    --radius: 1rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -141,6 +141,12 @@
   /* html, */
   body {
     @apply bg-background text-foreground;
+    font-family: 'Onest', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-canvas);
+    color: var(--fg1);
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.45;
     overflow: hidden;
     height: 100%;
   }
@@ -166,18 +172,18 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: rgba(245, 240, 230, 0.16);
     border-radius: 3px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: rgba(245, 240, 230, 0.28);
   }
 
   /* Firefox scrollbar */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
+    scrollbar-color: rgba(245, 240, 230, 0.16) transparent;
   }
 
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
@@ -212,3 +218,59 @@
     overflow: visible !important;
   }
 }
+
+@layer components {
+  .memento-shell { background: var(--bg-canvas); color: var(--fg1); }
+  .memento-sidebar { background: var(--bg-sheet); border-color: var(--border-subtle); }
+  .memento-logo { color: var(--fg1); font-size: 21px; font-weight: 600; letter-spacing: -0.04em; }
+  .memento-nav-item { position: relative; border-radius: 12px; padding: 0 12px; color: var(--fg2); font-size: 14px; font-weight: 500; transition: background 180ms ease, color 180ms ease; }
+  .memento-nav-item:hover { background: var(--state-hover-bg); color: var(--fg1); }
+  .memento-nav-item.is-active { background: var(--state-hover-bg); color: var(--fg1); }
+  .memento-nav-item.is-active::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); margin-right: 10px; }
+  .memento-primary-action { min-height: 42px; border-radius: 999px; background: var(--gold); color: var(--fg-inverse); transition: background 180ms ease, transform 180ms ease; }
+  .memento-primary-action:hover { background: var(--gold-active); }
+  .memento-primary-action:active { transform: scale(.985); }
+  .memento-record-dock { padding: 6px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-elevated); }
+  .mm-button { display: inline-flex; height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 20px; border: 1px solid transparent; border-radius: var(--radius-pill); font-size: 15px; font-weight: 600; line-height: 1; }
+  .mm-button-sm { height: 36px; padding: 0 16px; font-size: 14px; }
+  .mm-button-primary { background: var(--gold); color: var(--fg-inverse); }
+  .mm-button-primary:hover { background: var(--gold-active); }
+  .mm-button-secondary { background: transparent; border-color: var(--border-strong); color: var(--fg1); }
+  .mm-button-secondary:hover, .mm-button-ghost:hover { background: var(--state-hover-bg); }
+  .mm-button-ghost { background: transparent; color: var(--fg2); }
+  .mm-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-24); background: var(--surface-card); padding: 16px; }
+  .mm-record-overlay { width: 320px; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-20); background: var(--bg-elevated); animation: mmOverlayIn 300ms var(--ease-enter); }
+  .mm-record-header, .mm-record-meta, .mm-record-actions { display: flex; align-items: center; gap: 8px; }
+  .mm-record-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--gold); animation: mmPulse 1.4s var(--ease-standard) infinite; }
+  .mm-record-time { margin-left: auto; color: var(--gold); font-family: var(--font-numeric); font-size: 22px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .mm-equalizer { height: 30px; display: flex; align-items: center; gap: 4px; }
+  .mm-equalizer span { flex: 1; min-height: 3px; border-radius: 2px; background: var(--fg2); transition: height 180ms var(--ease-standard); }
+  .mm-record-meta { min-width: 0; color: var(--fg3); font-size: 12px; }
+  .mm-record-meta > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-record-actions > button { flex: 1; }
+  .mm-page { height: 100vh; display: flex; flex-direction: column; padding: 24px 32px; background: var(--bg-canvas); color: var(--fg1); }
+  .mm-page-header { display: flex; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
+  .mm-page-title { font-size: 28px; font-weight: 600; line-height: .98; letter-spacing: -.045em; }
+  .mm-icon-button { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--radius-16); color: var(--fg2); }
+  .mm-icon-button:hover { color: var(--fg1); background: var(--state-hover-bg); }
+  .mm-field { min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-16); background: var(--surface-input); color: var(--fg2); }
+  .mm-field:focus-within { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(224, 152, 48, .12); }
+  .mm-select { min-height: 40px; border: 1px solid var(--border-strong); border-radius: var(--radius-12); background: var(--bg-elevated); padding: 0 12px; color: var(--fg1); font-size: 14px; }
+  .mm-result-card { border: 1px solid var(--border-subtle); border-radius: var(--radius-16); background: var(--bg-surface); padding: 14px; color: var(--fg2); }
+  .mm-result-card:hover { border-color: var(--gold-border); background: var(--gold-soft); }
+  .mm-empty-icon { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle); border-radius: var(--radius-20); background: var(--bg-elevated); color: var(--gold); }
+  .mm-tab-list { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: var(--radius-16); background: var(--bg-sheet); }
+  .mm-tab { min-height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: var(--radius-12); color: var(--fg2); font-size: 13px; }
+  .mm-tab[data-state='active'] { background: var(--bg-elevated) !important; color: var(--fg1) !important; box-shadow: none !important; }
+}
+
+@keyframes mmOverlayIn { from { opacity: 0; transform: translateY(12px) scale(.98); } }
+
+input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font-family: inherit; }
+input, textarea { color: var(--fg1); }
+/* Native text inputs/selects default to a dark surface so they don't render white
+   on the dark theme. Any explicit `bg-*` utility (e.g. bg-transparent) overrides this. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']), textarea, select { background-color: var(--surface-input); }
+input::placeholder, textarea::placeholder { color: var(--fg3); }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.font-mono, time { font-family: 'Space Grotesk', 'Onest', sans-serif; font-variant-numeric: tabular-nums; }

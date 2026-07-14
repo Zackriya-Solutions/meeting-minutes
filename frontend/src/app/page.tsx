@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
@@ -21,6 +20,10 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { listen } from '@tauri-apps/api/event';
+import { RecordOverlay } from '@/components/memento/RecordOverlay';
+import { Icon } from '@/components/memento/Icon';
+import { useT } from '@/lib/i18n';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -29,7 +32,7 @@ export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle } = useTranscripts();
+  const { meetingTitle, currentMeetingId } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -37,6 +40,7 @@ export default function Home() {
   const { status, isStopping, isProcessing, isSaving } = recordingState;
 
   // Hooks
+  const t = useT();
   const { hasMicrophone } = usePermissionCheck();
   const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
@@ -124,12 +128,12 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success('Meeting recovered successfully!', {
+        toast.success(t('Meeting recovered successfully!'), {
           description: result.audioRecoveryStatus?.status === 'success'
-            ? 'Transcripts and audio recovered'
-            : 'Transcripts recovered (no audio available)',
+            ? t('Transcripts and audio recovered')
+            : t('Transcripts recovered (no audio available)'),
           action: result.meetingId ? {
-            label: 'View Meeting',
+            label: t('View Meeting'),
             onClick: () => {
               router.push(`/meeting-details?id=${result.meetingId}`);
             }
@@ -153,8 +157,8 @@ export default function Home() {
         }
       }
     } catch (error) {
-      toast.error('Failed to recover meeting', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+      toast.error(t('Failed to recover meeting'), {
+        description: error instanceof Error ? error.message : t('Unknown error occurred'),
       });
       throw error;
     }
@@ -186,6 +190,52 @@ export default function Home() {
     }
   }, [recordingState.isRecording]);
 
+  // Recording error handling.
+  // These listeners previously lived inside <RecordingControls>, which is no
+  // longer rendered. They must stay registered so a fatal transcription error
+  // still tears the recording down (parity with the old behavior). The
+  // structured `transcription-error` event is additionally surfaced to the user
+  // (toast / model selector) by useModalState, so here we only stop recording;
+  // the plain `transcript-error` string event is surfaced via the error alert.
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
+
+    const setupListeners = async () => {
+      try {
+        const unlistenTranscriptError = await listen<string>('transcript-error', (event) => {
+          const errorMessage = String(event.payload);
+          console.error('transcript-error received:', errorMessage);
+          Analytics.trackTranscriptionError(errorMessage);
+          handleRecordingStop(false);
+          showModal('errorAlert', errorMessage);
+        });
+        unlisteners.push(unlistenTranscriptError);
+
+        const unlistenTranscriptionError = await listen('transcription-error', (event) => {
+          const payload = event.payload;
+          const errorMessage =
+            typeof payload === 'object' && payload !== null
+              ? ((payload as { userMessage?: string; error?: string }).userMessage ??
+                 (payload as { error?: string }).error ??
+                 'Transcription error')
+              : String(payload);
+          console.error('transcription-error received:', errorMessage);
+          Analytics.trackTranscriptionError(errorMessage);
+          handleRecordingStop(false);
+        });
+        unlisteners.push(unlistenTranscriptionError);
+      } catch (error) {
+        console.error('Failed to set up recording error listeners:', error);
+      }
+    };
+
+    setupListeners();
+
+    return () => {
+      unlisteners.forEach((unlisten) => unlisten && unlisten());
+    };
+  }, [handleRecordingStop, showModal]);
+
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
@@ -194,7 +244,7 @@ export default function Home() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="memento-shell flex flex-col h-screen"
     >
       {/* All Modals supported*/}
       <SettingsModals
@@ -220,36 +270,40 @@ export default function Home() {
         />
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-        {(hasMicrophone || isRecording) &&
+        {recordingState.isRecording &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
-              <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
+            <div className="fixed bottom-6 right-6 z-10">
+              <RecordOverlay
+                title={meetingTitle || t('New meeting')}
+                bars={barHeights}
+                meetingId={currentMeetingId}
+                onStop={() => {
+                  setIsStopping(true);
+                  handleRecordingStop(true);
                 }}
+              />
+            </div>
+          )}
+
+        {/* Start-recording button — bottom center of the content area when idle */}
+        {!recordingState.isRecording &&
+          status !== RecordingStatus.STARTING &&
+          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
+          status !== RecordingStatus.SAVING && (
+            <div
+              className="pointer-events-none fixed bottom-8 right-0 z-10 flex justify-center transition-[left] duration-300"
+              style={{ left: sidebarCollapsed ? '4rem' : '232px' }}
+            >
+              <button
+                onClick={() => handleRecordingStart()}
+                disabled={isRecordingDisabled}
+                aria-label={t('Record meeting')}
+                className="memento-primary-action mm-press pointer-events-auto inline-flex items-center gap-2 px-6 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="bg-white rounded-full shadow-lg flex items-center">
-                    <RecordingControls
-                      isRecording={recordingState.isRecording}
-                      onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
-                      onRecordingStart={handleRecordingStart}
-                      onTranscriptReceived={() => { }} // Not actually used by RecordingControls
-                      onStopInitiated={() => setIsStopping(true)}
-                      barHeights={barHeights}
-                      onTranscriptionError={(message) => {
-                        showModal('errorAlert', message);
-                      }}
-                      isRecordingDisabled={isRecordingDisabled}
-                      isParentProcessing={isProcessingStop}
-                      selectedDevices={selectedDevices}
-                      meetingName={meetingTitle}
-                    />
-                  </div>
-                </div>
-              </div>
+                <Icon name="mic" size={18} />
+                {t('Record meeting')}
+              </button>
             </div>
           )}
 

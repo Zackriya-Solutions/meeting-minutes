@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Info } from 'lucide-react';
+import { Info } from '@/components/memento/LucideCompat';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useT } from '@/lib/i18n';
 import {
   Tooltip,
   TooltipContent,
@@ -12,6 +13,7 @@ import {
 
 export function SetupOverviewStep() {
   const { goNext } = useOnboarding();
+  const t = useT();
   const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
@@ -45,14 +47,14 @@ export function SetupOverviewStep() {
 
   return (
     <OnboardingContainer
-      title="Setup Overview"
-      description="Meetily requires that you download the Transcription & Summarization AI models for the software to work."
+      title={t('Setup Overview')}
+      description={t('Meetily requires that you download the Transcription & Summarization AI models for the software to work.')}
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
       <div className="flex flex-col items-center space-y-10">
         {/* Steps Card */}
-        <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 p-4">
+        <div className="w-full max-w-md bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-4">
           <div className="space-y-4">
             {steps.map((step, idx) => {
               return (
@@ -61,20 +63,19 @@ export function SetupOverviewStep() {
                   className={`flex items-start gap-4 p-1`}
                 >
                   <div className="flex-1 ml-1">
-                    <h3 className="font-medium text-gray-900 flex items-center gap-2">
-                        Step {step.number} :  {step.title}
+                    <h3 className="font-medium text-[var(--fg1)] flex items-center gap-2">
+                        {t('Step')} {step.number} · {t(step.title)}
 
                         {step.type === "summarization" && (
                             <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                <button className="text-gray-400 hover:text-gray-600">
+                                <button className="text-[var(--fg3)] hover:text-[var(--fg2)]">
                                     <Info className="w-4 h-4" />
                                 </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
-                                You can also select external AI providers like OpenAI, Claude, or
-                                Ollama for summary generation in settings.
+                                {t('You can also select external AI providers like OpenAI, Claude, or Ollama for summary generation in settings.')}
                                 </TooltipContent>
                             </Tooltip>
                             </TooltipProvider>
@@ -92,18 +93,18 @@ export function SetupOverviewStep() {
         <div className="w-full max-w-xs space-y-4">
           <Button
             onClick={handleContinue}
-            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
+            className="h-11 w-full rounded-full bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
           >
-            Let's Go
+            {t("Let's Go")}
           </Button>
           <div className="text-center">
             <a
-              href="https://github.com/Zackriya-Solutions/meeting-minutes"
+              href="https://github.com/andyzt/meet_at_giga/issues"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-gray-600 hover:underline"
+              className="text-xs text-[var(--fg2)] hover:underline"
             >
-              Report issues on GitHub
+              {t('Report issues on GitHub')}
             </a>
           </div>
         </div>

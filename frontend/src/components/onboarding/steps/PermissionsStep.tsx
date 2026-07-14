@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Mic, Volume2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/memento/Button';
+import { Icon } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useT } from '@/lib/i18n';
 
 export function PermissionsStep() {
+  const t = useT();
   const { setPermissionStatus, setPermissionsSkipped, permissions, completeOnboarding } = useOnboarding();
   const [isPending, setIsPending] = useState(false);
 
@@ -32,7 +34,7 @@ export function PermissionsStep() {
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Please enable microphone access in System Preferences > Security & Privacy > Microphone');
+        alert(t('Please enable microphone access in System Preferences > Security & Privacy > Microphone'));
       }
       return;
     }
@@ -64,7 +66,7 @@ export function PermissionsStep() {
       try {
         await invoke('open_system_settings');
       } catch {
-        alert('Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture');
+        alert(t('Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture'));
       }
       return;
     }
@@ -113,8 +115,8 @@ export function PermissionsStep() {
 
   return (
     <OnboardingContainer
-      title="Grant Permissions"
-      description="Meetily needs access to your microphone and system audio to record meetings"
+      title={t('Grant Permissions')}
+      description={t('Meetily needs access to your microphone and system audio to record meetings')}
       step={4}
       hideProgress={true}
       showNavigation={allPermissionsGranted}
@@ -125,9 +127,9 @@ export function PermissionsStep() {
         <div className="space-y-4">
           {/* Microphone */}
           <PermissionRow
-            icon={<Mic className="w-5 h-5" />}
-            title="Microphone"
-            description="Required to capture your voice during meetings"
+            icon={<Icon name="mic" />}
+            title={t('Microphone')}
+            description={t('Required to capture your voice during meetings')}
             status={permissions.microphone}
             isPending={isPending}
             onAction={handleMicrophoneAction}
@@ -135,9 +137,9 @@ export function PermissionsStep() {
 
           {/* System Audio */}
           <PermissionRow
-            icon={<Volume2 className="w-5 h-5" />}
-            title="System Audio"
-            description="Click Enable to grant Audio Capture permission"
+            icon={<Icon name="wave" />}
+            title={t('System Audio')}
+            description={t('Click Enable to grant Audio Capture permission')}
             status={permissions.systemAudio}
             isPending={isPending}
             onAction={handleSystemAudioAction}
@@ -147,19 +149,19 @@ export function PermissionsStep() {
         {/* Action Buttons */}
         <div className="flex flex-col gap-3 pt-4">
           <Button onClick={handleFinish} disabled={!allPermissionsGranted} className="w-full h-11">
-            Finish Setup
+            {t('Finish Setup')}
           </Button>
 
           <button
             onClick={handleSkip}
-            className="text-sm text-neutral-500 hover:text-neutral-700 transition-colors"
+            className="text-sm text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
           >
-            I'll do this later
+            {t("I'll do this later")}
           </button>
 
           {!allPermissionsGranted && (
             <p className="text-xs text-center text-muted-foreground">
-              Recording won't work without permissions. You can grant them later in settings.
+              {t("Recording won't work without permissions. You can grant them later in settings.")}
             </p>
           )}
         </div>

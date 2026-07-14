@@ -1,8 +1,9 @@
 import React from 'react';
-import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Mic, Speaker, RefreshCw } from '@/components/memento/LucideCompat';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
+import { useT } from '@/lib/i18n';
 
 interface PermissionWarningProps {
   hasMicrophone: boolean;
@@ -17,6 +18,7 @@ export function PermissionWarning({
   onRecheck,
   isRechecking = false
 }: PermissionWarningProps) {
+  const t = useT();
   const isLinux = useIsLinux();
 
   // Don't show on Linux - permission handling is not needed
@@ -55,13 +57,13 @@ export function PermissionWarning({
     <div className="max-w-md mb-4 space-y-3">
       {/* Combined Permission Warning - Show when either permission is missing */}
       {(!hasMicrophone || !hasSystemAudio) && (
-        <Alert variant="destructive" className="border-amber-400 bg-amber-50">
-          <AlertTriangle className="h-5 w-5 text-amber-600" />
-          <AlertTitle className="text-amber-900 font-semibold">
+        <Alert variant="destructive" className="border-[var(--gold-border)] bg-[var(--gold-soft)]">
+          <AlertTriangle className="h-5 w-5 text-[var(--gold)]" />
+          <AlertTitle className="font-semibold text-[var(--fg1)]">
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Permissions Required' : !hasMicrophone ? 'Microphone Permission Required' : 'System Audio Permission Required'}
+              {!hasMicrophone && !hasSystemAudio ? t('Permissions Required') : !hasMicrophone ? t('Microphone Permission Required') : t('System Audio Permission Required')}
             </div>
           </AlertTitle>
           {/* Action Buttons */}
@@ -69,43 +71,43 @@ export function PermissionWarning({
             {isMacOS && !hasMicrophone && (
               <button
                 onClick={openMicrophoneSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
               >
                 <Mic className="h-4 w-4" />
-                Open Microphone Settings
+                {t('Open Microphone Settings')}
               </button>
             )}
             {isMacOS && !hasSystemAudio && (
               <button
                 onClick={openScreenRecordingSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold-active)] rounded-md transition-colors"
               >
                 <Speaker className="h-4 w-4" />
-                Open Screen Recording Settings
+                {t('Open Screen Recording Settings')}
               </button>
             )}
             <button
               onClick={onRecheck}
               disabled={isRechecking}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--fg1)] transition-colors hover:bg-[var(--state-hover-bg)] disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
-              Recheck
+              {t('Recheck')}
             </button>
           </div>
-          <AlertDescription className="text-amber-800 mt-2">
+          <AlertDescription className="mt-2 text-[var(--fg2)]">
             {/* Microphone Warning */}
             {!hasMicrophone && (
               <>
                 <p className="mb-3">
-                  Meetily needs access to your microphone to record meetings. No microphone devices were detected.
+                  {t('Meetily needs access to your microphone to record meetings. No microphone devices were detected.')}
                 </p>
                 <div className="space-y-2 text-sm mb-4">
-                  <p className="font-medium">Please check:</p>
+                  <p className="font-medium">{t('Please check:')}</p>
                   <ul className="list-disc list-inside ml-2 space-y-1">
-                    <li>Your microphone is connected and powered on</li>
-                    <li>Microphone permission is granted in System Settings</li>
-                    <li>No other app is exclusively using the microphone</li>
+                    <li>{t('Your microphone is connected and powered on')}</li>
+                    <li>{t('Microphone permission is granted in System Settings')}</li>
+                    <li>{t('No other app is exclusively using the microphone')}</li>
                   </ul>
                 </div>
               </>
@@ -116,16 +118,16 @@ export function PermissionWarning({
               <>
                 <p className="mb-3">
                   {hasMicrophone
-                    ? 'System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.'
-                    : 'System audio capture is also not available.'}
+                    ? t('System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.')
+                    : t('System audio capture is also not available.')}
                 </p>
                 {isMacOS && (
                   <div className="space-y-2 text-sm mb-4">
-                    <p className="font-medium">To enable system audio on macOS:</p>
+                    <p className="font-medium">{t('To enable system audio on macOS:')}</p>
                     <ul className="list-disc list-inside ml-2 space-y-1">
-                      <li>Install a virtual audio device (e.g., BlackHole 2ch)</li>
-                      <li>Grant Screen Recording permission to Meetily</li>
-                      <li>Configure your audio routing in Audio MIDI Setup</li>
+                      <li>{t('Install a virtual audio device (e.g., BlackHole 2ch)')}</li>
+                      <li>{t('Grant Screen Recording permission to Meetily')}</li>
+                      <li>{t('Configure your audio routing in Audio MIDI Setup')}</li>
                     </ul>
                   </div>
                 )}

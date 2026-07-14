@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import {
   ModelInfo,
   ModelStatus,
-  getModelIcon,
   formatFileSize,
   getModelPerformanceBadge,
   isQuantizedModel,
@@ -14,6 +13,8 @@ import {
   WhisperAPI
 } from '../lib/whisper';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Icon } from '@/components/memento/Icon';
+import { useT } from '@/lib/i18n';
 
 interface ModelManagerProps {
   selectedModel?: string;
@@ -28,6 +29,7 @@ export function ModelManager({
   className = '',
   autoSave = false
 }: ModelManagerProps) {
+  const t = useT();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,9 +108,9 @@ export function ModelManager({
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize Whisper:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load models');
-        toast.error('Failed to load transcription models', {
-          description: err instanceof Error ? err.message : 'Unknown error',
+        setError(err instanceof Error ? err.message : t('Failed to load models'));
+        toast.error(t('Failed to load transcription models'), {
+          description: err instanceof Error ? err.message : t('Unknown error'),
           duration: 5000
         });
       } finally {
@@ -181,8 +183,8 @@ export function ModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.success(`${getModelIcon(model?.accuracy || 'Good')} ${displayName} ready!`, {
-            description: 'Model downloaded and ready to use',
+          toast.success(`${displayName} ${t('ready')}`, {
+            description: t('Model downloaded and ready to use'),
             duration: 4000
           });
 
@@ -220,11 +222,11 @@ export function ModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.error(`Failed to download ${displayName}`, {
+          toast.error(`${t('Failed to download')} ${displayName}`, {
             description: error,
             duration: 6000,
             action: {
-              label: 'Retry',
+              label: t('Retry'),
               onClick: () => downloadModel(modelName)
             }
           });
@@ -277,13 +279,13 @@ export function ModelManager({
       // Clean up throttle data
       progressThrottleRef.current.delete(modelName);
 
-      toast.info(`${displayName} download cancelled`, {
+      toast.info(`${displayName} ${t('download cancelled')}`, {
         duration: 3000
       });
     } catch (err) {
-      console.error('Failed to cancel download:', err);
-      toast.error('Failed to cancel download', {
-        description: err instanceof Error ? err.message : 'Unknown error',
+      console.error('Не удалось отменить загрузку:', err);
+      toast.error(t('Failed to cancel download'), {
+        description: err instanceof Error ? err.message : t('Unknown error'),
         duration: 4000
       });
     }
@@ -305,8 +307,8 @@ export function ModelManager({
         )
       );
 
-      toast.info(`Downloading ${displayName}...`, {
-        description: 'This may take a few minutes',
+      toast.info(`${t('Downloading')} ${displayName}...`, {
+        description: t('This may take a few minutes'),
         duration: 5000
       });
 
@@ -340,7 +342,7 @@ export function ModelManager({
     }
 
     const displayName = getDisplayName(modelName);
-    toast.success(`Switched to ${displayName}`, {
+    toast.success(`${t('Switched to')} ${displayName}`, {
       duration: 3000
     });
   };
@@ -355,8 +357,8 @@ export function ModelManager({
       const modelList = await WhisperAPI.getAvailableModels();
       setModels(modelList);
 
-      toast.success(`${displayName} deleted`, {
-        description: 'Model removed to free up space',
+      toast.success(`${displayName} ${t('deleted')}`, {
+        description: t('Model removed to free up space'),
         duration: 3000
       });
 
@@ -366,8 +368,8 @@ export function ModelManager({
       }
     } catch (err) {
       console.error('Failed to delete model:', err);
-      toast.error(`Failed to delete ${displayName}`, {
-        description: err instanceof Error ? err.message : 'Delete failed',
+      toast.error(`${t('Failed to delete')} ${displayName}`, {
+        description: err instanceof Error ? err.message : t('Delete failed'),
         duration: 4000
       });
     }
@@ -393,9 +395,9 @@ export function ModelManager({
     return (
       <div className={`space-y-3 ${className}`}>
         <div className="animate-pulse space-y-3">
-          <div className="h-20 bg-gray-100 rounded-lg"></div>
-          <div className="h-20 bg-gray-100 rounded-lg"></div>
-          <div className="h-20 bg-gray-100 rounded-lg"></div>
+          <div className="h-20 bg-[var(--bg-elevated)] rounded-lg"></div>
+          <div className="h-20 bg-[var(--bg-elevated)] rounded-lg"></div>
+          <div className="h-20 bg-[var(--bg-elevated)] rounded-lg"></div>
         </div>
       </div>
     );
@@ -403,9 +405,9 @@ export function ModelManager({
 
   if (error) {
     return (
-      <div className={`bg-red-50 border border-red-200 rounded-lg p-4 ${className}`}>
-        <p className="text-sm text-red-800">Failed to load models</p>
-        <p className="text-xs text-red-600 mt-1">{error}</p>
+      <div className={`bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-4 ${className}`}>
+        <p className="text-sm text-[var(--danger)]">{t('Failed to load models')}</p>
+        <p className="text-xs text-[var(--danger)] mt-1">{error}</p>
       </div>
     );
   }
@@ -442,12 +444,12 @@ export function ModelManager({
         })}
       </div>
 
-      {/* Advanced Models */}
+      {/* Расширенные модели */}
       {advancedModels.length > 0 && (
         <Accordion type="single" collapsible className="w-full">
           <AccordionItem value="advanced-models">
             <AccordionTrigger>
-              <span className='text-lg'>Advanced Models</span>
+              <span className='text-lg'>{t('Advanced Models')}</span>
             </AccordionTrigger>
             <AccordionContent>
               <div className="space-y-3 pt-4">
@@ -480,9 +482,9 @@ export function ModelManager({
         <motion.div
           initial={{ opacity: 0, y: -5 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-xs text-gray-500 text-center pt-2"
+          className="text-xs text-[var(--fg2)] text-center pt-2"
         >
-          Using {getDisplayName(selectedModel)} for transcription
+          {t('Using')} {getDisplayName(selectedModel)} {t('for transcription')}
         </motion.div>
       )}
     </div>
@@ -513,6 +515,7 @@ function ModelCard({
   isDownloading,
   displayName
 }: ModelCardProps) {
+  const t = useT();
   const [isHovered, setIsHovered] = useState(false);
 
   const isAvailable = model.status === 'Available';
@@ -534,10 +537,10 @@ function ModelCard({
       className={`
         relative rounded-lg border-2 transition-all cursor-pointer
         ${isSelected && isAvailable
-          ? 'border-blue-500 bg-blue-50'
+          ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
           : isAvailable
-            ? 'border-gray-200 hover:border-gray-300 bg-white'
-            : 'border-gray-200 bg-gray-50'
+            ? 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-canvas)]'
+            : 'border-[var(--border-subtle)] bg-[var(--bg-sheet)]'
         }
         ${isAvailable ? '' : 'cursor-default'}
       `}
@@ -547,8 +550,8 @@ function ModelCard({
     >
       {/* Recommended Badge */}
       {isRecommended && (
-        <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          Recommended
+        <div className="absolute -top-2 -right-2 bg-[var(--gold)] text-[var(--fg-inverse)] text-xs px-2 py-0.5 rounded-full font-medium">
+          {t('Recommended')}
         </div>
       )}
 
@@ -557,25 +560,25 @@ function ModelCard({
           <div className="flex-1">
             {/* Model Name and Tagline */}
             <div className="flex items-center gap-2 flex-wrap mb-2">
-              <span className="text-2xl">{getModelIcon(model.accuracy)}</span>
-              <h3 className="font-semibold text-gray-900">{displayName}</h3>
-              <span className="text-sm text-gray-500">•</span>
-              <span className="text-sm text-gray-500">{getModelTagline(model.name, model.speed, model.accuracy)}</span>
+              <Icon name="spark" size={22} className="text-[var(--fg2)]" />
+              <h3 className="font-semibold text-[var(--fg1)]">{displayName}</h3>
+              <span className="text-sm text-[var(--fg2)]">•</span>
+              <span className="text-sm text-[var(--fg2)]">{getModelTagline(model.name, model.speed, model.accuracy)}</span>
               {isSelected && isAvailable && (
                 <motion.span
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="bg-blue-600 text-white px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
+                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
                 >
-                  ✓
+                  <Icon name="check" size={13} />
                 </motion.span>
               )}
               {isQuantizedModel(model.name) && (
                 <span className={`px-2 py-0.5 rounded-full text-xs ${getModelPerformanceBadge(model.name).color === 'green'
-                  ? 'bg-green-100 text-green-700'
+                  ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)] text-[var(--success)]'
                   : getModelPerformanceBadge(model.name).color === 'orange'
-                    ? 'bg-orange-100 text-orange-700'
-                    : 'bg-gray-100 text-gray-700'
+                    ? 'bg-[var(--gold-soft)] text-[var(--gold)]'
+                    : 'bg-[var(--bg-elevated)] text-[var(--fg2)]'
                   }`}>
                   {getModelPerformanceBadge(model.name).label}
                 </span>
@@ -583,18 +586,18 @@ function ModelCard({
             </div>
 
             {/* Model Specs */}
-            <div className="flex items-center space-x-4 text-sm text-gray-600 ml-9 mt-1.5">
+            <div className="flex items-center space-x-4 text-sm text-[var(--fg2)] ml-9 mt-1.5">
               <span className="flex items-center space-x-1">
-                <span>📦</span>
+                <Icon name="database" size={14} />
                 <span>{formatFileSize(model.size_mb)}</span>
               </span>
               <span className="flex items-center space-x-1">
-                <span>🎯</span>
-                <span>{model.accuracy} accuracy</span>
+                <Icon name="tag" size={14} />
+                <span>{model.accuracy} {t('accuracy')}</span>
               </span>
               <span className="flex items-center space-x-1">
-                <span>⚡</span>
-                <span>{model.speed} processing</span>
+                <Icon name="clock" size={14} />
+                <span>{model.speed} {t('processing')}</span>
               </span>
             </div>
           </div>
@@ -603,9 +606,9 @@ function ModelCard({
           <div className="ml-4 flex items-center gap-2">
             {isAvailable && (
               <>
-                <div className="flex items-center gap-1.5 text-green-600">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-xs font-medium">Ready</span>
+                <div className="flex items-center gap-1.5 text-[var(--success)]">
+                  <div className="w-2 h-2 bg-[var(--success)] rounded-full"></div>
+                  <span className="text-xs font-medium">{t('Ready')}</span>
                 </div>
                 <AnimatePresence>
                   {isHovered && (
@@ -618,8 +621,8 @@ function ModelCard({
                         e.stopPropagation();
                         onDelete();
                       }}
-                      className="text-gray-400 hover:text-red-600 transition-colors p-1"
-                      title="Delete model to free up space"
+                      className="text-[var(--fg3)] hover:text-[var(--danger)] transition-colors p-1"
+                      title={t('Delete model to free up space')}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -636,9 +639,9 @@ function ModelCard({
                   e.stopPropagation();
                   onDownload();
                 }}
-                className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
               >
-                Download
+                {t('Download')}
               </button>
             )}
 
@@ -648,9 +651,9 @@ function ModelCard({
                   e.stopPropagation();
                   onDownload();
                 }}
-                className="bg-red-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                className="bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-colors"
               >
-                Retry
+                {t('Retry')}
               </button>
             )}
 
@@ -661,18 +664,18 @@ function ModelCard({
                     e.stopPropagation();
                     onDelete();
                   }}
-                  className="bg-orange-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-orange-700 transition-colors"
+                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
                 >
-                  Delete
+                  {t('Delete')}
                 </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onDownload();
                   }}
-                  className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
                 >
-                  Re-download
+                  {t('Re-download')}
                 </button>
               </div>
             )}
@@ -685,39 +688,39 @@ function ModelCard({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-3 pt-3 border-t border-gray-200"
+            className="mt-3 pt-3 border-t border-[var(--border-subtle)]"
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-blue-600">Downloading...</span>
-                <span className="text-sm font-semibold text-blue-600">{Math.round(downloadProgress)}%</span>
+                <span className="text-sm font-medium text-[var(--gold)]">{t('Downloading...')}</span>
+                <span className="text-sm font-semibold text-[var(--gold)]">{Math.round(downloadProgress)}%</span>
               </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onCancel();
                 }}
-                className="text-xs text-gray-600 hover:text-red-600 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50"
-                title="Cancel download"
+                className="text-xs text-[var(--fg2)] hover:text-[var(--danger)] font-medium transition-colors px-2 py-1 rounded hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
+                title={t('Cancel download')}
               >
-                Cancel
+                {t('Cancel')}
               </button>
             </div>
-            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
               <motion.div
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"
+                className="h-full rounded-full bg-[var(--gold)]"
                 initial={{ width: 0 }}
                 animate={{ width: `${downloadProgress}%` }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               />
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-[var(--fg2)] mt-1">
               {model.size_mb ? (
                 <>
                   {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}
                 </>
               ) : (
-                'Downloading...'
+                t('Downloading...')
               )}
             </p>
           </motion.div>

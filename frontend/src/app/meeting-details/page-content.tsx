@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
+import { getMarkedMoments } from '@/lib/markedMoments';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
@@ -17,6 +18,7 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 export default function PageContent({
   meeting,
@@ -63,10 +65,28 @@ export default function PageContent({
     transcriptsCount: meeting.transcripts?.length
   });
 
+  const t = useT();
+
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+
+  // Marked moments captured during recording (elapsed seconds), keyed by the
+  // saved meeting id in localStorage.
+  const markedMoments = useMemo(() => getMarkedMoments(meeting.id), [meeting.id]);
+
+  // Transcript jump target (seconds). Driven by the ?t= deep link and by
+  // clicking a marked-moment chip. A tiny jitter is added per click so tapping
+  // the same moment twice still re-triggers the scroll (the transcript view
+  // dedupes identical values).
+  const [seekTarget, setSeekTarget] = useState<number | null>(seekToSeconds);
+  useEffect(() => {
+    if (seekToSeconds != null) setSeekTarget(seekToSeconds);
+  }, [seekToSeconds]);
+  const handleSeekToMoment = (seconds: number) => {
+    setSeekTarget(seconds + Math.random() * 0.02);
+  };
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -113,10 +133,10 @@ export default function PageContent({
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Model settings saved successfully');
+      toast.success(t('Model settings saved successfully'));
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error('Failed to save model settings');
+      toast.error(t('Failed to save model settings'));
     }
   };
 
@@ -178,9 +198,9 @@ export default function PageContent({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="flex h-screen flex-col bg-[var(--bg-canvas)]"
     >
-      <div className="flex flex-1 overflow-hidden">
+      <div className="m-4 flex flex-1 overflow-hidden rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-sheet)]">
         <TranscriptPanel
           transcripts={meetingData.transcripts}
           customPrompt={customPrompt}
@@ -201,8 +221,10 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
-          // Jump-to-timestamp deep link (?t= from search/RAG)
-          scrollToTimestamp={seekToSeconds}
+          // Jump-to-timestamp: ?t= deep link (search/RAG) and marked moments
+          scrollToTimestamp={seekTarget}
+          markedMoments={markedMoments}
+          onSeekToMoment={handleSeekToMoment}
           // Speaker diarization props
           speakersById={speakersById}
           onRenameSpeaker={onRenameSpeaker}

@@ -2,13 +2,15 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 type Settings = Record<string, string>;
 
 const has = (s: Settings, k: string) => !!s[k] && s[k].length > 0;
 
 export function ProviderSettings() {
+  const t = useT();
   const [settings, setSettings] = useState<Settings>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -62,7 +64,7 @@ export function ProviderSettings() {
     if (gcPassword.trim()) updates.push(['gigachat.password', gcPassword.trim()]);
 
     if (updates.length === 0) {
-      setError('Nothing to save — enter a key or value first.');
+      setError(t('Nothing to save — enter a key or value first.'));
       return;
     }
 
@@ -78,45 +80,43 @@ export function ProviderSettings() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
-      setError(typeof e === 'string' ? e : 'Failed to save settings.');
+      setError(typeof e === 'string' ? e : t('Failed to save settings.'));
     } finally {
       setSaving(false);
     }
-  }, [dsKey, dsModel, gcAuthKey, gcModel, gcUser, gcPassword, refresh]);
+  }, [dsKey, dsModel, gcAuthKey, gcModel, gcUser, gcPassword, refresh, t]);
 
   if (!loaded) {
     return (
-      <div className="mt-6 flex items-center gap-2 text-sm text-gray-400">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      <div className="mt-6 flex items-center gap-2 text-sm text-[var(--fg3)]">
+        <Loader2 className="h-4 w-4 animate-spin" /> {t('Loading…')}
       </div>
     );
   }
 
   return (
     <div className="mt-6 max-w-2xl space-y-5">
-      <p className="text-sm text-gray-500">
-        Credentials for the Russian-market LLM providers used by Chat, summaries, and extraction. Stored locally;
-        changes take effect immediately (no restart). Keys are write-only here — a configured provider shows a badge,
-        and you only re-enter a key to change it.
+      <p className="text-sm text-[var(--fg2)]">
+        {t('Credentials for the Russian-market LLM providers used by Chat, summaries, and extraction. Stored locally; changes take effect immediately (no restart). Keys are write-only here — a configured provider shows a badge, and you only re-enter a key to change it.')}
       </p>
 
       {/* DeepSeek */}
       <ProviderCard
         title="DeepSeek"
-        subtitle="OpenAI-compatible · used for cross-meeting synthesis"
+        subtitle={t('OpenAI-compatible · used for cross-meeting synthesis')}
         configured={deepseekConfigured}
       >
-        <Field label="API key">
+        <Field label={t('API key')}>
           <input
             type="password"
             value={dsKey}
             onChange={(e) => setDsKey(e.target.value)}
-            placeholder={deepseekConfigured ? '•••••••• (saved — enter to replace)' : 'sk-…'}
+            placeholder={deepseekConfigured ? t('•••••••• (saved — enter to replace)') : 'sk-…'}
             className={inputCls}
             autoComplete="off"
           />
         </Field>
-        <Field label="Model (optional)">
+        <Field label={t('Model (optional)')}>
           <input
             type="text"
             value={dsModel}
@@ -130,25 +130,25 @@ export function ProviderSettings() {
       {/* GigaChat */}
       <ProviderCard
         title="GigaChat"
-        subtitle="Sber · used for fast single-meeting / lookup answers"
+        subtitle={t('Sber · used for fast single-meeting / lookup answers')}
         configured={gigachatConfigured}
       >
-        <Field label="Authorization key">
+        <Field label={t('Authorization key')}>
           <input
             type="password"
             value={gcAuthKey}
             onChange={(e) => setGcAuthKey(e.target.value)}
             placeholder={
-              has(settings, 'gigachat.auth_key') ? '•••••••• (saved — enter to replace)' : 'base64(client_id:secret)'
+              has(settings, 'gigachat.auth_key') ? t('•••••••• (saved — enter to replace)') : 'base64(client_id:secret)'
             }
             className={inputCls}
             autoComplete="off"
           />
-          <p className="mt-1 text-xs text-gray-400">
-            The Sber “Authorization Key” (base64 of ClientID:ClientSecret) from your GigaChat project.
+          <p className="mt-1 text-xs text-[var(--fg3)]">
+            {t('The Sber “Authorization Key” (base64 of ClientID:ClientSecret) from your GigaChat project.')}
           </p>
         </Field>
-        <Field label="Model (optional)">
+        <Field label={t('Model (optional)')}>
           <input
             type="text"
             value={gcModel}
@@ -161,14 +161,14 @@ export function ProviderSettings() {
         <button
           type="button"
           onClick={() => setShowGcLogin((v) => !v)}
-          className="mt-1 flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+          className="mt-1 flex items-center gap-1 text-xs text-[var(--fg2)] hover:text-[var(--fg1)]"
         >
           {showGcLogin ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          Or use login &amp; password instead
+          {t('Or use login & password instead')}
         </button>
         {showGcLogin && (
-          <div className="mt-2 space-y-3 border-l-2 border-gray-100 pl-3">
-            <Field label="User">
+          <div className="mt-2 space-y-3 border-l-2 border-[var(--border-subtle)] pl-3">
+            <Field label={t('User')}>
               <input
                 type="text"
                 value={gcUser}
@@ -177,12 +177,12 @@ export function ProviderSettings() {
                 autoComplete="off"
               />
             </Field>
-            <Field label="Password">
+            <Field label={t('Password')}>
               <input
                 type="password"
                 value={gcPassword}
                 onChange={(e) => setGcPassword(e.target.value)}
-                placeholder={has(settings, 'gigachat.password') ? '•••••••• (saved)' : ''}
+                placeholder={has(settings, 'gigachat.password') ? t('•••••••• (saved)') : ''}
                 className={inputCls}
                 autoComplete="off"
               />
@@ -195,33 +195,32 @@ export function ProviderSettings() {
         <button
           onClick={save}
           disabled={saving}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)]"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-          Save credentials
+          {t('Save credentials')}
         </button>
         {saved && (
-          <span className="flex items-center gap-1.5 text-sm text-green-600">
-            <CheckCircle2 className="h-4 w-4" /> Saved
+          <span className="flex items-center gap-1.5 text-sm text-[var(--success)]">
+            <CheckCircle2 className="h-4 w-4" /> {t('Saved')}
           </span>
         )}
         {error && (
-          <span className="flex items-center gap-1.5 text-sm text-red-600">
+          <span className="flex items-center gap-1.5 text-sm text-[var(--danger)]">
             <AlertTriangle className="h-4 w-4" /> {error}
           </span>
         )}
       </div>
 
-      <p className="text-xs text-gray-400">
-        Routing: single-meeting / short questions → GigaChat; cross-meeting synthesis &amp; extraction → DeepSeek.
-        If only one provider is configured, it handles everything.
+      <p className="text-xs text-[var(--fg3)]">
+        {t('Routing: single-meeting / short questions → GigaChat; cross-meeting synthesis & extraction → DeepSeek. If only one provider is configured, it handles everything.')}
       </p>
     </div>
   );
 }
 
 const inputCls =
-  'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:border-blue-400 focus:outline-none';
+  'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--fg1)] placeholder:text-[var(--fg3)] focus:border-[var(--gold-border)] focus:outline-none';
 
 function ProviderCard({
   title,
@@ -234,19 +233,20 @@ function ProviderCard({
   configured: boolean;
   children: React.ReactNode;
 }) {
+  const t = useT();
   return (
-    <div className="rounded-xl border border-gray-200 p-5">
+    <div className="rounded-xl border border-[var(--border-subtle)] p-5">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-          <p className="text-xs text-gray-400">{subtitle}</p>
+          <h3 className="text-sm font-semibold text-[var(--fg1)]">{title}</h3>
+          <p className="text-xs text-[var(--fg3)]">{subtitle}</p>
         </div>
         {configured ? (
-          <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-            <CheckCircle2 className="h-3.5 w-3.5" /> Configured
+          <span className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--success)]">
+            <CheckCircle2 className="h-3.5 w-3.5" /> {t('Configured')}
           </span>
         ) : (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Not set</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">{t('Not set')}</span>
         )}
       </div>
       <div className="space-y-3">{children}</div>
@@ -257,7 +257,7 @@ function ProviderCard({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-gray-600">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-[var(--fg2)]">{label}</span>
       {children}
     </label>
   );

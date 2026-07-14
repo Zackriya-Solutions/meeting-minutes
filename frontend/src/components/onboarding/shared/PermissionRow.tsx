@@ -1,18 +1,20 @@
 import React from 'react';
-import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, XCircle } from '@/components/memento/LucideCompat';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import type { PermissionRowProps } from '@/types/onboarding';
 
 export function PermissionRow({ icon, title, description, status, isPending = false, onAction }: PermissionRowProps) {
+  const t = useT();
   const isAuthorized = status === 'authorized';
   const isDenied = status === 'denied';
   const isChecking = isPending;
 
   const getButtonText = () => {
-    if (isChecking) return 'Checking...';
-    if (isDenied) return 'Open Settings';
-    return 'Enable';
+    if (isChecking) return t('Checking...');
+    if (isDenied) return t('Open Settings');
+    return t('Enable');
   };
 
   return (
@@ -20,7 +22,7 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
       className={cn(
         'flex items-center justify-between rounded-2xl border px-6 py-5',
         'transition-all duration-200',
-        isAuthorized ? 'border-gray-900 bg-gray-100' : isDenied ? 'border-red-300 bg-red-50' : 'bg-white border-neutral-200'
+        isAuthorized ? 'border-[var(--border-strong)] bg-[var(--bg-elevated)]' : isDenied ? 'border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]' : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)]'
       )}
     >
       {/* Left side: Icon + Info */}
@@ -29,25 +31,25 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
         <div
           className={cn(
             'flex size-10 items-center justify-center rounded-full flex-shrink-0',
-            isAuthorized ? 'bg-gray-200' : isDenied ? 'bg-red-100' : 'bg-neutral-50'
+            isAuthorized ? 'bg-[var(--bg-elevated)]' : isDenied ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]' : 'bg-[var(--bg-sheet)]'
           )}
         >
-          <div className={cn(isAuthorized ? 'text-gray-900' : isDenied ? 'text-red-500' : 'text-neutral-500')}>{icon}</div>
+          <div className={cn(isAuthorized ? 'text-[var(--fg1)]' : isDenied ? 'text-[var(--danger)]' : 'text-[var(--fg2)]')}>{icon}</div>
         </div>
 
         {/* Title + Description */}
         <div className="min-w-0 flex-1">
-          <div className="font-medium truncate text-neutral-900">{title}</div>
+          <div className="truncate font-medium text-[var(--fg1)]">{title}</div>
           <div className="text-sm text-muted-foreground">
             {isAuthorized ? (
-              <span className="text-green-600 flex items-center gap-1">
+              <span className="text-[var(--success)] flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Access Granted
+                {t('Access Granted')}
               </span>
             ) : isDenied ? (
-              <span className="text-red-500 flex items-center gap-1">
+              <span className="text-[var(--danger)] flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" />
-                Access Denied - Please grant in System Settings
+                {t('Access Denied - Please grant in System Settings')}
               </span>
             ) : (
               <span>{description}</span>
@@ -71,8 +73,8 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
           </Button>
         )}
         {isAuthorized && (
-          <div className="flex size-8 items-center justify-center rounded-full bg-green-100">
-            <CheckCircle2 className="w-4 h-4 text-green-600" />
+          <div className="flex size-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)]">
+            <CheckCircle2 className="w-4 h-4 text-[var(--success)]" />
           </div>
         )}
       </div>

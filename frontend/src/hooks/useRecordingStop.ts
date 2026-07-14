@@ -7,7 +7,9 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
+import { migrateMarkedMoments } from '@/lib/markedMoments';
 import Analytics from '@/lib/analytics';
+import { useT } from '@/lib/i18n';
 import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
@@ -41,6 +43,7 @@ export function useRecordingStop(
   setIsRecording: (value: boolean) => void,
   setIsRecordingDisabled: (value: boolean) => void
 ): UseRecordingStopReturn {
+  const t = useT();
   // USE global state instead
   const recordingState = useRecordingState();
   const {
@@ -262,7 +265,7 @@ export function useRecordingStop(
           const meetingId = responseData.meeting_id;
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
-            throw new Error('No meeting ID received from save operation');
+            throw new Error(t('No meeting ID received from save operation'));
           }
 
           let shouldDetectSummaryLanguage = false;
@@ -270,8 +273,8 @@ export function useRecordingStop(
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
           } catch (error) {
             console.warn('Failed to apply pinned summary language preference for new meeting:', error);
-            toast.warning('Could not apply default summary language', {
-              description: 'The meeting was saved, but the default summary language was not applied.',
+            toast.warning(t('Could not apply default summary language'), {
+              description: t('The meeting was saved, but the default summary language was not applied.'),
             });
           }
 
@@ -283,8 +286,8 @@ export function useRecordingStop(
               );
             } catch (error) {
               console.warn('Failed to detect summary language for new meeting:', error);
-              toast.warning('Could not detect summary language', {
-                description: 'The meeting was saved, but Auto could not detect the summary language.',
+              toast.warning(t('Could not detect summary language'), {
+                description: t('The meeting was saved, but Auto could not detect the summary language.'),
               });
             }
           }
@@ -292,6 +295,12 @@ export function useRecordingStop(
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
           console.log('   Transcripts:', freshTranscripts.length);
           console.log('   folder_path:', folderPath);
+
+          // Move marked moments from the temporary recording id onto the saved
+          // meeting id so meeting-details can find them. Must run before
+          // markMeetingAsSaved(), which clears the temporary id.
+          const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          migrateMarkedMoments(tempMeetingId, meetingId);
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
@@ -323,10 +332,10 @@ export function useRecordingStop(
           setStatus(RecordingStatus.COMPLETED);
 
           // Show success toast with navigation option
-          toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+          toast.success(t('Recording saved successfully!'), {
+            description: `${freshTranscripts.length} ${t('transcript segments saved.')}`,
             action: {
-              label: 'View Meeting',
+              label: t('View Meeting'),
               onClick: () => {
                 router.push(`/meeting-details?id=${meetingId}`);
                 Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
@@ -398,8 +407,8 @@ export function useRecordingStop(
         } catch (saveError) {
           console.error('Failed to save meeting to database:', saveError);
           setStatus(RecordingStatus.ERROR, saveError instanceof Error ? saveError.message : 'Unknown error');
-          toast.error('Failed to save meeting', {
-            description: saveError instanceof Error ? saveError.message : 'Unknown error'
+          toast.error(t('Failed to save meeting'), {
+            description: saveError instanceof Error ? saveError.message : t('Unknown error')
           });
           throw saveError;
         }

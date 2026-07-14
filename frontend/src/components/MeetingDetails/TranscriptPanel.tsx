@@ -4,7 +4,15 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
+import { Icon } from '@/components/memento/Icon';
+import { useT } from '@/lib/i18n';
 import { useMemo } from 'react';
+
+function formatClock(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.floor(totalSeconds % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -32,6 +40,11 @@ interface TranscriptPanelProps {
   /** Jump-to-timestamp (seconds) from search results / RAG citations. */
   scrollToTimestamp?: number | null;
 
+  /** Marked moments (elapsed seconds) captured during recording. */
+  markedMoments?: number[];
+  /** Jump the transcript to a marked moment. */
+  onSeekToMoment?: (seconds: number) => void;
+
   // Speaker diarization props
   speakersById?: Map<number, string> | null;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
@@ -58,10 +71,13 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
   scrollToTimestamp = null,
+  markedMoments = [],
+  onSeekToMoment,
   speakersById = null,
   onRenameSpeaker,
   onSpeakersDetected,
 }: TranscriptPanelProps) {
+  const t = useT();
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -80,9 +96,9 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
+    <div className="relative hidden min-w-0 shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-sheet)] md:flex md:w-1/4 lg:w-1/3">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="border-b border-[var(--border-subtle)] p-4">
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
@@ -93,6 +109,25 @@ export function TranscriptPanel({
           onSpeakersDetected={onSpeakersDetected}
         />
       </div>
+
+      {/* Marked moments — click to jump the transcript to that point */}
+      {markedMoments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
+          <span className="mm-eyebrow mr-1">{t('Moments')}</span>
+          {markedMoments.map((seconds) => (
+            <button
+              key={seconds}
+              type="button"
+              onClick={() => onSeekToMoment?.(seconds)}
+              title={t('Open this moment in the transcript')}
+              className="mm-numeric inline-flex items-center gap-1 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-2 py-0.5 text-xs text-[var(--gold)] transition-colors hover:bg-[var(--gold-soft-strong)]"
+            >
+              <Icon name="dot" size={12} />
+              {formatClock(seconds)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
@@ -118,10 +153,10 @@ export function TranscriptPanel({
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-gray-200">
+        <div className="border-t border-[var(--border-subtle)] p-3">
           <textarea
-            placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
+            placeholder={t('Add context for AI summary. For example people involved, meeting overview, objective etc...')}
+            className="mm-field min-h-[80px] w-full resize-y px-3 py-2 text-sm outline-none"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
           />

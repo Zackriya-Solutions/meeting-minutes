@@ -2,8 +2,9 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
+import { Copy, Save, Loader2, Search, FolderOpen } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
+import { useT } from '@/lib/i18n';
 
 interface SummaryUpdaterButtonGroupProps {
   isSaving: boolean;
@@ -24,14 +25,15 @@ export function SummaryUpdaterButtonGroup({
   onOpenFolder,
   hasSummary
 }: SummaryUpdaterButtonGroupProps) {
+  const t = useT();
   return (
     <ButtonGroup>
       {/* Save button */}
       <Button
         variant="outline"
         size="sm"
-        className={`${isDirty ? 'bg-green-200' : ""}`}
-        title={isSaving ? "Saving" : "Save Changes"}
+        className={`${isDirty ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]' : ""}`}
+        title={isSaving ? t('Saving') : t('Save Changes')}
         onClick={() => {
           Analytics.trackButtonClick('save_changes', 'meeting_details');
           onSave();
@@ -41,12 +43,12 @@ export function SummaryUpdaterButtonGroup({
         {isSaving ? (
           <>
             <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">Saving...</span>
+            <span className="hidden lg:inline">{t('Saving...')}</span>
           </>
         ) : (
           <>
             <Save />
-            <span className="hidden lg:inline">Save</span>
+            <span className="hidden lg:inline">{t('Save')}</span>
           </>
         )}
       </Button>
@@ -55,7 +57,7 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        title="Copy Summary"
+        title={t('Copy Summary')}
         onClick={() => {
           Analytics.trackButtonClick('copy_summary', 'meeting_details');
           onCopy();
@@ -64,7 +66,7 @@ export function SummaryUpdaterButtonGroup({
         className="cursor-pointer"
       >
         <Copy />
-        <span className="hidden lg:inline">Copy</span>
+        <span className="hidden lg:inline">{t('Copy')}</span>
       </Button>
 
       {/* Find button */}
@@ -72,7 +74,7 @@ export function SummaryUpdaterButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          title="Find in Summary"
+          title="Найти в сути"
           onClick={() => {
             Analytics.trackButtonClick('find_in_summary', 'meeting_details');
             onFind();
@@ -81,7 +83,7 @@ export function SummaryUpdaterButtonGroup({
           className="cursor-pointer"
         >
           <Search />
-          <span className="hidden lg:inline">Find</span>
+          <span className="hidden lg:inline">Найти</span>
         </Button>
       )} */}
     </ButtonGroup>

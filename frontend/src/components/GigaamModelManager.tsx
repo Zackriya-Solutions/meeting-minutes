@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Download, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { Download, CheckCircle2, Loader2, AlertTriangle } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 interface VariantInfo {
   id: string;
@@ -42,6 +43,7 @@ export function GigaamModelManager() {
   const [switching, setSwitching] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
 
   const refresh = useCallback(() => {
     invoke<GigaamStatus>('gigaam_status').then(setStatus).catch(() => setStatus(null));
@@ -74,7 +76,7 @@ export function GigaamModelManager() {
         await invoke('gigaam_select_variant', { variant });
         refresh();
       } catch (e) {
-        setError(typeof e === 'string' ? e : 'Failed to switch variant.');
+        setError(typeof e === 'string' ? e : t('Failed to switch variant.'));
       } finally {
         setSwitching(false);
       }
@@ -90,7 +92,7 @@ export function GigaamModelManager() {
       await invoke('gigaam_download_model');
       refresh();
     } catch (e) {
-      setError(typeof e === 'string' ? e : 'Download failed.');
+      setError(typeof e === 'string' ? e : t('Download failed.'));
       setDownloading(false);
     }
   }, [refresh]);
@@ -102,52 +104,52 @@ export function GigaamModelManager() {
   const selectedActive = loaded && status?.loaded_variant === status?.selected;
 
   return (
-    <div className="rounded-xl border border-gray-200 p-5">
+    <div className="rounded-xl border border-[var(--border-subtle)] p-5">
       <div className="mb-1 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">GigaAM v3 (Russian)</h3>
-          <p className="text-xs text-gray-400">
-            Sber ASR · punctuated &amp; capitalized · fully local
+          <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('GigaAM v3 (Russian)')}</h3>
+          <p className="text-xs text-[var(--fg3)]">
+            {t('Sber ASR · punctuated & capitalized · fully local')}
           </p>
         </div>
         {selectedActive ? (
-          <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-            <CheckCircle2 className="h-3.5 w-3.5" /> Active
+          <span className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--success)]">
+            <CheckCircle2 className="h-3.5 w-3.5" /> {t('Active')}
           </span>
         ) : present ? (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Installed — restart to load</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">{t('Installed — restart to load')}</span>
         ) : (
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Not downloaded</span>
+          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">{t('Not downloaded')}</span>
         )}
       </div>
 
       {/* Variant selector for A/B quality testing */}
       <div className="mt-4">
-        <label className="mb-1 block text-xs font-medium text-gray-600">Model variant</label>
+        <label className="mb-1 block text-xs font-medium text-[var(--fg2)]">{t('Model variant')}</label>
         <select
           value={status?.selected ?? 'e2e-rnnt-fp32'}
           onChange={(e) => selectVariant(e.target.value)}
           disabled={!status || downloading || switching}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none disabled:opacity-50"
+          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-sm text-[var(--fg1)] focus:border-[var(--gold-border)] focus:outline-none disabled:opacity-50"
         >
           {(status?.variants ?? []).map((v) => (
             <option key={v.id} value={v.id}>
-              {v.label} · ~{v.size_mb} MB{v.present ? ' · installed' : ''}
+              {v.label} · ~{v.size_mb}{t(' MB')}{v.present ? t(' · installed') : ''}
             </option>
           ))}
         </select>
-        <p className="mt-1 text-xs text-gray-400">
-          RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger &amp; slower).
+        <p className="mt-1 text-xs text-[var(--fg3)]">
+          {t('RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger & slower).')}
         </p>
       </div>
 
       <div className="mt-4">
         {downloading ? (
           <div>
-            <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
+            <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Downloading{progress ? ` ${progress.file}` : '…'}
+                {t('Downloading')}{progress ? ` ${progress.file}` : '…'}
               </span>
               {progress && progress.total > 0 && (
                 <span>
@@ -155,43 +157,43 @@ export function GigaamModelManager() {
                 </span>
               )}
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
               <div
-                className="h-full rounded-full bg-blue-500 transition-all"
+                className="h-full rounded-full bg-[var(--gold)] transition-all"
                 style={{ width: `${progress?.percent ?? 0}%` }}
               />
             </div>
           </div>
         ) : switching ? (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-[var(--fg2)]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading {selected?.label ?? 'variant'}…
+            {t('Loading')} {selected?.label ?? t('variant')}…
           </div>
         ) : selectedActive ? (
-          <div className="flex items-center gap-2 text-sm font-medium text-green-600">
+          <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
             <CheckCircle2 className="h-4 w-4" />
-            Ready — recordings will transcribe with this variant
+            {t('Ready — recordings will transcribe with this variant')}
           </div>
         ) : (
           <button
             onClick={download}
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
           >
             <Download className="h-4 w-4" />
-            {present ? 'Re-download variant' : `Download variant (~${selected?.size_mb ?? '?'} MB)`}
+            {present ? t('Re-download variant') : `${t('Download variant (~')}${selected?.size_mb ?? '?'}${t(' MB)')}`}
           </button>
         )}
 
         {/* Loaded-vs-selected mismatch hint (e.g. selected a new variant that still needs a download) */}
         {!switching && !downloading && loaded && !selectedActive && (
-          <p className="mt-2 text-xs text-amber-600">
-            Currently running <span className="font-medium">{status?.loaded_variant}</span>.
-            {present ? ' Restart to load the selected variant.' : ' Download the selected variant to switch.'}
+          <p className="mt-2 text-xs text-[var(--gold)]">
+            {t('Currently running')} <span className="font-medium">{status?.loaded_variant}</span>.
+            {present ? t(' Restart to load the selected variant.') : t(' Download the selected variant to switch.')}
           </p>
         )}
 
         {error && (
-          <div className="mt-3 flex items-start gap-1.5 text-sm text-red-600">
+          <div className="mt-3 flex items-start gap-1.5 text-sm text-[var(--danger)]">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
