@@ -6,7 +6,7 @@
 use serde_json::json;
 
 pub const DEFAULT_BASE_URL: &str = "https://gw.gigatool.app/deepseek/v1";
-pub const DEFAULT_MODEL: &str = "deepseek-v4-flash";
+pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
 
 /// A configured DeepSeek client. Cheap to construct per call.
 pub struct DeepSeekClient {

@@ -11,7 +11,8 @@ export type InvokeFn = <T = unknown>(cmd: string, args?: Record<string, unknown>
  *   - gigaam       → the global GigaAM model is loaded (`gigaam_status.loaded`)
  *   - localWhisper → `whisper_has_available_models`
  *   - parakeet     → `parakeet_has_available_models` (after `parakeet_init`)
- *   - salutespeech → a Sber Authorization Key is configured (`salutespeech.auth_key`)
+ *   - salutespeech → usable via a Sber Authorization Key OR the managed Memento gateway
+ *                    (`salutespeech_is_configured`)
  *   - cloud (deepgram/elevenLabs/groq/openai) → always ready (API-key based, no local model)
  *
  * `invoke` is injected (defaults to the real Tauri invoke) so tests can supply a stub.
@@ -39,10 +40,11 @@ export async function isConfiguredTranscriptionModelReady(
     return await invoke<boolean>('parakeet_has_available_models');
   }
   if (provider === 'salutespeech') {
-    // Cloud streaming — ready when a Sber Authorization Key is configured.
+    // Cloud — ready when usable via either a user Authorization Key OR the managed
+    // Memento gateway. The backend resolves both (a bare auth_key check would wrongly
+    // report "not ready" in the keyless managed build).
     try {
-      const s = await invoke<Record<string, string>>('get_app_settings');
-      return !!(s && s['salutespeech.auth_key'] && s['salutespeech.auth_key'].length > 0);
+      return await invoke<boolean>('salutespeech_is_configured');
     } catch {
       return false;
     }
