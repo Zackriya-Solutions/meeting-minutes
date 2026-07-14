@@ -1,7 +1,7 @@
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -31,16 +31,25 @@ pub struct ChatRequest {
 #[derive(Deserialize, Debug)]
 pub struct ChatResponse {
     pub choices: Vec<Choice>,
+    pub usage: Option<TokenUsage>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Choice {
     pub message: MessageContent,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct MessageContent {
-    pub content: String,
+    pub content: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct TokenUsage {
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
 }
 
 // Claude-specific request structure
@@ -109,6 +118,7 @@ impl LLMProvider {
 /// * `user_prompt` - User query/content to process
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
+/// * `deepseek_base_url` - Resolved DeepSeek base URL (managed gateway or custom endpoint)
 /// * `max_tokens` - Optional max tokens (for CustomOpenAI provider)
 /// * `temperature` - Optional temperature (for CustomOpenAI provider)
 /// * `top_p` - Optional top_p (for CustomOpenAI provider)
@@ -126,6 +136,7 @@ pub async fn generate_summary(
     user_prompt: &str,
     ollama_endpoint: Option<&str>,
     custom_openai_endpoint: Option<&str>,
+    deepseek_base_url: Option<&str>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -181,7 +192,12 @@ pub async fn generate_summary(
             header::HeaderMap::new(),
         ),
         LLMProvider::DeepSeek => (
-            format!("{}/deepseek/v1/chat/completions", crate::gateway_identity::PRIMARY_GATEWAY),
+            format!(
+                "{}/chat/completions",
+                deepseek_base_url
+                    .unwrap_or(crate::llm::providers::deepseek::DEFAULT_BASE_URL)
+                    .trim_end_matches('/')
+            ),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
@@ -215,7 +231,10 @@ pub async fn generate_summary(
                     .parse()
                     .map_err(|_| "Invalid anthropic version".to_string())?,
             );
-            ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
         }
         LLMProvider::BuiltInAI => {
             // This case is handled earlier with early returns
@@ -244,9 +263,17 @@ pub async fn generate_summary(
     );
 
     // Build request body based on provider
-    let request_body = if provider != &LLMProvider::Claude {
+    let request_body = if provider == &LLMProvider::DeepSeek {
+        crate::llm::providers::deepseek::build_request_body(
+            model_name,
+            system_prompt,
+            user_prompt,
+            max_tokens,
+        )
+    } else if provider != &LLMProvider::Claude {
         // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
+        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI
+        {
             (max_tokens, temperature, top_p)
         } else {
             (None, None, None)
@@ -280,9 +307,14 @@ pub async fn generate_summary(
         })
     };
 
-    info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
+    info!(
+        "🐞 LLM Request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
 
     // Send request with timeout and cancellation support
+    let request_started = Instant::now();
     let request_future = client
         .post(api_url)
         .headers(headers)
@@ -296,7 +328,10 @@ pub async fn generate_summary(
             result = request_future => {
                 result.map_err(|e| {
                     if e.is_timeout() {
-                        format!("LLM request timed out after 60 seconds")
+                        format!(
+                            "LLM request timed out after {} seconds",
+                            REQUEST_TIMEOUT_DURATION.as_secs()
+                        )
                     } else {
                         format!("Failed to send request to LLM: {}", e)
                     }
@@ -309,7 +344,10 @@ pub async fn generate_summary(
     } else {
         request_future.await.map_err(|e| {
             if e.is_timeout() {
-                format!("LLM request timed out after 60 seconds")
+                format!(
+                    "LLM request timed out after {} seconds",
+                    REQUEST_TIMEOUT_DURATION.as_secs()
+                )
             } else {
                 format!("Failed to send request to LLM: {}", e)
             }
@@ -341,20 +379,49 @@ pub async fn generate_summary(
             .trim();
         Ok(content.to_string())
     } else {
-        let chat_response = response
-            .json::<ChatResponse>()
+        let response_value = response
+            .json::<serde_json::Value>()
             .await
             .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
 
-        info!("🐞 LLM Response received from {}", provider_name(provider));
+        if provider == &LLMProvider::DeepSeek {
+            let content = crate::llm::providers::deepseek::parse_response(&response_value)?;
+            let usage = response_value.get("usage");
+            info!(
+                "LLM response received from DeepSeek in {:.2}s; usage={}",
+                request_started.elapsed().as_secs_f64(),
+                usage
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "unavailable".to_string())
+            );
+            return Ok(content);
+        }
 
-        let content = chat_response
+        let chat_response: ChatResponse = serde_json::from_value(response_value)
+            .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
+
+        info!(
+            "LLM response received from {} in {:.2}s; usage={:?}",
+            provider_name(provider),
+            request_started.elapsed().as_secs_f64(),
+            chat_response.usage
+        );
+
+        let choice = chat_response
             .choices
             .get(0)
-            .ok_or("No content in LLM response")?
-            .message
-            .content
-            .trim();
+            .ok_or("No content in LLM response")?;
+
+        if let Some(reason) = choice.finish_reason.as_deref() {
+            if reason != "stop" {
+                return Err(format!("LLM response incomplete: finish_reason={reason}"));
+            }
+        }
+
+        let content = choice.message.content.as_deref().unwrap_or_default().trim();
+        if content.is_empty() {
+            return Err("No final answer content in LLM response".to_string());
+        }
         Ok(content.to_string())
     }
 }
