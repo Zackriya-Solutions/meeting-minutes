@@ -2,6 +2,7 @@
     "name": "memento",
     "version": "0.4.0",
     "private": true,
+    "packageManager": "pnpm@10.15.1",
     "main": "electron/main.js",
     "scripts": {
         "dev": "next dev -p 3118",
