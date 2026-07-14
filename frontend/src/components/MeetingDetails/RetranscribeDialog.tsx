@@ -96,8 +96,10 @@ export function RetranscribeDialog({
   }, [selectedModelKey, availableModels]);
   const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
   const isGigaamModel = selectedModelDetails?.provider === 'gigaam';
-  // GigaAM (Russian e2e) and Parakeet don't take a language hint — they always auto-detect.
-  const languageAutoOnly = isParakeetModel || isGigaamModel;
+  const isSaluteSpeechModel = selectedModelDetails?.provider === 'salutespeech';
+  // GigaAM (Russian e2e), Parakeet, and SaluteSpeech don't take a language hint here —
+  // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
+  const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
 
   useEffect(() => {
     if (languageAutoOnly && selectedLang !== 'auto') {
@@ -335,9 +337,11 @@ export function RetranscribeDialog({
                   <span className="text-sm font-medium">{t('Language')}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {isGigaamModel
-                    ? t('GigaAM transcribes Russian and always auto-detects — no language selection needed.')
-                    : t("Language selection isn't supported for Parakeet. It always uses automatic detection.")}
+                  {isSaluteSpeechModel
+                    ? t('SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.')
+                    : isGigaamModel
+                      ? t('GigaAM transcribes Russian and always auto-detects — no language selection needed.')
+                      : t("Language selection isn't supported for Parakeet. It always uses automatic detection.")}
                 </p>
               </div>
             )
@@ -356,7 +360,8 @@ export function RetranscribeDialog({
                 <SelectContent>
                   {availableModels.map((model) => (
                     <SelectItem key={`${model.provider}:${model.name}`} value={`${model.provider}:${model.name}`}>
-                      {model.displayName} ({Math.round(model.size_mb)} {t('MB')})
+                      {model.displayName}
+                      {model.size_mb > 0 ? ` (${Math.round(model.size_mb)} ${t('MB')})` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -186,6 +186,7 @@ async fn run_retranscription<R: Runtime>(
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
     let use_gigaam = provider.as_deref() == Some("gigaam");
+    let use_salutespeech = provider.as_deref() == Some("salutespeech");
 
     info!(
         "Starting retranscription for meeting {} with language {:?}, model {:?}, provider {:?}",
@@ -303,7 +304,7 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet && !use_gigaam {
+    let whisper_engine = if !use_parakeet && !use_gigaam && !use_salutespeech {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -318,6 +319,20 @@ async fn run_retranscription<R: Runtime>(
             "GigaAM model is not loaded. Download it in Settings → Transcription first."
         ));
     }
+    // SaluteSpeech (cloud): build the provider once (fails fast without an auth key).
+    let salute_provider = if use_salutespeech {
+        let state = app
+            .try_state::<AppState>()
+            .ok_or_else(|| anyhow!("App state not available for SaluteSpeech"))?;
+        let cfg = crate::salutespeech::resolve_config(state.db_manager.pool())
+            .await
+            .ok_or_else(|| {
+                anyhow!("SaluteSpeech Authorization Key is not configured. Set it in Settings → Transcription.")
+            })?;
+        Some(crate::salutespeech::SaluteSpeechProvider::new(cfg))
+    } else {
+        None
+    };
 
     // Split very long segments at silence boundaries for better transcription quality.
     // Hard cuts at arbitrary sample positions lose words at boundaries. Instead, scan
@@ -377,7 +392,21 @@ async fn run_retranscription<R: Runtime>(
         }
 
         // Transcribe this segment
-        let (text, conf) = if use_gigaam {
+        let (text, conf) = if use_salutespeech {
+            use crate::audio::transcription::TranscriptionProvider;
+            let provider = salute_provider
+                .as_ref()
+                .expect("SaluteSpeech provider built above when use_salutespeech");
+            match provider
+                .transcribe(segment.samples.clone(), language.clone())
+                .await
+            {
+                Ok(r) => (r.text, 0.9f32),
+                Err(e) => {
+                    return Err(anyhow!("SaluteSpeech transcription failed on segment {}: {}", i, e))
+                }
+            }
+        } else if use_gigaam {
             match crate::gigaam_engine::transcribe(segment.samples.clone()).await {
                 Some(Ok(text)) => (text, 0.9f32),
                 Some(Err(e)) => return Err(anyhow!("GigaAM transcription failed on segment {}: {}", i, e)),

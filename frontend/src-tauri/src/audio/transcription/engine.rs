@@ -144,6 +144,19 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 Err("GigaAM model is not downloaded. Open Settings → Transcription and download the GigaAM model.".to_string())
             }
         }
+        "salutespeech" => {
+            info!("🔍 Validating SaluteSpeech credentials...");
+            let configured = match app.try_state::<crate::state::AppState>() {
+                Some(state) => crate::salutespeech::is_configured(state.db_manager.pool()).await,
+                None => false,
+            };
+            if configured {
+                info!("✅ SaluteSpeech Authorization Key is configured");
+                Ok(())
+            } else {
+                Err("SaluteSpeech is selected but no Authorization Key is set. Open Settings → Transcription and paste your Sber SaluteSpeech key.".to_string())
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -229,6 +242,19 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 )))
             } else {
                 Err("GigaAM model not loaded. Download it in Settings → Transcription.".to_string())
+            }
+        }
+        "salutespeech" => {
+            info!("☁️ Initializing SaluteSpeech (Sber cloud) transcription engine");
+            let cfg = match app.try_state::<crate::state::AppState>() {
+                Some(state) => crate::salutespeech::resolve_config(state.db_manager.pool()).await,
+                None => None,
+            };
+            match cfg {
+                Some(cfg) => Ok(TranscriptionEngine::Provider(std::sync::Arc::new(
+                    crate::salutespeech::SaluteSpeechProvider::new(cfg),
+                ))),
+                None => Err("SaluteSpeech Authorization Key not configured. Open Settings → Transcription and paste your Sber SaluteSpeech key.".to_string()),
             }
         }
         "localWhisper" | _ => {

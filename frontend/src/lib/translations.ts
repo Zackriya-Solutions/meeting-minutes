@@ -457,5 +457,22 @@ export const RU: Record<string, string> = {
   "🔴 Recording Started": "Запись началась",
   "Inform all participants this meeting is being recorded.": "Предупреди участников встречи о записи.",
   "Don't show this again": "Больше не показывать",
-  "I've Notified Participants": "Участники предупреждены"
+  "I've Notified Participants": "Участники предупреждены",
+  "Transcription engine": "Способ расшифровки",
+  "Choose how meetings are transcribed.": "Выбери, как Memento будет расшифровывать встречи.",
+  "GigaAM v3 · on-device": "GigaAM v3 · на устройстве",
+  "Sber · offline Russian speech recognition with punctuation. Private — audio never leaves your machine.": "Сбер · локальное распознавание русской речи с пунктуацией. Аудио не покидает устройство.",
+  "SaluteSpeech · Sber cloud": "SaluteSpeech · облако Сбера",
+  "Cloud recognition via speech.giga.chat (ru-RU). Audio is sent to Sber for transcription; needs an internet connection.": "Облачное распознавание через speech.giga.chat (ru-RU). Аудио отправляется в Сбер, требуется интернет.",
+  "SaluteSpeech credentials": "Доступ к SaluteSpeech",
+  "The Sber “Authorization Key” from your account — base64 of login:password (or ClientID:ClientSecret).": "Ключ авторизации из кабинета Сбера — base64 от login:password или ClientID:ClientSecret.",
+  "Recognition model": "Модель распознавания",
+  "default": "по умолчанию",
+  "high quality": "высокое качество",
+  "fast": "быстрая",
+  "Save key": "Сохранить ключ",
+  "Enter your Authorization Key first.": "Сначала введи ключ авторизации.",
+  "Failed to save credentials.": "Не удалось сохранить данные доступа.",
+  "Recognition runs in the cloud (ru-RU) via speech.giga.chat. Requires an internet connection; the on-device GigaAM engine remains available as an offline fallback. Speaker labels come from local diarization (the cloud recognizer returns text only).": "Распознавание работает в облаке speech.giga.chat (ru-RU) и требует интернет. Локальный GigaAM остаётся офлайн-альтернативой. Метки спикеров создаются локальной диаризацией.",
+  "SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.": "SaluteSpeech распознаёт русскую речь в облаке Сбера автоматически — выбирать язык не нужно."
 };

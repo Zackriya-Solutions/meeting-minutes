@@ -171,8 +171,10 @@ export function ImportAudioDialog({
   }, [selectedModelKey, availableModels]);
   const isParakeetModel = selectedModel?.provider === 'parakeet';
   const isGigaamModel = selectedModel?.provider === 'gigaam';
-  // GigaAM (Russian e2e) and Parakeet don't take a language hint — they always auto-detect.
-  const languageAutoOnly = isParakeetModel || isGigaamModel;
+  const isSaluteSpeechModel = selectedModel?.provider === 'salutespeech';
+  // GigaAM (Russian e2e), Parakeet, and SaluteSpeech don't take a language hint here —
+  // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
+  const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
 
   useEffect(() => {
     if (languageAutoOnly && selectedLang !== 'auto') {
@@ -372,9 +374,11 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">Язык</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {isGigaamModel
-                              ? 'GigaAM transcribes Russian and always auto-detects — no language selection needed.'
-                              : "Language selection isn't supported for Parakeet. It always uses automatic detection."}
+                            {isSaluteSpeechModel
+                              ? 'SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.'
+                              : isGigaamModel
+                                ? 'GigaAM transcribes Russian and always auto-detects — no language selection needed.'
+                                : "Language selection isn't supported for Parakeet. It always uses automatic detection."}
                           </p>
                         </div>
                       )}
@@ -400,7 +404,8 @@ export function ImportAudioDialog({
                                   key={`${model.provider}:${model.name}`}
                                   value={`${model.provider}:${model.name}`}
                                 >
-                                  {model.displayName} ({Math.round(model.size_mb)} MB)
+                                  {model.displayName}
+                                  {model.size_mb > 0 ? ` (${Math.round(model.size_mb)} MB)` : ''}
                                 </SelectItem>
                               ))}
                             </SelectContent>

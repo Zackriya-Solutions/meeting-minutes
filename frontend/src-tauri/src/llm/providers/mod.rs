@@ -79,6 +79,9 @@ pub async fn resolve_deepseek_api_key(pool: &SqlitePool) -> Option<String> {
     setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await
 }
 
+// NOTE: SaluteSpeech config resolution lives in `crate::salutespeech` (it needs several
+// endpoint/model keys with SBER_SALUTE_* env fallbacks), not here.
+
 /// Which providers are configured — for the settings UI / diagnostics.
 pub async fn configured(pool: &SqlitePool) -> (bool, bool) {
     (
