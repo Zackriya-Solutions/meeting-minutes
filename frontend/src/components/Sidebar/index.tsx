@@ -3,7 +3,14 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, MessageSquare } from '@/components/memento/LucideCompat';
 import { useRouter, usePathname } from 'next/navigation';
-import { useSidebar } from './SidebarProvider';
+import {
+  useSidebar,
+  persistSidebarWidth,
+  clearStoredSidebarWidth,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+} from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -50,6 +57,10 @@ const Sidebar: React.FC = () => {
     sidebarItems,
     isCollapsed,
     toggleCollapse,
+    sidebarWidth,
+    setSidebarWidth,
+    isSidebarResizing,
+    setIsSidebarResizing,
     handleRecordingToggle,
     searchTranscripts,
     searchResults,
@@ -58,6 +69,43 @@ const Sidebar: React.FC = () => {
     setMeetings,
     serverAddress
   } = useSidebar();
+
+  // Right-edge drag handle: pointer capture keeps the drag alive over the main
+  // content; the sidebar is fixed at the window's left edge, so clientX is the
+  // desired width directly.
+  const handleSidebarResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isCollapsed) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    setIsSidebarResizing(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    let width = sidebarWidth;
+    const onMove = (ev: PointerEvent) => {
+      width = Math.min(Math.max(ev.clientX, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH);
+      setSidebarWidth(width);
+    };
+    const onEnd = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onEnd);
+      handle.removeEventListener('pointercancel', onEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      setIsSidebarResizing(false);
+      persistSidebarWidth(width);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onEnd);
+    handle.addEventListener('pointercancel', onEnd);
+  };
+
+  // Double-click restores the default width.
+  const resetSidebarWidth = () => {
+    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+    clearStoredSidebarWidth();
+  };
 
   // Get recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -731,9 +779,25 @@ const Sidebar: React.FC = () => {
       </button>
 
       <div
-        className={`memento-sidebar h-screen border-r flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-[232px]'
+        className={`memento-sidebar relative h-screen border-r flex flex-col ${isSidebarResizing ? '' : 'transition-all duration-300'} ${isCollapsed ? 'w-16' : ''
           }`}
+        style={isCollapsed ? undefined : { width: sidebarWidth }}
       >
+        {/* Resize handle on the right edge (expanded only). z-40 keeps it below
+            the floating collapse chevron (z-50) where they overlap. */}
+        {!isCollapsed && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('Resize sidebar')}
+            title={t('Resize sidebar')}
+            onPointerDown={handleSidebarResizeStart}
+            onDoubleClick={resetSidebarWidth}
+            className="group absolute inset-y-0 -right-[3px] z-40 w-[6px] cursor-col-resize touch-none"
+          >
+            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-all group-hover:w-[3px] group-hover:bg-[var(--gold-border)]" />
+          </div>
+        )}
         {/*  Header with traffic light spacing */}
         <div className="flex-shrink-0 h-22 flex items-center">
 
@@ -750,7 +814,9 @@ const Sidebar: React.FC = () => {
                 <Logo isCollapsed={isCollapsed} />
 
                 <div className="relative mb-1">
-                  <InputGroup >
+                  {/* Explicit memento tokens: the group's default border-input is nearly
+                      invisible on the sheet background. */}
+                  <InputGroup className="rounded-[10px] border-[var(--border-strong)] bg-[var(--surface-input)]">
                     <InputGroupInput placeholder={t('Search meeting content...')} value={searchQuery}
                       onChange={(e) => handleSearchChange(e.target.value)}
                     />

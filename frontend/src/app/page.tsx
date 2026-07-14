@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
@@ -28,7 +28,6 @@ import { useT } from '@/lib/i18n';
 export default function Home() {
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
-  const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   // Use contexts for state management
@@ -42,7 +41,7 @@ export default function Home() {
   // Hooks
   const t = useT();
   const { hasMicrophone } = usePermissionCheck();
-  const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
+  const { setIsMeetingActive, isCollapsed: sidebarCollapsed, sidebarWidth, refetchMeetings } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
   const { handleRecordingStart } = useRecordingStart(isRecording, setIsRecordingState, showModal);
@@ -174,22 +173,6 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    if (recordingState.isRecording) {
-      const interval = setInterval(() => {
-        setBarHeights(prev => {
-          const newHeights = [...prev];
-          newHeights[0] = Math.random() * 20 + 10 + 'px';
-          newHeights[1] = Math.random() * 20 + 10 + 'px';
-          newHeights[2] = Math.random() * 20 + 10 + 'px';
-          return newHeights;
-        });
-      }, 300);
-
-      return () => clearInterval(interval);
-    }
-  }, [recordingState.isRecording]);
-
   // Recording error handling.
   // These listeners previously lived inside <RecordingControls>, which is no
   // longer rendered. They must stay registered so a fatal transcription error
@@ -197,11 +180,28 @@ export default function Home() {
   // structured `transcription-error` event is additionally surfaced to the user
   // (toast / model selector) by useModalState, so here we only stop recording;
   // the plain `transcript-error` string event is surfaced via the error alert.
+  // Per-chunk transcription failures (e.g. a cloud provider erroring mid-meeting)
+  // only emit 'transcription-warning' from the Rust worker — the recording keeps
+  // going but transcripts silently stop. Surface them (throttled: a failing
+  // provider warns on every chunk) so the user sees WHY the transcript stalled.
+  const lastTranscriptionWarningAtRef = useRef(0);
+
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
 
     const setupListeners = async () => {
       try {
+        const unlistenTranscriptionWarning = await listen<string>('transcription-warning', (event) => {
+          const message = String(event.payload);
+          console.warn('transcription-warning received:', message);
+          const now = Date.now();
+          if (now - lastTranscriptionWarningAtRef.current > 15000) {
+            lastTranscriptionWarningAtRef.current = now;
+            toast.warning(t('Transcription issue'), { description: message, duration: 8000 });
+          }
+        });
+        unlisteners.push(unlistenTranscriptionWarning);
+
         const unlistenTranscriptError = await listen<string>('transcript-error', (event) => {
           const errorMessage = String(event.payload);
           console.error('transcript-error received:', errorMessage);
@@ -234,7 +234,7 @@ export default function Home() {
     return () => {
       unlisteners.forEach((unlisten) => unlisten && unlisten());
     };
-  }, [handleRecordingStop, showModal]);
+  }, [handleRecordingStop, showModal, t]);
 
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
@@ -276,7 +276,6 @@ export default function Home() {
             <div className="fixed bottom-6 right-6 z-10">
               <RecordOverlay
                 title={meetingTitle || t('New meeting')}
-                bars={barHeights}
                 meetingId={currentMeetingId}
                 onStop={() => {
                   setIsStopping(true);
@@ -293,7 +292,7 @@ export default function Home() {
           status !== RecordingStatus.SAVING && (
             <div
               className="pointer-events-none fixed bottom-8 right-0 z-10 flex justify-center transition-[left] duration-300"
-              style={{ left: sidebarCollapsed ? '4rem' : '232px' }}
+              style={{ left: sidebarCollapsed ? '4rem' : `${sidebarWidth}px` }}
             >
               <button
                 onClick={() => handleRecordingStart()}

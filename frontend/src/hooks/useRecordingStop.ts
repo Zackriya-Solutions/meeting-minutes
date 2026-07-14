@@ -5,9 +5,13 @@ import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
+import { invoke } from '@tauri-apps/api/core';
+import { appDataDir } from '@tauri-apps/api/path';
 import { storageService } from '@/services/storageService';
+import { recordingService } from '@/services/recordingService';
 import { transcriptService } from '@/services/transcriptService';
 import { migrateMarkedMoments } from '@/lib/markedMoments';
+import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import {
@@ -144,9 +148,29 @@ export function useRecordingStop(
         current_transcript_count: transcriptsRef.current.length
       });
 
-      // Note: stop_recording is already called by RecordingControls.stopRecordingAction
-      // This function only handles post-stop processing (transcription wait, API call, navigation)
-      console.log('Recording already stopped by RecordingControls, processing transcription...');
+      // Stop the native recorder first. This used to live in <RecordingControls>,
+      // which the Memento rebrand stopped rendering — leaving the Rust recorder
+      // running forever after a UI stop (mic hot, state flip-flopping via the
+      // 1s backend poll). The command is idempotent: it returns Ok when nothing
+      // is recording, so tray-initiated stops (which stop natively before
+      // emitting recording-stop-complete) pass through harmlessly.
+      try {
+        const dataDir = await appDataDir();
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        await recordingService.stopRecording(`${dataDir}/recording-${timestamp}.wav`);
+        console.log('Native stop_recording completed');
+      } catch (stopError) {
+        console.error('Failed to stop native recording:', stopError);
+        // The recorder is still running — restore the UI to the recording state
+        // (the backend poll would do it anyway) and let the user retry.
+        setIsRecording(true);
+        setIsRecordingDisabled(false);
+        setStatus(RecordingStatus.ERROR, stopError instanceof Error ? stopError.message : 'Failed to stop recording');
+        toast.error(t('Failed to stop recording'), {
+          description: stopError instanceof Error ? stopError.message : undefined,
+        });
+        return;
+      }
 
       // Wait for transcription to complete
       setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');
@@ -301,6 +325,23 @@ export function useRecordingStop(
           // markMeetingAsSaved(), which clears the temporary id.
           const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
           migrateMarkedMoments(tempMeetingId, meetingId);
+
+          // Persist the in-recording control pill's speaker-ID choices onto the
+          // saved meeting row (drives the automatic diarize job and the manual
+          // Detect Speakers run). No entry = pill untouched = keep defaults.
+          const diarizationPrefs = takeDiarizationPrefs(tempMeetingId);
+          if (diarizationPrefs) {
+            try {
+              await invoke('set_meeting_diarization_prefs', {
+                meetingId,
+                enabled: diarizationPrefs.speakerIdEnabled,
+                expectedSpeakers: diarizationPrefs.expectedSpeakers,
+              });
+            } catch (error) {
+              // Non-fatal: the meeting is saved; diarization falls back to defaults.
+              console.warn('Failed to save diarization preferences:', error);
+            }
+          }
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
