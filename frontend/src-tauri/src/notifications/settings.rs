@@ -7,6 +7,10 @@ use dirs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
+    /// Suggest starting a recording when a supported meeting app/call is detected.
+    #[serde(default = "default_auto_meeting_detection")]
+    pub auto_meeting_detection: bool,
+
     /// Enable recording lifecycle notifications (start/stop/pause/resume)
     pub recording_notifications: bool,
 
@@ -65,6 +69,7 @@ pub struct NotificationPreferences {
 impl Default for NotificationSettings {
     fn default() -> Self {
         Self {
+            auto_meeting_detection: true,
             recording_notifications: true,
             time_based_reminders: true,
             meeting_reminders: true,
@@ -76,6 +81,10 @@ impl Default for NotificationSettings {
             notification_preferences: NotificationPreferences::default(),
         }
     }
+}
+
+const fn default_auto_meeting_detection() -> bool {
+    true
 }
 
 impl Default for NotificationPreferences {
@@ -264,6 +273,7 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
     let _defaults = NotificationSettings::default();
 
     NotificationSettings {
+        auto_meeting_detection: partial.auto_meeting_detection,
         recording_notifications: partial.recording_notifications,
         time_based_reminders: partial.time_based_reminders,
         meeting_reminders: partial.meeting_reminders,
@@ -273,5 +283,28 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
         consent_given: partial.consent_given,
         manual_dnd_mode: partial.manual_dnd_mode,
         notification_preferences: partial.notification_preferences,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_settings_enable_auto_detection_without_losing_compatibility() {
+        let legacy = serde_json::json!({
+            "recording_notifications": true,
+            "time_based_reminders": true,
+            "meeting_reminders": true,
+            "respect_do_not_disturb": true,
+            "notification_sound": true,
+            "system_permission_granted": true,
+            "consent_given": true,
+            "manual_dnd_mode": false,
+            "notification_preferences": NotificationPreferences::default(),
+        });
+
+        let settings: NotificationSettings = serde_json::from_value(legacy).unwrap();
+        assert!(settings.auto_meeting_detection);
     }
 }

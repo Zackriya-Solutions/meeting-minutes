@@ -44,6 +44,7 @@ pub mod console_utils;
 pub mod database;
 pub mod jobs;
 pub mod llm;
+pub mod meeting_detection;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -424,6 +425,7 @@ pub fn run() {
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
+        .manage(meeting_detection::AutoMeetingDetectionState::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
@@ -459,6 +461,12 @@ pub fn run() {
                     }
                 }
             });
+
+            // Start the privacy-preserving process/microphone signal detector. It remains
+            // active while the app is hidden in the tray and never starts recording itself.
+            _app
+                .state::<meeting_detection::AutoMeetingDetectionState>()
+                .start(_app.handle().clone());
 
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
@@ -587,6 +595,7 @@ pub fn run() {
             stop_recording,
             is_recording,
             get_transcription_status,
+            meeting_detection::get_auto_meeting_detection_status,
             read_audio_file,
             save_transcript,
             analytics::commands::init_analytics,
@@ -818,6 +827,9 @@ pub fn run() {
                 }
                 tauri::RunEvent::Exit => {
                     log::info!("Application exiting, cleaning up resources...");
+                    _app_handle
+                        .state::<meeting_detection::AutoMeetingDetectionState>()
+                        .stop();
                     tauri::async_runtime::block_on(async {
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
