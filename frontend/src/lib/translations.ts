@@ -870,5 +870,16 @@ export const RU: Record<string, string> = {
   "Enter your Authorization Key first.": "Сначала введи ключ авторизации.",
   "Failed to save credentials.": "Не удалось сохранить данные доступа.",
   "Recognition runs in the cloud (ru-RU) via speech.giga.chat. Requires an internet connection; the on-device GigaAM engine remains available as an offline fallback. Speaker labels come from local diarization (the cloud recognizer returns text only).": "Распознавание работает в облаке speech.giga.chat (ru-RU) и требует интернет. Локальный GigaAM остаётся офлайн-альтернативой. Метки спикеров создаются локальной диаризацией.",
-  "SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.": "SaluteSpeech распознаёт русскую речь в облаке Сбера автоматически — выбирать язык не нужно."
+  "SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.": "SaluteSpeech распознаёт русскую речь в облаке Сбера автоматически — выбирать язык не нужно.",
+  "Usage Analytics": "Аналитика использования",
+  "Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.": "Аналитика использования выключена по умолчанию. Включите её, чтобы делиться обезличенными данными о работе приложения; личное содержимое не собирается.",
+  "Enable Analytics": "Включить аналитику",
+  "Updating...": "Обновление…",
+  "Off unless you choose to enable it": "Выключено, пока вы не включите",
+  "Your User ID": "Ваш идентификатор",
+  "Share this ID when reporting issues to help us investigate your issue logs": "Укажите этот идентификатор при обращении, чтобы помочь разобраться с логами",
+  "Copy User ID": "Скопировать идентификатор",
+  "Copied!": "Скопировано!",
+  "View Privacy Policy": "Политика конфиденциальности",
+  "Your meetings, transcripts, and recordings remain completely private and local.": "Ваши встречи, расшифровки и записи остаются полностью приватными и локальными."
 };

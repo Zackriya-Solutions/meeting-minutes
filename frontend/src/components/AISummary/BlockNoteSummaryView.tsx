@@ -268,7 +268,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
                 handleEditorChange(editor.document);
               }
             }}
-            theme="light"
+            theme="dark"
           />
         </div>
       </div>

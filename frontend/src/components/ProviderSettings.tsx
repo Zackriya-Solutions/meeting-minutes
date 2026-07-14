@@ -220,7 +220,7 @@ export function ProviderSettings() {
 }
 
 const inputCls =
-  'w-full rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--fg1)] focus:border-[var(--gold-border)] focus:outline-none';
+  'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--fg1)] placeholder:text-[var(--fg3)] focus:border-[var(--gold-border)] focus:outline-none';
 
 function ProviderCard({
   title,

@@ -501,7 +501,7 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleRecordingToggle}
                 disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-[var(--danger)] cursor-not-allowed' : 'bg-[var(--danger)] hover:opacity-90'} rounded-full transition-colors duration-150 shadow-none`}
+                className={`p-2 text-[var(--fg-inverse)] ${isRecording ? 'bg-[var(--danger)] cursor-not-allowed' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]'} rounded-full transition-colors duration-150 shadow-none`}
               >
                 {isRecording ? (
                   <MementoIcon name="stop" size={20} />

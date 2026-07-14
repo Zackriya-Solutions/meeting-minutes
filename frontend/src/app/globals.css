@@ -268,6 +268,9 @@
 
 input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font-family: inherit; }
 input, textarea { color: var(--fg1); }
+/* Native text inputs/selects default to a dark surface so they don't render white
+   on the dark theme. Any explicit `bg-*` utility (e.g. bg-transparent) overrides this. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']), textarea, select { background-color: var(--surface-input); }
 input::placeholder, textarea::placeholder { color: var(--fg3); }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
 .font-mono, time { font-family: 'Space Grotesk', 'Onest', sans-serif; font-variant-numeric: tabular-nums; }

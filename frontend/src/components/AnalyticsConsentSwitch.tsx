@@ -7,10 +7,12 @@ import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
 import AnalyticsDataModal from './AnalyticsDataModal';
+import { useT } from '@/lib/i18n';
 
 const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
 export default function AnalyticsConsentSwitch() {
+  const t = useT();
   const { setIsAnalyticsOptedIn, isAnalyticsOptedIn } = useContext(AnalyticsContext);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -157,17 +159,17 @@ export default function AnalyticsConsentSwitch() {
     <>
       <div className="space-y-4">
         <div>
-          <h3 className="text-base font-semibold text-[var(--fg1)] mb-2">Usage Analytics</h3>
+          <h3 className="text-base font-semibold text-[var(--fg1)] mb-2">{t('Usage Analytics')}</h3>
           <p className="text-sm text-[var(--fg2)] mb-4">
-            Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.
+            {t('Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.')}
           </p>
         </div>
 
         <div className="flex items-center justify-between p-3 bg-[var(--bg-sheet)] rounded-lg border border-[var(--border-subtle)]">
           <div>
-            <h4 className="font-semibold text-[var(--fg1)]">Enable Analytics</h4>
+            <h4 className="font-semibold text-[var(--fg1)]">{t('Enable Analytics')}</h4>
             <p className="text-sm text-[var(--fg2)]">
-              {isProcessing ? 'Updating...' : 'Off unless you choose to enable it'}
+              {isProcessing ? t('Updating...') : t('Off unless you choose to enable it')}
             </p>
           </div>
           <div className="flex items-center gap-2 ml-4">
@@ -187,9 +189,9 @@ export default function AnalyticsConsentSwitch() {
           <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-[var(--fg1)] mb-1">Your User ID</div>
+                <div className="font-medium text-[var(--fg1)] mb-1">{t('Your User ID')}</div>
                 <p className="text-xs text-[var(--fg2)] mb-2">
-                  Share this ID when reporting issues to help us investigate your issue logs
+                  {t('Share this ID when reporting issues to help us investigate your issue logs')}
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="text-xs text-[var(--fg2)] bg-[var(--bg-canvas)] px-2 py-1 rounded border border-[var(--border-strong)] font-mono flex-1 truncate">
@@ -200,17 +202,17 @@ export default function AnalyticsConsentSwitch() {
                     variant="outline"
                     size="sm"
                     className="flex-shrink-0"
-                    title="Copy User ID"
+                    title={t('Copy User ID')}
                   >
                     {isCopied ? (
                       <>
                         <Check className="w-3.5 h-3.5 text-[var(--success)]" />
-                        <span className="text-[var(--success)]">Copied!</span>
+                        <span className="text-[var(--success)]">{t('Copied!')}</span>
                       </>
                     ) : (
                       <>
                         <Copy className="w-3.5 h-3.5" />
-                        <span>Copy</span>
+                        <span>{t('Copy')}</span>
                       </>
                     )}
                   </Button>
@@ -224,13 +226,13 @@ export default function AnalyticsConsentSwitch() {
           <Info className="w-4 h-4 text-[var(--gold)] mt-0.5 flex-shrink-0" />
           <div className="text-xs text-[var(--gold)]">
             <p className="mb-1">
-              Your meetings, transcripts, and recordings remain completely private and local.
+              {t('Your meetings, transcripts, and recordings remain completely private and local.')}
             </p>
             <button
               onClick={handlePrivacyPolicyClick}
               className="text-[var(--gold)] hover:text-[var(--gold-active)] underline hover:no-underline"
             >
-              View Privacy Policy
+              {t('View Privacy Policy')}
             </button>
           </div>
         </div>
