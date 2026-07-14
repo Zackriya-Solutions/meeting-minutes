@@ -28,12 +28,49 @@ interface TranscriptSearchResult {
   timestamp: string;
 };
 
+// Expanded-sidebar width (px) — user-resizable via the right-edge drag handle,
+// persisted across sessions. Consumed by the sidebar itself, MainContent's
+// margin, and the home page's record-button offset.
+export const SIDEBAR_DEFAULT_WIDTH = 232;
+export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_WIDTH_KEY = 'memento:sidebar:width';
+
+function readStoredSidebarWidth(): number {
+  if (typeof window === 'undefined') return SIDEBAR_DEFAULT_WIDTH;
+  try {
+    const parsed = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(parsed) && parsed >= SIDEBAR_MIN_WIDTH && parsed <= SIDEBAR_MAX_WIDTH
+      ? parsed
+      : SIDEBAR_DEFAULT_WIDTH;
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+export function persistSidebarWidth(width: number): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width)));
+  } catch { /* ignore */ }
+}
+
+export function clearStoredSidebarWidth(): void {
+  try {
+    window.localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+  } catch { /* ignore */ }
+}
+
 interface SidebarContextType {
   currentMeeting: CurrentMeeting | null;
   setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
   sidebarItems: SidebarItem[];
   isCollapsed: boolean;
   toggleCollapse: () => void;
+  sidebarWidth: number;
+  setSidebarWidth: (width: number) => void;
+  /** True while the user drags the sidebar handle — consumers disable width transitions. */
+  isSidebarResizing: boolean;
+  setIsSidebarResizing: (resizing: boolean) => void;
   meetings: CurrentMeeting[];
   setMeetings: (meetings: CurrentMeeting[]) => void;
   isMeetingActive: boolean;
@@ -69,6 +106,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const t = useT();
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: t('+ New Call') });
   const [isCollapsed, setIsCollapsed] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
@@ -298,6 +337,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       sidebarItems,
       isCollapsed,
       toggleCollapse,
+      sidebarWidth,
+      setSidebarWidth,
+      isSidebarResizing,
+      setIsSidebarResizing,
       meetings,
       setMeetings,
       isMeetingActive,

@@ -266,9 +266,13 @@ export function SummaryPanel({
           onChange={onTitleChange}
         /> */}
 
-        {/* Button groups - only show when summary exists */}
+        {/* Button groups - only show when summary exists. flex-wrap: the labels
+            show/hide on WINDOW (lg:) breakpoints, not pane width, so on a wide
+            window with a narrow summary pane the two shrink-0 groups can exceed
+            the pane — without wrapping they clip at both edges until the user
+            drags the splitter. */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-center w-full pt-0 gap-2">
+          <div className="flex flex-wrap items-center justify-center w-full pt-0 gap-2">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup

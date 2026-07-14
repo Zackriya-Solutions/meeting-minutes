@@ -13,6 +13,22 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
+
+// Transcript/summary splitter: user-dragged width of the transcript pane (px),
+// persisted across meetings. Bounded so neither pane can be crushed.
+const TRANSCRIPT_WIDTH_KEY = 'memento:details:transcript-width';
+const MIN_TRANSCRIPT_WIDTH = 260;
+const MAX_TRANSCRIPT_FRACTION = 0.65;
+
+function readStoredTranscriptWidth(): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const parsed = Number(window.localStorage.getItem(TRANSCRIPT_WIDTH_KEY));
+    return Number.isFinite(parsed) && parsed >= MIN_TRANSCRIPT_WIDTH ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
@@ -90,6 +106,57 @@ export default function PageContent({
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
+
+  // Draggable vertical splitter between the transcript and summary panes.
+  // Pointer capture keeps the drag alive over the BlockNote editor; the width
+  // is clamped live against the container so window resizes can't wedge the
+  // layout, and `min(px, 65%)` re-clamps rendered width without JS on resize.
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const transcriptPaneRef = useRef<HTMLDivElement>(null);
+  const [transcriptWidth, setTranscriptWidth] = useState<number | null>(readStoredTranscriptWidth);
+
+  const handleSplitterPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pane = transcriptPaneRef.current;
+    if (!pane) return;
+    e.preventDefault();
+    const splitter = e.currentTarget;
+    splitter.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startWidth = pane.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    let width = startWidth;
+    const onMove = (ev: PointerEvent) => {
+      const container = splitContainerRef.current;
+      const max = container
+        ? Math.max(MIN_TRANSCRIPT_WIDTH, container.getBoundingClientRect().width * MAX_TRANSCRIPT_FRACTION)
+        : startWidth;
+      width = Math.min(Math.max(startWidth + (ev.clientX - startX), MIN_TRANSCRIPT_WIDTH), max);
+      setTranscriptWidth(width);
+    };
+    const onEnd = () => {
+      splitter.removeEventListener('pointermove', onMove);
+      splitter.removeEventListener('pointerup', onEnd);
+      splitter.removeEventListener('pointercancel', onEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        window.localStorage.setItem(TRANSCRIPT_WIDTH_KEY, String(Math.round(width)));
+      } catch { /* ignore */ }
+    };
+    splitter.addEventListener('pointermove', onMove);
+    splitter.addEventListener('pointerup', onEnd);
+    splitter.addEventListener('pointercancel', onEnd);
+  };
+
+  // Double-click restores the default 33% split.
+  const resetSplitter = () => {
+    setTranscriptWidth(null);
+    try {
+      window.localStorage.removeItem(TRANSCRIPT_WIDTH_KEY);
+    } catch { /* ignore */ }
+  };
 
   // Sidebar context
   const { serverAddress } = useSidebar();
@@ -200,7 +267,21 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex h-screen flex-col bg-[var(--bg-canvas)]"
     >
-      <div className="m-4 flex flex-1 overflow-hidden rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-sheet)]">
+      <div
+        ref={splitContainerRef}
+        className="m-4 flex flex-1 overflow-hidden rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-sheet)]"
+      >
+        <div
+          ref={transcriptPaneRef}
+          className="flex min-w-0 shrink-0"
+          style={{
+            width:
+              transcriptWidth != null
+                ? `min(${transcriptWidth}px, ${MAX_TRANSCRIPT_FRACTION * 100}%)`
+                : '33%',
+            minWidth: MIN_TRANSCRIPT_WIDTH,
+          }}
+        >
         <TranscriptPanel
           transcripts={meetingData.transcripts}
           customPrompt={customPrompt}
@@ -230,6 +311,18 @@ export default function PageContent({
           onRenameSpeaker={onRenameSpeaker}
           onSpeakersDetected={onSpeakersDetected}
         />
+        </div>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('Resize transcript panel')}
+          title={t('Resize transcript panel')}
+          onPointerDown={handleSplitterPointerDown}
+          onDoubleClick={resetSplitter}
+          className="group relative z-10 w-[7px] shrink-0 cursor-col-resize touch-none"
+        >
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[var(--border-subtle)] transition-all group-hover:w-[3px] group-hover:bg-[var(--gold-border)]" />
+        </div>
         <SummaryPanel
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}

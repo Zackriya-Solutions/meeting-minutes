@@ -5,11 +5,17 @@ import { Icon } from './Icon';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { recordingService } from '@/services/recordingService';
 import { addMarkedMoment, getMarkedMoments } from '@/lib/markedMoments';
+import {
+  getDiarizationPrefs,
+  setDiarizationPrefs,
+  MAX_EXPECTED_SPEAKERS,
+  MIN_EXPECTED_SPEAKERS,
+  type RecordingDiarizationPrefs,
+} from '@/lib/diarizationPrefs';
 import { useT } from '@/lib/i18n';
 
 interface RecordOverlayProps {
   title?: string;
-  bars: string[];
   onStop: () => void;
   meetingId?: string | null;
 }
@@ -20,7 +26,7 @@ function formatTime(totalSeconds: number): string {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
-export function RecordOverlay({ title = 'Новая встреча', bars, onStop, meetingId = null }: RecordOverlayProps) {
+export function RecordOverlay({ title = 'Новая встреча', onStop, meetingId = null }: RecordOverlayProps) {
   // Duration and pause state come from the backend-synced context, so the timer
   // reflects the real recording (and survives navigation / remount) instead of a
   // local counter that resets to 0:00. Use activeDuration (excludes paused time)
@@ -30,6 +36,9 @@ export function RecordOverlay({ title = 'Новая встреча', bars, onSto
   const { activeDuration, isPaused } = useRecordingState();
   const [marks, setMarks] = useState<number[]>(() => getMarkedMoments(meetingId));
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [diarization, setDiarization] = useState<RecordingDiarizationPrefs>(() =>
+    getDiarizationPrefs(meetingId)
+  );
 
   const elapsed = Math.max(0, Math.floor(activeDuration ?? 0));
 
@@ -37,7 +46,42 @@ export function RecordOverlay({ title = 'Новая встреча', bars, onSto
   // by the recording-started event, which may land just after this mounts).
   useEffect(() => {
     setMarks(getMarkedMoments(meetingId));
+    setDiarization(getDiarizationPrefs(meetingId));
   }, [meetingId]);
+
+  // Speaker-ID choices are written through to localStorage on every change so
+  // they survive navigation/remount and are picked up by the save flow
+  // (useRecordingStop → set_meeting_diarization_prefs).
+  const updateDiarization = useCallback(
+    (patch: Partial<RecordingDiarizationPrefs>) => {
+      setDiarization((prev) => {
+        const next = { ...prev, ...patch };
+        setDiarizationPrefs(meetingId, next);
+        return next;
+      });
+    },
+    [meetingId]
+  );
+
+  // Stepper over Auto → 2 → … → MAX. Stepping below the floor returns to Auto.
+  const stepSpeakers = useCallback(
+    (delta: 1 | -1) => {
+      const current = diarization.expectedSpeakers;
+      const next =
+        current === null
+          ? delta > 0
+            ? MIN_EXPECTED_SPEAKERS
+            : null
+          : current + delta;
+      updateDiarization({
+        expectedSpeakers:
+          next === null || next < MIN_EXPECTED_SPEAKERS
+            ? null
+            : Math.min(next, MAX_EXPECTED_SPEAKERS),
+      });
+    },
+    [diarization.expectedSpeakers, updateDiarization]
+  );
 
   // Record a real timestamp (elapsed seconds) and persist it (keyed by meeting)
   // so meeting-details can surface it later, rather than a cosmetic counter.
@@ -76,15 +120,61 @@ export function RecordOverlay({ title = 'Новая встреча', bars, onSto
         <span className="mm-eyebrow">{isPaused ? t('Paused') : t('Recording')}</span>
         <time className="mm-record-time">{formatTime(elapsed)}</time>
       </header>
-      <div className="mm-equalizer" aria-hidden="true">
-        {bars.map((height, index) => (
-          <span key={index} style={{ height: isPaused ? '3px' : height }} />
+      {/* CSS-animated voice wave (see .mm-equalizer in globals.css) */}
+      <div className={`mm-equalizer${isPaused ? ' is-paused' : ''}`} aria-hidden="true">
+        {Array.from({ length: 7 }, (_, i) => (
+          <span key={i} />
         ))}
       </div>
       <div className="mm-record-meta">
         <Icon name="mic" size={15} />
         <span>{title}</span>
         {marks.length > 0 && <span className="mm-numeric">{marks.length} {t('marked')}</span>}
+      </div>
+      <div className="mm-record-meta">
+        <button
+          type="button"
+          onClick={() => updateDiarization({ speakerIdEnabled: !diarization.speakerIdEnabled })}
+          aria-pressed={diarization.speakerIdEnabled}
+          title={t('Detect who spoke in this meeting (runs after it ends)')}
+          className="mm-press flex flex-none items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
+          style={
+            diarization.speakerIdEnabled
+              ? { borderColor: 'var(--gold-border)', color: 'var(--gold)' }
+              : { borderColor: 'var(--border-strong)', color: 'var(--fg3)' }
+          }
+        >
+          <Icon name="users" size={14} />
+          <span>{t('Speaker ID')}</span>
+        </button>
+        {diarization.speakerIdEnabled && (
+          <div
+            className="ml-auto flex items-center gap-1"
+            title={t('Expected number of speakers — improves detection accuracy')}
+          >
+            <button
+              type="button"
+              onClick={() => stepSpeakers(-1)}
+              disabled={diarization.expectedSpeakers === null}
+              aria-label={t('Fewer speakers')}
+              className="mm-press flex h-6 w-6 flex-none items-center justify-center rounded-full border border-[var(--border-strong)] text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] disabled:opacity-40 disabled:hover:border-[var(--border-strong)]"
+            >
+              <Icon name="minus" size={13} />
+            </button>
+            <span className="mm-numeric min-w-[38px] text-center text-xs">
+              {diarization.expectedSpeakers ?? t('Auto')}
+            </span>
+            <button
+              type="button"
+              onClick={() => stepSpeakers(1)}
+              disabled={diarization.expectedSpeakers === MAX_EXPECTED_SPEAKERS}
+              aria-label={t('More speakers')}
+              className="mm-press flex h-6 w-6 flex-none items-center justify-center rounded-full border border-[var(--border-strong)] text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] disabled:opacity-40 disabled:hover:border-[var(--border-strong)]"
+            >
+              <Icon name="plus" size={13} />
+            </button>
+          </div>
+        )}
       </div>
       <div className="mm-record-actions">
         <Button

@@ -1,6 +1,6 @@
 import type { SVGProps } from 'react';
 
-export type MementoIconName = 'wave' | 'mic' | 'stop' | 'play' | 'pause' | 'transcript' | 'library' | 'search' | 'spark' | 'tag' | 'clock' | 'calendar' | 'users' | 'plus' | 'check' | 'check-circle' | 'chevron-right' | 'chevron-down' | 'chevron-up' | 'back' | 'close' | 'close-circle' | 'settings' | 'chat' | 'upload' | 'download' | 'home' | 'filter' | 'send' | 'alert' | 'circle' | 'copy' | 'database' | 'external' | 'eye' | 'eye-off' | 'folder' | 'globe' | 'info' | 'loader' | 'lock' | 'unlock' | 'edit' | 'pin' | 'refresh' | 'save' | 'speaker' | 'trash' | 'dot';
+export type MementoIconName = 'wave' | 'mic' | 'stop' | 'play' | 'pause' | 'transcript' | 'library' | 'search' | 'spark' | 'tag' | 'clock' | 'calendar' | 'users' | 'plus' | 'minus' | 'check' | 'check-circle' | 'chevron-right' | 'chevron-down' | 'chevron-up' | 'back' | 'close' | 'close-circle' | 'settings' | 'chat' | 'upload' | 'download' | 'home' | 'filter' | 'send' | 'alert' | 'circle' | 'copy' | 'database' | 'external' | 'eye' | 'eye-off' | 'folder' | 'globe' | 'info' | 'loader' | 'lock' | 'unlock' | 'edit' | 'pin' | 'refresh' | 'save' | 'speaker' | 'trash' | 'dot';
 
 const glyphs: Record<MementoIconName, React.ReactNode> = {
   wave: <><path d="M2.5 12C3.4 3.8 5.8 3.8 6.8 12c.9 7.6 2.9 7.6 3.8 0 .8-6.2 2.3-6.2 3.1 0 .6 4.2 1.7 4.2 2.3 0h2.4" /><circle cx="21" cy="12" r="1.7" fill="currentColor" stroke="none" /></>,
@@ -17,6 +17,7 @@ const glyphs: Record<MementoIconName, React.ReactNode> = {
   calendar: <><rect x="4" y="5.5" width="16" height="14" rx="3" /><path d="M4 10.5h16M8 3.5V7M16 3.5V7" /></>,
   users: <><circle cx="9" cy="9.5" r="3.2" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0m1.3-12.4a3.2 3.2 0 0 1 0 5.8M17.5 19a5.5 5.5 0 0 0-3.4-5" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   check: <path d="m6 12.5 4 4 8-8.5" />,
   'check-circle': <><circle cx="12" cy="12" r="8" /><path d="m8.5 12 2.2 2.2 4.8-5" /></>,
   'chevron-right': <path d="m9 6 6 6-6 6" />,

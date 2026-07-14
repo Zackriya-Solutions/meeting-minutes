@@ -243,8 +243,35 @@
   .mm-record-header, .mm-record-meta, .mm-record-actions { display: flex; align-items: center; gap: 8px; }
   .mm-record-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--gold); animation: mmPulse 1.4s var(--ease-standard) infinite; }
   .mm-record-time { margin-left: auto; color: var(--gold); font-family: var(--font-numeric); font-size: 22px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-  .mm-equalizer { height: 30px; display: flex; align-items: center; gap: 4px; }
-  .mm-equalizer span { flex: 1; min-height: 3px; border-radius: 2px; background: var(--fg2); transition: height 180ms var(--ease-standard); }
+  /* Recording-pill equalizer: a symmetric 7-bar voice wave. Purely CSS-driven —
+     each bar gets its own height (--eq-h), period (--eq-t) and negative delay
+     (--eq-d), so the pattern breathes organically without JS re-renders. */
+  .mm-equalizer { height: 30px; display: flex; align-items: center; justify-content: center; gap: 4px; }
+  .mm-equalizer span {
+    flex: none;
+    width: 3px;
+    height: var(--eq-h, 100%);
+    border-radius: 999px;
+    background: var(--gold);
+    transform-origin: center;
+    animation: mmEqualize var(--eq-t, 1.6s) ease-in-out var(--eq-d, 0s) infinite;
+    will-change: transform;
+  }
+  .mm-equalizer span:nth-child(1) { --eq-h: 34%; --eq-t: 1.5s; --eq-d: -0.9s; }
+  .mm-equalizer span:nth-child(2) { --eq-h: 56%; --eq-t: 1.9s; --eq-d: -0.4s; }
+  .mm-equalizer span:nth-child(3) { --eq-h: 80%; --eq-t: 1.3s; --eq-d: -1.2s; }
+  .mm-equalizer span:nth-child(4) { --eq-h: 100%; --eq-t: 1.7s; --eq-d: -0.2s; }
+  .mm-equalizer span:nth-child(5) { --eq-h: 80%; --eq-t: 1.4s; --eq-d: -0.7s; }
+  .mm-equalizer span:nth-child(6) { --eq-h: 56%; --eq-t: 2.0s; --eq-d: -1.5s; }
+  .mm-equalizer span:nth-child(7) { --eq-h: 34%; --eq-t: 1.6s; --eq-d: -0.6s; }
+  .mm-equalizer.is-paused span { animation: none; transform: scaleY(0.18); opacity: 0.45; background: var(--fg3); }
+  @keyframes mmEqualize {
+    0%, 100% { transform: scaleY(0.25); }
+    50% { transform: scaleY(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mm-equalizer span { animation: none; transform: scaleY(0.5); }
+  }
   .mm-record-meta { min-width: 0; color: var(--fg3); font-size: 12px; }
   .mm-record-meta > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mm-record-actions > button { flex: 1; }
@@ -269,8 +296,11 @@
 input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font-family: inherit; }
 input, textarea { color: var(--fg1); }
 /* Native text inputs/selects default to a dark surface so they don't render white
-   on the dark theme. Any explicit `bg-*` utility (e.g. bg-transparent) overrides this. */
-input:not([type='checkbox']):not([type='radio']):not([type='range']), textarea, select { background-color: var(--surface-input); }
+   on the dark theme. NOTE: this outweighs single-class utilities like bg-transparent
+   (specificity 0,3,1), so composite fields whose input must stay transparent —
+   InputGroup controls carry data-slot="input-group-control" — are excluded here;
+   their background/border belong to the wrapping group. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([data-slot='input-group-control']), textarea:not([data-slot='input-group-control']), select { background-color: var(--surface-input); }
 input::placeholder, textarea::placeholder { color: var(--fg3); }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
 .font-mono, time { font-family: 'Space Grotesk', 'Onest', sans-serif; font-variant-numeric: tabular-nums; }

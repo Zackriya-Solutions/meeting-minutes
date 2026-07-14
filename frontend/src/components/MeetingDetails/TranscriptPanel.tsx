@@ -96,7 +96,9 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="relative hidden min-w-0 shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-sheet)] md:flex md:w-1/4 lg:w-1/3">
+    // Width and the panel divider are owned by the wrapper + splitter in
+    // meeting-details/page-content.tsx; this root just fills its pane.
+    <div className="relative flex h-full w-full min-w-0 flex-col bg-[var(--bg-sheet)]">
       {/* Title area */}
       <div className="border-b border-[var(--border-subtle)] p-4">
         <TranscriptButtonGroup
