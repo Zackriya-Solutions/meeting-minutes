@@ -881,5 +881,17 @@ export const RU: Record<string, string> = {
   "Copy User ID": "Скопировать идентификатор",
   "Copied!": "Скопировано!",
   "View Privacy Policy": "Политика конфиденциальности",
-  "Your meetings, transcripts, and recordings remain completely private and local.": "Ваши встречи, расшифровки и записи остаются полностью приватными и локальными."
+  "Your meetings, transcripts, and recordings remain completely private and local.": "Ваши встречи, расшифровки и записи остаются полностью приватными и локальными.",
+  "Daily Standup": "Ежедневный стендап",
+  "Time-boxed daily updates for engineering/product teams.": "Короткие ежедневные апдейты для команд разработки и продукта.",
+  "Project Sync / Status Update": "Синхронизация по проекту / статус",
+  "Weekly or bi-weekly project status meeting focusing on milestones and risks.": "Еженедельная встреча по статусу проекта: этапы и риски.",
+  "Psychiatric Session Note (SOAP + AI Hybrid)": "Заметка психиатрической сессии (SOAP + ИИ)",
+  "AI-assisted psychiatric progress note template based on SOAP, with clinical metadata and AI summary.": "Шаблон психиатрической заметки на основе SOAP с клиническими метаданными и суммаризацией ИИ.",
+  "Retrospective (Agile)": "Ретроспектива (Agile)",
+  "Sprint retrospective template for continuous improvement.": "Шаблон ретроспективы спринта для постоянных улучшений.",
+  "Client / Sales Meeting": "Встреча с клиентом / продажи",
+  "Capture client goals, deliverables, and next steps.": "Зафиксируйте цели клиента, результаты и следующие шаги.",
+  "Standard Meeting Notes": "Стандартные заметки встречи",
+  "A standard template for general meetings, focusing on key outcomes and actions.": "Стандартный шаблон для обычных встреч: ключевые итоги и задачи."
 };

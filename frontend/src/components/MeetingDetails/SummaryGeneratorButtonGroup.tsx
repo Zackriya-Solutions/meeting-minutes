@@ -344,10 +344,10 @@ export function SummaryGeneratorButtonGroup({
               <DropdownMenuItem
                 key={template.id}
                 onClick={() => onTemplateSelect(template.id, template.name)}
-                title={template.description}
+                title={t(template.description)}
                 className="flex items-center justify-between gap-2"
               >
-                <span>{template.name}</span>
+                <span>{t(template.name)}</span>
                 {selectedTemplate === template.id && (
                   <Check className="h-4 w-4 text-[var(--success)]" />
                 )}

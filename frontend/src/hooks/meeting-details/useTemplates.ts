@@ -35,7 +35,7 @@ export function useTemplates() {
   const handleTemplateSelection = useCallback((templateId: string, templateName: string) => {
     setSelectedTemplate(templateId);
     toast.success(t('Template selected'), {
-      description: `${t('Using')} "${templateName}" ${t('template for summary generation')}`,
+      description: `${t('Using')} "${t(templateName)}" ${t('template for summary generation')}`,
     });
     Analytics.trackFeatureUsed('template_selected');
   }, []);
