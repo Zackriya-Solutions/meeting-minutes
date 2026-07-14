@@ -3,6 +3,64 @@
 # Exit on error
 set -e
 
+# Load local build variables when present. The file is ignored by Git.
+if [ -f ".env" ]; then
+    # shellcheck disable=SC1091
+    set -a
+    source ".env"
+    set +a
+fi
+
+# Release builds need the same gateway registration value as CI. For authorized
+# maintainers, use the server-owned value when it is not supplied locally.
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ]; then
+    GATEWAY_SSH_HOST="${MEMENTO_GATEWAY_SSH_HOST:-i167}"
+    MEMENTO_REGISTRATION_KEY="$(
+        ssh -o BatchMode=yes -o ConnectTimeout=8 "$GATEWAY_SSH_HOST" \
+            "sudo -n sed -n 's/^MEMENTO_REGISTRATION_KEY=//p' /etc/gigatool-gateway.env 2>/dev/null || sed -n 's/^MEMENTO_REGISTRATION_KEY=//p' /etc/gigatool-gateway.env 2>/dev/null" \
+            | head -n 1
+    )" || true
+    export MEMENTO_REGISTRATION_KEY
+fi
+
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] || [ "$MEMENTO_REGISTRATION_KEY" = "replace-with-development-registration-key" ]; then
+    echo "Missing MEMENTO_REGISTRATION_KEY for the local release build."
+    echo "Grant SSH access to the gateway (default host: i167), set MEMENTO_GATEWAY_SSH_HOST,"
+    echo "or copy .env.example to .env and add the key manually."
+    exit 1
+fi
+
+# Prefer the Node.js major used in CI; Homebrew's Bun can otherwise expose an
+# incompatible `node` shim.
+if [[ -x "/opt/homebrew/opt/node@20/bin/node" ]]; then
+    export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+fi
+
+if ! command -v node >/dev/null 2>&1 || ! node --version >/dev/null 2>&1; then
+    echo "Node.js is required. On macOS run: brew install node@20"
+    exit 1
+fi
+
+if command -v corepack >/dev/null 2>&1; then
+    corepack enable pnpm >/dev/null 2>&1
+    PNPM=(corepack pnpm)
+elif command -v pnpm >/dev/null 2>&1; then
+    PNPM=(pnpm)
+else
+    echo "pnpm is required. Install Corepack/Node.js or run: brew install pnpm"
+    exit 1
+fi
+
+echo "Using Node.js $(node --version) and pnpm $("${PNPM[@]}" --version)"
+
+# cidre requires full Xcode, not only Command Line Tools. Check before deleting
+# caches or reinstalling dependencies.
+if [[ "$(uname -s)" == "Darwin" ]] && ! xcodebuild -version >/dev/null 2>&1; then
+    echo "Full Xcode is required for the macOS Tauri build."
+    echo "Install Xcode, then run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
+    exit 1
+fi
+
 # Add log level selector with default to INFO
 LOG_LEVEL=${1:-info}
 
@@ -43,15 +101,16 @@ rm -rf .pnp.cjs
 rm -rf out
 
 echo "Installing dependencies..."
-pnpm install
+"${PNPM[@]}" install
 
 # Build the Next.js application first
 echo "Building Next.js application..."
-pnpm run build
+"${PNPM[@]}" run build
 
 # Set environment variables for the build
 
 echo "Building Tauri app..."
-pnpm run tauri build
+# Local builds produce the .app and DMG only. Updater artifacts require the
+# private signing key and are created by the protected GitHub release workflow.
+"${PNPM[@]}" exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 sleep
-
