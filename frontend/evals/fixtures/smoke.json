@@ -1,0 +1,52 @@
+{
+  "dataset_id": "synthetic-smoke-v1",
+  "frame_ms": 100,
+  "transcription": [
+    {
+      "id": "ru-smoke-1",
+      "reference": "Обсудили бюджет проекта Альфа и срок до пятницы",
+      "hypothesis": "Обсудили бюджет проекта Альфа и срок до пятницы"
+    }
+  ],
+  "diarization": [
+    {
+      "id": "speakers-smoke-1",
+      "reference": [
+        {"start_ms": 0, "end_ms": 1000, "speaker": "Анна"},
+        {"start_ms": 1000, "end_ms": 2000, "speaker": "Иван"}
+      ],
+      "hypothesis": [
+        {"start_ms": 0, "end_ms": 1000, "speaker": "SPEAKER_00"},
+        {"start_ms": 1000, "end_ms": 2000, "speaker": "SPEAKER_01"}
+      ]
+    }
+  ],
+  "retrieval": [
+    {
+      "id": "search-smoke-answerable",
+      "answerable": true,
+      "expected_chunk_ids": [42],
+      "returned_chunk_ids": [42, 7, 9],
+      "found": true
+    },
+    {
+      "id": "search-smoke-no-answer",
+      "answerable": false,
+      "expected_chunk_ids": [],
+      "returned_chunk_ids": [],
+      "found": false
+    }
+  ],
+  "summary": [
+    {
+      "id": "summary-smoke-1",
+      "success": true,
+      "latency_ms": 1200,
+      "quality": {
+        "fact_coverage": 1,
+        "unsupported_claim_rate": 0,
+        "action_item_f1": 1
+      }
+    }
+  ]
+}

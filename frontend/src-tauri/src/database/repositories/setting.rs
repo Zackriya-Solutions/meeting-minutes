@@ -14,6 +14,22 @@ pub struct SaveModelConfigRequest {
     pub ollama_endpoint: Option<String>,
 }
 
+#[cfg(test)]
+mod public_secret_tests {
+    use super::*;
+
+    #[test]
+    fn renderer_only_receives_configured_state() {
+        assert_eq!(
+            redact_secret(Some("sk-real-secret".into())).as_deref(),
+            Some(CONFIGURED_SECRET_SENTINEL)
+        );
+        assert_eq!(redact_secret(Some("  ".into())), None);
+        assert!(is_secret_sentinel(CONFIGURED_SECRET_SENTINEL));
+        assert!(!is_secret_sentinel("sk-real-secret"));
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
 pub struct SaveTranscriptConfigRequest {
     pub provider: String,
@@ -23,6 +39,22 @@ pub struct SaveTranscriptConfigRequest {
 }
 
 pub struct SettingsRepository;
+
+pub const CONFIGURED_SECRET_SENTINEL: &str = "__configured__";
+
+pub fn redact_secret(value: Option<String>) -> Option<String> {
+    value.and_then(|secret| {
+        if secret.trim().is_empty() {
+            None
+        } else {
+            Some(CONFIGURED_SECRET_SENTINEL.to_string())
+        }
+    })
+}
+
+pub fn is_secret_sentinel(value: &str) -> bool {
+    value == CONFIGURED_SECRET_SENTINEL
+}
 
 // Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
 // Summary providers: openai, claude, ollama, groq, added openrouter

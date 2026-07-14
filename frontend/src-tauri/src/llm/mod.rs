@@ -50,15 +50,15 @@ impl Default for PrivacyConfig {
 
 impl PrivacyConfig {
     /// Load privacy settings from `app_settings_kv` (keys `privacy.*`). Missing keys keep
-    /// the permissive defaults. Never fails — a DB error yields defaults (fail-open on
-    /// read is fine; the guard still runs at call time).
-    pub async fn load(pool: &sqlx::SqlitePool) -> Self {
+    /// the explicit defaults, but a database/read failure is an error. Outbound operations
+    /// must fail closed when the privacy policy cannot be read.
+    pub async fn load(pool: &sqlx::SqlitePool) -> Result<Self, LlmError> {
         let mut cfg = Self::default();
         let rows: Vec<(String, String)> =
             sqlx::query_as("SELECT key, value FROM app_settings_kv WHERE key LIKE 'privacy.%'")
                 .fetch_all(pool)
                 .await
-                .unwrap_or_default();
+                .map_err(|e| LlmError::PrivacyConfigUnavailable(e.to_string()))?;
         for (k, v) in rows {
             let on = v == "true" || v == "1";
             match k.as_str() {
@@ -68,7 +68,7 @@ impl PrivacyConfig {
                 _ => {}
             }
         }
-        cfg
+        Ok(cfg)
     }
 
     /// Whether an LLM call for `purpose` is permitted. Returns the specific block reason
@@ -91,6 +91,8 @@ pub enum LlmError {
     LocalOnlyMode,
     /// This purpose is disabled in settings.
     PurposeDisabled(Purpose),
+    /// Privacy settings could not be read, so the outbound call was denied.
+    PrivacyConfigUnavailable(String),
     /// The provider itself failed.
     Provider(String),
 }
@@ -100,12 +102,27 @@ impl std::fmt::Display for LlmError {
         match self {
             LlmError::LocalOnlyMode => write!(f, "local-only mode is enabled; LLM call blocked"),
             LlmError::PurposeDisabled(p) => write!(f, "{} is disabled in settings", p.as_str()),
+            LlmError::PrivacyConfigUnavailable(e) => {
+                write!(f, "privacy settings unavailable; outbound call blocked: {e}")
+            }
             LlmError::Provider(e) => write!(f, "LLM provider error: {e}"),
         }
     }
 }
 
 impl std::error::Error for LlmError {}
+
+/// Apply the central privacy policy before resolving credentials or constructing an
+/// outbound provider. This is also used by the legacy summary pipeline so it cannot
+/// bypass the routed LLM layer.
+pub async fn ensure_outbound_allowed(
+    pool: &sqlx::SqlitePool,
+    purpose: Purpose,
+) -> Result<PrivacyConfig, LlmError> {
+    let privacy = PrivacyConfig::load(pool).await?;
+    privacy.ensure_allowed(purpose)?;
+    Ok(privacy)
+}
 
 /// Run an LLM completion for `purpose`, enforcing privacy FIRST. `provider_call` is the
 /// (lazy) provider future — typically `generate_summary(...)`. It is only awaited if the
@@ -135,11 +152,9 @@ pub async fn complete_routed(
     system: &str,
     user: &str,
 ) -> Result<String, LlmError> {
-    let privacy = PrivacyConfig::load(pool).await;
+    let privacy = ensure_outbound_allowed(pool, purpose).await?;
     // Guard first — blocked purposes / local-only mode make ZERO network calls and
     // don't even resolve provider credentials.
-    privacy.ensure_allowed(purpose)?;
-
     let target = router::route(purpose, scope, query_chars);
     let giga = providers::resolve_gigachat(pool).await;
     let deep = providers::resolve_deepseek(pool).await;
@@ -223,13 +238,24 @@ mod tests {
         sqlx::query("CREATE TABLE app_settings_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
             .execute(&pool).await.unwrap();
         // Missing keys -> defaults.
-        assert!(PrivacyConfig::load(&pool).await.extraction_enabled);
+        assert!(PrivacyConfig::load(&pool).await.unwrap().extraction_enabled);
 
         sqlx::query("INSERT INTO app_settings_kv(key,value) VALUES('privacy.extraction_enabled','false'),('privacy.local_only','true')")
             .execute(&pool).await.unwrap();
-        let cfg = PrivacyConfig::load(&pool).await;
+        let cfg = PrivacyConfig::load(&pool).await.unwrap();
         assert!(cfg.local_only && !cfg.extraction_enabled);
         // And the guard then blocks extraction.
         assert!(cfg.ensure_allowed(Purpose::Extract).is_err());
+    }
+
+    #[tokio::test]
+    async fn load_fails_closed_when_policy_table_is_unavailable() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let err = PrivacyConfig::load(&pool).await.unwrap_err();
+        assert!(matches!(err, LlmError::PrivacyConfigUnavailable(_)));
     }
 }
