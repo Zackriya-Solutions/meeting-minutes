@@ -523,6 +523,7 @@ const Sidebar: React.FC = () => {
     const isSettingsPage = pathname === '/settings';
     const isChatPage = pathname === '/chat';
     const isSearchPage = pathname === '/search';
+    const isCollectionsPage = pathname === '/collections';
 
     return (
       <TooltipProvider>
@@ -594,6 +595,21 @@ const Sidebar: React.FC = () => {
             </TooltipTrigger>
             <TooltipContent side="right">
               <p>{t('Meeting Notes')}</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/collections')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${isCollectionsPage ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'
+                  }`}
+              >
+                <MementoIcon name="folder" size={20} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>{t('Collections')}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -922,6 +938,14 @@ const Sidebar: React.FC = () => {
                 <span>{t('Import Audio')}</span>
               </button>
             )}
+
+            <button
+              onClick={() => router.push('/collections')}
+              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/collections' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
+            >
+              <MementoIcon name="folder" size={17} />
+              <span>{t('Collections')}</span>
+            </button>
 
             <button
               onClick={() => router.push('/search')}

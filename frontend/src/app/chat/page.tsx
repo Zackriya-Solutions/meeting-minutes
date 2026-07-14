@@ -84,6 +84,19 @@ export default function ChatPage() {
       .catch(() => setCollections([]));
   }, []);
 
+  // Collection workspace deep-links here with the scope already selected.
+  // Read the URL in an effect so the page remains compatible with static export.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('scope') !== 'collection') return;
+    const requestedCollectionId = Number(params.get('collectionId'));
+    if (!Number.isInteger(requestedCollectionId) || requestedCollectionId <= 0) return;
+    setScopeKind('collection');
+    setCollectionId(requestedCollectionId);
+    setSessionId(null);
+    setMessages([]);
+  }, []);
+
   // Auto-scroll to the latest message.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });

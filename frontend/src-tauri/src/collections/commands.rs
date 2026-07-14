@@ -2,6 +2,7 @@
 //! (PLAN.md Phase 5). Thin DB wrappers over the schema in migrations 20260706000000/2.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::collections::{suggest_series, MeetingRef, MIN_SERIES_SIZE};
 use crate::database::repositories::setting::redact_secret;
@@ -12,6 +13,34 @@ pub struct CollectionRow {
     pub id: i64,
     pub name: String,
     pub kind: String,
+    pub meeting_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CollectionMeetingRow {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub in_collection: bool,
+}
+
+fn normalize_collection_name(name: String) -> Result<String, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Collection name cannot be empty".into());
+    }
+    if name.chars().count() > 120 {
+        return Err("Collection name cannot be longer than 120 characters".into());
+    }
+    Ok(name)
+}
+
+fn normalize_collection_kind(kind: Option<String>) -> Result<String, String> {
+    let kind = kind.unwrap_or_else(|| "manual".into());
+    match kind.as_str() {
+        "manual" | "series" => Ok(kind),
+        _ => Err("Collection kind must be either 'manual' or 'series'".into()),
+    }
 }
 
 #[tauri::command]
@@ -21,15 +50,60 @@ pub async fn create_collection(
     kind: Option<String>,
 ) -> Result<i64, String> {
     let pool = state.db_manager.pool();
-    let kind = kind.unwrap_or_else(|| "manual".into());
-    sqlx::query_scalar::<_, i64>(
-        "INSERT INTO collections(name, kind) VALUES(?, ?) RETURNING id",
-    )
-    .bind(name)
-    .bind(kind)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| e.to_string())
+    let name = normalize_collection_name(name)?;
+    let kind = normalize_collection_kind(kind)?;
+    sqlx::query_scalar::<_, i64>("INSERT INTO collections(name, kind) VALUES(?, ?) RETURNING id")
+        .bind(name)
+        .bind(kind)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_collection(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+    name: String,
+) -> Result<(), String> {
+    let name = normalize_collection_name(name)?;
+    let result = sqlx::query("UPDATE collections SET name = ? WHERE id = ?")
+        .bind(name)
+        .bind(collection_id)
+        .execute(state.db_manager.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+    if result.rows_affected() == 0 {
+        return Err("Collection not found".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_collection(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+) -> Result<(), String> {
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM meeting_collections WHERE collection_id = ?")
+        .bind(collection_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    let result = sqlx::query("DELETE FROM collections WHERE id = ?")
+        .bind(collection_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    if result.rows_affected() == 0 {
+        return Err("Collection not found".into());
+    }
+    tx.commit().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -39,15 +113,13 @@ pub async fn add_meeting_to_collection(
     collection_id: i64,
 ) -> Result<(), String> {
     let pool = state.db_manager.pool();
-    sqlx::query(
-        "INSERT OR IGNORE INTO meeting_collections(meeting_id, collection_id) VALUES(?, ?)",
-    )
-    .bind(meeting_id)
-    .bind(collection_id)
-    .execute(pool)
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    sqlx::query("INSERT OR IGNORE INTO meeting_collections(meeting_id, collection_id) VALUES(?, ?)")
+        .bind(meeting_id)
+        .bind(collection_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -55,15 +127,121 @@ pub async fn list_collections(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<CollectionRow>, String> {
     let pool = state.db_manager.pool();
-    let rows: Vec<(i64, String, String)> =
-        sqlx::query_as("SELECT id, name, kind FROM collections ORDER BY name")
-            .fetch_all(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    let rows: Vec<(i64, String, String, i64)> = sqlx::query_as(
+        "SELECT c.id, c.name, c.kind, COUNT(mc.meeting_id) \
+         FROM collections c \
+         LEFT JOIN meeting_collections mc ON mc.collection_id = c.id \
+         GROUP BY c.id, c.name, c.kind \
+         ORDER BY lower(c.name), c.id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, kind)| CollectionRow { id, name, kind })
+        .map(|(id, name, kind, meeting_count)| CollectionRow {
+            id,
+            name,
+            kind,
+            meeting_count,
+        })
         .collect())
+}
+
+#[tauri::command]
+pub async fn list_collection_candidates(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+) -> Result<Vec<CollectionMeetingRow>, String> {
+    let exists: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?)")
+        .bind(collection_id)
+        .fetch_one(state.db_manager.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+    if exists == 0 {
+        return Err("Collection not found".into());
+    }
+
+    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+        "SELECT m.id, m.title, m.created_at, \
+         EXISTS(SELECT 1 FROM meeting_collections mc \
+                WHERE mc.meeting_id = m.id AND mc.collection_id = ?) \
+         FROM meetings m ORDER BY m.created_at DESC, m.id",
+    )
+    .bind(collection_id)
+    .fetch_all(state.db_manager.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, title, created_at, in_collection)| CollectionMeetingRow {
+                id,
+                title,
+                created_at,
+                in_collection: in_collection != 0,
+            },
+        )
+        .collect())
+}
+
+#[tauri::command]
+pub async fn set_collection_meetings(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+    meeting_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut unique_ids = Vec::with_capacity(meeting_ids.len());
+    let mut seen = HashSet::with_capacity(meeting_ids.len());
+    for id in meeting_ids {
+        if seen.insert(id.clone()) {
+            unique_ids.push(id);
+        }
+    }
+
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| e.to_string())?;
+    let collection_exists: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?)")
+            .bind(collection_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    if collection_exists == 0 {
+        return Err("Collection not found".into());
+    }
+
+    for meeting_id in &unique_ids {
+        let meeting_exists: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)")
+                .bind(meeting_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+        if meeting_exists == 0 {
+            return Err(format!("Meeting not found: {meeting_id}"));
+        }
+    }
+
+    sqlx::query("DELETE FROM meeting_collections WHERE collection_id = ?")
+        .bind(collection_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    for meeting_id in unique_ids {
+        sqlx::query("INSERT INTO meeting_collections(meeting_id, collection_id) VALUES(?, ?)")
+            .bind(meeting_id)
+            .bind(collection_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,7 +258,10 @@ pub async fn save_search(
     input: SaveSearchInput,
 ) -> Result<i64, String> {
     let pool = state.db_manager.pool();
-    let filters = input.filters.unwrap_or_else(|| serde_json::json!({})).to_string();
+    let filters = input
+        .filters
+        .unwrap_or_else(|| serde_json::json!({}))
+        .to_string();
     sqlx::query_scalar::<_, i64>(
         "INSERT INTO saved_searches(name, query, filters) VALUES(?, ?, ?) RETURNING id",
     )
@@ -99,23 +280,86 @@ pub struct SeriesSuggestionOut {
     pub cadence: String,
 }
 
+#[tauri::command]
+pub async fn accept_series_suggestion(
+    state: tauri::State<'_, AppState>,
+    suggested_name: String,
+    meeting_ids: Vec<String>,
+) -> Result<i64, String> {
+    let name = normalize_collection_name(suggested_name)?;
+    let unique_ids: Vec<String> = meeting_ids
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    if unique_ids.len() < MIN_SERIES_SIZE {
+        return Err(format!(
+            "A series requires at least {MIN_SERIES_SIZE} meetings"
+        ));
+    }
+
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| e.to_string())?;
+    for meeting_id in &unique_ids {
+        let exists: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)")
+            .bind(meeting_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        if exists == 0 {
+            return Err(format!("Meeting not found: {meeting_id}"));
+        }
+    }
+
+    let collection_id: i64 =
+        sqlx::query_scalar("INSERT INTO collections(name, kind) VALUES(?, 'series') RETURNING id")
+            .bind(name)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    for meeting_id in unique_ids {
+        sqlx::query("INSERT INTO meeting_collections(meeting_id, collection_id) VALUES(?, ?)")
+            .bind(meeting_id)
+            .bind(collection_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(collection_id)
+}
+
 /// Propose series from the meeting archive (PLAN.md Phase 5 auto-series).
 #[tauri::command]
 pub async fn suggest_meeting_series(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<SeriesSuggestionOut>, String> {
     let pool = state.db_manager.pool();
-    let rows: Vec<(String, String, String)> =
-        sqlx::query_as("SELECT id, title, created_at FROM meetings")
-            .fetch_all(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    // Once a suggestion has been accepted, do not propose the same meetings
+    // again on the next launch. Manual collections do not suppress discovery.
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT m.id, m.title, m.created_at FROM meetings m \
+         WHERE NOT EXISTS ( \
+           SELECT 1 FROM meeting_collections mc \
+           JOIN collections c ON c.id = mc.collection_id \
+           WHERE mc.meeting_id = m.id AND c.kind = 'series' \
+         )",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
     let meetings: Vec<MeetingRef> = rows
         .into_iter()
         .filter_map(|(id, title, created_at)| {
             // created_at may be a full datetime; take the leading YYYY-MM-DD.
-            let date = chrono::NaiveDate::parse_from_str(created_at.get(0..10).unwrap_or(""), "%Y-%m-%d").ok()?;
+            let date =
+                chrono::NaiveDate::parse_from_str(created_at.get(0..10).unwrap_or(""), "%Y-%m-%d")
+                    .ok()?;
             Some(MeetingRef { id, title, date })
         })
         .collect();
@@ -218,6 +462,26 @@ pub async fn set_app_setting(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collection_name_is_trimmed_and_bounded() {
+        assert_eq!(
+            normalize_collection_name("  Product  ".into()).unwrap(),
+            "Product"
+        );
+        assert!(normalize_collection_name("   ".into()).is_err());
+        assert!(normalize_collection_name("x".repeat(121)).is_err());
+    }
+
+    #[test]
+    fn only_supported_collection_kinds_are_accepted() {
+        assert_eq!(normalize_collection_kind(None).unwrap(), "manual");
+        assert_eq!(
+            normalize_collection_kind(Some("series".into())).unwrap(),
+            "series"
+        );
+        assert!(normalize_collection_kind(Some("smart".into())).is_err());
+    }
 
     #[test]
     fn secret_keys_are_classified_without_hiding_public_config() {
