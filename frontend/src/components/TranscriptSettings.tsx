@@ -164,7 +164,7 @@ function SaluteSpeechSettings() {
   const [configured, setConfigured] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [authKey, setAuthKey] = useState('');
-  const [model, setModel] = useState('voice_messaging');
+  const [model, setModel] = useState('universal_turbo');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -241,9 +241,8 @@ function SaluteSpeechSettings() {
       <label className="mt-3 block">
         <span className="mb-1 block text-xs font-medium text-[var(--fg2)]">{t('Recognition model')}</span>
         <select value={model} onChange={(event) => setModel(event.target.value)} className="w-full rounded-[var(--radius-12)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--fg1)] focus:border-[var(--gold)] focus:outline-none">
-          <option value="voice_messaging">voice_messaging ({t('default')})</option>
+          <option value="universal_turbo">universal_turbo ({t('default')}, {t('fast')})</option>
           <option value="transcribation_hq">transcribation_hq ({t('high quality')})</option>
-          <option value="universal_turbo">universal_turbo ({t('fast')})</option>
         </select>
       </label>
 
