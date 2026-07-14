@@ -38,9 +38,38 @@ fn rest_base(recognize_url: &str) -> &str {
         .unwrap_or(recognize_url)
 }
 
+/// Read a response body, turning non-2xx statuses into an error that carries the
+/// gateway's explanation (it answers 4xx with `{"status":N,"message":"..."}` — dropping
+/// it via `error_for_status()` reduced real causes to an opaque "400 Bad Request").
+async fn read_body_checked(resp: reqwest::Response, ctx: &str) -> Result<String, String> {
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("salutespeech {ctx} read: {e}"))?;
+    if status.is_success() {
+        return Ok(text);
+    }
+    let detail: String = text.trim().chars().take(300).collect();
+    if detail.is_empty() {
+        Err(format!("salutespeech {ctx}: HTTP {status}"))
+    } else {
+        Err(format!("salutespeech {ctx}: HTTP {status}: {detail}"))
+    }
+}
+
+/// [`read_body_checked`] + JSON parse.
+async fn read_json_checked(resp: reqwest::Response, ctx: &str) -> Result<serde_json::Value, String> {
+    let text = read_body_checked(resp, ctx).await?;
+    serde_json::from_str(&text).map_err(|e| format!("salutespeech {ctx} parse: {e}"))
+}
+
 /// Run async recognition with speaker separation over `pcm16` (16 kHz mono, 16-bit LE PCM)
-/// and return the detected speaker turns.
-pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<Vec<CloudTurn>, String> {
+/// and return the detected speaker turns. `expected_speakers` is the user's speaker-count
+/// hint (in-meeting control pill); when set it is forwarded as
+/// `speaker_separation_options.count_of_speaker` (SmartSpeech proto field name).
+pub async fn diarize_pcm16(
+    cfg: &SaluteSpeechConfig,
+    pcm16: Vec<u8>,
+    expected_speakers: Option<u32>,
+) -> Result<Vec<CloudTurn>, String> {
     if pcm16.is_empty() {
         return Ok(Vec::new());
     }
@@ -51,7 +80,7 @@ pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<V
     let client = reqwest::Client::new();
 
     // 1) Upload the audio.
-    let upload: serde_json::Value = client
+    let resp = client
         .post(format!("{base}/data:upload"))
         .bearer_auth(&token)
         .header(reqwest::header::CONTENT_TYPE, "audio/x-pcm;bit=16;rate=16000")
@@ -59,12 +88,8 @@ pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<V
         .body(pcm16)
         .send()
         .await
-        .map_err(|e| format!("salutespeech upload failed: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("salutespeech upload error: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("salutespeech upload parse: {e}"))?;
+        .map_err(|e| format!("salutespeech upload failed: {e}"))?;
+    let upload = read_json_checked(resp, "upload").await?;
     let request_file_id = upload
         .pointer("/result/request_file_id")
         .and_then(|v| v.as_str())
@@ -78,11 +103,11 @@ pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<V
             "audio_encoding": "PCM_S16LE",
             "sample_rate": 16000,
             "language": "ru-RU",
-            "speaker_separation_options": { "enable": true }
+            "speaker_separation_options": speaker_separation_options(expected_speakers)
         },
         "request_file_id": request_file_id
     });
-    let started: serde_json::Value = client
+    let resp = client
         .post(format!("{base}/speech:async_recognize"))
         .bearer_auth(&token)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -90,12 +115,8 @@ pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<V
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("salutespeech async_recognize failed: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("salutespeech async_recognize error: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("salutespeech async_recognize parse: {e}"))?;
+        .map_err(|e| format!("salutespeech async_recognize failed: {e}"))?;
+    let started = read_json_checked(resp, "async_recognize").await?;
     let task_id = started
         .pointer("/result/id")
         .and_then(|v| v.as_str())
@@ -105,19 +126,15 @@ pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<V
     // 3) Poll until the task is DONE.
     let mut response_file_id: Option<String> = None;
     for _ in 0..MAX_POLLS {
-        let task: serde_json::Value = client
+        let resp = client
             .get(format!("{base}/task:get"))
             .query(&[("id", task_id.as_str())])
             .bearer_auth(&token)
             .header(reqwest::header::USER_AGENT, "GigaChat-Meetily")
             .send()
             .await
-            .map_err(|e| format!("salutespeech task:get failed: {e}"))?
-            .error_for_status()
-            .map_err(|e| format!("salutespeech task:get error: {e}"))?
-            .json()
-            .await
-            .map_err(|e| format!("salutespeech task:get parse: {e}"))?;
+            .map_err(|e| format!("salutespeech task:get failed: {e}"))?;
+        let task = read_json_checked(resp, "task:get").await?;
         match task.pointer("/result/status").and_then(|v| v.as_str()).unwrap_or("") {
             "DONE" => {
                 response_file_id = task
@@ -136,23 +153,31 @@ pub async fn diarize_pcm16(cfg: &SaluteSpeechConfig, pcm16: Vec<u8>) -> Result<V
         response_file_id.ok_or("salutespeech: recognition task did not complete in time")?;
 
     // 4) Download and parse the speaker-labeled result.
-    let text = client
+    let resp = client
         .get(format!("{base}/data:download"))
         .query(&[("response_file_id", response_file_id.as_str())])
         .bearer_auth(&token)
         .header(reqwest::header::USER_AGENT, "GigaChat-Meetily")
         .send()
         .await
-        .map_err(|e| format!("salutespeech data:download failed: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("salutespeech data:download error: {e}"))?
-        .text()
-        .await
-        .map_err(|e| format!("salutespeech data:download read: {e}"))?;
+        .map_err(|e| format!("salutespeech data:download failed: {e}"))?;
+    let text = read_body_checked(resp, "data:download").await?;
     let result: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("salutespeech data:download parse: {e}"))?;
 
     Ok(parse_turns(&result))
+}
+
+/// Build the `speaker_separation_options` request object: always enabled, with the
+/// user's expected-speaker-count hint attached when provided. The REST field is `count`
+/// (verified live 2026-07-14: the gateway strictly rejects unknown fields, and the gRPC
+/// proto name `count_of_speaker` gets HTTP 400 "unknown field"; `count` returns 200 and
+/// the task completes).
+fn speaker_separation_options(expected_speakers: Option<u32>) -> serde_json::Value {
+    match expected_speakers {
+        Some(n) if n >= 1 => json!({ "enable": true, "count": n }),
+        _ => json!({ "enable": true }),
+    }
 }
 
 /// Extract turns from the download payload: per-speaker partial entries
@@ -200,6 +225,17 @@ mod tests {
             rest_base("https://speech.giga.chat/rest/v1/speech:recognize"),
             "https://speech.giga.chat/rest/v1"
         );
+    }
+
+    #[test]
+    fn speaker_separation_options_carries_the_count_hint() {
+        assert_eq!(speaker_separation_options(None), json!({ "enable": true }));
+        assert_eq!(
+            speaker_separation_options(Some(3)),
+            json!({ "enable": true, "count": 3 })
+        );
+        // A degenerate 0 hint is dropped rather than sent.
+        assert_eq!(speaker_separation_options(Some(0)), json!({ "enable": true }));
     }
 
     #[test]

@@ -130,6 +130,55 @@ impl MeetingsRepository {
         Ok(meeting)
     }
 
+    /// Per-meeting diarization preferences (set from the in-recording control pill).
+    /// `enabled = None` means "follow the default" (enabled); `expected_speakers = None`
+    /// means automatic estimation. Returns `None` when the meeting does not exist.
+    pub async fn get_diarization_prefs(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Option<(Option<bool>, Option<i64>)>, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT diarization_enabled, expected_speakers FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(row.map(|(enabled, expected)| (enabled.map(|v| v != 0), expected)))
+    }
+
+    /// Store per-meeting diarization preferences. Returns false when the meeting
+    /// does not exist. NULLs reset a preference back to its default.
+    pub async fn set_diarization_prefs(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        enabled: Option<bool>,
+        expected_speakers: Option<i64>,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        let rows_affected = sqlx::query(
+            "UPDATE meetings SET diarization_enabled = ?, expected_speakers = ? WHERE id = ?",
+        )
+        .bind(enabled.map(|v| v as i64))
+        .bind(expected_speakers)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+
+        Ok(rows_affected.rows_affected() > 0)
+    }
+
     /// Get meeting transcripts with pagination support
     pub async fn get_meeting_transcripts_paginated(
         pool: &SqlitePool,
@@ -273,4 +322,69 @@ async fn delete_meeting_with_transaction(
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// In-memory pool with the meetings columns the diarization-prefs SQL touches
+    /// (mirrors the real schema's relevant subset incl. migration 20260714000000).
+    async fn prefs_test_pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db");
+        sqlx::query(
+            "CREATE TABLE meetings (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                diarization_enabled INTEGER,
+                expected_speakers INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO meetings (id, title) VALUES ('m1', 'Standup')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn diarization_prefs_default_to_none_and_round_trip() {
+        let pool = prefs_test_pool().await;
+
+        // Untouched meeting: both prefs unset.
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        assert_eq!(prefs, Some((None, None)));
+
+        // Pill choices: speaker ID off, 3 expected speakers.
+        let updated =
+            MeetingsRepository::set_diarization_prefs(&pool, "m1", Some(false), Some(3))
+                .await
+                .unwrap();
+        assert!(updated);
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        assert_eq!(prefs, Some((Some(false), Some(3))));
+
+        // Nulls reset back to defaults.
+        MeetingsRepository::set_diarization_prefs(&pool, "m1", None, None).await.unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        assert_eq!(prefs, Some((None, None)));
+    }
+
+    #[tokio::test]
+    async fn diarization_prefs_missing_meeting_and_empty_id() {
+        let pool = prefs_test_pool().await;
+        assert_eq!(MeetingsRepository::get_diarization_prefs(&pool, "nope").await.unwrap(), None);
+        assert!(!MeetingsRepository::set_diarization_prefs(&pool, "nope", Some(true), None)
+            .await
+            .unwrap());
+        assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ").await.is_err());
+        assert!(MeetingsRepository::set_diarization_prefs(&pool, "", None, None).await.is_err());
+    }
 }

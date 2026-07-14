@@ -21,8 +21,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::speaker::SpeakersRepository;
 use crate::pipeline::diarization::{
-    assign_segment, fold_embedding, match_speaker, Diarizer, DiarizerConfig, SpeakerTurn,
-    DEFAULT_SPEAKER_TAU, EMBEDDING_FILE, MIN_OVERLAP_RATIO, SEGMENTATION_FILE,
+    assign_segment, fold_embedding, match_speaker, DiarizationParams, Diarizer, DiarizerConfig,
+    SpeakerTurn, DEFAULT_SPEAKER_TAU, EMBEDDING_FILE, MIN_OVERLAP_RATIO, SEGMENTATION_FILE,
 };
 use crate::state::AppState;
 
@@ -352,6 +352,18 @@ pub async fn run_diarization_core<R: Runtime>(
     let audio_path = crate::audio::retranscription::find_audio_file(Path::new(&folder))
         .map_err(|_| DiarizeError::NoRecording)?;
 
+    // Per-meeting expected-speaker-count hint (in-meeting control pill). Constrains
+    // clustering (local) / count_of_speaker (cloud); None = automatic estimation.
+    let expected_speakers: Option<usize> = MeetingsRepository::get_diarization_prefs(pool, meeting_id)
+        .await
+        .map_err(|e| DiarizeError::Other(e.into()))?
+        .and_then(|(_, expected)| expected)
+        .filter(|n| *n >= 1)
+        .map(|n| n as usize);
+    if let Some(n) = expected_speakers {
+        log::info!("[diarize] meeting {meeting_id}: using expected speaker count hint = {n}");
+    }
+
     // 2) Produce speaker turns + a cluster->speaker map from the configured engine.
     let (turns, cluster_to_speaker): (Vec<SpeakerTurn>, HashMap<i64, i64>) =
         if resolve_diarization_provider(pool).await == "salutespeech" {
@@ -367,9 +379,13 @@ pub async fn run_diarization_core<R: Runtime>(
                 .await
                 .map_err(|e| DiarizeError::Other(anyhow!("audio decode task panicked: {e}")))?
                 .map_err(DiarizeError::Other)?;
-            let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(&cfg, pcm16)
-                .await
-                .map_err(|e| DiarizeError::Other(anyhow!(e)))?;
+            let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(
+                &cfg,
+                pcm16,
+                expected_speakers.map(|n| n as u32),
+            )
+            .await
+            .map_err(|e| DiarizeError::Other(anyhow!(e)))?;
             let turns: Vec<SpeakerTurn> = cloud_turns
                 .into_iter()
                 .map(|t| SpeakerTurn {
@@ -387,9 +403,10 @@ pub async fn run_diarization_core<R: Runtime>(
             if !config.is_available() {
                 return Err(DiarizeError::ModelsUnavailable);
             }
+            let params = DiarizationParams { num_speakers: expected_speakers, ..Default::default() };
             let ap = audio_path.clone();
             let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-                let diarizer = Diarizer::load(config)?;
+                let diarizer = Diarizer::load_with_params(config, params)?;
                 diarizer.diarize(&ap)
             })
             .await
@@ -492,6 +509,62 @@ pub async fn get_meeting_speakers(
     SpeakersRepository::meeting_speakers(state.db_manager.pool(), &meeting_id)
         .await
         .map_err(|e| format!("Failed to load meeting speakers: {e}"))
+}
+
+/// Per-meeting diarization preferences, as stored on the meeting row.
+#[derive(serde::Serialize)]
+pub struct MeetingDiarizationPrefs {
+    /// None = default (enabled); Some(false) = speaker ID off for this meeting.
+    pub diarization_enabled: Option<bool>,
+    /// None = automatic estimation; Some(n) = expected speaker count hint.
+    pub expected_speakers: Option<i64>,
+}
+
+/// Sanity ceiling for the expected-speaker hint; matches the pill's stepper range.
+const MAX_EXPECTED_SPEAKERS: i64 = 32;
+
+/// Store the in-meeting control pill's choices on the saved meeting row. `enabled = false`
+/// skips the automatic post-meeting diarize job (the manual "Detect speakers" button still
+/// runs); `expected_speakers` constrains clustering in both engines. Nulls reset to defaults.
+#[tauri::command]
+pub async fn set_meeting_diarization_prefs(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    enabled: Option<bool>,
+    expected_speakers: Option<i64>,
+) -> Result<(), String> {
+    if let Some(n) = expected_speakers {
+        if !(1..=MAX_EXPECTED_SPEAKERS).contains(&n) {
+            return Err(format!(
+                "expected_speakers must be between 1 and {MAX_EXPECTED_SPEAKERS}"
+            ));
+        }
+    }
+    let updated = MeetingsRepository::set_diarization_prefs(
+        state.db_manager.pool(),
+        &meeting_id,
+        enabled,
+        expected_speakers,
+    )
+    .await
+    .map_err(|e| format!("Failed to save diarization preferences: {e}"))?;
+    if !updated {
+        return Err(format!("Meeting {meeting_id} not found"));
+    }
+    Ok(())
+}
+
+/// Read a meeting's diarization preferences (both None until the pill sets them).
+#[tauri::command]
+pub async fn get_meeting_diarization_prefs(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<MeetingDiarizationPrefs, String> {
+    let prefs = MeetingsRepository::get_diarization_prefs(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to load diarization preferences: {e}"))?
+        .ok_or_else(|| format!("Meeting {meeting_id} not found"))?;
+    Ok(MeetingDiarizationPrefs { diarization_enabled: prefs.0, expected_speakers: prefs.1 })
 }
 
 /// Rename a speaker profile and mark it confirmed. Rejects empty/whitespace names.

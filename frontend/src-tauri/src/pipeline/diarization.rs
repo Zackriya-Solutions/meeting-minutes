@@ -388,6 +388,23 @@ pub fn merge_clusters_by_centroid(
     labels: &[usize],
     min_similarity: f32,
 ) -> Vec<usize> {
+    merge_clusters_by_centroid_with_hint(embeddings, durations_ms, labels, min_similarity, None)
+}
+
+/// [`merge_clusters_by_centroid`] with an optional expected-speaker-count hint (the
+/// in-meeting control pill's "expected speakers"). With `num_speakers = Some(k)` the
+/// similarity floor is replaced by a count target: closest centroid pairs merge
+/// (regardless of similarity) while more than `k` clusters remain, and merging stops at
+/// exactly `k` — the hint is the true count, not a maximum, so threshold merges below it
+/// are also suppressed. If stage 1 formed fewer than `k` fragments nothing merges (a
+/// fragment cannot be split).
+pub fn merge_clusters_by_centroid_with_hint(
+    embeddings: &[Vec<f32>],
+    durations_ms: &[i64],
+    labels: &[usize],
+    min_similarity: f32,
+    num_speakers: Option<usize>,
+) -> Vec<usize> {
     let n = labels.len();
     if n == 0 {
         return Vec::new();
@@ -411,11 +428,13 @@ pub fn merge_clusters_by_centroid(
 
     loop {
         // Find the most similar live pair.
+        let mut live = 0usize;
         let mut best: Option<(f32, usize, usize)> = None;
         for a in 0..members.len() {
             if members[a].is_empty() {
                 continue;
             }
+            live += 1;
             for b in (a + 1)..members.len() {
                 if members[b].is_empty() {
                     continue;
@@ -426,8 +445,14 @@ pub fn merge_clusters_by_centroid(
                 }
             }
         }
+        // With a hint: merge (closest pair, any similarity) while above the target count,
+        // and never past it. Without: merge while the closest pair clears the floor.
+        let should_merge = match num_speakers {
+            Some(k) => live > k.max(1),
+            None => best.map_or(false, |(sim, _, _)| sim >= min_similarity),
+        };
         match best {
-            Some((sim, a, b)) if sim >= min_similarity => {
+            Some((_, a, b)) if should_merge => {
                 let moved = std::mem::take(&mut members[b]);
                 members[a].extend(moved);
                 centroids[a] = centroid_of(&members[a]);
@@ -577,6 +602,10 @@ pub struct DiarizationParams {
     /// Stage-2 floor: fragments merge while their duration-weighted centroids are at least
     /// this cosine-similar. See [`DEFAULT_CENTROID_MERGE_MIN_SIM`].
     pub centroid_merge_min_similarity: f32,
+    /// Expected speaker count (user hint from the in-meeting control pill). When set,
+    /// stage 2 merges down to exactly this many clusters instead of using the
+    /// similarity floor. `None` = automatic (threshold-based) estimation.
+    pub num_speakers: Option<usize>,
 }
 
 impl Default for DiarizationParams {
@@ -590,6 +619,7 @@ impl Default for DiarizationParams {
             max_overlap_frac: DEFAULT_MAX_OVERLAP_FRAC,
             linkage: Linkage::Complete,
             centroid_merge_min_similarity: DEFAULT_CENTROID_MERGE_MIN_SIM,
+            num_speakers: None,
         }
     }
 }
@@ -830,12 +860,14 @@ impl Diarizer {
             self.params.cluster_distance_threshold,
             self.params.linkage,
         );
-        // Stage 2: consolidate fragments of one speaker via duration-weighted centroids.
-        let labels = merge_clusters_by_centroid(
+        // Stage 2: consolidate fragments of one speaker via duration-weighted centroids
+        // (or down to the user's expected speaker count when a hint is set).
+        let labels = merge_clusters_by_centroid_with_hint(
             &formation_embs,
             &formation_durs,
             &fragment_labels,
             self.params.centroid_merge_min_similarity,
+            self.params.num_speakers,
         );
         let num_clusters = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
 
@@ -1214,6 +1246,59 @@ mod tests {
         // Single cluster passes through.
         let one = merge_clusters_by_centroid(&[vec![1.0, 0.0]], &[500], &[0], 0.7);
         assert_eq!(one, vec![0]);
+    }
+
+    #[test]
+    fn speaker_count_hint_forces_merge_down_to_target() {
+        // Three fragments: two +x-ish voices that are NOT similar enough to merge at the
+        // floor (cos ≈ 0.71 < 0.85) plus one orthogonal +y voice. Without a hint the floor
+        // keeps all three apart; with num_speakers=2 the closest pair must merge anyway.
+        let embs = vec![
+            vec![1.0, 0.0],
+            vec![0.71, 0.71], // cos 0.71 with both neighbors
+            vec![0.0, 1.0],
+        ];
+        let durs = vec![3000, 3000, 3000];
+        let labels = vec![0, 1, 2];
+
+        let auto = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.85, None);
+        assert_eq!(auto.iter().copied().max().unwrap() + 1, 3, "floor keeps all apart");
+
+        let hinted = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.85, Some(2));
+        assert_eq!(hinted.iter().copied().max().unwrap() + 1, 2, "hint forces down to 2");
+        // The middle fragment joins one of its equally-close neighbors; the far pair
+        // (+x vs +y, cos 0) must remain split.
+        assert_ne!(hinted[0], hinted[2]);
+    }
+
+    #[test]
+    fn speaker_count_hint_blocks_merging_below_target() {
+        // Two near-identical fragments (cos ≈ 0.99, far above the 0.65 floor). Auto merges
+        // them into one speaker; num_speakers=2 asserts two people, so they must stay apart.
+        let embs = vec![vec![1.0, 0.0], vec![0.99, 0.14]];
+        let durs = vec![2000, 2000];
+        let labels = vec![0, 1];
+
+        let auto = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.65, None);
+        assert_eq!(auto[0], auto[1], "similar fragments auto-merge");
+
+        let hinted = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.65, Some(2));
+        assert_ne!(hinted[0], hinted[1], "hint pins the count at 2");
+    }
+
+    #[test]
+    fn speaker_count_hint_edge_cases() {
+        let embs = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let durs = vec![1000, 1000];
+        // Fewer fragments than the hint: nothing to split, labels pass through.
+        let under = merge_clusters_by_centroid_with_hint(&embs, &durs, &[0, 1], 0.65, Some(5));
+        assert_ne!(under[0], under[1]);
+        // Degenerate hint of 0 is clamped to 1 (everything merges, no infinite loop).
+        let zero = merge_clusters_by_centroid_with_hint(&embs, &durs, &[0, 1], 0.65, Some(0));
+        assert_eq!(zero[0], zero[1]);
+        // Hint of 1 collapses orthogonal voices into one cluster.
+        let one = merge_clusters_by_centroid_with_hint(&embs, &durs, &[0, 1], 0.65, Some(1));
+        assert_eq!(one[0], one[1]);
     }
 
     #[test]

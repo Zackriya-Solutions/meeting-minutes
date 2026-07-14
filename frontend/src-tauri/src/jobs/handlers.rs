@@ -167,6 +167,22 @@ impl JobHandler for DiarizeHandler {
 
         let meeting_id = meeting_id.ok_or_else(|| anyhow::anyhow!("diarize requires a meeting_id"))?;
 
+        // Per-meeting opt-out (in-meeting control pill): diarization_enabled = 0 skips the
+        // automatic job. The manual `diarize_meeting` command bypasses this — an explicit
+        // "Detect speakers" click always runs.
+        let prefs = crate::database::repositories::meeting::MeetingsRepository::get_diarization_prefs(
+            &ctx.pool,
+            meeting_id,
+        )
+        .await?;
+        if prefs.and_then(|(enabled, _)| enabled) == Some(false) {
+            log::info!(
+                "[diarize] meeting {meeting_id}: speaker ID disabled for this meeting; \
+                 leaving segments unattributed"
+            );
+            return Ok(());
+        }
+
         // The runner owns no AppHandle; the diarize core reaches Tauri (model dir + event
         // emission) via the process-wide handle set at startup. If it is absent (should not
         // happen in a running app), degrade gracefully — segments stay unattributed.

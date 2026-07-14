@@ -562,6 +562,8 @@ pub fn run() {
             pipeline::diarization_commands::diarize_meeting,
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
+            pipeline::diarization_commands::set_meeting_diarization_prefs,
+            pipeline::diarization_commands::get_meeting_diarization_prefs,
             gigaam_engine::commands::gigaam_status,
             gigaam_engine::commands::gigaam_download_model,
             gigaam_engine::commands::gigaam_select_variant,
