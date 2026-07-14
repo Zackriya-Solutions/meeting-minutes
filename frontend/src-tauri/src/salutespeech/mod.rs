@@ -10,11 +10,12 @@
 //!
 //! Endpoints, model, and scope are configurable via `app_settings_kv`
 //! (`salutespeech.*`) or the environment (`SBER_SALUTE_*` / `SALUTESPEECH_*`), with
-//! `speech.giga.chat` + model `voice_messaging` as defaults. TLS verifies with system
+//! `speech.giga.chat` + model `universal_turbo` as defaults. TLS verifies with system
 //! trust roots (no custom CA needed). Speaker attribution comes from the app's existing
 //! local diarization / channel tagging — the sync REST API returns no speaker labels.
 
 pub mod auth;
+pub mod diarize;
 pub mod rest;
 
 pub use rest::SaluteSpeechProvider;
@@ -23,8 +24,8 @@ use sqlx::SqlitePool;
 
 pub const DEFAULT_OAUTH_URL: &str = "https://speech.giga.chat/v1/token";
 pub const DEFAULT_RECOGNIZE_URL: &str = "https://speech.giga.chat/rest/v1/speech:recognize";
-/// giga.chat recognition models: transcribation_hq | voice_messaging | universal_turbo.
-pub const DEFAULT_MODEL: &str = "voice_messaging";
+/// giga.chat recognition models: transcribation_hq | universal_turbo.
+pub const DEFAULT_MODEL: &str = "universal_turbo";
 
 /// Resolved SaluteSpeech configuration for a recording/session.
 #[derive(Clone, Debug)]

@@ -266,6 +266,72 @@ async fn resolve_cluster_speakers(
     Ok(map)
 }
 
+/// Diarization engine selection: `"local"` (default) or `"salutespeech"` (Sber cloud).
+/// Reads `app_settings_kv.diarization.provider`; `MEETILY_DIARIZATION_PROVIDER` overrides
+/// it (headless runs / tests).
+async fn resolve_diarization_provider(pool: &SqlitePool) -> String {
+    if let Ok(v) = std::env::var("MEETILY_DIARIZATION_PROVIDER") {
+        if !v.trim().is_empty() {
+            return v.trim().to_string();
+        }
+    }
+    sqlx::query_scalar::<_, String>(
+        "SELECT value FROM app_settings_kv WHERE key = 'diarization.provider'",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| "local".to_string())
+}
+
+/// Create a fresh unconfirmed `Speaker N` profile per distinct cloud speaker id, returning
+/// a `cluster_id -> speakers.id` map. Cloud speaker ids aren't stable across meetings, so
+/// (unlike the local path) we don't attempt cross-meeting embedding matching — profiles are
+/// stored with an empty embedding (never matches) and orphans are GC'd after the run.
+async fn resolve_cloud_speakers(
+    pool: &SqlitePool,
+    turns: &[SpeakerTurn],
+) -> anyhow::Result<HashMap<i64, i64>> {
+    let mut distinct: Vec<i64> = turns.iter().map(|t| t.cluster_id).collect();
+    distinct.sort_unstable();
+    distinct.dedup();
+
+    let base_count = SpeakersRepository::count(pool).await?;
+    let mut map = HashMap::new();
+    for (i, cluster_id) in distinct.iter().enumerate() {
+        let name = format!("Speaker {}", base_count + 1 + i as i64);
+        let id = SpeakersRepository::insert(pool, &name, &[], false).await?;
+        map.insert(*cluster_id, id);
+    }
+    Ok(map)
+}
+
+/// Decode a recording to 16 kHz mono 16-bit LE PCM (for cloud upload). CPU-bound — call
+/// under `spawn_blocking`.
+fn decode_to_pcm16_16k(path: &Path) -> anyhow::Result<Vec<u8>> {
+    let decoded = crate::audio::decoder::decode_audio_file(path)?;
+    let mono: Vec<f32> = if decoded.channels > 1 {
+        let ch = decoded.channels as usize;
+        decoded.samples.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect()
+    } else {
+        decoded.samples
+    };
+    let s16k = if decoded.sample_rate != 16_000 {
+        crate::audio::audio_processing::resample_audio(&mono, decoded.sample_rate, 16_000)
+    } else {
+        mono
+    };
+    let mut pcm = Vec::with_capacity(s16k.len() * 2);
+    for s in s16k {
+        let v = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+        pcm.extend_from_slice(&v.to_le_bytes());
+    }
+    Ok(pcm)
+}
+
 /// Shared diarization core, called by both the `diarize_meeting` command and the `diarize`
 /// job handler. Runs the engine on the meeting's recording, attributes transcript segments
 /// to resolved speakers, persists cross-meeting speaker identities, and emits
@@ -275,14 +341,7 @@ pub async fn run_diarization_core<R: Runtime>(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<DiarizeOutcome, DiarizeError> {
-    // 1) Model availability.
-    let model_dir = resolve_model_dir(app).map_err(|e| DiarizeError::Other(anyhow!(e)))?;
-    let config = DiarizerConfig { model_dir };
-    if !config.is_available() {
-        return Err(DiarizeError::ModelsUnavailable);
-    }
-
-    // 2) Locate the meeting's saved recording (reuses retranscription's lookup).
+    // 1) Locate the meeting's saved recording (both engines need it).
     let meeting = MeetingsRepository::get_meeting_metadata(pool, meeting_id)
         .await
         .map_err(|e| DiarizeError::Other(e.into()))?
@@ -293,19 +352,54 @@ pub async fn run_diarization_core<R: Runtime>(
     let audio_path = crate::audio::retranscription::find_audio_file(Path::new(&folder))
         .map_err(|_| DiarizeError::NoRecording)?;
 
-    // 3) Run the (sync, CPU-bound) diarizer off the async runtime.
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let diarizer = Diarizer::load(config)?;
-        diarizer.diarize(&audio_path)
-    })
-    .await
-    .map_err(|e| DiarizeError::Other(anyhow!("diarize task panicked: {e}")))?
-    .map_err(DiarizeError::Other)?;
-
-    // 4) Cross-meeting speaker identities → cluster_id -> speakers.id.
-    let cluster_to_speaker = resolve_cluster_speakers(pool, &result.cluster_embeddings)
-        .await
-        .map_err(DiarizeError::Other)?;
+    // 2) Produce speaker turns + a cluster->speaker map from the configured engine.
+    let (turns, cluster_to_speaker): (Vec<SpeakerTurn>, HashMap<i64, i64>) =
+        if resolve_diarization_provider(pool).await == "salutespeech" {
+            // Cloud: SaluteSpeech async recognition with speaker separation.
+            log::info!("[diarize] using SaluteSpeech cloud engine");
+            let cfg = crate::salutespeech::resolve_config(pool).await.ok_or_else(|| {
+                DiarizeError::Other(anyhow!(
+                    "SaluteSpeech Authorization Key not configured (Settings → Transcription)"
+                ))
+            })?;
+            let ap = audio_path.clone();
+            let pcm16 = tokio::task::spawn_blocking(move || decode_to_pcm16_16k(&ap))
+                .await
+                .map_err(|e| DiarizeError::Other(anyhow!("audio decode task panicked: {e}")))?
+                .map_err(DiarizeError::Other)?;
+            let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(&cfg, pcm16)
+                .await
+                .map_err(|e| DiarizeError::Other(anyhow!(e)))?;
+            let turns: Vec<SpeakerTurn> = cloud_turns
+                .into_iter()
+                .map(|t| SpeakerTurn {
+                    start_ms: t.start_ms,
+                    end_ms: t.end_ms,
+                    cluster_id: t.speaker_id,
+                })
+                .collect();
+            let cts = resolve_cloud_speakers(pool, &turns).await.map_err(DiarizeError::Other)?;
+            (turns, cts)
+        } else {
+            // Local: pyannote-style ONNX cascade (segmentation + CAM++ + clustering).
+            let model_dir = resolve_model_dir(app).map_err(|e| DiarizeError::Other(anyhow!(e)))?;
+            let config = DiarizerConfig { model_dir };
+            if !config.is_available() {
+                return Err(DiarizeError::ModelsUnavailable);
+            }
+            let ap = audio_path.clone();
+            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                let diarizer = Diarizer::load(config)?;
+                diarizer.diarize(&ap)
+            })
+            .await
+            .map_err(|e| DiarizeError::Other(anyhow!("diarize task panicked: {e}")))?
+            .map_err(DiarizeError::Other)?;
+            let cts = resolve_cluster_speakers(pool, &result.cluster_embeddings)
+                .await
+                .map_err(DiarizeError::Other)?;
+            (result.turns, cts)
+        };
 
     // 5) Attribute transcript segments. Reset first so re-runs are idempotent (only
     //    speaker_id is touched — the 'mic'/'system' channel tag is preserved).
@@ -313,7 +407,7 @@ pub async fn run_diarization_core<R: Runtime>(
         .await
         .map_err(|e| DiarizeError::Other(e.into()))?;
     let total_segments = segments.len() as i64;
-    let assignments = assign_segments_to_speakers(&segments, &result.turns, &cluster_to_speaker);
+    let assignments = assign_segments_to_speakers(&segments, &turns, &cluster_to_speaker);
 
     SpeakersRepository::clear_meeting_speaker_ids(pool, meeting_id)
         .await

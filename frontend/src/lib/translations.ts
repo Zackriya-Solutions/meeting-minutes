@@ -893,5 +893,12 @@ export const RU: Record<string, string> = {
   "Client / Sales Meeting": "Встреча с клиентом / продажи",
   "Capture client goals, deliverables, and next steps.": "Зафиксируйте цели клиента, результаты и следующие шаги.",
   "Standard Meeting Notes": "Стандартные заметки встречи",
-  "A standard template for general meetings, focusing on key outcomes and actions.": "Стандартный шаблон для обычных встреч: ключевые итоги и задачи."
+  "A standard template for general meetings, focusing on key outcomes and actions.": "Стандартный шаблон для обычных встреч: ключевые итоги и задачи.",
+  "Speaker detection": "Определение спикеров",
+  "Who said each line — runs after a meeting via the “Speakers” button.": "Кто что сказал — определяется после встречи по кнопке «Спикеры».",
+  "Local · on-device": "Локально · на устройстве",
+  "pyannote-style models (~35 MB, one-time download). Private — audio stays on your machine.": "Модели pyannote (~35 МБ, разовая загрузка). Приватно — аудио остаётся на устройстве.",
+  "Cloud speaker separation using your SaluteSpeech key. Audio is sent to Sber.": "Облачное разделение по спикерам через ваш ключ SaluteSpeech. Аудио отправляется в Сбер.",
+  "Needs a SaluteSpeech Authorization Key (set it above). Audio is sent to Sber.": "Нужен ключ авторизации SaluteSpeech (укажите выше). Аудио отправляется в Сбер.",
+  "Set your SaluteSpeech key in Settings → Transcription to use cloud speaker detection.": "Укажите ключ SaluteSpeech в «Настройки → Расшифровка», чтобы использовать облачное определение спикеров."
 };
