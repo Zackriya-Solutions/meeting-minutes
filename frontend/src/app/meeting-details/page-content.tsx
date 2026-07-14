@@ -13,6 +13,12 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
+import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
+import { useTemplates } from '@/hooks/meeting-details/useTemplates';
+import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
+import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
+import { useConfig } from '@/contexts/ConfigContext';
+import { useT } from '@/lib/i18n';
 
 // Transcript/summary splitter: user-dragged width of the transcript pane (px),
 // persisted across meetings. Bounded so neither pane can be crushed.
@@ -29,12 +35,6 @@ function readStoredTranscriptWidth(): number | null {
     return null;
   }
 }
-import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
-import { useTemplates } from '@/hooks/meeting-details/useTemplates';
-import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
-import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
-import { useConfig } from '@/contexts/ConfigContext';
-import { useT } from '@/lib/i18n';
 
 export default function PageContent({
   meeting,

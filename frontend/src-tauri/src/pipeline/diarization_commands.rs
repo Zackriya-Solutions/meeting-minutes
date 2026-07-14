@@ -511,15 +511,6 @@ pub async fn get_meeting_speakers(
         .map_err(|e| format!("Failed to load meeting speakers: {e}"))
 }
 
-/// Per-meeting diarization preferences, as stored on the meeting row.
-#[derive(serde::Serialize)]
-pub struct MeetingDiarizationPrefs {
-    /// None = default (enabled); Some(false) = speaker ID off for this meeting.
-    pub diarization_enabled: Option<bool>,
-    /// None = automatic estimation; Some(n) = expected speaker count hint.
-    pub expected_speakers: Option<i64>,
-}
-
 /// Sanity ceiling for the expected-speaker hint; matches the pill's stepper range.
 const MAX_EXPECTED_SPEAKERS: i64 = 32;
 
@@ -552,19 +543,6 @@ pub async fn set_meeting_diarization_prefs(
         return Err(format!("Meeting {meeting_id} not found"));
     }
     Ok(())
-}
-
-/// Read a meeting's diarization preferences (both None until the pill sets them).
-#[tauri::command]
-pub async fn get_meeting_diarization_prefs(
-    state: tauri::State<'_, AppState>,
-    meeting_id: String,
-) -> Result<MeetingDiarizationPrefs, String> {
-    let prefs = MeetingsRepository::get_diarization_prefs(state.db_manager.pool(), &meeting_id)
-        .await
-        .map_err(|e| format!("Failed to load diarization preferences: {e}"))?
-        .ok_or_else(|| format!("Meeting {meeting_id} not found"))?;
-    Ok(MeetingDiarizationPrefs { diarization_enabled: prefs.0, expected_speakers: prefs.1 })
 }
 
 /// Rename a speaker profile and mark it confirmed. Rejects empty/whitespace names.

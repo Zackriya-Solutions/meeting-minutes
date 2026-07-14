@@ -64,7 +64,8 @@ async fn read_json_checked(resp: reqwest::Response, ctx: &str) -> Result<serde_j
 /// Run async recognition with speaker separation over `pcm16` (16 kHz mono, 16-bit LE PCM)
 /// and return the detected speaker turns. `expected_speakers` is the user's speaker-count
 /// hint (in-meeting control pill); when set it is forwarded as
-/// `speaker_separation_options.count_of_speaker` (SmartSpeech proto field name).
+/// `speaker_separation_options.count` (see [`speaker_separation_options`] for why the REST
+/// field is `count` and not the gRPC proto name `count_of_speaker`).
 pub async fn diarize_pcm16(
     cfg: &SaluteSpeechConfig,
     pcm16: Vec<u8>,
