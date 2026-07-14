@@ -39,6 +39,8 @@ set -uo pipefail
 
 TARGET="x86_64-apple-darwin"
 GPU_FEATURE="metal"   # Intel Macs: Metal GPU. CoreML (Neural Engine) is Apple-Silicon only.
+FFMPEG_FETCH_URL="https://www.osxexperts.net/ffmpeg80intel.zip"
+FFMPEG_FETCH_SHA256="2d24d22db78c87f394a5822867acd5c5dc5e762cd261a44bd26923f3a5af3e07"
 
 # Compile std from source with the current (Homebrew) compiler — see header.
 export RUSTC_BOOTSTRAP=1
@@ -155,10 +157,19 @@ else
   done
   # 2) Optional network fetch of a full static Intel build (osxexperts, v8.0).
   if [[ $produced -eq 0 && $fetch_ffmpeg -eq 1 ]]; then
-    URL="https://www.osxexperts.net/ffmpeg80intel.zip"
-    echo "    fetching full x86_64 ffmpeg from $URL"
+    echo "    fetching full x86_64 ffmpeg from $FFMPEG_FETCH_URL"
     tmp="$(mktemp -d)"
-    if curl -fsSL "$URL" -o "$tmp/ffmpeg.zip" && unzip -qo "$tmp/ffmpeg.zip" -d "$tmp"; then
+    if curl -fsSL "$FFMPEG_FETCH_URL" -o "$tmp/ffmpeg.zip"; then
+      actual_sha256="$(shasum -a 256 "$tmp/ffmpeg.zip" | awk '{print $1}')"
+      if [[ "$actual_sha256" != "$FFMPEG_FETCH_SHA256" ]]; then
+        echo "error: downloaded ffmpeg checksum mismatch" >&2
+        echo "       expected: $FFMPEG_FETCH_SHA256" >&2
+        echo "       actual:   $actual_sha256" >&2
+        rm -rf "$tmp"
+        exit 1
+      fi
+    fi
+    if [[ -f "$tmp/ffmpeg.zip" ]] && unzip -qo "$tmp/ffmpeg.zip" -d "$tmp"; then
       got="$(find "$tmp" -type f -name ffmpeg -not -path '*__MACOSX*' | head -1)"
       if [[ -n "$got" ]] && ffmpeg_is_x86 "$got"; then
         cp -f "$got" "$FFMPEG_SIDECAR" && produced=1
