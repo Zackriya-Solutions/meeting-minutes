@@ -104,7 +104,8 @@
         "macOS": {
             "entitlements": "entitlements.plist",
             "signingIdentity": "-",
-            "hardenedRuntime": true
+            "hardenedRuntime": true,
+            "minimumSystemVersion": "14.2"
         },
         "windows": {
             "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
