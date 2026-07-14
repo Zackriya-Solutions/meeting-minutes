@@ -38,6 +38,15 @@ impl DatabaseManager {
 
         sqlx::migrate!("./migrations").run(&pool).await?;
 
+        let managed_defaults = super::managed_defaults::migrate(&pool).await?;
+        if managed_defaults.transcription_changed || managed_defaults.summary_changed {
+            log::info!(
+                "Managed defaults migration applied: transcription_changed={}, summary_changed={}",
+                managed_defaults.transcription_changed,
+                managed_defaults.summary_changed
+            );
+        }
+
         // Create the vec0 embeddings table if the extension is available. Never
         // fatal: a build without sqlite-vec still boots (hybrid search falls back
         // to FTS-only).

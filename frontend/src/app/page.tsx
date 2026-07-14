@@ -238,6 +238,11 @@ export default function Home() {
 
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
+  const transcriptionProviderLabel = transcriptModelConfig.provider === 'salutespeech'
+    ? 'SaluteSpeech · cloud'
+    : transcriptModelConfig.provider === 'gigaam'
+      ? 'GigaAM · local'
+      : `${transcriptModelConfig.provider} · ${transcriptModelConfig.model}`;
 
   return (
     <motion.div
@@ -291,9 +296,15 @@ export default function Home() {
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
             <div
-              className="pointer-events-none fixed bottom-8 right-0 z-10 flex justify-center transition-[left] duration-300"
+              className="pointer-events-none fixed bottom-8 right-0 z-10 flex flex-col items-center gap-2 transition-[left] duration-300"
               style={{ left: sidebarCollapsed ? '4rem' : `${sidebarWidth}px` }}
             >
+              <span
+                className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--fg2)] shadow-sm"
+                title={`${t('Transcription engine')}: ${transcriptModelConfig.model}`}
+              >
+                {transcriptionProviderLabel}
+              </span>
               <button
                 onClick={() => handleRecordingStart()}
                 disabled={isRecordingDisabled}
