@@ -7,6 +7,14 @@ use log::{info, warn};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 
+const COREML_CTC_LIVE_SEGMENT_DURATION_MS: u32 = 5_000;
+
+fn max_live_segment_duration_ms(provider: &str, model: &str) -> Option<u32> {
+    (provider == "parakeet"
+        && model == crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL)
+        .then_some(COREML_CTC_LIVE_SEGMENT_DURATION_MS)
+}
+
 // ============================================================================
 // TRANSCRIPTION ENGINE ENUM
 // ============================================================================
@@ -51,8 +59,11 @@ impl TranscriptionEngine {
 // MODEL VALIDATION AND INITIALIZATION
 // ============================================================================
 
-/// Validate that transcription models (Whisper or Parakeet) are ready before starting recording
-pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+/// Validate that transcription models (Whisper or Parakeet) are ready before starting recording.
+/// Returns the maximum live segment duration for models that require bounded-latency chunks.
+pub async fn validate_transcription_model_ready<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<u32>, String> {
     // Check transcript configuration to determine which engine to validate
     let config = match crate::api::api::api_get_transcript_config(
         app.clone(),
@@ -103,7 +114,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
                 Ok(model_name) => {
                     info!("✅ Whisper model validation successful: {} is ready", model_name);
-                    Ok(())
+                    Ok(None)
                 }
                 Err(e) => {
                     warn!("❌ Whisper model validation failed: {}", e);
@@ -127,7 +138,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             match crate::parakeet_engine::commands::parakeet_validate_model_ready_with_config(app).await {
                 Ok(model_name) => {
                     info!("✅ Parakeet model validation successful: {} is ready", model_name);
-                    Ok(())
+                    Ok(max_live_segment_duration_ms("parakeet", &model_name))
                 }
                 Err(e) => {
                     warn!("❌ Parakeet model validation failed: {}", e);
@@ -142,6 +153,33 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 other
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::max_live_segment_duration_ms;
+
+    #[test]
+    fn live_segmentation_is_limited_to_coreml_ctc() {
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "parakeet",
+                crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL,
+            ),
+            Some(5_000),
+        );
+        assert_eq!(
+            max_live_segment_duration_ms("parakeet", "parakeet-tdt-0.6b-v3-int8"),
+            None,
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "localWhisper",
+                crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL,
+            ),
+            None,
+        );
     }
 }
 

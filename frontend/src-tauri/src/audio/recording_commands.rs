@@ -91,19 +91,23 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
+    let max_live_segment_duration_ms =
+        match transcription::validate_transcription_model_ready(&app).await {
+            Ok(duration) => duration,
+            Err(validation_error) => {
+                error!("Model validation failed: {}", validation_error);
 
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
+                // Emit error event for frontend - actionable: false to show toast instead of modal
+                // (download progress is already shown in top-right toast)
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "error": validation_error,
+                    "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+                    "actionable": false
+                }));
 
-        return Err(validation_error);
-    }
+                return Err(validation_error);
+            }
+        };
     info!("✅ Transcription model validation passed");
 
     // Async-first approach - no more blocking operations!
@@ -234,7 +238,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            max_live_segment_duration_ms,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -337,19 +346,23 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
+    let max_live_segment_duration_ms =
+        match transcription::validate_transcription_model_ready(&app).await {
+            Ok(duration) => duration,
+            Err(validation_error) => {
+                error!("Model validation failed: {}", validation_error);
 
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
+                // Emit error event for frontend - actionable: false to show toast instead of modal
+                // (download progress is already shown in top-right toast)
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "error": validation_error,
+                    "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+                    "actionable": false
+                }));
 
-        return Err(validation_error);
-    }
+                return Err(validation_error);
+            }
+        };
     info!("✅ Transcription model validation passed");
 
     // Parse devices
@@ -405,7 +418,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            max_live_segment_duration_ms,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
