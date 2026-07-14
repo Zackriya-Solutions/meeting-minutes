@@ -43,6 +43,14 @@ fi
 
 echo "Using Node.js $(node --version) and pnpm $("${PNPM[@]}" --version)"
 
+# cidre builds the macOS system-audio bridge with xcodebuild. Command Line Tools alone
+# are insufficient, so fail before deleting caches and reinstalling dependencies.
+if [[ "$(uname -s)" == "Darwin" ]] && ! xcodebuild -version >/dev/null 2>&1; then
+    echo "Full Xcode is required for the macOS Tauri build (Command Line Tools are not enough)."
+    echo "Install Xcode, then run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
+    exit 1
+fi
+
 # Bypass any configured HTTP proxy for localhost. Without this, an http_proxy/
 # HTTPS_PROXY with no localhost exception routes 127.0.0.1 through the proxy,
 # which can't reach it — breaking the Next dev server / HMR (ChunkLoadError:
