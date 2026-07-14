@@ -8,6 +8,16 @@ pub const PRIMARY_GATEWAY: &str = "https://gw.gigatool.app";
 pub const FALLBACK_GATEWAY: &str = "https://gw2.gigatool.app";
 const SERVICE: &str = "meetily.gateway";
 
+fn registration_key() -> Result<String, String> {
+    // Release builds receive this at compile time. Runtime env is kept for local
+    // development/CI. The value is never committed to the repository.
+    option_env!("MEMENTO_REGISTRATION_KEY")
+        .map(str::to_owned)
+        .or_else(|| std::env::var("MEMENTO_REGISTRATION_KEY").ok())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "MEMENTO_REGISTRATION_KEY is missing from this build".to_string())
+}
+
 #[derive(Serialize)]
 struct Registration<'a> {
     #[serde(rename = "deviceId")]
@@ -42,6 +52,7 @@ fn device_id() -> Result<String, String> {
 async fn register(base: &str) -> Result<String, String> {
     let response = reqwest::Client::new()
         .post(format!("{}/register", base.trim_end_matches('/')))
+        .header("x-memento-registration-key", registration_key()?)
         .json(&Registration {
             device_id: &device_id()?,
             platform: std::env::consts::OS,
