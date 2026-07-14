@@ -68,6 +68,18 @@ async fn resolve(pool: &SqlitePool, key: &str, envs: &[&str], default: &str) -> 
 
 /// Resolve full config from settings/env. `None` when no Authorization Key is set.
 pub async fn resolve_config(pool: &SqlitePool) -> Option<SaluteSpeechConfig> {
+    // SaluteSpeech sends audio off-device. An unreadable privacy policy fails closed.
+    match crate::llm::PrivacyConfig::load(pool).await {
+        Ok(privacy) if !privacy.local_only => {}
+        Ok(_) => {
+            log::info!("SaluteSpeech disabled by privacy.local_only");
+            return None;
+        }
+        Err(e) => {
+            log::warn!("SaluteSpeech blocked because privacy settings are unavailable: {e}");
+            return None;
+        }
+    }
     let configured_key = kv(pool, "salutespeech.auth_key")
         .await
         .or_else(|| env("SALUTESPEECH_AUTH_KEY"))
@@ -118,9 +130,21 @@ pub async fn resolve_config(pool: &SqlitePool) -> Option<SaluteSpeechConfig> {
     })
 }
 
-/// Whether SaluteSpeech is usable (an Authorization Key is configured).
+/// Whether SaluteSpeech is usable: a user Authorization Key is configured OR the
+/// managed Memento gateway can issue an install token (keyless pilot path).
 pub async fn is_configured(pool: &SqlitePool) -> bool {
     resolve_config(pool).await.is_some()
+}
+
+/// Tauri command mirroring [`is_configured`] for the frontend readiness gates
+/// (recording start, speaker detection). Returns true when SaluteSpeech is usable
+/// via either a user key or the managed gateway — so the UI no longer demands a
+/// local `salutespeech.auth_key` in the managed build.
+#[tauri::command]
+pub async fn salutespeech_is_configured(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    Ok(is_configured(state.db_manager.pool()).await)
 }
 
 /// Map the app's language preference (`"ru"`, `"en"`, `"auto"`, `None`) to a

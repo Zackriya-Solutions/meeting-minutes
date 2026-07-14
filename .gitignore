@@ -77,3 +77,5 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+frontend/evals/private/
+frontend/evals/reports/

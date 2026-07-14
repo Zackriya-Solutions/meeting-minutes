@@ -242,7 +242,10 @@ export default function RootLayout({
           </RecordingStateProvider>
         </AnalyticsProvider>
 
-        <Toaster position="bottom-center" richColors closeButton />
+        {/* App is dark-only (:root is dark, no theme toggle). Without theme="dark",
+            Sonner renders light toasts, so toasts whose custom content uses the app's
+            dark-theme --fg vars (e.g. the recording notification) show white-on-white. */}
+        <Toaster position="bottom-center" richColors closeButton theme="dark" />
         </LanguageProvider>
       </body>
     </html>

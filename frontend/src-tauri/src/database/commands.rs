@@ -187,28 +187,28 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     // Update app state with the new manager
     app.manage(AppState { db_manager: db_manager.clone() });
 
-    // Set default model configuration for fresh installs
+    // Set default model configuration for fresh installs. Managed pilot defaults:
+    // cloud DeepSeek (summary) + SaluteSpeech (transcription), both via the Memento
+    // gateway — no local models or API keys required. Users can switch to local
+    // providers (builtin-ai / parakeet / gigaam) in Settings.
     let pool = db_manager.pool();
-    
-    let default_summary_model = crate::summary::summary_engine::commands::get_recommended_summary_model_for_current_system()
-        .unwrap_or("qwen3.5:2b");
 
-    // Default Summary Model: Built-in AI (Qwen recommendation for this system)
+    // Default Summary Model: managed DeepSeek (cloud)
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
-        default_summary_model,
-        "large-v3", // Default whisper model (unused for builtin but required)
+        "deepseek",
+        crate::llm::providers::deepseek::DEFAULT_MODEL,
+        "large-v3", // Default whisper model (unused for cloud but column is required)
         None,
     ).await {
         error!("Failed to set default summary model config: {}", e);
     }
 
-    // Default Transcription Model: Parakeet
+    // Default Transcription Model: managed SaluteSpeech (cloud)
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
         pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
+        "salutespeech",
+        "salutespeech-stream-v2",
     ).await {
         error!("Failed to set default transcription model config: {}", e);
     }

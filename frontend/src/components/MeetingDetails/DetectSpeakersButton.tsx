@@ -65,21 +65,26 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
         setPhase("checking");
         try {
             // Cloud diarization (SaluteSpeech) skips the local-model download gate — it
-            // only needs the configured Authorization Key.
-            let provider = "local";
-            let saluteKeySet = false;
+            // works through the managed Memento gateway (or a user Authorization Key).
+            // Default to SaluteSpeech when nothing is persisted (managed build default).
+            let provider = "salutespeech";
+            let saluteReady = false;
             try {
                 const s = await invoke<Record<string, string>>("get_app_settings");
-                provider = (s?.["diarization.provider"] || "local").trim() || "local";
-                saluteKeySet = !!(s?.["salutespeech.auth_key"] && s["salutespeech.auth_key"].length > 0);
+                provider = (s?.["diarization.provider"] || "salutespeech").trim() || "salutespeech";
             } catch {
-                /* settings unreadable → fall back to local */
+                /* settings unreadable → fall back to the salutespeech default */
+            }
+            try {
+                saluteReady = await invoke<boolean>("salutespeech_is_configured");
+            } catch {
+                saluteReady = false;
             }
 
             if (provider === "salutespeech") {
-                if (!saluteKeySet) {
+                if (!saluteReady) {
                     setPhase("idle");
-                    toast.error(t("Set your SaluteSpeech key in Settings → Transcription to use cloud speaker detection."));
+                    toast.error(t("SaluteSpeech speaker detection is unavailable right now. Try again shortly or switch to Local in Settings → Transcription."));
                     return;
                 }
                 await runDiarize();

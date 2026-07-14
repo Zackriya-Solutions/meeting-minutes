@@ -19,6 +19,12 @@ pub struct JobRow {
     pub run_after: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnqueueOutcome {
+    pub id: i64,
+    pub created: bool,
+}
+
 /// Insert a new queued job. Returns its id.
 pub async fn enqueue(
     pool: &SqlitePool,
@@ -37,6 +43,78 @@ pub async fn enqueue(
     .fetch_one(pool)
     .await?;
     Ok(id)
+}
+
+/// Enqueue at most one active job for a `(kind, meeting_id)` pair. The
+/// `INSERT ... WHERE NOT EXISTS` is a single SQLite write statement, so two
+/// callers cannot both observe the queue as empty and insert duplicates.
+/// Completed and permanently failed jobs do not block a fresh repair attempt.
+pub async fn enqueue_unique(
+    pool: &SqlitePool,
+    kind: &str,
+    meeting_id: Option<&str>,
+    payload: &serde_json::Value,
+) -> Result<EnqueueOutcome, sqlx::Error> {
+    let payload_str = payload.to_string();
+    if let Some(id) = try_insert_unique(pool, kind, meeting_id, &payload_str).await? {
+        return Ok(EnqueueOutcome { id, created: true });
+    }
+
+    if let Some(id) = find_active_job(pool, kind, meeting_id).await? {
+        return Ok(EnqueueOutcome { id, created: false });
+    }
+
+    // The blocking job may have completed between the INSERT and SELECT above.
+    // Retry the atomic insert once; if another caller wins that retry, return the
+    // active job it created instead of surfacing a benign RowNotFound race.
+    if let Some(id) = try_insert_unique(pool, kind, meeting_id, &payload_str).await? {
+        return Ok(EnqueueOutcome { id, created: true });
+    }
+
+    let id = find_active_job(pool, kind, meeting_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    Ok(EnqueueOutcome { id, created: false })
+}
+
+async fn try_insert_unique(
+    pool: &SqlitePool,
+    kind: &str,
+    meeting_id: Option<&str>,
+    payload: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "INSERT INTO jobs (kind, meeting_id, payload, status, updated_at) \
+         SELECT ?, ?, ?, 'queued', datetime('now') \
+         WHERE NOT EXISTS ( \
+           SELECT 1 FROM jobs \
+           WHERE kind = ? AND meeting_id IS ? AND status IN ('queued', 'running') \
+         ) \
+         RETURNING id",
+    )
+    .bind(kind)
+    .bind(meeting_id)
+    .bind(payload)
+    .bind(kind)
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
+}
+
+async fn find_active_job(
+    pool: &SqlitePool,
+    kind: &str,
+    meeting_id: Option<&str>,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM jobs \
+         WHERE kind = ? AND meeting_id IS ? AND status IN ('queued', 'running') \
+         ORDER BY id LIMIT 1",
+    )
+    .bind(kind)
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
 }
 
 /// Startup recovery: any job left in `running` (app killed mid-flight) is returned to
@@ -78,10 +156,12 @@ pub async fn try_claim(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> 
 }
 
 pub async fn mark_done(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE jobs SET status='done', last_error=NULL, updated_at=datetime('now') WHERE id=?")
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE jobs SET status='done', last_error=NULL, updated_at=datetime('now') WHERE id=?",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

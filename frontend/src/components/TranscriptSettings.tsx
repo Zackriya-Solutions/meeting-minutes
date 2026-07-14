@@ -81,22 +81,28 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
  */
 function DiarizationEngineSetting() {
   const t = useT();
-  const [provider, setProvider] = useState<'local' | 'salutespeech'>('local');
-  const [saluteKeySet, setSaluteKeySet] = useState(false);
+  const [provider, setProvider] = useState<'local' | 'salutespeech'>('salutespeech');
+  const [saluteReady, setSaluteReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const settings = await invoke<Record<string, string>>('get_app_settings');
-        const p = (settings?.['diarization.provider'] || 'local').trim();
-        setProvider(p === 'salutespeech' ? 'salutespeech' : 'local');
-        setSaluteKeySet(!!settings?.['salutespeech.auth_key'] && settings['salutespeech.auth_key'].length > 0);
+        // Default to SaluteSpeech (cloud) when nothing is persisted — matches the
+        // backend diarization default in the managed build.
+        const p = (settings?.['diarization.provider'] || 'salutespeech').trim();
+        setProvider(p === 'local' ? 'local' : 'salutespeech');
       } catch {
-        // default to local
-      } finally {
-        setLoaded(true);
+        // default to salutespeech
       }
+      try {
+        // Ready via a user key OR the managed Memento gateway.
+        setSaluteReady(await invoke<boolean>('salutespeech_is_configured'));
+      } catch {
+        setSaluteReady(false);
+      }
+      setLoaded(true);
     })();
   }, []);
 
@@ -123,9 +129,9 @@ function DiarizationEngineSetting() {
           active={provider === 'salutespeech'}
           onClick={() => choose('salutespeech')}
           title={t('SaluteSpeech · Sber cloud')}
-          subtitle={saluteKeySet
-            ? t('Cloud speaker separation using your SaluteSpeech key. Audio is sent to Sber.')
-            : t('Needs a SaluteSpeech Authorization Key (set it above). Audio is sent to Sber.')}
+          subtitle={saluteReady
+            ? t('Cloud speaker separation through the Memento gateway. Audio is sent to Sber.')
+            : t('SaluteSpeech is unavailable right now. Audio is sent to Sber.')}
         />
       </div>
     </div>

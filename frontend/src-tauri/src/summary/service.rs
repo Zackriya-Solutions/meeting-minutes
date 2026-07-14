@@ -320,6 +320,19 @@ impl SummaryService {
             }
         };
 
+        // Enforce the central privacy policy before reading credentials or constructing
+        // a network client. BuiltInAI and Ollama remain available in local-only mode.
+        if !matches!(&provider, LLMProvider::BuiltInAI | LLMProvider::Ollama) {
+            if let Err(e) = crate::llm::ensure_outbound_allowed(
+                &pool,
+                crate::llm::Purpose::Summary,
+            ).await {
+                let err_msg = e.to_string();
+                Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                return;
+            }
+        }
+
         // Validate and setup api_key, Flexible for Ollama, BuiltInAI, and CustomOpenAI
         let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
             // These providers don't require API keys from the standard database column

@@ -3,6 +3,22 @@
 # Exit on error
 set -e
 
+# Local development gateway credential. Release builds receive this from CI;
+# developers can keep it in an ignored file instead of macOS Keychain.
+DEV_ENV_FILE="${MEMENTO_DEV_ENV_FILE:-.env.local-dev}"
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] && [ -f "$DEV_ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a
+    source "$DEV_ENV_FILE"
+    set +a
+fi
+
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] || [ "$MEMENTO_REGISTRATION_KEY" = "replace-with-development-registration-key" ]; then
+    echo "Missing MEMENTO_REGISTRATION_KEY for local development."
+    echo "Copy .env.local-dev.example to .env.local-dev and add the development key."
+    exit 1
+fi
+
 # Add log level selector with default to INFO
 LOG_LEVEL=${1:-info}
 
@@ -15,6 +31,41 @@ case $LOG_LEVEL in
         exit 1
         ;;
 esac
+
+# Homebrew's Bun formula may expose `node` as a Bun compatibility shim. Prefer the
+# same Node.js major used in CI when it is installed, without unlinking Bun globally.
+if [[ -x "/opt/homebrew/opt/node@20/bin/node" ]]; then
+    export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+fi
+
+if ! command -v node >/dev/null 2>&1 || ! node --version >/dev/null 2>&1; then
+    echo "Node.js is required. On macOS run: brew install node@20"
+    exit 1
+fi
+
+# Prefer Corepack so package.json pins the pnpm version. Fall back to a standalone
+# pnpm binary for environments where Corepack is not bundled with Node.js.
+if command -v corepack >/dev/null 2>&1; then
+    # Tauri runs `pnpm dev` as a child command, so expose Corepack's pnpm shim in
+    # the selected Node.js bin directory as well as using Corepack below.
+    corepack enable pnpm >/dev/null 2>&1
+    PNPM=(corepack pnpm)
+elif command -v pnpm >/dev/null 2>&1; then
+    PNPM=(pnpm)
+else
+    echo "pnpm is required. Install Corepack/Node.js or run: brew install pnpm"
+    exit 1
+fi
+
+echo "Using Node.js $(node --version) and pnpm $("${PNPM[@]}" --version)"
+
+# cidre builds the macOS system-audio bridge with xcodebuild. Command Line Tools alone
+# are insufficient, so fail before deleting caches and reinstalling dependencies.
+if [[ "$(uname -s)" == "Darwin" ]] && ! xcodebuild -version >/dev/null 2>&1; then
+    echo "Full Xcode is required for the macOS Tauri build (Command Line Tools are not enough)."
+    echo "Install Xcode, then run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
+    exit 1
+fi
 
 # Bypass any configured HTTP proxy for localhost. Without this, an http_proxy/
 # HTTPS_PROXY with no localhost exception routes 127.0.0.1 through the proxy,
@@ -38,16 +89,15 @@ rm -rf .pnp.cjs
 rm -rf out
 
 echo "Installing dependencies..."
-pnpm install
+"${PNPM[@]}" install
 
 # Build the Next.js application first
 echo "Building Next.js application..."
-pnpm run build
+"${PNPM[@]}" run build
 
 # Set environment variables for the build
 echo "Setting up build environment..."
 
 echo "Building Tauri app..."
-pnpm run tauri dev
+"${PNPM[@]}" run tauri dev
 sleep
-

@@ -10,6 +10,7 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { EmbeddingModelSettings } from '@/components/EmbeddingModelSettings';
 import { ProviderSettings } from '@/components/ProviderSettings';
+import { PrivacySettings } from '@/components/PrivacySettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Icon, MementoIconName } from '@/components/memento/Icon';
@@ -23,6 +24,7 @@ const TABS = [
   { value: 'Transcriptionmodels', label: 'Transcription', icon: 'transcript' },
   { value: 'summaryModels', label: 'Summary', icon: 'spark' },
   { value: 'providers', label: 'Providers', icon: 'library' },
+  { value: 'privacy', label: 'Privacy', icon: 'lock' },
   { value: 'search', label: 'Search', icon: 'search' },
   { value: 'beta', label: 'Beta', icon: 'plus' }
 ] as const satisfies ReadonlyArray<{ value: string; label: string; icon: MementoIconName }>;
@@ -132,6 +134,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="providers">
               <ProviderSettings />
+            </TabsContent>
+            <TabsContent value="privacy">
+              <PrivacySettings />
             </TabsContent>
             <TabsContent value="search">
               <EmbeddingModelSettings />

@@ -30,7 +30,8 @@ impl JobHandler for ChunkEmbedHandler {
         meeting_id: Option<&str>,
         _payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
-        let meeting_id = meeting_id.ok_or_else(|| anyhow::anyhow!("chunk_embed requires a meeting_id"))?;
+        let meeting_id =
+            meeting_id.ok_or_else(|| anyhow::anyhow!("chunk_embed requires a meeting_id"))?;
         let pool = &ctx.pool;
 
         // Load segments (ordered). Timing is seconds (REAL) -> ms; NULLs degrade to 0.
@@ -52,6 +53,7 @@ impl JobHandler for ChunkEmbedHandler {
             })
             .collect();
 
+        let mut embedding_needs_repair = false;
         if segments.is_empty() {
             log::info!("[chunk_embed] meeting {meeting_id} has no segments; nothing to chunk");
         } else {
@@ -96,7 +98,10 @@ impl JobHandler for ChunkEmbedHandler {
                 .await?;
                 chunk_ids.push(id);
             }
-            log::info!("[chunk_embed] meeting {meeting_id}: created {} chunk(s)", chunk_ids.len());
+            log::info!(
+                "[chunk_embed] meeting {meeting_id}: created {} chunk(s)",
+                chunk_ids.len()
+            );
 
             // Embedding step: embed each chunk and write to the vec0 table. If no model is
             // loaded (or sqlite-vec is unavailable), chunks stay embedding_status='pending'
@@ -117,18 +122,43 @@ impl JobHandler for ChunkEmbedHandler {
                                     .await;
                                     embedded += 1;
                                 }
-                                Err(e) => log::warn!("[chunk_embed] upsert failed for chunk {id}: {e}"),
+                                Err(e) => {
+                                    embedding_needs_repair = true;
+                                    let _ = sqlx::query(
+                                        "UPDATE chunks SET embedding_status='failed' WHERE id=?",
+                                    )
+                                    .bind(*id)
+                                    .execute(pool)
+                                    .await;
+                                    log::warn!("[chunk_embed] upsert failed for chunk {id}: {e}");
+                                }
                             }
                         }
-                        log::info!("[chunk_embed] meeting {meeting_id}: embedded {embedded} chunk(s)");
+                        log::info!(
+                            "[chunk_embed] meeting {meeting_id}: embedded {embedded} chunk(s)"
+                        );
                     }
-                    Some(Ok(_)) => log::warn!("[chunk_embed] embedding count mismatch; skipping"),
+                    Some(Ok(_)) => {
+                        embedding_needs_repair = true;
+                        log::warn!("[chunk_embed] embedding count mismatch; marking chunks failed");
+                        let _ = sqlx::query(
+                            "UPDATE chunks SET embedding_status='failed' \
+                             WHERE meeting_id=? AND embedding_status != 'done'",
+                        )
+                        .bind(meeting_id)
+                        .execute(pool)
+                        .await;
+                    }
                     Some(Err(e)) => {
+                        embedding_needs_repair = true;
                         log::warn!("[chunk_embed] embedding failed: {e}");
-                        let _ = sqlx::query("UPDATE chunks SET embedding_status='failed' WHERE meeting_id=?")
-                            .bind(meeting_id)
-                            .execute(pool)
-                            .await;
+                        let _ = sqlx::query(
+                            "UPDATE chunks SET embedding_status='failed' \
+                             WHERE meeting_id=? AND embedding_status != 'done'",
+                        )
+                        .bind(meeting_id)
+                        .execute(pool)
+                        .await;
                     }
                     None => {}
                 }
@@ -140,12 +170,120 @@ impl JobHandler for ChunkEmbedHandler {
             }
         }
 
+        if embedding_needs_repair {
+            ctx.enqueue_unique(
+                kind::EMBEDDING_REPAIR,
+                Some(meeting_id),
+                &serde_json::json!({ "reason": "chunk_embed_partial_failure" }),
+            )
+            .await?;
+        }
+
         // Chain: diarization and extraction run after chunking, in parallel. A diarize
         // failure must not block extraction (Phase 2 degradation rule).
         let empty = serde_json::json!({});
-        ctx.enqueue(kind::DIARIZE, Some(meeting_id), &empty).await?;
-        ctx.enqueue(kind::EXTRACT, Some(meeting_id), &empty).await?;
+        ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &empty)
+            .await?;
+        ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &empty)
+            .await?;
         Ok(())
+    }
+}
+
+/// Repair vector embeddings without deleting/recreating chunks. Keeping chunk
+/// ids stable preserves citations and avoids unnecessary FTS trigger churn.
+pub struct EmbeddingRepairHandler;
+
+#[async_trait]
+impl JobHandler for EmbeddingRepairHandler {
+    fn kind(&self) -> &'static str {
+        kind::EMBEDDING_REPAIR
+    }
+
+    async fn run(
+        &self,
+        ctx: &JobContext,
+        meeting_id: Option<&str>,
+        _payload: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let meeting_id =
+            meeting_id.ok_or_else(|| anyhow::anyhow!("embedding_repair requires a meeting_id"))?;
+        if !crate::pipeline::embedder::is_loaded() {
+            log::info!(
+                "[embedding_repair] meeting {meeting_id}: model not loaded; leaving chunks pending"
+            );
+            return Ok(());
+        }
+
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, text FROM chunks \
+             WHERE meeting_id = ? AND embedding_status != 'done' ORDER BY id",
+        )
+        .bind(meeting_id)
+        .fetch_all(&ctx.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let texts = rows.iter().map(|(_, text)| text.clone()).collect();
+        let vectors = match crate::pipeline::embedder::embed_passages(texts).await {
+            Some(Ok(vectors)) if vectors.len() == rows.len() => vectors,
+            Some(Ok(_)) => {
+                sqlx::query(
+                    "UPDATE chunks SET embedding_status='failed' \
+                     WHERE meeting_id=? AND embedding_status != 'done'",
+                )
+                .bind(meeting_id)
+                .execute(&ctx.pool)
+                .await?;
+                anyhow::bail!("embedding count mismatch");
+            }
+            Some(Err(e)) => {
+                sqlx::query(
+                    "UPDATE chunks SET embedding_status='failed' \
+                     WHERE meeting_id=? AND embedding_status != 'done'",
+                )
+                .bind(meeting_id)
+                .execute(&ctx.pool)
+                .await?;
+                return Err(anyhow::anyhow!(e));
+            }
+            None => anyhow::bail!("embedding model became unavailable"),
+        };
+
+        let mut failures = Vec::new();
+        for ((chunk_id, _), vector) in rows.iter().zip(vectors) {
+            match crate::vector::upsert_embedding(&ctx.pool, *chunk_id, &vector).await {
+                Ok(()) => {
+                    sqlx::query("UPDATE chunks SET embedding_status='done' WHERE id=?")
+                        .bind(*chunk_id)
+                        .execute(&ctx.pool)
+                        .await?;
+                }
+                Err(e) => {
+                    sqlx::query("UPDATE chunks SET embedding_status='failed' WHERE id=?")
+                        .bind(*chunk_id)
+                        .execute(&ctx.pool)
+                        .await?;
+                    failures.push(format!("chunk {chunk_id}: {e}"));
+                }
+            }
+        }
+
+        if failures.is_empty() {
+            log::info!(
+                "[embedding_repair] meeting {meeting_id}: repaired {} chunk(s)",
+                rows.len()
+            );
+            Ok(())
+        } else {
+            anyhow::bail!(
+                "{} embedding write(s) failed: {}",
+                failures.len(),
+                failures.join("; ")
+            )
+        }
     }
 }
 
@@ -163,18 +301,21 @@ impl JobHandler for DiarizeHandler {
         meeting_id: Option<&str>,
         _payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
-        use crate::pipeline::diarization_commands::{app_handle, run_diarization_core, DiarizeError};
+        use crate::pipeline::diarization_commands::{
+            app_handle, run_diarization_core, DiarizeError,
+        };
 
-        let meeting_id = meeting_id.ok_or_else(|| anyhow::anyhow!("diarize requires a meeting_id"))?;
+        let meeting_id =
+            meeting_id.ok_or_else(|| anyhow::anyhow!("diarize requires a meeting_id"))?;
 
         // Per-meeting opt-out (in-meeting control pill): diarization_enabled = 0 skips the
         // automatic job. The manual `diarize_meeting` command bypasses this — an explicit
         // "Detect speakers" click always runs.
-        let prefs = crate::database::repositories::meeting::MeetingsRepository::get_diarization_prefs(
-            &ctx.pool,
-            meeting_id,
-        )
-        .await?;
+        let prefs =
+            crate::database::repositories::meeting::MeetingsRepository::get_diarization_prefs(
+                &ctx.pool, meeting_id,
+            )
+            .await?;
         if prefs.and_then(|(enabled, _)| enabled) == Some(false) {
             log::info!(
                 "[diarize] meeting {meeting_id}: speaker ID disabled for this meeting; \
@@ -275,7 +416,11 @@ impl JobHandler for ExtractHandler {
 
         let filled = prompts::fill(
             prompts::extract_v1(),
-            &[("transcript", &transcript), ("meeting_title", &title), ("meeting_date", "")],
+            &[
+                ("transcript", &transcript),
+                ("meeting_title", &title),
+                ("meeting_date", ""),
+            ],
         );
         let system = "Верни только валидный JSON строго по инструкции ниже.";
 
@@ -309,7 +454,9 @@ impl JobHandler for ExtractHandler {
                     extraction = Some(x);
                     break;
                 }
-                Err(e) => log::warn!("[extract] meeting {meeting_id}: invalid JSON (attempt {attempt}): {e}"),
+                Err(e) => log::warn!(
+                    "[extract] meeting {meeting_id}: invalid JSON (attempt {attempt}): {e}"
+                ),
             }
         }
 
@@ -322,9 +469,18 @@ impl JobHandler for ExtractHandler {
             extraction.entities.len(),
             extraction.action_items.len()
         );
-        // TODO(Phase 3 persistence): resolve entities (extraction::resolve_entity) into
-        // entities/pending_merges, map quotes to chunks, insert entity_mentions +
-        // action_items. The extraction call itself (providers) is now wired end-to-end.
+        let persisted = crate::pipeline::extraction_persistence::persist_extraction(
+            pool,
+            meeting_id,
+            &extraction,
+        ).await?;
+        log::info!(
+            "[extract] meeting {meeting_id}: persisted {} entities, {} mentions, {} reviews, {} actions",
+            persisted.entities_created,
+            persisted.mentions_created,
+            persisted.pending_merges_created,
+            persisted.action_items_created,
+        );
         Ok(())
     }
 }
@@ -343,20 +499,79 @@ impl JobHandler for BackfillHandler {
         _meeting_id: Option<&str>,
         _payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
-        // Enqueue the pipeline for every meeting that has no chunks yet. Idempotent: the
-        // deterministic chunker makes re-running chunk_embed safe, and the queue's bounded
-        // concurrency rate-limits downstream LLM extraction (PLAN.md Phase 5).
+        // Only meetings with transcript content are indexable. Empty recordings remain
+        // intentionally absent instead of being enqueued on every repair pass.
         let meeting_ids: Vec<String> = sqlx::query_scalar(
             "SELECT m.id FROM meetings m \
-             WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.meeting_id = m.id)",
+             WHERE EXISTS ( \
+               SELECT 1 FROM transcripts t \
+               WHERE t.meeting_id = m.id AND length(trim(t.transcript)) > 0 \
+             ) \
+             AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.meeting_id = m.id)",
         )
         .fetch_all(&ctx.pool)
         .await?;
 
-        log::info!("[backfill] enqueuing pipeline for {} un-chunked meeting(s)", meeting_ids.len());
+        let mut chunk_jobs = 0usize;
         for id in meeting_ids {
-            ctx.enqueue(kind::CHUNK_EMBED, Some(&id), &serde_json::json!({})).await?;
+            if ctx
+                .enqueue_unique(kind::CHUNK_EMBED, Some(&id), &serde_json::json!({}))
+                .await?
+                .created
+            {
+                chunk_jobs += 1;
+            }
         }
+
+        // If the vec0 table was recreated after corruption or manual cleanup,
+        // reconcile authoritative chunk status before selecting repairs.
+        let vector_table_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+             WHERE type='table' AND name='chunk_embeddings')",
+        )
+        .fetch_one(&ctx.pool)
+        .await?;
+        if vector_table_exists != 0 {
+            match sqlx::query(
+                "UPDATE chunks SET embedding_status='pending' \
+                 WHERE embedding_status='done' AND NOT EXISTS ( \
+                   SELECT 1 FROM chunk_embeddings e WHERE e.chunk_id=chunks.id \
+                 )",
+            )
+            .execute(&ctx.pool)
+            .await
+            {
+                Ok(result) if result.rows_affected() > 0 => log::warn!(
+                    "[backfill] found {} chunk(s) missing vector rows; marked for repair",
+                    result.rows_affected()
+                ),
+                Ok(_) => {}
+                Err(e) => log::warn!("[backfill] vector integrity check failed: {e}"),
+            }
+        }
+
+        let mut repair_jobs = 0usize;
+        if crate::pipeline::embedder::is_loaded() {
+            let repair_ids: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT meeting_id FROM chunks \
+                 WHERE embedding_status != 'done' ORDER BY meeting_id",
+            )
+            .fetch_all(&ctx.pool)
+            .await?;
+            for id in repair_ids {
+                if ctx
+                    .enqueue_unique(kind::EMBEDDING_REPAIR, Some(&id), &serde_json::json!({}))
+                    .await?
+                    .created
+                {
+                    repair_jobs += 1;
+                }
+            }
+        }
+
+        log::info!(
+            "[backfill] queued {chunk_jobs} chunk job(s) and {repair_jobs} embedding repair job(s)"
+        );
         Ok(())
     }
 }

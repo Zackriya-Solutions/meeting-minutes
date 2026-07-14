@@ -28,11 +28,12 @@ pub mod store;
 mod tests;
 
 pub use runner::{JobRunner, RunnerConfig};
-pub use store::{enqueue as enqueue_raw, meeting_has_incomplete_jobs, JobRow};
+pub use store::{meeting_has_incomplete_jobs, JobRow};
 
 /// Job kind identifiers. Kept as constants so enqueue sites and handlers agree.
 pub mod kind {
     pub const CHUNK_EMBED: &str = "chunk_embed";
+    pub const EMBEDDING_REPAIR: &str = "embedding_repair";
     pub const DIARIZE: &str = "diarize";
     pub const EXTRACT: &str = "extract";
     pub const BACKFILL: &str = "backfill";
@@ -57,6 +58,20 @@ impl JobContext {
         let id = store::enqueue(&self.pool, kind, meeting_id, payload).await?;
         self.notify.notify_one();
         Ok(id)
+    }
+
+    /// Enqueue only when the same job is not already queued or running.
+    pub async fn enqueue_unique(
+        &self,
+        kind: &str,
+        meeting_id: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Result<store::EnqueueOutcome, sqlx::Error> {
+        let outcome = store::enqueue_unique(&self.pool, kind, meeting_id, payload).await?;
+        if outcome.created {
+            self.notify.notify_one();
+        }
+        Ok(outcome)
     }
 }
 
@@ -96,6 +111,7 @@ impl JobRegistry {
     pub fn with_defaults() -> Self {
         let mut r = Self::new();
         r.register(Arc::new(handlers::ChunkEmbedHandler))
+            .register(Arc::new(handlers::EmbeddingRepairHandler))
             .register(Arc::new(handlers::DiarizeHandler))
             .register(Arc::new(handlers::ExtractHandler))
             .register(Arc::new(handlers::BackfillHandler));
@@ -109,11 +125,12 @@ pub async fn enqueue_post_meeting_pipeline(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<i64, sqlx::Error> {
-    store::enqueue(
+    Ok(store::enqueue_unique(
         pool,
         kind::CHUNK_EMBED,
         Some(meeting_id),
         &serde_json::json!({}),
     )
-    .await
+    .await?
+    .id)
 }

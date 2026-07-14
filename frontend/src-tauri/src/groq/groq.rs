@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use tauri::command;
+use tauri::{command, State};
+
+use crate::database::repositories::setting::{is_secret_sentinel, SettingsRepository};
+use crate::state::AppState;
 
 /// Groq model information returned to frontend
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -69,7 +72,18 @@ fn is_chat_model(model_id: &str) -> bool {
 /// # Returns
 /// Vector of available models, or fallback models on error
 #[command]
-pub async fn get_groq_models(api_key: Option<String>) -> Result<Vec<GroqModel>, String> {
+pub async fn get_groq_models(
+    state: State<'_, AppState>,
+    api_key: Option<String>,
+) -> Result<Vec<GroqModel>, String> {
+    let api_key = match api_key {
+        Some(value) if is_secret_sentinel(&value) => {
+            SettingsRepository::get_api_key(state.db_manager.pool(), "groq")
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        value => value,
+    };
     // Return fallback if no API key provided
     let api_key = match api_key {
         Some(key) if !key.trim().is_empty() => key.trim().to_string(),

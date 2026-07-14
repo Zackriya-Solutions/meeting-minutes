@@ -11,6 +11,7 @@ use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::pipeline::embedder;
+use crate::state::AppState;
 
 const MODEL_URL: &str =
     "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model.onnx";
@@ -77,7 +78,12 @@ async fn download_file<R: Runtime>(
                 last_pct = pct;
                 let _ = app.emit(
                     "embedder-download-progress",
-                    DownloadProgress { file: label.to_string(), downloaded, total, percent: pct },
+                    DownloadProgress {
+                        file: label.to_string(),
+                        downloaded,
+                        total,
+                        percent: pct,
+                    },
                 );
             }
         }
@@ -99,12 +105,104 @@ pub async fn embedder_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json
     }))
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct IndexingStatus {
+    pub indexable_meetings: i64,
+    pub chunked_meetings: i64,
+    pub chunks_total: i64,
+    pub embeddings_done: i64,
+    pub embeddings_pending: i64,
+    pub embeddings_failed: i64,
+    pub queued_jobs: i64,
+    pub running_jobs: i64,
+    pub unresolved_failed_jobs: i64,
+    pub needs_repair: bool,
+}
+
+/// Observable archive-index health for Settings. Only indexing-related jobs are
+/// included; optional diarization/extraction failures do not make search look broken.
+#[tauri::command]
+pub async fn indexing_status(state: tauri::State<'_, AppState>) -> Result<IndexingStatus, String> {
+    let pool = state.db_manager.pool();
+    let indexable_meetings: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM meetings m WHERE EXISTS ( \
+           SELECT 1 FROM transcripts t \
+           WHERE t.meeting_id=m.id AND length(trim(t.transcript)) > 0 \
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let chunked_meetings: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT meeting_id) FROM chunks")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (chunks_total, embeddings_done, embeddings_pending, embeddings_failed): (
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = sqlx::query_as(
+        "SELECT COUNT(*), \
+                COALESCE(SUM(embedding_status='done'), 0), \
+                COALESCE(SUM(embedding_status='pending'), 0), \
+                COALESCE(SUM(embedding_status='failed'), 0) \
+         FROM chunks",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let (queued_jobs, running_jobs): (i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(status='queued'), 0), COALESCE(SUM(status='running'), 0) \
+         FROM jobs WHERE kind IN ('chunk_embed', 'embedding_repair', 'backfill')",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let unresolved_failed_jobs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM jobs j \
+         WHERE j.kind IN ('chunk_embed', 'embedding_repair', 'backfill') \
+           AND j.status='failed' \
+           AND j.id = ( \
+             SELECT MAX(j2.id) FROM jobs j2 \
+             WHERE j2.kind=j.kind AND j2.meeting_id IS j.meeting_id \
+           )",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(IndexingStatus {
+        indexable_meetings,
+        chunked_meetings,
+        chunks_total,
+        embeddings_done,
+        embeddings_pending,
+        embeddings_failed,
+        queued_jobs,
+        running_jobs,
+        unresolved_failed_jobs,
+        needs_repair: chunked_meetings < indexable_meetings
+            || embeddings_pending > 0
+            || embeddings_failed > 0,
+    })
+}
+
 /// Download the embedding model (tokenizer first, then the ONNX weights) and load it.
 /// Emits `embedder-download-progress` while downloading and `embedder-ready` on success.
 #[tauri::command]
-pub async fn embedder_download_model<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+pub async fn embedder_download_model<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let dir = embedding_model_dir(&app)?;
-    download_file(&app, TOKENIZER_URL, &dir.join("tokenizer.json"), "tokenizer.json").await?;
+    download_file(
+        &app,
+        TOKENIZER_URL,
+        &dir.join("tokenizer.json"),
+        "tokenizer.json",
+    )
+    .await?;
     download_file(&app, MODEL_URL, &dir.join("model.onnx"), "model.onnx").await?;
 
     let dir_for_load = dir.clone();
@@ -114,6 +212,23 @@ pub async fn embedder_download_model<R: Runtime>(app: AppHandle<R>) -> Result<()
         .map_err(|e| e.to_string())?;
 
     let _ = app.emit("embedder-ready", ());
+    let outcome = crate::jobs::store::enqueue_unique(
+        state.db_manager.pool(),
+        crate::jobs::kind::BACKFILL,
+        None,
+        &serde_json::json!({ "reason": "embedder_ready" }),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    log::info!(
+        "embedding model ready; archive repair job {} ({})",
+        outcome.id,
+        if outcome.created {
+            "queued"
+        } else {
+            "already active"
+        }
+    );
     log::info!("embedding model downloaded and loaded");
     Ok(())
 }
@@ -128,12 +243,34 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
         }
     };
     if model_present(&dir) {
-        let _ = tokio::task::spawn_blocking(move || {
+        let loaded = tokio::task::spawn_blocking(move || {
             if let Err(e) = embedder::load_global(dir) {
                 log::warn!("failed to load embedder at startup: {e}");
+                false
+            } else {
+                true
             }
         })
-        .await;
+        .await
+        .unwrap_or(false);
+        if loaded {
+            if let Some(state) = app.try_state::<AppState>() {
+                match crate::jobs::store::enqueue_unique(
+                    state.db_manager.pool(),
+                    crate::jobs::kind::BACKFILL,
+                    None,
+                    &serde_json::json!({ "reason": "startup" }),
+                )
+                .await
+                {
+                    Ok(outcome) if outcome.created => {
+                        log::info!("queued archive index repair after embedder startup")
+                    }
+                    Ok(_) => {}
+                    Err(e) => log::warn!("failed to queue startup archive repair: {e}"),
+                }
+            }
+        }
     } else {
         log::info!("embedding model not present; search/RAG run FTS-only until it is downloaded");
     }

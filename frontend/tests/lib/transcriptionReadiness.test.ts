@@ -62,22 +62,23 @@ describe("isConfiguredTranscriptionModelReady (provider-aware recording gate)", 
     expect(f.calls).not.toContain("parakeet_has_available_models");
   });
 
-  test("salutespeech: ready only when a Sber auth key is configured", async () => {
+  test("salutespeech: ready per backend salutespeech_is_configured (key OR managed gateway)", async () => {
     const configured = fakeInvoke({
       api_get_transcript_config: { provider: "salutespeech" },
-      get_app_settings: { "salutespeech.auth_key": "base64key" },
+      salutespeech_is_configured: true,
     });
     expect(await isConfiguredTranscriptionModelReady(configured.invoke)).toBe(true);
-    expect(configured.calls).toContain("get_app_settings");
-    // Must NOT touch any local-engine check.
+    expect(configured.calls).toContain("salutespeech_is_configured");
+    // Managed build: must NOT gate on a local auth key, nor any local-engine check.
+    expect(configured.calls).not.toContain("get_app_settings");
     expect(configured.calls).not.toContain("gigaam_status");
     expect(configured.calls).not.toContain("parakeet_has_available_models");
 
-    const missing = fakeInvoke({
+    const unavailable = fakeInvoke({
       api_get_transcript_config: { provider: "salutespeech" },
-      get_app_settings: {},
+      salutespeech_is_configured: false,
     });
-    expect(await isConfiguredTranscriptionModelReady(missing.invoke)).toBe(false);
+    expect(await isConfiguredTranscriptionModelReady(unavailable.invoke)).toBe(false);
   });
 
   test("cloud provider (openai): always ready, no local-model query", async () => {

@@ -16,7 +16,7 @@ interface SummaryModelSettingsProps {
 export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsProps) {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'deepseek',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-pro',
     whisperModel: 'large-v3',
     apiKey: null,
     ollamaEndpoint: null
@@ -144,19 +144,89 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
       <SummaryLanguageSettings />
 
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none" data-summary-model-config>
         <h3 className="text-lg font-semibold mb-4">{t('Summary Model Configuration')}</h3>
         <p className="text-sm text-[var(--fg2)] mb-6">
           {t('Configure the AI model used for generating meeting summaries.')}
         </p>
 
-        <ModelSettingsModal
-          modelConfig={modelConfig}
-          setModelConfig={setModelConfig}
-          onSave={handleSaveModelConfig}
-          skipInitialFetch={true}
-        />
+        {/* Managed pilot: DeepSeek runs through the Memento gateway (no API key). Offer a
+            simple quality switch (Pro / Flash). Other providers keep the full modal. */}
+        {modelConfig.provider === 'deepseek' ? (
+          <DeepSeekModelPicker
+            model={modelConfig.model}
+            onSelect={(model) =>
+              handleSaveModelConfig({ ...modelConfig, provider: 'deepseek', model })
+            }
+          />
+        ) : (
+          <ModelSettingsModal
+            modelConfig={modelConfig}
+            setModelConfig={setModelConfig}
+            onSave={handleSaveModelConfig}
+            skipInitialFetch={true}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Quality switch for the managed DeepSeek summary model. Both variants run in the cloud
+ * through the Memento gateway (no API key). Pro = higher quality (default), Flash = faster.
+ */
+function DeepSeekModelPicker({
+  model,
+  onSelect,
+}: {
+  model: string;
+  onSelect: (model: string) => void;
+}) {
+  const t = useT();
+  const OPTIONS: { id: string; title: string; subtitle: string }[] = [
+    {
+      id: 'deepseek-v4-pro',
+      title: 'DeepSeek v4 Pro',
+      subtitle: t('Higher quality and more thorough. Recommended.'),
+    },
+    {
+      id: 'deepseek-v4-flash',
+      title: 'DeepSeek v4 Flash',
+      subtitle: t('Faster and lighter, with more concise summaries.'),
+    },
+  ];
+  // Treat any unknown/legacy value as Pro so the selection is never empty.
+  const active = model === 'deepseek-v4-flash' ? 'deepseek-v4-flash' : 'deepseek-v4-pro';
+
+  return (
+    <div className="grid gap-2">
+      {OPTIONS.map((opt) => {
+        const isActive = active === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onSelect(opt.id)}
+            className={`mm-press flex items-start gap-3 rounded-[var(--radius-16)] border p-4 text-left transition-colors ${
+              isActive
+                ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
+                : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] hover:bg-[var(--state-hover-bg)]'
+            }`}
+          >
+            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${isActive ? 'border-[var(--gold)]' : 'border-[var(--border-strong)]'}`}>
+              {isActive && <span className="h-2 w-2 rounded-full bg-[var(--gold)]" />}
+            </span>
+            <span>
+              <span className="block text-sm font-medium text-[var(--fg1)]">{opt.title}</span>
+              <span className="mt-0.5 block text-xs text-[var(--fg2)]">{opt.subtitle}</span>
+            </span>
+          </button>
+        );
+      })}
+      <p className="mt-1 text-xs text-[var(--fg3)]">
+        {t('Runs in the cloud through the Memento gateway. No API key required.')}
+      </p>
     </div>
   );
 }

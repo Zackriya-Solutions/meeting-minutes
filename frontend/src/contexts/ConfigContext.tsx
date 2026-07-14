@@ -100,7 +100,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'deepseek',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-pro',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });

@@ -6,4 +6,5 @@ pub mod diarization;
 pub mod diarization_commands;
 pub mod embedder;
 pub mod extraction;
+pub mod extraction_persistence;
 pub mod kaldi_fbank;
