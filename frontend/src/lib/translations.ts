@@ -909,5 +909,11 @@ export const RU: Record<string, string> = {
   "pyannote-style models (~35 MB, one-time download). Private — audio stays on your machine.": "Модели pyannote (~35 МБ, разовая загрузка). Приватно — аудио остаётся на устройстве.",
   "Cloud speaker separation using your SaluteSpeech key. Audio is sent to Sber.": "Облачное разделение по спикерам через ваш ключ SaluteSpeech. Аудио отправляется в Сбер.",
   "Needs a SaluteSpeech Authorization Key (set it above). Audio is sent to Sber.": "Нужен ключ авторизации SaluteSpeech (укажите выше). Аудио отправляется в Сбер.",
-  "Set your SaluteSpeech key in Settings → Transcription to use cloud speaker detection.": "Укажите ключ SaluteSpeech в «Настройки → Расшифровка», чтобы использовать облачное определение спикеров."
+  "Set your SaluteSpeech key in Settings → Transcription to use cloud speaker detection.": "Укажите ключ SaluteSpeech в «Настройки → Расшифровка», чтобы использовать облачное определение спикеров.",
+  "Cloud speaker separation through the Memento gateway. Audio is sent to Sber.": "Облачное разделение по спикерам через шлюз Memento. Аудио отправляется в Сбер.",
+  "SaluteSpeech is unavailable right now. Audio is sent to Sber.": "SaluteSpeech сейчас недоступен. Аудио отправляется в Сбер.",
+  "SaluteSpeech speaker detection is unavailable right now. Try again shortly or switch to Local in Settings → Transcription.": "Облачное определение спикеров SaluteSpeech сейчас недоступно. Повторите попытку позже или переключитесь на локальный режим в «Настройки → Расшифровка».",
+  "Higher quality and more thorough. Recommended.": "Выше качество и детальность. Рекомендуется.",
+  "Faster and lighter, with more concise summaries.": "Быстрее и легче, суммаризация короче.",
+  "Runs in the cloud through the Memento gateway. No API key required.": "Работает в облаке через шлюз Memento. Ключ API не требуется."
 };

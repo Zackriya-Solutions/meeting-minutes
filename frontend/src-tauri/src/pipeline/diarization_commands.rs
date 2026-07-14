@@ -266,7 +266,7 @@ async fn resolve_cluster_speakers(
     Ok(map)
 }
 
-/// Diarization engine selection: `"local"` (default) or `"salutespeech"` (Sber cloud).
+/// Diarization engine selection: `"salutespeech"` (Sber cloud, default) or `"local"`.
 /// Reads `app_settings_kv.diarization.provider`; `MEETILY_DIARIZATION_PROVIDER` overrides
 /// it (headless runs / tests).
 async fn resolve_diarization_provider(pool: &SqlitePool) -> String {
@@ -284,7 +284,7 @@ async fn resolve_diarization_provider(pool: &SqlitePool) -> String {
     .flatten()
     .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty())
-    .unwrap_or_else(|| "local".to_string())
+    .unwrap_or_else(|| "salutespeech".to_string())
 }
 
 /// Create a fresh unconfirmed `Speaker N` profile per distinct cloud speaker id, returning

@@ -118,9 +118,21 @@ pub async fn resolve_config(pool: &SqlitePool) -> Option<SaluteSpeechConfig> {
     })
 }
 
-/// Whether SaluteSpeech is usable (an Authorization Key is configured).
+/// Whether SaluteSpeech is usable: a user Authorization Key is configured OR the
+/// managed Memento gateway can issue an install token (keyless pilot path).
 pub async fn is_configured(pool: &SqlitePool) -> bool {
     resolve_config(pool).await.is_some()
+}
+
+/// Tauri command mirroring [`is_configured`] for the frontend readiness gates
+/// (recording start, speaker detection). Returns true when SaluteSpeech is usable
+/// via either a user key or the managed gateway — so the UI no longer demands a
+/// local `salutespeech.auth_key` in the managed build.
+#[tauri::command]
+pub async fn salutespeech_is_configured(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    Ok(is_configured(state.db_manager.pool()).await)
 }
 
 /// Map the app's language preference (`"ru"`, `"en"`, `"auto"`, `None`) to a

@@ -173,34 +173,39 @@ pub async fn complete_onboarding<R: Runtime>(
     state: tauri::State<'_, AppState>,
     model: String,
 ) -> Result<(), String> {
-    info!("Completing onboarding with builtin-ai model: {}", model);
+    info!(
+        "Completing onboarding with managed defaults (DeepSeek summary + SaluteSpeech transcription); local model choice recorded: {}",
+        model
+    );
 
     // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding always uses builtin-ai (local LLM)
+    // Managed pilot: summary defaults to cloud DeepSeek (reached via the Memento gateway —
+    // no local model download or API key required). Users can switch to a local builtin-ai
+    // model or another provider in Settings → Summary.
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
-        &model,
+        "deepseek",
+        crate::llm::providers::deepseek::DEFAULT_MODEL,
         "large-v3",
         None,
     ).await {
-        error!("Failed to save builtin-ai model config: {}", e);
-        return Err(format!("Failed to save builtin-ai model config: {}", e));
+        error!("Failed to save DeepSeek model config: {}", e);
+        return Err(format!("Failed to save DeepSeek model config: {}", e));
     }
-    info!("Saved builtin-ai model config: model={}", model);
+    info!("Saved DeepSeek summary model config: model={}", crate::llm::providers::deepseek::DEFAULT_MODEL);
 
-    // Save transcription model config (parakeet provider) - always parakeet
+    // Transcription defaults to cloud SaluteSpeech (managed gateway, no local model).
     if let Err(e) = SettingsRepository::save_transcript_config(
         pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
+        "salutespeech",
+        "salutespeech-stream-v2",
     ).await {
         error!("Failed to save transcription model config: {}", e);
         return Err(format!("Failed to save transcription model config: {}", e));
     }
-    info!("Saved transcription model config: provider=parakeet, model={}", crate::config::DEFAULT_PARAKEET_MODEL);
+    info!("Saved transcription model config: provider=salutespeech, model=salutespeech-stream-v2");
 
     // Step 2: Only NOW mark onboarding as complete (after DB operations succeed)
     let mut status = load_onboarding_status(&app)
