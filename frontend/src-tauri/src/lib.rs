@@ -557,6 +557,7 @@ pub fn run() {
             search::commands::search_meetings,
             search::commands::rag_ask,
             pipeline::commands::embedder_status,
+            pipeline::commands::indexing_status,
             pipeline::commands::embedder_download_model,
             pipeline::diarization_commands::diarization_status,
             pipeline::diarization_commands::download_diarization_models,
