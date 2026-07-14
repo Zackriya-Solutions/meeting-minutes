@@ -135,9 +135,15 @@ pub async fn suggest_meeting_series(
 #[tauri::command]
 pub async fn run_backfill(state: tauri::State<'_, AppState>) -> Result<i64, String> {
     let pool = state.db_manager.pool();
-    crate::jobs::enqueue_raw(pool, crate::jobs::kind::BACKFILL, None, &serde_json::json!({}))
-        .await
-        .map_err(|e| e.to_string())
+    crate::jobs::store::enqueue_unique(
+        pool,
+        crate::jobs::kind::BACKFILL,
+        None,
+        &serde_json::json!({ "reason": "manual" }),
+    )
+    .await
+    .map(|outcome| outcome.id)
+    .map_err(|e| e.to_string())
 }
 
 fn is_secret_setting(key: &str) -> bool {

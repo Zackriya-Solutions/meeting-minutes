@@ -14,6 +14,19 @@ interface EmbedderStatus {
   loaded: boolean;
 }
 
+interface IndexingStatus {
+  indexable_meetings: number;
+  chunked_meetings: number;
+  chunks_total: number;
+  embeddings_done: number;
+  embeddings_pending: number;
+  embeddings_failed: number;
+  queued_jobs: number;
+  running_jobs: number;
+  unresolved_failed_jobs: number;
+  needs_repair: boolean;
+}
+
 // Mirrors the Rust `embedder-download-progress` event payload.
 interface DownloadProgress {
   file: string;
@@ -29,7 +42,9 @@ function mb(bytes: number): string {
 export function EmbeddingModelSettings() {
   const t = useT();
   const [status, setStatus] = useState<EmbedderStatus | null>(null);
+  const [indexStatus, setIndexStatus] = useState<IndexingStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +52,9 @@ export function EmbeddingModelSettings() {
     invoke<EmbedderStatus>('embedder_status')
       .then(setStatus)
       .catch(() => setStatus(null));
+    invoke<IndexingStatus>('indexing_status')
+      .then(setIndexStatus)
+      .catch(() => setIndexStatus(null));
   }, []);
 
   useEffect(() => {
@@ -57,6 +75,19 @@ export function EmbeddingModelSettings() {
     };
   }, [refresh]);
 
+  // Indexing runs in the persistent background queue. Poll only while Settings
+  // is open; this also reflects jobs resumed after an app restart.
+  useEffect(() => {
+    const timer = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (indexStatus && indexStatus.queued_jobs + indexStatus.running_jobs === 0) {
+      setRepairing(false);
+    }
+  }, [indexStatus]);
+
   const download = useCallback(async () => {
     setError(null);
     setDownloading(true);
@@ -71,10 +102,28 @@ export function EmbeddingModelSettings() {
     }
   }, [refresh, t]);
 
+  const repairIndex = useCallback(async () => {
+    setError(null);
+    setRepairing(true);
+    try {
+      await invoke('run_backfill');
+      refresh();
+    } catch (e) {
+      setError(typeof e === 'string' ? e : t('Could not start index repair.'));
+      setRepairing(false);
+    }
+  }, [refresh, t]);
+
   const loaded = !!status?.loaded;
   const present = !!status?.model_present;
   const modelName = status?.model ?? 'multilingual-e5-small';
   const dim = status?.dim ?? 384;
+  const activeJobs = (indexStatus?.queued_jobs ?? 0) + (indexStatus?.running_jobs ?? 0);
+  const semanticCoverage = indexStatus?.chunks_total
+    ? Math.round((indexStatus.embeddings_done / indexStatus.chunks_total) * 100)
+    : indexStatus?.indexable_meetings === 0
+      ? 100
+      : 0;
 
   return (
     <div className="mt-6 max-w-2xl">
@@ -146,6 +195,66 @@ export function EmbeddingModelSettings() {
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{error}</span>
                 </div>
+              )}
+            </div>
+
+            <div className="mt-5 border-t border-[var(--border-subtle)] pt-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-[var(--fg1)]">{t('Archive search index')}</h4>
+                  {indexStatus ? (
+                    <p className="mt-1 text-xs leading-relaxed text-[var(--fg3)]">
+                      {indexStatus.chunked_meetings} {t('of')} {indexStatus.indexable_meetings}{' '}
+                      {t('meetings searchable')} · {indexStatus.embeddings_done} {t('of')}{' '}
+                      {indexStatus.chunks_total} {t('semantic chunks ready')}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-[var(--fg3)]">{t('Index status unavailable')}</p>
+                  )}
+                </div>
+                <button
+                  onClick={repairIndex}
+                  disabled={repairing || activeJobs > 0}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--fg2)] hover:bg-[var(--bg-elevated)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RotateCw className={`h-3.5 w-3.5 ${repairing || activeJobs > 0 ? 'animate-spin' : ''}`} />
+                  {repairing || activeJobs > 0 ? t('Repairing index…') : t('Check and repair index')}
+                </button>
+              </div>
+
+              {indexStatus && (
+                <>
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--gold)] transition-all"
+                      style={{ width: `${loaded ? semanticCoverage : 0}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--fg3)]">
+                    {loaded ? (
+                      <span>{semanticCoverage}% {t('semantic coverage')}</span>
+                    ) : (
+                      <span>{t('Install the model to build semantic coverage')}</span>
+                    )}
+                    {indexStatus.embeddings_pending > 0 && (
+                      <span>{indexStatus.embeddings_pending} {t('pending')}</span>
+                    )}
+                    {indexStatus.embeddings_failed > 0 && (
+                      <span className="text-[var(--danger)]">
+                        {indexStatus.embeddings_failed} {t('failed')}
+                      </span>
+                    )}
+                    {activeJobs > 0 && <span>{activeJobs} {t('background jobs active')}</span>}
+                    {indexStatus.unresolved_failed_jobs > 0 && (
+                      <span className="text-[var(--danger)]">
+                        {indexStatus.unresolved_failed_jobs} {t('jobs need retry')}
+                      </span>
+                    )}
+                    {!indexStatus.needs_repair && activeJobs === 0 && (
+                      <span className="text-[var(--success)]">{t('Index is healthy')}</span>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>
