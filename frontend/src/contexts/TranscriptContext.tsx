@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
 import { Transcript, TranscriptUpdate } from '@/types';
 import { toast } from 'sonner';
+import { useT } from '@/lib/i18n';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
@@ -25,6 +26,7 @@ interface TranscriptContextType {
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
+  const t = useT();
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
@@ -340,7 +342,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        alert(t('Failed to setup transcript listener. Check console for details.'));
       }
     };
 
@@ -472,7 +474,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 
-    toast.success("Transcript copied to clipboard");
+    toast.success(t("Transcript copied to clipboard"));
   }, [transcripts]);
 
   // Force flush buffer (for final transcript processing)

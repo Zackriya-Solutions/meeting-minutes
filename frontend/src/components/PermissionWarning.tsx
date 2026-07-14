@@ -3,6 +3,7 @@ import { AlertTriangle, Mic, Speaker, RefreshCw } from '@/components/memento/Luc
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
+import { useT } from '@/lib/i18n';
 
 interface PermissionWarningProps {
   hasMicrophone: boolean;
@@ -17,6 +18,7 @@ export function PermissionWarning({
   onRecheck,
   isRechecking = false
 }: PermissionWarningProps) {
+  const t = useT();
   const isLinux = useIsLinux();
 
   // Don't show on Linux - permission handling is not needed
@@ -61,7 +63,7 @@ export function PermissionWarning({
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Нужны разрешения' : !hasMicrophone ? 'Нужен доступ к микрофону' : 'Нужен доступ к системному звуку'}
+              {!hasMicrophone && !hasSystemAudio ? t('Permissions Required') : !hasMicrophone ? t('Microphone Permission Required') : t('System Audio Permission Required')}
             </div>
           </AlertTitle>
           {/* Action Buttons */}
@@ -72,7 +74,7 @@ export function PermissionWarning({
                 className="inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
               >
                 <Mic className="h-4 w-4" />
-                Открыть настройки микрофона
+                {t('Open Microphone Settings')}
               </button>
             )}
             {isMacOS && !hasSystemAudio && (
@@ -81,7 +83,7 @@ export function PermissionWarning({
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold-active)] rounded-md transition-colors"
               >
                 <Speaker className="h-4 w-4" />
-                Открыть настройки записи экрана
+                {t('Open Screen Recording Settings')}
               </button>
             )}
             <button
@@ -90,7 +92,7 @@ export function PermissionWarning({
               className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--fg1)] transition-colors hover:bg-[var(--state-hover-bg)] disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
-              Проверить снова
+              {t('Recheck')}
             </button>
           </div>
           <AlertDescription className="mt-2 text-[var(--fg2)]">
@@ -98,14 +100,14 @@ export function PermissionWarning({
             {!hasMicrophone && (
               <>
                 <p className="mb-3">
-                  Memento нужен доступ к микрофону для записи встреч. Микрофон не обнаружен.
+                  {t('Meetily needs access to your microphone to record meetings. No microphone devices were detected.')}
                 </p>
                 <div className="space-y-2 text-sm mb-4">
-                  <p className="font-medium">Проверь:</p>
+                  <p className="font-medium">{t('Please check:')}</p>
                   <ul className="list-disc list-inside ml-2 space-y-1">
-                    <li>Микрофон подключён и включён</li>
-                    <li>Доступ к микрофону разрешён в системных настройках</li>
-                    <li>Другое приложение не заняло микрофон</li>
+                    <li>{t('Your microphone is connected and powered on')}</li>
+                    <li>{t('Microphone permission is granted in System Settings')}</li>
+                    <li>{t('No other app is exclusively using the microphone')}</li>
                   </ul>
                 </div>
               </>
@@ -116,16 +118,16 @@ export function PermissionWarning({
               <>
                 <p className="mb-3">
                   {hasMicrophone
-                    ? 'Системный звук недоступен. Можно записывать с микрофона, но звук компьютера не попадёт в запись.'
-                    : 'Системный звук тоже недоступен.'}
+                    ? t('System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.')
+                    : t('System audio capture is also not available.')}
                 </p>
                 {isMacOS && (
                   <div className="space-y-2 text-sm mb-4">
-                    <p className="font-medium">Чтобы включить системный звук в macOS:</p>
+                    <p className="font-medium">{t('To enable system audio on macOS:')}</p>
                     <ul className="list-disc list-inside ml-2 space-y-1">
-                      <li>Установи виртуальное аудиоустройство, например BlackHole 2ch</li>
-                      <li>Разреши Memento запись экрана</li>
-                      <li>Настрой маршрутизацию в Audio MIDI Setup</li>
+                      <li>{t('Install a virtual audio device (e.g., BlackHole 2ch)')}</li>
+                      <li>{t('Grant Screen Recording permission to Meetily')}</li>
+                      <li>{t('Configure your audio routing in Audio MIDI Setup')}</li>
                     </ul>
                   </div>
                 )}

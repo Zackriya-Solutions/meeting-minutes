@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { AlertTriangle, CheckCircle, X } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 interface ComplianceNotificationProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
   onAcknowledge,
   recordingButtonRef,
 }) => {
+  const t = useT();
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 192 }); // Default width
 
@@ -77,7 +79,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
           <div className="flex items-center gap-1">
             <AlertTriangle className="h-3 w-3 flex-shrink-0 text-[var(--gold)]" />
             <h3 className="text-xs font-semibold text-[var(--fg1)]">
-              Уведомление о записи
+              {t('Recording Notice')}
             </h3>
           </div>
           <button
@@ -91,11 +93,11 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
         {/* Content */}
         <div className="mb-2">
           <p className="text-xs text-[var(--fg2)] mb-1">
-            Предупреди участников о записи.
+            {t('Inform participants about recording.')}
           </p>
           <div className="rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] p-1">
             <p className="text-xs font-medium text-[var(--gold)]">
-              Учитывай местные требования к согласию
+              {t('US compliance required')}
             </p>
           </div>
         </div>
@@ -108,7 +110,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             onClick={handleClose}
             className="text-xs px-2 py-0.5 h-6 flex-1"
           >
-            Later
+            {t('Later')}
           </Button>
           <Button
             size="sm"
@@ -116,7 +118,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             className="text-xs px-2 py-0.5 h-6 bg-[var(--success)] hover:brightness-110 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
-            Done
+            {t('Done')}
           </Button>
         </div>
       </div>

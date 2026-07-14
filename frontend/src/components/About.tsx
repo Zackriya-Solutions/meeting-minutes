@@ -8,9 +8,11 @@ import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
 import { Loader2, CheckCircle2 } from '@/components/memento/LucideCompat';
 import { toast } from 'sonner';
+import { useT } from '@/lib/i18n';
 
 
 export function About() {
+    const t = useT();
     const [currentVersion, setCurrentVersion] = useState<string>('0.4.0');
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [isChecking, setIsChecking] = useState(false);
@@ -37,11 +39,11 @@ export function About() {
             if (info.available) {
                 setShowUpdateDialog(true);
             } else {
-                toast.success('Установлена последняя версия');
+                toast.success(t('You are running the latest version'));
             }
         } catch (error: any) {
             console.error('Failed to check for updates:', error);
-            toast.error('Не удалось проверить обновления: ' + (error.message || 'неизвестная ошибка'));
+            toast.error(t('Failed to check for updates: ') + (error.message || t('Unknown error')));
         } finally {
             setIsChecking(false);
         }
@@ -54,7 +56,7 @@ export function About() {
                 <div className="mb-3">
                     <Image
                         src="/memento-app-icon.png"
-                        alt="Memento logo"
+                        alt={t('Meetily Logo')}
                         width={64}
                         height={64}
                         className="mx-auto"
@@ -63,7 +65,7 @@ export function About() {
                 <h1 className="text-xl font-semibold">memento</h1>
                 <span className="text-sm text-[var(--fg2)]"> v{currentVersion}</span>
                 <p className="text-medium text-[var(--fg2)] mt-1">
-                    Встречи, расшифровки и суть остаются на твоём устройстве.
+                    {t('Real-time notes and summaries that never leave your machine.')}
                 </p>
                 <div className="mt-3">
                     <Button
@@ -76,18 +78,18 @@ export function About() {
                         {isChecking ? (
                             <>
                                 <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                                Проверяем…
+                                {t('Checking...')}
                             </>
                         ) : (
                             <>
                                 <CheckCircle2 className="h-3 w-3 mr-2" />
-                                Проверить обновления
+                                {t('Check for Updates')}
                             </>
                         )}
                     </Button>
                     {updateInfo?.available && (
                         <div className="mt-2 text-xs text-[var(--gold)]">
-                            Доступна версия {updateInfo.version}
+                            {t('Update available: v')}{updateInfo.version}
                         </div>
                     )}
                 </div>
@@ -95,23 +97,23 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[var(--fg1)]">Почему Memento</h2>
+                <h2 className="text-base font-semibold text-[var(--fg1)]">{t('What makes Meetily different')}</h2>
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Локальные данные</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Записи и обработка могут полностью оставаться на твоём устройстве.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Privacy-first')}</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.')}</p>
                     </div>
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Любая модель</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Используй локальные модели или подключи выбранного облачного провайдера.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Use Any Model')}</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.')}</p>
                     </div>
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Без оплаты за минуты</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Локальные модели не требуют подписки или поминутной оплаты.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Cost-Smart')}</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Avoid pay-per-minute bills by running models locally (or pay only for the calls you choose).')}</p>
                     </div>
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">Для любой встречи</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">Google Meet, Zoom, Teams и разговоры офлайн.</p>
+                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Works everywhere')}</h3>
+                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Google Meet, Zoom, Teams-online or offline.')}</p>
                     </div>
                 </div>
             </div>
@@ -119,28 +121,28 @@ export function About() {
             {/* Coming Soon - Compact */}
             <div className="bg-[var(--gold-soft)] rounded p-3">
                 <p className="text-s text-[var(--gold)]">
-                    <span className="font-bold">Дальше:</span> локальные помощники для задач и договорённостей после встречи.
+                    <span className="font-bold">{t('Coming soon:')}</span> {t('A library of on-device AI agents-automating follow-ups, action tracking, and more.')}
                 </p>
             </div>
 
             {/* CTA Section - Compact */}
             <div className="text-center space-y-2">
-                <h3 className="text-medium font-semibold text-[var(--fg1)]">Нужен Memento для команды</h3>
+                <h3 className="text-medium font-semibold text-[var(--fg1)]">{t('Ready to push your business further?')}</h3>
                 <p className="text-s text-[var(--fg2)]">
-                    Можно обсудить частное развёртывание и адаптацию продукта под процессы команды.
+                    {t("If you're planning to build privacy-first custom AI agents or a fully tailored product for your business, we can help you build it.")}
                 </p>
                 <button
                     onClick={handleContactClick}
                     className="inline-flex items-center px-4 py-2 bg-[var(--gold)] hover:bg-[var(--gold-active)] text-[var(--fg-inverse)] text-sm font-medium rounded transition-colors duration-200 shadow-none hover:shadow-none"
                 >
-                    Связаться с командой
+                    {t('Chat with the Zackriya team')}
                 </button>
             </div>
 
             {/* Footer - Compact */}
             <div className="pt-2 border-t border-[var(--border-subtle)] text-center">
                 <p className="text-xs text-[var(--fg3)]">
-                    Сделано Zackriya Solutions
+                    {t('Built by Zackriya Solutions')}
                 </p>
             </div>
             <AnalyticsConsentSwitch />

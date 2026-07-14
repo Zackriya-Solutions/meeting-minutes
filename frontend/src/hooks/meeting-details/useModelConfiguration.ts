@@ -3,12 +3,14 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { useT } from '@/lib/i18n';
 
 interface UseModelConfigurationProps {
   serverAddress: string | null;
 }
 
 export function useModelConfiguration({ serverAddress }: UseModelConfigurationProps) {
+  const t = useT();
   // Note: No hardcoded defaults - DB is the source of truth
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -146,12 +148,12 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', payload);
 
-      toast.success("Summary settings Saved successfully");
+      toast.success(t("Summary settings Saved successfully"));
 
       await Analytics.trackSettingsChanged('model_config', `${payload.provider}_${payload.model}`);
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error("Failed to save summary settings", { description: String(error) });
+      toast.error(t("Failed to save summary settings"), { description: String(error) });
       if (error instanceof Error) {
         setError(error.message);
       } else {

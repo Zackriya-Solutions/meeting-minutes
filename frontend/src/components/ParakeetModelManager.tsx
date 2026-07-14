@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { Icon } from '@/components/memento/Icon';
+import { useT } from '@/lib/i18n';
 import {
   ParakeetModelInfo,
   ModelStatus,
@@ -26,6 +27,7 @@ export function ParakeetModelManager({
   className = '',
   autoSave = false
 }: ParakeetModelManagerProps) {
+  const t = useT();
   const [models, setModels] = useState<ParakeetModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +61,9 @@ export function ParakeetModelManager({
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize Parakeet:', err);
-        setError(err instanceof Error ? err.message : 'Не удалось загрузить модели');
-        toast.error('Не удалось загрузить модели расшифровки', {
-          description: err instanceof Error ? err.message : 'Неизвестная ошибка',
+        setError(err instanceof Error ? err.message : t('Failed to load models'));
+        toast.error(t('Failed to load transcription models'), {
+          description: err instanceof Error ? err.message : t('Unknown error'),
           duration: 5000
         });
       } finally {
@@ -134,8 +136,8 @@ export function ParakeetModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.success(`${displayName} готова`, {
-            description: 'Модель загружена и готова к работе',
+          toast.success(`${displayName} ${t('ready!')}`, {
+            description: t('Model downloaded and ready to use'),
             duration: 4000
           });
 
@@ -174,11 +176,11 @@ export function ParakeetModelManager({
           // Clean up throttle data
           progressThrottleRef.current.delete(modelName);
 
-          toast.error(`Не удалось загрузить ${displayName}`, {
+          toast.error(`${t('Failed to download')} ${displayName}`, {
             description: error,
             duration: 6000,
             action: {
-              label: 'Повторить',
+              label: t('Retry'),
               onClick: () => downloadModel(modelName)
             }
           });
@@ -232,13 +234,13 @@ export function ParakeetModelManager({
       // Clean up throttle data
       progressThrottleRef.current.delete(modelName);
 
-      toast.info(`Загрузка ${displayName} отменена`, {
+      toast.info(`${displayName} ${t('download cancelled')}`, {
         duration: 3000
       });
     } catch (err) {
       console.error('Failed to cancel download:', err);
-      toast.error('Не удалось отменить загрузку', {
-        description: err instanceof Error ? err.message : 'Неизвестная ошибка',
+      toast.error(t('Failed to cancel download'), {
+        description: err instanceof Error ? err.message : t('Unknown error'),
         duration: 4000
       });
     }
@@ -261,8 +263,8 @@ export function ParakeetModelManager({
         )
       );
 
-      toast.info(`Загружаю ${displayName}…`, {
-        description: 'Это займёт несколько минут',
+      toast.info(`${t('Downloading')} ${displayName}...`, {
+        description: t('This may take a few minutes'),
         duration: 5000  // Auto-dismiss after 5 seconds
       });
 
@@ -275,7 +277,7 @@ export function ParakeetModelManager({
         return newSet;
       });
 
-      const errorMessage = err instanceof Error ? err.message : 'Не удалось загрузить модель';
+      const errorMessage = err instanceof Error ? err.message : t('Download failed');
       setModels(prev =>
         prev.map(model =>
           model.name === modelName ? { ...model, status: { Error: errorMessage } } : model
@@ -295,7 +297,7 @@ export function ParakeetModelManager({
 
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;
-    toast.success(`Выбрана ${displayName}`, {
+    toast.success(`${t('Switched to')} ${displayName}`, {
       duration: 3000
     });
   };
@@ -311,8 +313,8 @@ export function ParakeetModelManager({
       const modelList = await ParakeetAPI.getAvailableModels();
       setModels(modelList);
 
-      toast.success(`${displayName} удалена`, {
-        description: 'Освободили место на устройстве',
+      toast.success(`${displayName} ${t('deleted')}`, {
+        description: t('Model removed to free up space'),
         duration: 3000
       });
 
@@ -322,8 +324,8 @@ export function ParakeetModelManager({
       }
     } catch (err) {
       console.error('Failed to delete model:', err);
-      toast.error(`Не удалось удалить ${displayName}`, {
-        description: err instanceof Error ? err.message : 'Ошибка удаления',
+      toast.error(`${t('Failed to delete')} ${displayName}`, {
+        description: err instanceof Error ? err.message : t('Delete failed'),
         duration: 4000
       });
     }
@@ -343,7 +345,7 @@ export function ParakeetModelManager({
   if (error) {
     return (
       <div className={`bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-4 ${className}`}>
-        <p className="text-sm text-[var(--danger)]">Не удалось загрузить модели</p>
+        <p className="text-sm text-[var(--danger)]">{t('Failed to load models')}</p>
         <p className="text-xs text-[var(--danger)] mt-1">{error}</p>
       </div>
     );
@@ -406,7 +408,7 @@ export function ParakeetModelManager({
           animate={{ opacity: 1, y: 0 }}
           className="text-xs text-[var(--fg2)] text-center pt-2"
         >
-          Using {getModelDisplayName(selectedModel)} for transcription
+          {t('Using')} {getModelDisplayName(selectedModel)} {t('for transcription')}
         </motion.div>
       )}
     </div>
@@ -435,6 +437,7 @@ function ModelCard({
   onDelete,
   isDownloading
 }: ModelCardProps) {
+  const t = useT();
   const [isHovered, setIsHovered] = useState(false);
   const displayInfo = getModelDisplayInfo(model.name);
   const displayName = displayInfo?.friendlyName || model.name;
@@ -473,7 +476,7 @@ function ModelCard({
       {/* Recommended Badge */}
       {isRecommended && (
         <div className="absolute -top-2 -right-2 bg-[var(--gold)] text-[var(--fg-inverse)] text-xs px-2 py-0.5 rounded-full font-medium">
-          Рекомендуемая
+          {t('Recommended')}
         </div>
       )}
 
@@ -505,7 +508,7 @@ function ModelCard({
               <>
                 <div className="flex items-center gap-1.5 text-[var(--success)]">
                   <div className="w-2 h-2 bg-[var(--success)] rounded-full"></div>
-                  <span className="text-xs font-medium">Готово</span>
+                  <span className="text-xs font-medium">{t('Ready')}</span>
                 </div>
                 <AnimatePresence>
                   {isHovered && (
@@ -519,7 +522,7 @@ function ModelCard({
                         onDelete();
                       }}
                       className="text-[var(--fg3)] hover:text-[var(--danger)] transition-colors p-1"
-                      title="Удалить модель to free up space"
+                      title={t('Delete model to free up space')}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -538,7 +541,7 @@ function ModelCard({
                 }}
                 className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
               >
-                Загрузить
+                {t('Download')}
               </button>
             )}
 
@@ -550,7 +553,7 @@ function ModelCard({
                 }}
                 className="bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-colors"
               >
-                Повторить
+                {t('Retry')}
               </button>
             )}
 
@@ -563,7 +566,7 @@ function ModelCard({
                   }}
                   className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
                 >
-                  Удалить
+                  {t('Delete')}
                 </button>
                 <button
                   onClick={(e) => {
@@ -572,7 +575,7 @@ function ModelCard({
                   }}
                   className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
                 >
-                  Re-download
+                  {t('Re-download')}
                 </button>
               </div>
             )}
@@ -589,7 +592,7 @@ function ModelCard({
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[var(--gold)]">Загрузка…</span>
+                <span className="text-sm font-medium text-[var(--gold)]">{t('Downloading...')}</span>
                 <span className="text-sm font-semibold text-[var(--gold)]">{Math.round(downloadProgress)}%</span>
               </div>
               <button
@@ -598,9 +601,9 @@ function ModelCard({
                   onCancel();
                 }}
                 className="text-xs text-[var(--fg2)] hover:text-[var(--danger)] font-medium transition-colors px-2 py-1 rounded hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
-                title="Отменить загрузку"
+                title={t('Cancel download')}
               >
-                Отмена
+                {t('Cancel')}
               </button>
             </div>
             <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
@@ -617,7 +620,7 @@ function ModelCard({
                   {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}
                 </>
               ) : (
-                'Загрузка…'
+                t('Downloading...')
               )}
             </p>
           </motion.div>

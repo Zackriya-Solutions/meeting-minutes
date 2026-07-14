@@ -10,6 +10,7 @@ import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
+import { useT } from "@/lib/i18n";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -99,7 +100,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerRenamable?: boolean;
     onSpeakerClick?: (speakerId: number) => void;
 }) {
-    const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const t = useT();
+    const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
 
     return (
         <div
@@ -113,7 +115,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                             <button
                                 type="button"
                                 onClick={() => onSpeakerClick(speakerId)}
-                                title="Переименовать спикера"
+                                title={t('Rename speaker')}
                                 className="text-[10px] font-medium uppercase tracking-wide text-[var(--fg3)] hover:text-[var(--gold)] leading-tight text-left focus:outline-none"
                             >
                                 {speakerLabel}
@@ -169,6 +171,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     speakersById = null,
     onRenameSpeaker,
 }) => {
+    const t = useT();
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Segment id to briefly highlight after a jump-to-timestamp.
@@ -341,16 +344,16 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-[var(--gold)]' : 'bg-[var(--gold)] animate-pulse'}`}></div>
                             </div>
                             <p className="text-sm text-[var(--fg2)]">
-                                {isPaused ? 'Recording paused' : 'Listening for speech...'}
+                                {isPaused ? t('Recording paused') : t('Listening for speech...')}
                             </p>
                             <p className="text-xs mt-1 text-[var(--fg3)]">
-                                {isPaused ? 'Click resume to continue recording' : 'Speak to see live transcription'}
+                                {isPaused ? t('Click resume to continue recording') : t('Speak to see live transcription')}
                             </p>
                         </>
                     ) : (
                         <>
-                            <p className="text-lg font-semibold">Добро пожаловать в Memento</p>
-                            <p className="text-xs mt-1">Начни запись, и здесь появится расшифровка</p>
+                            <p className="text-lg font-semibold">{t('Welcome to Memento')}</p>
+                            <p className="text-xs mt-1">{t('Start recording to see live transcription')}</p>
                         </>
                     )}
                 </motion.div>
@@ -409,11 +412,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             {isLoadingMore ? (
                                 <div className="flex items-center gap-2 text-[var(--fg2)]">
                                     <div className="w-4 h-4 border-2 border-[var(--border-strong)] border-t-[var(--fg2)] rounded-full animate-spin" />
-                                    <span className="text-sm">Загружаем ещё…</span>
+                                    <span className="text-sm">{t('Loading more...')}</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
                                 <span className="text-sm text-[var(--fg3)]">
-                                    Showing {loadedCount} of {totalCount} segments
+                                    {t('Showing')} {loadedCount} {t('of')} {totalCount} {t('segments')}
                                 </span>
                             ) : null}
                         </div>
@@ -428,7 +431,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             className="flex items-center gap-2 mt-4 text-[var(--fg2)]"
                         >
                             <div className="w-2 h-2 bg-[var(--gold)] rounded-full animate-pulse"></div>
-                            <span className="text-sm">Слушаем…</span>
+                            <span className="text-sm">{t('Listening...')}</span>
                         </motion.div>
                     )}
                 </>
@@ -474,11 +477,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             {isLoadingMore ? (
                                 <div className="flex items-center gap-2 text-[var(--fg2)]">
                                     <div className="w-4 h-4 border-2 border-[var(--border-strong)] border-t-[var(--fg2)] rounded-full animate-spin" />
-                                    <span className="text-sm">Загружаем ещё…</span>
+                                    <span className="text-sm">{t('Loading more...')}</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
                                 <span className="text-sm text-[var(--fg3)]">
-                                    Showing {loadedCount} of {totalCount} segments
+                                    {t('Showing')} {loadedCount} {t('of')} {totalCount} {t('segments')}
                                 </span>
                             ) : null}
                         </div>
@@ -493,7 +496,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             className="flex items-center gap-2 mt-4 text-[var(--fg2)]"
                         >
                             <div className="w-2 h-2 bg-[var(--gold)] rounded-full animate-pulse"></div>
-                            <span className="text-sm">Слушаем…</span>
+                            <span className="text-sm">{t('Listening...')}</span>
                         </motion.div>
                     )}
                 </>

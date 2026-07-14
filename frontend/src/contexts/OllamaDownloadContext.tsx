@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
+import { useT } from '@/lib/i18n';
 
 /**
  * Ollama download state synchronized with backend
@@ -34,6 +35,7 @@ export const useOllamaDownload = () => {
 };
 
 export function OllamaDownloadProvider({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [downloadProgress, setDownloadProgress] = useState<Map<string, number>>(new Map());
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
 
@@ -78,8 +80,8 @@ export function OllamaDownloadProvider({ children }: { children: React.ReactNode
             const { modelName } = event.payload;
             console.log(`✅ [OllamaDownloadContext] Download complete for ${modelName}`);
 
-            toast.success(`Модель ${modelName} загружена`, {
-              description: 'Модель готова к работе',
+            toast.success(`${t('Model')} ${modelName} ${t('downloaded!')}`, {
+              description: t('Model is now ready to use'),
               duration: 4000
             });
 
@@ -106,7 +108,7 @@ export function OllamaDownloadProvider({ children }: { children: React.ReactNode
             const { modelName, error } = event.payload;
             console.error(`❌ [OllamaDownloadContext] Download error for ${modelName}:`, error);
 
-            toast.error(`Не удалось загрузить ${modelName}`, {
+            toast.error(`${t('Download failed:')} ${modelName}`, {
               description: error,
               duration: 6000
             });

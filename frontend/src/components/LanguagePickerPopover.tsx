@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
 import { useRecentLanguages } from "@/hooks/useRecentLanguages";
 import { Icon } from "@/components/memento/Icon";
+import { useT } from "@/lib/i18n";
 
 interface LanguagePickerPopoverProps {
   value: string | null;
@@ -20,6 +21,7 @@ export function LanguagePickerPopover({
   mode = "meeting",
   autoSubtitle,
 }: LanguagePickerPopoverProps) {
+  const t = useT();
   const { recents } = useRecentLanguages();
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -84,7 +86,7 @@ export function LanguagePickerPopover({
       ref={containerRef}
       className="w-72 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none overflow-hidden"
       role="dialog"
-      aria-label="Pick summary language"
+      aria-label={t('Pick summary language')}
     >
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--border-subtle)]">
         <Icon name="search" size={16} className="text-[var(--fg3)]" />
@@ -93,7 +95,7 @@ export function LanguagePickerPopover({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Найти язык…"
+          placeholder={t('Search language...')}
           className="flex-1 text-sm text-[var(--fg1)] bg-transparent border-none outline-none placeholder:text-[var(--fg3)]"
         />
       </div>
@@ -102,7 +104,7 @@ export function LanguagePickerPopover({
         {showRecents && (
           <>
             <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--fg3)]">
-              Recently Used
+              {t('Recently Used')}
             </div>
             {recentsResolved.map((opt) => (
               <button
@@ -135,7 +137,7 @@ export function LanguagePickerPopover({
             }`}
           >
             <span className="flex flex-col">
-              <span>Auto</span>
+              <span>{t('Auto')}</span>
               {autoSubtitle && (
                 <span className="text-xs font-normal text-[var(--fg3)]">{autoSubtitle}</span>
               )}
@@ -146,7 +148,7 @@ export function LanguagePickerPopover({
 
         {filteredAll.length > 0 && (
           <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--fg3)]">
-            {mode === "meeting" ? "Other Languages" : "All Languages"}
+            {mode === "meeting" ? t("Other Languages") : t("All Languages")}
           </div>
         )}
 
@@ -169,7 +171,7 @@ export function LanguagePickerPopover({
         ))}
 
         {hasNoResults && (
-          <div className="px-3 py-2 text-sm text-[var(--fg3)]">No matches</div>
+          <div className="px-3 py-2 text-sm text-[var(--fg3)]">{t('No matches')}</div>
         )}
       </div>
     </div>

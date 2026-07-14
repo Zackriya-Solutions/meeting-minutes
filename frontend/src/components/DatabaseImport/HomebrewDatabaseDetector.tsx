@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { Database, AlertCircle, Loader2, CheckCircle2 } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 interface HomebrewDatabaseDetectorProps {
   onImportSuccess: () => void;
@@ -23,6 +24,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
   const [dbSize, setDbSize] = useState<number>(0);
   const [detectedPath, setDetectedPath] = useState<string>('');
   const [isDismissed, setIsDismissed] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     checkHomebrewDatabase();
@@ -61,7 +63,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
         legacyDbPath: detectedPath,
       });
 
-      toast.success('Данные импортированы. Перезапускаю…');
+      toast.success(t('Database imported successfully! Reloading...'));
 
       // Wait 1 second for user to see success, then reload window to refresh all data
       setTimeout(() => {
@@ -69,7 +71,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
       }, 1000);
     } catch (error) {
       console.error('Error importing database:', error);
-      toast.error(`Не удалось импортировать данные: ${error}`);
+      toast.error(`${t('Import failed:')} ${error}`);
       setIsImporting(false);
     }
   };
@@ -97,22 +99,22 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
           <div className="flex items-center gap-2 mb-1">
             <AlertCircle className="h-4 w-4 text-[var(--gold)]" />
             <h3 className="text-sm font-semibold text-[var(--gold)]">
-              Найдены данные Meetily
+              {t('Previous Meetily Installation Detected!')}
             </h3>
           </div>
           <p className="text-sm text-[var(--gold)] mb-2">
-            Найдена база данных из предыдущей версии Meetily.
+            {t('We found an existing database from your previous Meetily installation (Python backend version).')}
           </p>
           <div className="bg-[var(--bg-canvas)]/50 rounded p-2 mb-3">
             <p className="text-xs text-[var(--gold)] font-mono break-all">
               {detectedPath}
             </p>
             <p className="text-xs text-[var(--gold)] mt-1">
-              Размер: {formatFileSize(dbSize)}
+              {t('Size:')} {formatFileSize(dbSize)}
             </p>
           </div>
           <p className="text-sm text-[var(--gold)] mb-3">
-            Would you like to import your previous meetings, transcripts, and summaries?
+            {t('Would you like to import your previous meetings, transcripts, and summaries?')}
           </p>
           
           {/* Yes/No Buttons */}
@@ -125,12 +127,12 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
               {isImporting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Импортирую…</span>
+                  <span>{t('Importing...')}</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="h-4 w-4" />
-                  <span>Импортировать</span>
+                  <span>{t('Yes, Import')}</span>
                 </>
               )}
             </button>
@@ -140,7 +142,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
               disabled={isImporting}
               className="flex-1 px-4 py-2 border-2 border-[var(--gold-border)] text-[var(--gold)] rounded-lg hover:bg-[var(--gold-soft)] disabled:bg-[var(--bg-elevated)] disabled:cursor-not-allowed transition-colors"
             >
-              No, Browse Manually
+              {t('No, Browse Manually')}
             </button>
           </div>
         </div>

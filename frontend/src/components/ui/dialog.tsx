@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Icon } from "@/components/memento/Icon"
 
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
 
 const Dialog = DialogPrimitive.Root
 
@@ -32,7 +33,9 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, ...props }, ref) => {
+  const t = useT()
+  return (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -46,11 +49,12 @@ const DialogContent = React.forwardRef<
       {children}
       <DialogPrimitive.Close className="mm-icon-button absolute right-3 top-3 h-9 w-9 disabled:pointer-events-none">
         <Icon name="close" size={17} />
-        <span className="sr-only">Закрыть</span>
+        <span className="sr-only">{t('Close')}</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </DialogPortal>
-))
+  )
+})
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({

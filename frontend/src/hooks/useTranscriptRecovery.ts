@@ -11,6 +11,7 @@ import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
+import { useT } from '@/lib/i18n';
 
 interface AudioRecoveryStatus {
   status: string; // "success" | "partial" | "failed" | "none"
@@ -31,6 +32,7 @@ export interface UseTranscriptRecoveryReturn {
 }
 
 export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
+  const t = useT();
   const [recoverableMeetings, setRecoverableMeetings] = useState<MeetingMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
@@ -113,13 +115,13 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       // 1. Load meeting metadata
       const metadata = await indexedDBService.getMeetingMetadata(meetingId);
       if (!metadata) {
-        throw new Error('Meeting metadata not found');
+        throw new Error(t('Meeting metadata not found'));
       }
 
       // 2. Load all transcripts
       const transcripts = await loadMeetingTranscripts(meetingId);
       if (transcripts.length === 0) {
-        throw new Error('No transcripts found for this meeting');
+        throw new Error(t('No transcripts found for this meeting'));
       }
 
       // 3. Check for folder path
@@ -188,8 +190,8 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
       } catch (error) {
         console.warn('Failed to apply pinned summary language to recovered meeting:', error);
-        toast.warning('Could not apply default summary language', {
-          description: 'The recovered meeting was saved, but the default summary language was not applied.',
+        toast.warning(t('Could not apply default summary language'), {
+          description: t('The recovered meeting was saved, but the default summary language was not applied.'),
         });
       }
 

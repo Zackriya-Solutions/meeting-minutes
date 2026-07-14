@@ -37,6 +37,7 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import { useT } from '@/lib/i18n';
 
 
 interface ImportAudioDialogProps {
@@ -70,6 +71,7 @@ export function ImportAudioDialog({
   preselectedFile,
   onComplete,
 }: ImportAudioDialogProps) {
+  const t = useT();
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
   const { selectedLanguage, transcriptModelConfig } = useConfig();
@@ -95,18 +97,18 @@ export function ImportAudioDialog({
   } = useTranscriptionModels(transcriptModelConfig);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
-    toast.success(`Импорт завершён. Создано фрагментов: ${result.segments_count}.`);
+    toast.success(`${t('Import complete!')} ${result.segments_count} ${t('segments created.')}`);
 
     // Refresh meetings list then navigate to the imported meeting
     refetchMeetings();
     onComplete?.();
     onOpenChange(false);
     router.push(`/meeting-details?id=${result.meeting_id}`);
-  }, [router, refetchMeetings, onComplete, onOpenChange]);
+  }, [t, router, refetchMeetings, onComplete, onOpenChange]);
 
   const handleImportError = useCallback((error: string) => {
-    toast.error('Не удалось импортировать аудио', { description: error });
-  }, []);
+    toast.error(t('Import failed'), { description: error });
+  }, [t]);
 
   const {
     status,
@@ -204,7 +206,7 @@ export function ImportAudioDialog({
   const handleCancel = async () => {
     if (isProcessing) {
       await cancelImport();
-      toast.info('Импорт отменён');
+      toast.info(t('Import cancelled'));
     }
     onOpenChange(false);
   };
@@ -241,31 +243,31 @@ export function ImportAudioDialog({
             {isProcessing ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-[var(--gold)]" />
-                Importing Audio...
+                {t('Importing Audio...')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-[var(--danger)]" />
-                Не удалось импортировать
+                {t('Import Failed')}
               </>
             ) : status === 'complete' ? (
               <>
                 <CheckCircle2 className="h-5 w-5 text-[var(--success)]" />
-                Import Complete
+                {t('Import Complete')}
               </>
             ) : (
               <>
                 <Upload className="h-5 w-5 text-[var(--gold)]" />
-                Import Audio File
+                {t('Import Audio File')}
               </>
             )}
           </DialogTitle>
           <DialogDescription>
             {isProcessing
-              ? progress?.message || 'Processing audio...'
+              ? progress?.message || t('Processing audio...')
               : error
-              ? 'An error occurred during import'
-              : 'Import an audio file to create a new meeting with transcripts'}
+              ? t('An error occurred during import')
+              : t('Import an audio file to create a new meeting with transcripts')}
           </DialogDescription>
         </DialogHeader>
 
@@ -295,19 +297,19 @@ export function ImportAudioDialog({
 
                   {/* Editable title */}
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-[var(--fg2)]">Название встречи</label>
+                    <label className="text-sm font-medium text-[var(--fg2)]">{t('Meeting Title')}</label>
                     <Input
                       value={title}
                       onChange={(e) => {
                         setTitle(e.target.value);
                         setTitleModifiedByUser(true);
                       }}
-                      placeholder="Название встречи"
+                      placeholder={t('Enter meeting title')}
                     />
                   </div>
 
                   <Button variant="outline" size="sm" onClick={handleSelectFile} className="w-full">
-                    Choose Different File
+                    {t('Choose Different File')}
                   </Button>
                 </div>
               ) : (
@@ -317,16 +319,16 @@ export function ImportAudioDialog({
                     {status === 'validating' ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Validating...
+                        {t('Validating...')}
                       </>
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Select Audio File
+                        {t('Select Audio File')}
                       </>
                     )}
                   </Button>
-                  <p className="text-sm text-[var(--fg2)] mt-2">MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA</p>
+                  <p className="text-sm text-[var(--fg2)] mt-2">{t('MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA')}</p>
                 </div>
               )}
 
@@ -337,7 +339,7 @@ export function ImportAudioDialog({
                     onClick={() => setShowAdvanced(!showAdvanced)}
                     className="w-full flex items-center justify-between p-3 text-sm font-medium text-[var(--fg2)] hover:bg-[var(--bg-sheet)]"
                   >
-                    <span>Дополнительные параметры</span>
+                    <span>{t('Advanced Options')}</span>
                     {showAdvanced ? (
                       <ChevronUp className="h-4 w-4" />
                     ) : (
@@ -352,11 +354,11 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Язык</span>
+                            <span className="text-sm font-medium">{t('Language')}</span>
                           </div>
                           <Select value={selectedLang} onValueChange={setSelectedLang}>
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Выбери язык" />
+                              <SelectValue placeholder={t('Select language')} />
                             </SelectTrigger>
                             <SelectContent className="max-h-60">
                               {LANGUAGES.map((lang) => (
@@ -371,14 +373,14 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Язык</span>
+                            <span className="text-sm font-medium">{t('Language')}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             {isSaluteSpeechModel
-                              ? 'SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.'
+                              ? t('SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.')
                               : isGigaamModel
-                                ? 'GigaAM transcribes Russian and always auto-detects — no language selection needed.'
-                                : "Language selection isn't supported for Parakeet. It always uses automatic detection."}
+                                ? t('GigaAM transcribes Russian and always auto-detects — no language selection needed.')
+                                : t("Language selection isn't supported for Parakeet. It always uses automatic detection.")}
                           </p>
                         </div>
                       )}
@@ -388,7 +390,7 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Cpu className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Модель</span>
+                            <span className="text-sm font-medium">{t('Model')}</span>
                           </div>
                           <Select
                             value={selectedModelKey}
@@ -396,7 +398,7 @@ export function ImportAudioDialog({
                             disabled={loadingModels}
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder={loadingModels ? 'Загружаю модели…' : 'Выбери модель'} />
+                              <SelectValue placeholder={loadingModels ? t('Loading models...') : t('Select model')} />
                             </SelectTrigger>
                             <SelectContent>
                               {availableModels.map((model) => (
@@ -405,7 +407,7 @@ export function ImportAudioDialog({
                                   value={`${model.provider}:${model.name}`}
                                 >
                                   {model.displayName}
-                                  {model.size_mb > 0 ? ` (${Math.round(model.size_mb)} MB)` : ''}
+                                  {model.size_mb > 0 ? ` (${Math.round(model.size_mb)} ${t('MB')})` : ''}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -450,7 +452,7 @@ export function ImportAudioDialog({
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Отмена
+                {t('Cancel')}
               </Button>
               <Button
                 onClick={handleStartImport}
@@ -458,23 +460,23 @@ export function ImportAudioDialog({
                 disabled={!fileInfo}
               >
                 <Upload className="h-4 w-4 mr-2" />
-                Import
+                {t('Import')}
               </Button>
             </>
           )}
           {isProcessing && (
             <Button variant="outline" onClick={handleCancel}>
               <X className="h-4 w-4 mr-2" />
-              Отмена
+              {t('Cancel')}
             </Button>
           )}
           {error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Закрыть
+                {t('Close')}
               </Button>
               <Button onClick={reset} variant="outline">
-                Try Again
+                {t('Try Again')}
               </Button>
             </>
           )}

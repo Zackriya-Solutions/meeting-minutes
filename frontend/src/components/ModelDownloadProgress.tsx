@@ -1,6 +1,7 @@
 import React from 'react';
 import { ModelStatus } from '../lib/whisper';
 import { Button } from './ui/button';
+import { useT } from '@/lib/i18n';
 
 interface ModelDownloadProgressProps {
   status: ModelStatus;
@@ -9,6 +10,7 @@ interface ModelDownloadProgressProps {
 }
 
 export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDownloadProgressProps) {
+  const t = useT();
   if (typeof status !== 'object' || !('Downloading' in status)) {
     return null;
   }
@@ -22,7 +24,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
         <div className="flex items-center space-x-2">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--gold-border)]"></div>
           <span className="text-sm font-medium text-[var(--gold)]">
-            {isCompleted ? 'Завершаю…' : `Загружаю ${modelName}`}
+            {isCompleted ? t('Finalizing...') : `${t('Downloading')} ${modelName}`}
           </span>
         </div>
       </div>
@@ -35,16 +37,16 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
           />
         </div>
         <div className="flex justify-between text-xs text-[var(--gold)] mt-1">
-          <span>{Math.round(progress)}% complete</span>
+          <span>{Math.round(progress)}% {t('complete')}</span>
           {!isCompleted && (
-            <span className="animate-pulse">Downloading...</span>
+            <span className="animate-pulse">{t('Downloading...')}</span>
           )}
         </div>
       </div>
       
       {isCompleted && (
         <div className="mt-2 text-xs text-[var(--success)]">
-          Загрузка завершена, запускаю модель…
+          {t('✓ Download completed, loading model...')}
         </div>
       )}
     </div>
@@ -105,6 +107,7 @@ interface DownloadSummaryProps {
 }
 
 export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: DownloadSummaryProps) {
+  const t = useT();
   const formatSize = (mb: number) => {
     if (mb >= 1000) return `${(mb / 1000).toFixed(1)}GB`;
     return `${mb}MB`;
@@ -114,15 +117,15 @@ export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: 
     <div className="bg-[var(--bg-sheet)] rounded-lg p-3 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-[var(--fg2)]">
-          Доступно моделей: {downloadedModels} из {totalModels}
+          {t('Models available:')} {downloadedModels} {t('of')} {totalModels}
         </span>
         <span className="text-[var(--fg2)]">
-          Всего {formatSize(totalSizeMb)}
+          {t('Total')} {formatSize(totalSizeMb)}
         </span>
       </div>
       {downloadedModels > 0 && (
         <div className="mt-1 text-xs text-[var(--success)]">
-          Модели работают локально — интернет для расшифровки не нужен
+          {t('✓ Models run locally - no internet required for transcription')}
         </div>
       )}
     </div>

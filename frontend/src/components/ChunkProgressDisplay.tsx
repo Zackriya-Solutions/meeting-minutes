@@ -1,5 +1,6 @@
 import React from 'react';
 import { CheckCircle, Clock, Loader2, XCircle } from '@/components/memento/LucideCompat';
+import { useT } from '@/lib/i18n';
 
 export interface ChunkStatus {
   chunk_id: number;
@@ -37,6 +38,7 @@ export function ChunkProgressDisplay({
   isPaused = false,
   className = ''
 }: ChunkProgressDisplayProps) {
+  const t = useT();
   const completionPercentage = progress.total_chunks > 0
     ? Math.round((progress.completed_chunks / progress.total_chunks) * 100)
     : 0;
@@ -47,16 +49,16 @@ export function ChunkProgressDisplay({
     const hours = Math.floor(minutes / 60);
 
     if (hours > 0) {
-      return `${hours} ч ${minutes % 60} мин ${seconds % 60} с`;
+      return `${hours}${t('h')} ${minutes % 60}${t('m')} ${seconds % 60}${t('s')}`;
     } else if (minutes > 0) {
-      return `${minutes} мин ${seconds % 60} с`;
+      return `${minutes}${t('m')} ${seconds % 60}${t('s')}`;
     } else {
-      return `${seconds} с`;
+      return `${seconds}${t('s')}`;
     }
   };
 
   const formatTimeRemaining = (ms?: number) => {
-    if (!ms || ms <= 0) return 'Считаем…';
+    if (!ms || ms <= 0) return t('Calculating...');
     return formatDuration(ms);
   };
 
@@ -94,11 +96,11 @@ export function ChunkProgressDisplay({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">
           <h3 className="text-lg font-semibold text-[var(--fg1)]">
-            Ход обработки
+            {t('Processing Progress')}
           </h3>
           {isPaused && (
             <span className="bg-[var(--gold-soft)] text-[var(--gold)] px-2 py-1 rounded-full text-xs font-medium">
-              На паузе
+              {t('Paused')}
             </span>
           )}
         </div>
@@ -110,14 +112,14 @@ export function ChunkProgressDisplay({
               className="bg-[var(--gold)] hover:bg-[var(--gold-active)] text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
               disabled={progress.processing_chunks === 0 && progress.completed_chunks === progress.total_chunks}
             >
-              Pause
+              {t('Pause')}
             </button>
           ) : (
             <button
               onClick={onResume}
               className="bg-[var(--success)] hover:brightness-110 text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
             >
-              Resume
+              {t('Resume')}
             </button>
           )}
 
@@ -125,7 +127,7 @@ export function ChunkProgressDisplay({
             onClick={onCancel}
             className="bg-[var(--danger)] hover:opacity-90 text-[var(--fg-inverse)] px-3 py-1 rounded text-sm transition-colors"
           >
-            Cancel
+            {t('Cancel')}
           </button>
         </div>
       </div>
@@ -134,7 +136,7 @@ export function ChunkProgressDisplay({
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-[var(--fg2)]">
-            {progress.completed_chunks} of {progress.total_chunks} chunks completed
+            {progress.completed_chunks} {t('of')} {progress.total_chunks} {t('chunks completed')}
           </span>
           <span className="text-sm font-medium text-[var(--fg2)]">
             {completionPercentage}%
@@ -155,28 +157,28 @@ export function ChunkProgressDisplay({
           <div className="text-lg font-semibold text-[var(--success)]">
             {progress.completed_chunks}
           </div>
-          <div className="text-[var(--fg2)]">Готово</div>
+          <div className="text-[var(--fg2)]">{t('Completed')}</div>
         </div>
 
         <div className="text-center">
           <div className="text-lg font-semibold text-[var(--gold)]">
             {progress.processing_chunks}
           </div>
-          <div className="text-[var(--fg2)]">В работе</div>
+          <div className="text-[var(--fg2)]">{t('Processing')}</div>
         </div>
 
         <div className="text-center">
           <div className="text-lg font-semibold text-[var(--fg2)]">
             {progress.total_chunks - progress.completed_chunks - progress.processing_chunks - progress.failed_chunks}
           </div>
-          <div className="text-[var(--fg2)]">В очереди</div>
+          <div className="text-[var(--fg2)]">{t('Pending')}</div>
         </div>
 
         <div className="text-center">
           <div className="text-lg font-semibold text-[var(--danger)]">
             {progress.failed_chunks}
           </div>
-          <div className="text-[var(--fg2)]">Ошибки</div>
+          <div className="text-[var(--fg2)]">{t('Failed')}</div>
         </div>
       </div>
 
@@ -186,7 +188,7 @@ export function ChunkProgressDisplay({
           <div className="flex items-center space-x-2">
             <Clock size={16} className="text-[var(--gold)]" />
             <span className="text-sm text-[var(--gold)]">
-              Осталось примерно {formatTimeRemaining(progress.estimated_remaining_ms)}
+              {t('Estimated time remaining:')} {formatTimeRemaining(progress.estimated_remaining_ms)}
             </span>
           </div>
         </div>
@@ -195,7 +197,7 @@ export function ChunkProgressDisplay({
       {/* Recent Chunks Grid */}
       <div className="space-y-2">
         <h4 className="text-sm font-medium text-[var(--fg2)] mb-2">
-          Последние фрагменты: {Math.min(progress.chunks.length, 10)} из {progress.total_chunks}
+          {t('Recent Chunks')} ({Math.min(progress.chunks.length, 10)} {t('of')} {progress.total_chunks})
         </h4>
 
         <div className="max-h-48 overflow-y-auto space-y-1">
@@ -211,7 +213,7 @@ export function ChunkProgressDisplay({
                   <div className="flex items-center space-x-2">
                     <span>{getChunkStatusIcon(chunk.status)}</span>
                     <span className="font-medium">
-                      Фрагмент {chunk.chunk_id}
+                      {t('Chunk')} {chunk.chunk_id}
                     </span>
                     {chunk.duration_ms && (
                       <span className="text-[var(--fg2)]">
@@ -235,7 +237,7 @@ export function ChunkProgressDisplay({
 
                 {chunk.error_message && (
                   <div className="mt-1 text-[var(--danger)] text-xs">
-                    Ошибка: {chunk.error_message}
+                    {t('Error:')} {chunk.error_message}
                   </div>
                 )}
               </div>
@@ -249,7 +251,7 @@ export function ChunkProgressDisplay({
           <div className="flex items-center space-x-2">
             <CheckCircle size={16} className="text-[var(--success)]" />
             <span className="text-sm font-medium text-[var(--success)]">
-              Обработка завершена. Расшифровано фрагментов: {progress.total_chunks}.
+              {t('Processing completed! All')} {progress.total_chunks} {t('chunks have been transcribed.')}
             </span>
           </div>
         </div>
@@ -260,6 +262,7 @@ export function ChunkProgressDisplay({
 
 // Mini version for sidebar or compact display
 export function ChunkProgressMini({ progress, className = '' }: { progress: ProcessingProgress; className?: string }) {
+  const t = useT();
   const completionPercentage = progress.total_chunks > 0
     ? Math.round((progress.completed_chunks / progress.total_chunks) * 100)
     : 0;
@@ -268,7 +271,7 @@ export function ChunkProgressMini({ progress, className = '' }: { progress: Proc
     <div className={`bg-[var(--bg-sheet)] border border-[var(--border-subtle)] rounded-lg p-3 ${className}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-[var(--fg2)]">
-          Processing
+          {t('Processing')}
         </span>
         <span className="text-sm font-medium text-[var(--fg2)]">
           {completionPercentage}%
@@ -283,10 +286,10 @@ export function ChunkProgressMini({ progress, className = '' }: { progress: Proc
       </div>
 
       <div className="text-xs text-[var(--fg2)]">
-        {progress.completed_chunks} / {progress.total_chunks} chunks
+        {progress.completed_chunks} / {progress.total_chunks} {t('chunks')}
         {progress.processing_chunks > 0 && (
           <span className="ml-2 text-[var(--gold)]">
-            ({progress.processing_chunks} processing)
+            ({progress.processing_chunks} {t('processing')})
           </span>
         )}
       </div>

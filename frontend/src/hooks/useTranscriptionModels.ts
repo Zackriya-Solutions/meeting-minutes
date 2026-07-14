@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useT } from '@/lib/i18n';
 
 export interface RawModelInfo {
   name: string;
@@ -39,6 +40,7 @@ interface TranscriptModelConfig {
  * @returns Object containing available models, selected model key, loading state, and fetch function
  */
 export function useTranscriptionModels(transcriptModelConfig: TranscriptModelConfig | undefined) {
+  const t = useT();
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState<string>('');
   const [loadingModels, setLoadingModels] = useState(false);
@@ -62,7 +64,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         allModels.push({
           provider: 'gigaam' as const,
           name: gigaam.model || 'gigaam-v3-e2e-ctc',
-          displayName: 'GigaAM v3 (русский)',
+          displayName: t('GigaAM v3 (Russian)'),
           size_mb: 224,
         });
       }
@@ -93,7 +95,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         .map((m) => ({
           provider: 'whisper' as const,
           name: m.name,
-          displayName: `Whisper: ${m.name}`,
+          displayName: `${t('Whisper')}: ${m.name}`,
           size_mb: m.size_mb,
         }));
       allModels.push(...availableWhisper);
@@ -109,7 +111,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         .map((m) => ({
           provider: 'parakeet' as const,
           name: m.name,
-          displayName: `Parakeet: ${m.name}`,
+          displayName: `${t('Parakeet')}: ${m.name}`,
           size_mb: m.size_mb,
         }));
       allModels.push(...availableParakeet);
@@ -146,7 +148,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     }
 
     setLoadingModels(false);
-  }, [transcriptModelConfig]);
+  }, [transcriptModelConfig, t]);
 
   // Reset user selection tracking (call when dialog opens fresh)
   const resetSelection = useCallback(() => {
