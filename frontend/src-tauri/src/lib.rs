@@ -50,6 +50,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+pub mod gateway_identity;
 pub mod openrouter;
 pub mod gigaam_engine;
 pub mod parakeet_engine;

@@ -181,7 +181,7 @@ pub async fn generate_summary(
             header::HeaderMap::new(),
         ),
         LLMProvider::DeepSeek => (
-            "https://api.deepseek.com/v1/chat/completions".to_string(),
+            format!("{}/deepseek/v1/chat/completions", crate::gateway_identity::PRIMARY_GATEWAY),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {

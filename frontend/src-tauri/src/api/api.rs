@@ -513,8 +513,14 @@ pub async fn api_get_model_config<R: Runtime>(
             }
         }
         Ok(None) => {
-            log_warn!("⚠️ No model config found in database - database may be empty or settings table not initialized");
-            Ok(None)
+            log_info!("No model config found, returning managed DeepSeek default");
+            Ok(Some(ModelConfig {
+                provider: "deepseek".to_string(),
+                model: crate::llm::providers::deepseek::DEFAULT_MODEL.to_string(),
+                whisper_model: "large-v3".to_string(),
+                api_key: None,
+                ollama_endpoint: None,
+            }))
         }
         Err(e) => {
             log_error!("❌ Failed to get model config from database: {}", e);
@@ -644,8 +650,8 @@ pub async fn api_get_transcript_config<R: Runtime>(
         Ok(None) => {
             log_info!("No transcript config found, returning default.");
             Ok(Some(TranscriptConfig {
-                provider: "parakeet".to_string(),
-                model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+                provider: "salutespeech".to_string(),
+                model: "salutespeech-stream-v2".to_string(),
                 api_key: None,
             }))
         }

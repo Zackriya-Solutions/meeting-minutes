@@ -342,9 +342,7 @@ impl SummaryService {
             match crate::llm::providers::resolve_deepseek_api_key(&pool).await {
                 Some(key) => key,
                 None => {
-                    let err_msg =
-                        "DeepSeek is not configured. Add your API key in Settings → Providers."
-                            .to_string();
+                    let err_msg = "Managed DeepSeek gateway is unavailable.".to_string();
                     Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
                     return;
                 }

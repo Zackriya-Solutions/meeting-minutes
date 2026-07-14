@@ -1,0 +1,96 @@
+//! Per-install identity shared by the managed DeepSeek and SaluteSpeech paths.
+//! The gateway JWT is stored in the operating-system credential vault; upstream
+//! provider credentials never ship in the application.
+
+use serde::{Deserialize, Serialize};
+
+pub const PRIMARY_GATEWAY: &str = "https://gw.gigatool.app";
+pub const FALLBACK_GATEWAY: &str = "https://gw2.gigatool.app";
+const SERVICE: &str = "meetily.gateway";
+
+#[derive(Serialize)]
+struct Registration<'a> {
+    #[serde(rename = "deviceId")]
+    device_id: &'a str,
+    platform: &'a str,
+    version: &'a str,
+    product: &'a str,
+}
+
+#[derive(Deserialize)]
+struct RegistrationResponse {
+    token: String,
+}
+
+fn entry(name: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(SERVICE, name).map_err(|e| format!("credential vault unavailable: {e}"))
+}
+
+fn device_id() -> Result<String, String> {
+    let item = entry("device-id")?;
+    if let Ok(value) = item.get_password() {
+        if !value.is_empty() {
+            return Ok(value);
+        }
+    }
+    let value = uuid::Uuid::new_v4().to_string();
+    item.set_password(&value)
+        .map_err(|e| format!("cannot save gateway device id: {e}"))?;
+    Ok(value)
+}
+
+async fn register(base: &str) -> Result<String, String> {
+    let response = reqwest::Client::new()
+        .post(format!("{}/register", base.trim_end_matches('/')))
+        .json(&Registration {
+            device_id: &device_id()?,
+            platform: std::env::consts::OS,
+            version: env!("CARGO_PKG_VERSION"),
+            product: "memento",
+        })
+        .send()
+        .await
+        .map_err(|e| format!("gateway registration failed: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("gateway registration error {}", response.status()));
+    }
+    response
+        .json::<RegistrationResponse>()
+        .await
+        .map(|v| v.token)
+        .map_err(|e| format!("invalid gateway registration response: {e}"))
+}
+
+async fn valid(base: &str, token: &str) -> bool {
+    reqwest::Client::new()
+        .get(format!("{}/me", base.trim_end_matches('/')))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// Return a valid install JWT and the gateway host that accepted it.
+pub async fn install_token() -> Result<(String, String), String> {
+    let item = entry("install-token")?;
+    if let Ok(token) = item.get_password() {
+        for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
+            if valid(base, &token).await {
+                return Ok((token, base.to_string()));
+            }
+        }
+    }
+    let mut last = String::new();
+    for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
+        match register(base).await {
+            Ok(token) => {
+                item.set_password(&token)
+                    .map_err(|e| format!("cannot save gateway token: {e}"))?;
+                return Ok((token, base.to_string()));
+            }
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
