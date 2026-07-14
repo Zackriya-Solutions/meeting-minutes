@@ -3,20 +3,39 @@
 # Exit on error
 set -e
 
-# Local development gateway credential. Release builds receive this from CI;
-# developers can keep it in an ignored file instead of macOS Keychain.
-DEV_ENV_FILE="${MEMENTO_DEV_ENV_FILE:-.env.local-dev}"
-if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] && [ -f "$DEV_ENV_FILE" ]; then
+# Load the standard ignored local environment file. Release builds receive the
+# same variable from GitHub Actions; local development keeps it in frontend/.env.
+if [ -f ".env" ]; then
     # shellcheck disable=SC1090
     set -a
-    source "$DEV_ENV_FILE"
+    source ".env"
     set +a
+fi
+
+# If the local env has no key, retrieve the server-owned value over authenticated
+# SSH. This deliberately requires gateway host access; exposing the key over a
+# public HTTP endpoint would make the registration check meaningless.
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ]; then
+    GATEWAY_SSH_HOST="${MEMENTO_GATEWAY_SSH_HOST:-i167}"
+    MEMENTO_REGISTRATION_KEY="$(
+        ssh -o BatchMode=yes -o ConnectTimeout=8 "$GATEWAY_SSH_HOST" \
+            "sudo -n sed -n 's/^MEMENTO_REGISTRATION_KEY=//p' /etc/gigatool-gateway.env 2>/dev/null || sed -n 's/^MEMENTO_REGISTRATION_KEY=//p' /etc/gigatool-gateway.env 2>/dev/null" \
+            | head -n 1
+    )" || true
+    export MEMENTO_REGISTRATION_KEY
 fi
 
 if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] || [ "$MEMENTO_REGISTRATION_KEY" = "replace-with-development-registration-key" ]; then
     echo "Missing MEMENTO_REGISTRATION_KEY for local development."
-    echo "Copy .env.local-dev.example to .env.local-dev and add the development key."
+    echo "Grant SSH access to the gateway (default host: i167), set MEMENTO_GATEWAY_SSH_HOST,"
+    echo "or copy .env.example to .env and add the development key manually."
     exit 1
+fi
+
+# Lightweight validation hook used by CI and maintainers; never prints the key.
+if [ "${MEMENTO_ENV_CHECK_ONLY:-0}" = "1" ]; then
+    echo "Memento gateway development credential is available."
+    exit 0
 fi
 
 # Add log level selector with default to INFO
