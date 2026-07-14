@@ -94,31 +94,35 @@ impl HybridSearch {
     ) -> Result<Vec<SearchHit>, sqlx::Error> {
         let terms = query_terms(query_text);
 
+        // Resolve scope before either branch ranks candidates.
+        let allowed = allowed_chunk_ids(pool, filters).await?;
+
         // Branch A: FTS5 BM25 over chunks.
-        let fts_ids = fts_branch(pool, &terms, BRANCH_LIMIT).await?;
+        let fts_ids = fts_branch(pool, &terms, BRANCH_LIMIT, allowed.as_ref()).await?;
 
         // Branch B: vector KNN (best-effort; empty if unavailable or not requested).
         let vec_ids: Vec<i64> = match query_embedding {
-            Some(emb) => match crate::vector::knn(pool, emb, BRANCH_LIMIT).await {
-                Ok(rows) => rows.into_iter().map(|(id, _)| id).collect(),
-                Err(e) => {
-                    log::warn!("vector branch unavailable, using FTS-only: {e}");
-                    Vec::new()
+            Some(emb) => {
+                let result = match &allowed {
+                    Some(ids) => {
+                        let mut ids: Vec<i64> = ids.iter().copied().collect();
+                        ids.sort_unstable();
+                        crate::vector::knn_filtered(pool, emb, &ids, BRANCH_LIMIT).await
+                    }
+                    None => crate::vector::knn(pool, emb, BRANCH_LIMIT).await,
+                };
+                match result {
+                    Ok(rows) => rows.into_iter().map(|(id, _)| id).collect(),
+                    Err(e) => {
+                        log::warn!("vector branch unavailable, using FTS-only: {e}");
+                        Vec::new()
+                    }
                 }
-            },
+            }
             None => Vec::new(),
         };
 
-        // Filters applied to BOTH branches before ranking.
-        let allowed = allowed_chunk_ids(pool, filters).await?;
-        let apply = |ids: Vec<i64>| -> Vec<i64> {
-            match &allowed {
-                Some(set) => ids.into_iter().filter(|id| set.contains(id)).collect(),
-                None => ids,
-            }
-        };
-
-        let fused = reciprocal_rank_fusion(&[apply(fts_ids), apply(vec_ids)], DEFAULT_RRF_K);
+        let fused = reciprocal_rank_fusion(&[fts_ids, vec_ids], DEFAULT_RRF_K);
         let top: Vec<(i64, f64)> = fused.into_iter().take(limit).collect();
         load_hits(pool, &top, &terms).await
     }
@@ -140,6 +144,7 @@ async fn fts_branch(
     pool: &sqlx::SqlitePool,
     terms: &[String],
     limit: i64,
+    allowed: Option<&std::collections::HashSet<i64>>,
 ) -> Result<Vec<i64>, sqlx::Error> {
     if terms.is_empty() {
         return Ok(Vec::new());
@@ -150,13 +155,38 @@ async fn fts_branch(
         .collect::<Vec<_>>()
         .join(" OR ");
 
-    sqlx::query_scalar::<_, i64>(
-        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
-    )
-    .bind(match_expr)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+    let Some(allowed) = allowed else {
+        return sqlx::query_scalar::<_, i64>(
+            "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts), rowid LIMIT ?",
+        ).bind(match_expr).bind(limit).fetch_all(pool).await;
+    };
+    if allowed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut ids: Vec<i64> = allowed.iter().copied().collect();
+    ids.sort_unstable();
+    let mut candidates: Vec<(i64, f64)> = Vec::new();
+    for batch in ids.chunks(400) {
+        let placeholders = vec!["?"; batch.len()].join(",");
+        let sql = format!(
+            "SELECT rowid, bm25(chunks_fts) AS rank FROM chunks_fts \
+             WHERE chunks_fts MATCH ? AND rowid IN ({placeholders}) \
+             ORDER BY rank, rowid LIMIT ?"
+        );
+        let mut query = sqlx::query_as::<_, (i64, f64)>(&sql).bind(&match_expr);
+        for id in batch {
+            query = query.bind(*id);
+        }
+        candidates.extend(query.bind(limit).fetch_all(pool).await?);
+    }
+    candidates.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    candidates.dedup_by_key(|row| row.0);
+    candidates.truncate(limit as usize);
+    Ok(candidates.into_iter().map(|(id, _)| id).collect())
 }
 
 /// Compute the set of chunk ids permitted by the filters, or `None` when no filter is
@@ -305,5 +335,32 @@ mod tests {
         let b = reciprocal_rank_fusion(&[vec![3], vec![5]], DEFAULT_RRF_K);
         assert_eq!(a, b);
         assert_eq!(a[0].0, 3, "lower id first on tie");
+    }
+
+    #[tokio::test]
+    async fn scoped_search_is_not_crowded_out_by_global_top_k() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT, created_at TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, start_ms INTEGER, text TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("CREATE VIRTUAL TABLE chunks_fts USING fts5(text)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings VALUES('outside','Outside','2026-01-01'),('inside','Inside','2026-01-01')")
+            .execute(&pool).await.unwrap();
+        for id in 1..=25_i64 {
+            sqlx::query("INSERT INTO chunks VALUES(?,'outside',0,'бюджет')")
+                .bind(id).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO chunks_fts(rowid,text) VALUES(?,'бюджет')")
+                .bind(id).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO chunks VALUES(99,'inside',0,'бюджет')")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO chunks_fts(rowid,text) VALUES(99,'бюджет')")
+            .execute(&pool).await.unwrap();
+        let filters = SearchFilters { meeting_ids: vec!["inside".into()], ..Default::default() };
+        let hits = HybridSearch::search(&pool, "бюджет", None, &filters, 5).await.unwrap();
+        assert_eq!(hits.iter().map(|hit| hit.chunk_id).collect::<Vec<_>>(), vec![99]);
     }
 }

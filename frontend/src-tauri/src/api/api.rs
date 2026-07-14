@@ -8,7 +8,8 @@ use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository,
+            setting::{is_secret_sentinel, redact_secret, SettingsRepository},
             transcript::TranscriptsRepository,
         },
     },
@@ -498,7 +499,7 @@ pub async fn api_get_model_config<R: Runtime>(
                         provider: config.provider,
                         model: config.model,
                         whisper_model: config.whisper_model,
-                        api_key,
+                        api_key: redact_secret(api_key),
                         ollama_endpoint: config.ollama_endpoint,
                     }))
                 }
@@ -558,7 +559,7 @@ pub async fn api_save_model_config<R: Runtime>(
 
     // Skip API key saving for custom-openai provider (it uses customOpenAIConfig JSON instead)
     if let Some(key) = api_key {
-        if !key.is_empty() && provider != "custom-openai" {
+        if !key.is_empty() && !is_secret_sentinel(&key) && provider != "custom-openai" {
             log_info!("🔑 API key provided, saving...");
             if let Err(e) = SettingsRepository::save_api_key(pool, &provider, &key).await {
                 log_error!("❌ Failed to save API key: {}", e);
@@ -597,7 +598,7 @@ pub async fn api_get_api_key<R: Runtime>(
                 "Successfully retrieved API key for provider '{}'.",
                 &provider
             );
-            Ok(key.unwrap_or_default())
+            Ok(redact_secret(key).unwrap_or_default())
         }
         Err(e) => {
             log_error!("Failed to get API key for provider '{}': {}", &provider, e);
@@ -628,7 +629,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
                     Ok(Some(TranscriptConfig {
                         provider: config.provider,
                         model: config.model,
-                        api_key,
+                        api_key: redact_secret(api_key),
                     }))
                 }
                 Err(e) => {
@@ -677,7 +678,7 @@ pub async fn api_save_transcript_config<R: Runtime>(
     }
 
     if let Some(key) = api_key {
-        if !key.is_empty() {
+        if !key.is_empty() && !is_secret_sentinel(&key) {
             log_info!("API key provided, saving for transcript provider...");
             if let Err(e) = SettingsRepository::save_transcript_api_key(pool, &provider, &key).await
             {
@@ -710,7 +711,7 @@ pub async fn api_get_transcript_api_key<R: Runtime>(
                 "Successfully retrieved transcript API key for provider '{}'.",
                 &provider
             );
-            Ok(key.unwrap_or_default())
+            Ok(redact_secret(key).unwrap_or_default())
         }
         Err(e) => {
             log_error!(
@@ -1227,16 +1228,22 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
         }
     }
 
+    let pool = state.db_manager.pool();
+    let api_key = match api_key {
+        Some(value) if is_secret_sentinel(&value) => SettingsRepository::get_custom_openai_config(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .and_then(|config| config.api_key),
+        value => value.filter(|key| !key.trim().is_empty()),
+    };
     let config = CustomOpenAIConfig {
         endpoint: endpoint.trim().to_string(),
-        api_key: api_key.filter(|k| !k.trim().is_empty()),
+        api_key,
         model: model.trim().to_string(),
         max_tokens,
         temperature,
         top_p,
     };
-
-    let pool = state.db_manager.pool();
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
@@ -1264,10 +1271,11 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
     let pool = state.db_manager.pool();
 
     match SettingsRepository::get_custom_openai_config(pool).await {
-        Ok(config) => {
-            if let Some(ref c) = config {
+        Ok(mut config) => {
+            if let Some(ref mut c) = config {
                 log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
                     c.endpoint, c.model);
+                c.api_key = redact_secret(c.api_key.take());
             } else {
                 log_info!("No custom OpenAI config found");
             }
@@ -1285,6 +1293,7 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
 #[tauri::command]
 pub async fn api_test_custom_openai_connection<R: Runtime>(
     _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
     endpoint: String,
     api_key: Option<String>,
     model: String,
@@ -1325,8 +1334,18 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         .header("Content-Type", "application/json")
         .json(&test_request);
 
-    // Add authorization if API key provided
-    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
+    let api_key = match api_key {
+        Some(value) if is_secret_sentinel(&value) => {
+            SettingsRepository::get_custom_openai_config(state.db_manager.pool())
+                .await
+                .map_err(|e| e.to_string())?
+                .and_then(|config| config.api_key)
+        }
+        value => value.filter(|key| !key.trim().is_empty()),
+    };
+
+    // Add authorization if API key provided.
+    if let Some(key) = api_key {
         request = request.header("Authorization", format!("Bearer {}", key));
     }
 

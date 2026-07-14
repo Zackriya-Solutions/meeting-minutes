@@ -68,6 +68,18 @@ async fn resolve(pool: &SqlitePool, key: &str, envs: &[&str], default: &str) -> 
 
 /// Resolve full config from settings/env. `None` when no Authorization Key is set.
 pub async fn resolve_config(pool: &SqlitePool) -> Option<SaluteSpeechConfig> {
+    // SaluteSpeech sends audio off-device. An unreadable privacy policy fails closed.
+    match crate::llm::PrivacyConfig::load(pool).await {
+        Ok(privacy) if !privacy.local_only => {}
+        Ok(_) => {
+            log::info!("SaluteSpeech disabled by privacy.local_only");
+            return None;
+        }
+        Err(e) => {
+            log::warn!("SaluteSpeech blocked because privacy settings are unavailable: {e}");
+            return None;
+        }
+    }
     let auth_key = match kv(pool, "salutespeech.auth_key").await {
         Some(v) => v,
         None => env("SALUTESPEECH_AUTH_KEY").or_else(|| env("SBER_SALUTE_AUTH_KEY"))?,

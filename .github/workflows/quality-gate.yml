@@ -1,0 +1,62 @@
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression-gate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck production sources
+        working-directory: frontend
+        run: pnpm typecheck
+
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: bun test tests
+
+      - name: Synthetic quality-gate smoke
+        working-directory: frontend
+        run: pnpm quality:smoke
+
+      - name: Install Rust and Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Rust correctness tests
+        working-directory: frontend/src-tauri
+        run: cargo test --lib --no-default-features

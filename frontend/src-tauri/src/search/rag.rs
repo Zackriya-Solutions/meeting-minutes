@@ -18,6 +18,10 @@ pub const RAG_TOP_K: usize = 12;
 /// requires the best hit to land within ~top-10 of at least one branch.
 pub const MIN_CONFIDENCE: f64 = 1.0 / (crate::search::hybrid::DEFAULT_RRF_K + 10.0);
 
+pub fn retrieval_is_sufficient(hits: &[SearchHit]) -> bool {
+    hits.first().is_some_and(|hit| hit.score >= MIN_CONFIDENCE)
+}
+
 /// A source the answer can cite. `index` is the 1-based `[N]` marker.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Citation {
@@ -158,8 +162,8 @@ pub async fn ask(
     let hits = HybridSearch::search(pool, query, query_embedding.as_deref(), &filters, RAG_TOP_K)
         .await
         .map_err(|e| format!("retrieval failed: {e}"))?;
-    if hits.is_empty() {
-        // Nothing retrieved → don't call the LLM at all.
+    if !retrieval_is_sufficient(&hits) {
+        // Empty or low-confidence retrieval → don't call the LLM at all.
         return Ok(RagAnswer { answer: NOT_FOUND_MESSAGE.to_string(), citations: vec![], found: false, warning: None });
     }
     let top_score = hits.first().map(|h| h.score).unwrap_or(0.0);
@@ -254,6 +258,15 @@ mod tests {
         assert_eq!(evaluate_answer(RAG_NOT_FOUND, 0.05, &cites), AnswerVerdict::NotFound);
         // no sources -> NotFound
         assert_eq!(evaluate_answer("ответ [1]", 0.05, &[]), AnswerVerdict::NotFound);
+    }
+
+    #[test]
+    fn retrieval_gate_rejects_empty_and_low_confidence_hits() {
+        assert!(!retrieval_is_sufficient(&[]));
+        let mut low = hit(1, "Noise", "случайный фрагмент");
+        low.score = MIN_CONFIDENCE / 2.0;
+        assert!(!retrieval_is_sufficient(&[low]));
+        assert!(retrieval_is_sufficient(&[hit(2, "Relevant", "проект альфа")]));
     }
 
     #[test]

@@ -25,7 +25,10 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
-        "lint": "next lint"
+        "lint": "next lint",
+        "typecheck": "tsc -p tsconfig.release.json --noEmit",
+        "quality:smoke": "node evals/quality-gate.mjs --mode smoke --dataset evals/fixtures/smoke.json --thresholds evals/thresholds.smoke.json",
+        "quality:gate": "node evals/quality-gate.mjs --mode release --thresholds evals/thresholds.release.json"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
