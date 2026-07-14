@@ -57,6 +57,12 @@ jobs:
         with:
           workspaces: frontend/src-tauri
 
+      - name: Prepare test-only sidecar resource
+        run: |
+          mkdir -p frontend/src-tauri/binaries
+          touch frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+          chmod +x frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
       - name: Rust correctness tests
         working-directory: frontend/src-tauri
         run: cargo test --lib --no-default-features
