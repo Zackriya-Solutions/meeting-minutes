@@ -38,11 +38,24 @@ export default function SettingsPage() {
         const config = await invoke('api_get_transcript_config') as any;
         if (config) {
           console.log('Loaded saved transcript config:', config);
+          // ponytail: parse the RemoteProvider JSON blob in-place so the UI can
+          // populate the four fields; ignore when provider != 'remote'.
+          let remote = null;
+          if (config.remoteConfig) {
+            try {
+              remote = typeof config.remoteConfig === 'string'
+                ? JSON.parse(config.remoteConfig)
+                : config.remoteConfig;
+            } catch (err) {
+              console.warn('Failed to parse remoteConfig; ignoring:', err);
+            }
+          }
           setTranscriptModelConfig({
             provider: config.provider || 'localWhisper',
             model: config.model || 'large-v3',
-            apiKey: config.apiKey || null
-          });
+            apiKey: config.apiKey || null,
+            remoteConfig: remote,
+          } as any);
         }
       } catch (error) {
         console.error('Failed to load transcript config:', error);

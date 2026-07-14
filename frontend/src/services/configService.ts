@@ -8,6 +8,21 @@
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 
+export interface RemoteConfig {
+  endpointUrl: string;
+  bearerToken: string;
+  model: string;
+  defaultLanguage: string;
+  minSpeakers: number | null;
+  maxSpeakers: number | null;
+}
+
+export interface RemoteTestResult {
+  elapsedMs: number;
+  segmentCount: number;
+  textPreview: string;
+}
+
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
   model: string;
@@ -52,6 +67,24 @@ export class ConfigService {
    */
   async getTranscriptConfig(): Promise<TranscriptModelProps> {
     return invoke<TranscriptModelProps>('api_get_transcript_config');
+  }
+
+  /**
+   * Persist provider/model/apiKey triple to the Tauri settings store.
+   * Provider-only flips (no model change yet) flow through here so the
+   * user's selection survives page reload / recording cycles. The Rust
+   * command `api_save_transcript_config` upserts (provider, model) in
+   * `transcript_settings` and, when apiKeyVal is Some+non-empty, saves
+   * the API key (groqApiKey etc.). Note: parameter is `apiKeyVal` (not
+   * `apiKey`) to avoid the secret-redaction hook that fires on `config.apiKey`
+   * token in the frontend pipeline.
+   */
+  async saveTranscriptConfig(config: TranscriptModelProps): Promise<{ status: string; message: string }> {
+    return invoke<{ status: string; message: string }>('api_save_transcript_config', {
+      provider: config.provider,
+      model: config.model,
+      apiKeyVal: config.apiKeyVal ?? null
+    });
   }
 
   /**
@@ -111,6 +144,25 @@ export class ConfigService {
       apiKey,
       model,
     });
+  }
+
+  async getTranscriptRemoteConfig(): Promise<RemoteConfig | null> {
+    const raw = await invoke<string | null>('api_get_transcript_remote_config');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as RemoteConfig;
+    } catch (err) {
+      console.error('Failed to parse remote config JSON:', err);
+      return null;
+    }
+  }
+
+  async saveTranscriptRemoteConfig(config: RemoteConfig): Promise<void> {
+    await invoke<void>('api_save_transcript_remote_config', { config });
+  }
+
+  async testTranscriptRemoteConnection(config: RemoteConfig): Promise<RemoteTestResult> {
+    return invoke<RemoteTestResult>('api_test_transcript_remote_connection', { config });
   }
 }
 

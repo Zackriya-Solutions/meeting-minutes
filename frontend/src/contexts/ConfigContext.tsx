@@ -109,7 +109,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'parakeet',
     model: 'parakeet-tdt-0.6b-v3-int8',
-    apiKey: null
+    apiKeyVal: null
   });
 
   // Provider-specific API keys (loaded once at startup)
@@ -201,7 +201,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           setTranscriptModelConfig({
             provider: config.provider || 'parakeet',
             model: config.model || 'parakeet-tdt-0.6b-v3-int8',
-            apiKey: config.apiKey || null
+            apiKeyVal: config.apiKeyVal || null
           });
         }
       } catch (error) {

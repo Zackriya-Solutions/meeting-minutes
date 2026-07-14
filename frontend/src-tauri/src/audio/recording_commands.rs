@@ -26,6 +26,7 @@ use super::{
 use super::transcription::{
     self,
     reset_speech_detected_flag,
+    reset_transcription_paused_flag,
 };
 
 // Re-export TranscriptUpdate for backward compatibility
@@ -249,6 +250,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
+    reset_transcription_paused_flag(); // Reset session-scoped pause flag with new recording
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -420,6 +422,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
+    reset_transcription_paused_flag(); // Reset session-scoped pause flag with new recording
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -524,27 +527,28 @@ pub async fn stop_recording<R: Runtime>(
 
     let (stop_result, manager_for_cleanup) = stop_result;
 
-    match stop_result {
-        Ok(_) => {
-            info!("✅ Audio streams stopped successfully - no more chunks will be created");
+        match stop_result {
+            Ok(_) => {
+                info!("✅ Audio streams stopped successfully - no more chunks will be created");
+            }
+            Err(e) => {
+                error!("❌ Failed to stop audio streams: {}", e);
+                return Err(format!("Failed to stop audio streams: {}", e));
+            }
         }
-        Err(e) => {
-            error!("❌ Failed to stop audio streams: {}", e);
-            return Err(format!("Failed to stop audio streams: {}", e));
-        }
-    }
 
-    // Step 1.5: Clean up transcript listener to release microphone
-    // Unlisten transcript-update event to prevent lingering references
-    {
-        use tauri::Listener;
-        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
-            app.unlisten(listener_id);
-            info!("✅ Transcript-update listener removed");
-        }
-    }
+        // Step 1.5: Signal the pipeline to release its transcription sender.
+            // After force_flush_and_stop(), the pipeline holds the sender; we need
+            // to close it so the transcription worker's recv() returns None and
+            // the worker finishes instead of hanging indefinitely. The 5s timeout
+            // on the task wait is our safety net if the channel doesn't close.
+            // (signal_transcription_complete is not yet implemented — commented
+            //  out; the 5s timeout on the task await below handles this case.)
+            // if let Some(ref manager) = manager_for_cleanup {
+            //     manager.signal_transcription_complete();
+            // }
 
-    // Step 2: Signal transcription workers to finish processing ALL queued chunks
+        // Step 2: Signal transcription workers to finish processing ALL queued chunks
     let _ = app.emit(
         "recording-shutdown-progress",
         serde_json::json!({
@@ -586,11 +590,14 @@ pub async fn stop_recording<R: Runtime>(
             }
         });
 
-        // Wait up to 10 minutes for transcription completion to prevent indefinite hangs
-        match tokio::time::timeout(
-            tokio::time::Duration::from_secs(600), // 10 minutes max
-            task_handle
-        ).await {
+        // Wait for transcription completion. After force_flush_and_stop(), the pipeline has
+                // sent all remaining chunks. If the sender isn't properly dropped (e.g. the pipeline
+                // holds a reference), recv() blocks indefinitely. Cap the wait at 5s so shutdown is
+                // not blocked — we proceed with the paused-chunk drain which catches anything left.
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    task_handle
+                ).await {
             Ok(Ok(())) => {
                 info!("✅ ALL transcription chunks processed successfully - no data lost");
             }
@@ -610,7 +617,41 @@ pub async fn stop_recording<R: Runtime>(
         info!("ℹ️ No transcription task found to wait for");
     }
 
-    // Step 3: Now safely unload Whisper model after ALL chunks are processed
+    // Step 2.5: Drain any chunks that were buffered while transcription was paused.
+    // The worker task above only drains the live receiver; chunks that sat in
+    // PAUSED_CHUNKS at the moment TRANSCRIPTION_PAUSED was set are still owned by
+    // the global mutex. Re-acquire the live engine (still loaded at this point)
+    // and transcribe them so a paused-then-stopped recording is not lost.
+    {
+        let _ = app.emit(
+            "recording-shutdown-progress",
+            serde_json::json!({
+                "stage": "draining_paused_chunks",
+                "message": "Transcribing audio captured while transcription was paused...",
+                "progress": 55
+            }),
+        );
+        let drained = transcription::worker::drain_and_transcribe_paused_chunks(&app).await;
+        if drained > 0 {
+            info!(
+                "\u{2705} Post-recording drain transcribed {} paused chunk(s) before unload",
+                drained
+            );
+        }
+    }
+
+        // Step 3.5: Clean up transcript listener after ALL chunks (including drain) are processed.
+        // Moved from former step 1.5 to here so that paused-chunk drain events (step 2.5) are still
+        // caught by the listener and persisted to the recording manager.
+        {
+            use tauri::Listener;
+            if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
+                app.unlisten(listener_id);
+                info!("✅ Transcript-update listener removed after chunk drain");
+            }
+        }
+
+        // Step 4: Now safely unload model after ALL chunks are processed
     let _ = app.emit(
         "recording-shutdown-progress",
         serde_json::json!({
@@ -699,27 +740,25 @@ pub async fn stop_recording<R: Runtime>(
         }
     }
 
-    // Step 3.5: Track meeting ended analytics with privacy-safe metadata
-    // Extract all data from manager BEFORE any async operations to avoid Send issues
-    let analytics_data = if let Some(ref manager) = manager_for_cleanup {
-        let state = manager.get_state();
-        let stats = state.get_stats();
+        // Extract analytics data from manager for tracking
+        let analytics_data = if let Some(ref manager) = manager_for_cleanup {
+            let state = manager.get_state();
+            let stats = state.get_stats();
+            Some((
+                manager.get_recording_duration(),
+                manager.get_active_recording_duration().unwrap_or(0.0),
+                manager.get_total_pause_duration(),
+                manager.get_transcript_segments().len() as u64,
+                state.has_fatal_error(),
+                state.get_microphone_device().map(|d| d.name.clone()),
+                state.get_system_device().map(|d| d.name.clone()),
+                stats.chunks_processed,
+            ))
+        } else {
+            None
+        };
 
-        Some((
-            manager.get_recording_duration(),
-            manager.get_active_recording_duration().unwrap_or(0.0),
-            manager.get_total_pause_duration(),
-            manager.get_transcript_segments().len() as u64,
-            state.has_fatal_error(),
-            state.get_microphone_device().map(|d| d.name.clone()),
-            state.get_system_device().map(|d| d.name.clone()),
-            stats.chunks_processed,
-        ))
-    } else {
-        None
-    };
-
-    // Now perform async analytics tracking without holding manager reference
+        // Now perform async analytics tracking
     if let Some((total_duration, active_duration, pause_duration, transcript_segments_count, had_fatal_error, mic_device_name, sys_device_name, chunks_processed)) = analytics_data {
         info!("📊 Collecting analytics for meeting end");
 
@@ -976,6 +1015,28 @@ pub async fn resume_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), Strin
     } else {
         Err("No recording manager found".to_string())
     }
+}
+
+/// Toggle the in-session transcription pause flag.
+///
+/// Unlike `pause_recording` (which suspends audio capture itself), this only
+/// signals the transcription worker to drop incoming chunks without ending
+/// the recording. The recording continues; the transcript just stops growing
+/// until the user resumes. Useful for skipping typing/silent stretches
+/// mid-meeting without restarting the whole session.
+#[tauri::command]
+pub async fn set_transcription_paused(paused: bool) -> Result<(), String> {
+    info!("Setting transcription_paused to {}", paused);
+    transcription::set_transcription_paused(paused);
+    Ok(())
+}
+
+/// Read the current transcription-paused flag. Used by the UI to sync the
+/// button label/state on mount so it reflects the worker's actual mode
+/// (e.g. after a hot-reload during an active recording).
+#[tauri::command]
+pub async fn is_transcription_paused() -> Result<bool, String> {
+    Ok(transcription::is_transcription_paused())
 }
 
 /// Check if recording is currently paused

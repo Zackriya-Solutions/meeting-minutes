@@ -605,6 +605,8 @@ pub fn run() {
             audio::recording_commands::pause_recording,
             audio::recording_commands::resume_recording,
             audio::recording_commands::is_recording_paused,
+            audio::recording_commands::set_transcription_paused,
+            audio::recording_commands::is_transcription_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
             // Reload sync commands (retrieve transcript history and meeting name)
@@ -643,6 +645,9 @@ pub fn run() {
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
+            api::api_get_transcript_remote_config,
+            api::api_save_transcript_remote_config,
+            api::api_test_transcript_remote_connection,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,

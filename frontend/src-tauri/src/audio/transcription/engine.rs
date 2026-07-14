@@ -16,6 +16,9 @@ pub enum TranscriptionEngine {
     Whisper(Arc<crate::whisper_engine::WhisperEngine>),  // Direct access (backward compat)
     Parakeet(Arc<crate::parakeet_engine::ParakeetEngine>), // Direct access (backward compat)
     Provider(Arc<dyn TranscriptionProvider>),  // Trait-based (preferred for new code)
+    /// #338 — transcription intentionally disabled (record-only mode).
+    /// No model is loaded; the worker drains audio chunks without transcribing.
+    Disabled,
 }
 
 impl TranscriptionEngine {
@@ -25,6 +28,9 @@ impl TranscriptionEngine {
             Self::Whisper(engine) => engine.is_model_loaded().await,
             Self::Parakeet(engine) => engine.is_model_loaded().await,
             Self::Provider(provider) => provider.is_model_loaded().await,
+            // ponytail: Disabled is by construction "nothing running" — return
+            // false so the worker takes its no-model path without panicking.
+            Self::Disabled => false,
         }
     }
 
@@ -34,6 +40,7 @@ impl TranscriptionEngine {
             Self::Whisper(engine) => engine.get_current_model().await,
             Self::Parakeet(engine) => engine.get_current_model().await,
             Self::Provider(provider) => provider.get_current_model().await,
+            Self::Disabled => None,
         }
     }
 
@@ -43,7 +50,13 @@ impl TranscriptionEngine {
             Self::Whisper(_) => "Whisper (direct)",
             Self::Parakeet(_) => "Parakeet (direct)",
             Self::Provider(provider) => provider.provider_name(),
+            Self::Disabled => "Disabled (record-only)",
         }
+    }
+
+    /// True when the user picked "Disable transcription" in Settings (#338).
+    pub fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
     }
 }
 
@@ -74,6 +87,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
         Err(e) => {
@@ -82,12 +96,20 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
     };
 
     // Validate based on provider
     match config.provider.as_str() {
+        "disabled" | "none" | "" => {
+            // ponytail: #338 record-only mode. No model needed; recording
+            // proceeds and saves the raw WAV. The worker drains chunks but
+            // does not transcribe.
+            info!("🎙️ Transcription disabled — record-only mode");
+            Ok(())
+        }
         "localWhisper" => {
             info!("🔍 Validating Whisper model...");
             // Ensure whisper engine is initialized first
@@ -135,6 +157,38 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "remote" => {
+            // ponytail: validation for remote = endpoint_url present in saved config.
+            // The worker may be reachable or not; we cannot probe here without side
+            // effects. Defer full reachability to the user-driven "Test connection"
+            // button in Settings.
+            info!("🔍 Validating RemoteProvider configuration...");
+            crate::api::api::api_get_transcript_remote_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to read remote transcript config: {e}"))?
+            .ok_or_else(|| "RemoteProvider selected but no configuration saved. Open Settings → Transcription and configure an endpoint.".to_string())?;
+            Ok(())
+        }
+        "groq" => {
+            // ponytail: Groq reqs are only the api_key + a model id;
+            // both come from `transcript_settings` columns we already
+            // store. Network reachability is deferred to the live
+            // transcribe path so we don't add latency on validation.
+            info!("🔍 Validating Groq configuration...");
+            let app_state = app.state::<crate::state::AppState>();
+            let pool = app_state.db_manager.pool();
+            let key = crate::database::repositories::setting::SettingsRepository::get_transcript_api_key(pool, "groq")
+                .await
+                .map_err(|e| format!("Failed to read Groq API key: {e}"))?;
+            if key.as_deref().map(str::is_empty).unwrap_or(true) {
+                return Err("Groq selected but no API key saved. Open Settings → Transcription and paste your Groq API key.".to_string());
+            }
+            Ok(())
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -170,6 +224,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
         Err(e) => {
@@ -178,12 +233,20 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                remote_config: None,
             }
         }
     };
 
     // Initialize the appropriate engine based on provider
     match config.provider.as_str() {
+        "disabled" | "none" | "" => {
+            // ponytail: #338 — recording proceeds, no ASR runs. The worker
+            // drains chunks without transcribing and the audio saver still
+            // writes the WAV.
+            info!("🎙️ Transcription disabled — no engine will be initialized");
+            Ok(TranscriptionEngine::Disabled)
+        }
         "parakeet" => {
             info!("🦜 Initializing Parakeet transcription engine");
 
@@ -211,6 +274,64 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "remote" => {
+            // ponytail: instantiate a fresh RemoteProvider per engine request; the
+            // provider holds a reqwest::Client + config and is cheap to construct.
+            // Per-segment cloning of the engine is fine because client connections
+            // are pooled inside reqwest::Client.
+            info!("🌐 Initializing RemoteProvider transcription engine");
+
+            let cfg_json = crate::api::api::api_get_transcript_remote_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to read remote transcript config: {e}"))?
+            .ok_or_else(|| "RemoteProvider selected but no configuration saved".to_string())?;
+
+            let payload: crate::api::api::RemoteConfigPayload = serde_json::from_str(&cfg_json)
+                .map_err(|e| format!("RemoteProvider config is not valid JSON: {e}"))?;
+            let prov_cfg = super::remote_provider::RemoteProviderConfig {
+                endpoint_url: payload.endpoint_url,
+                bearer_token: payload.bearer_token,
+                model: if payload.model.is_empty() { "default".into() } else { payload.model },
+                default_lang: if payload.default_language.is_empty() { "en".into() } else { payload.default_language },
+                min_speakers: payload.min_speakers,
+                max_speakers: payload.max_speakers,
+                request_timeout: std::time::Duration::from_secs(300),
+            };
+            let provider = super::remote_provider::RemoteProvider::new(prov_cfg);
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
+        }
+        "groq" => {
+            // ponytail: construct GroqProvider from api_key + model
+            // already on disk. Per-segment cloning is fine because
+            // reqwest::Client pools connections.
+            info!("🦙 Initializing Groq transcription engine");
+
+            let cfg = config;
+
+            let app_state = app.state::<crate::state::AppState>();
+            let pool = app_state.db_manager.pool();
+            let api_key = crate::database::repositories::setting::SettingsRepository::get_transcript_api_key(pool, "groq")
+                .await
+                .map_err(|e| format!("Failed to read Groq API key: {e}"))?
+                .unwrap_or_default();
+
+            if api_key.is_empty() {
+                return Err("Groq selected but no API key saved".to_string());
+            }
+
+            let prov_cfg = super::groq_provider::GroqConfig {
+                api_key,
+                model: if cfg.model.is_empty() { "whisper-large-v3".into() } else { cfg.model },
+                default_lang: "en".into(),
+                request_timeout: std::time::Duration::from_secs(120),
+            };
+            let provider = super::groq_provider::GroqProvider::new(prov_cfg);
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");
