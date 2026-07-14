@@ -11,6 +11,19 @@ const has = (s: Settings, k: string) => !!s[k] && s[k].length > 0;
 
 export function ProviderSettings() {
   const t = useT();
+  return (
+    <div className="mt-6 max-w-2xl rounded-[var(--radius-24)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
+      <h3 className="text-sm font-semibold text-[var(--fg1)]">DeepSeek · {t('managed')}</h3>
+      <p className="mt-1 text-sm text-[var(--fg2)]">
+        {t('DeepSeek and SaluteSpeech are ready through the Memento gateway. No API keys are required. GigaChat is not enabled.')}
+      </p>
+    </div>
+  );
+}
+
+// Kept internally so BYOK can be restored later without exposing it in the pilot UI.
+function LegacyProviderSettings() {
+  const t = useT();
   const [settings, setSettings] = useState<Settings>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);

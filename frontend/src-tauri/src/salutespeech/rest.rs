@@ -8,11 +8,11 @@
 
 use async_trait::async_trait;
 
+use super::auth::SaluteSpeechAuth;
 use super::{map_language, SaluteSpeechConfig};
 use crate::audio::transcription::provider::{
-    TranscriptionError, TranscriptionProvider, TranscriptResult,
+    TranscriptResult, TranscriptionError, TranscriptionProvider,
 };
-use super::auth::SaluteSpeechAuth;
 
 /// The worker delivers 16 kHz mono audio; the recognize `Content-Type` fixes the rate.
 const RECOGNIZE_CONTENT_TYPE: &str = "audio/x-pcm;bit=16;rate=16000";
@@ -82,7 +82,9 @@ impl TranscriptionProvider for SaluteSpeechProvider {
             .send()
             .await
             .map_err(|e| {
-                TranscriptionError::EngineFailed(format!("salutespeech recognize request failed: {e}"))
+                TranscriptionError::EngineFailed(format!(
+                    "salutespeech recognize request failed: {e}"
+                ))
             })?;
 
         if !resp.status().is_success() {

@@ -5,7 +5,7 @@
 
 use serde_json::json;
 
-pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1";
+pub const DEFAULT_BASE_URL: &str = "https://gw.gigatool.app/deepseek/v1";
 pub const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 
 /// A configured DeepSeek client. Cheap to construct per call.
@@ -54,14 +54,18 @@ impl DeepSeekClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("deepseek error {status}: {}", text.chars().take(300).collect::<String>()));
+            return Err(format!(
+                "deepseek error {status}: {}",
+                text.chars().take(300).collect::<String>()
+            ));
         }
 
         let v: serde_json::Value = resp
             .json()
             .await
             .map_err(|e| format!("deepseek response parse failed: {e}"))?;
-        extract_openai_content(&v).ok_or_else(|| "deepseek response missing choices[0].message.content".to_string())
+        extract_openai_content(&v)
+            .ok_or_else(|| "deepseek response missing choices[0].message.content".to_string())
     }
 }
 

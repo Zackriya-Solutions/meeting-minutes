@@ -33,11 +33,23 @@ async fn setting_or_env(pool: &SqlitePool, key: &str, env: &str) -> Option<Strin
 /// Build a DeepSeek client if an API key is configured (settings `deepseek.api_key`
 /// or env `DEEPSEEK_API_KEY`).
 pub async fn resolve_deepseek(pool: &SqlitePool) -> Option<DeepSeekClient> {
-    let api_key = setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await?;
+    let configured = setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await;
+    let (api_key, managed_base) = match configured {
+        Some(key) => (key, None),
+        None => crate::gateway_identity::install_token()
+            .await
+            .ok()
+            .map(|(token, base)| {
+                (
+                    token,
+                    Some(format!("{}/deepseek/v1", base.trim_end_matches('/'))),
+                )
+            })?,
+    };
     Some(DeepSeekClient::new(
         api_key,
         kv(pool, "deepseek.model").await,
-        kv(pool, "deepseek.base_url").await,
+        kv(pool, "deepseek.base_url").await.or(managed_base),
     ))
 }
 
@@ -76,7 +88,13 @@ pub async fn resolve_gigachat_auth_key(pool: &SqlitePool) -> Option<String> {
 
 /// Resolve the DeepSeek API key (`deepseek.api_key` / `DEEPSEEK_API_KEY`). None if unset.
 pub async fn resolve_deepseek_api_key(pool: &SqlitePool) -> Option<String> {
-    setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await
+    if let Some(key) = setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await {
+        return Some(key);
+    }
+    crate::gateway_identity::install_token()
+        .await
+        .ok()
+        .map(|(token, _)| token)
 }
 
 // NOTE: SaluteSpeech config resolution lives in `crate::salutespeech` (it needs several
