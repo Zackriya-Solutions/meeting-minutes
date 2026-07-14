@@ -64,6 +64,28 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
         Analytics.trackButtonClick("detect_speakers", "meeting_details");
         setPhase("checking");
         try {
+            // Cloud diarization (SaluteSpeech) skips the local-model download gate — it
+            // only needs the configured Authorization Key.
+            let provider = "local";
+            let saluteKeySet = false;
+            try {
+                const s = await invoke<Record<string, string>>("get_app_settings");
+                provider = (s?.["diarization.provider"] || "local").trim() || "local";
+                saluteKeySet = !!(s?.["salutespeech.auth_key"] && s["salutespeech.auth_key"].length > 0);
+            } catch {
+                /* settings unreadable → fall back to local */
+            }
+
+            if (provider === "salutespeech") {
+                if (!saluteKeySet) {
+                    setPhase("idle");
+                    toast.error(t("Set your SaluteSpeech key in Settings → Transcription to use cloud speaker detection."));
+                    return;
+                }
+                await runDiarize();
+                return;
+            }
+
             const status = await invoke<DiarizationStatus>("diarization_status");
             if (!status.available) {
                 setPhase("idle");

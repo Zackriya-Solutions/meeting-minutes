@@ -67,6 +67,67 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
       {provider === 'gigaam' && <GigaamModelManager />}
       {provider === 'salutespeech' && <SaluteSpeechSettings />}
+
+      <DiarizationEngineSetting />
+    </div>
+  );
+}
+
+/**
+ * Speaker-detection (diarization) engine — independent of the transcription engine; runs
+ * post-meeting via the "Speakers" button. Local uses on-device ONNX models; SaluteSpeech
+ * uses Sber's cloud speaker separation (reuses the SaluteSpeech Authorization Key above).
+ * Persisted to app_settings_kv `diarization.provider`.
+ */
+function DiarizationEngineSetting() {
+  const t = useT();
+  const [provider, setProvider] = useState<'local' | 'salutespeech'>('local');
+  const [saluteKeySet, setSaluteKeySet] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await invoke<Record<string, string>>('get_app_settings');
+        const p = (settings?.['diarization.provider'] || 'local').trim();
+        setProvider(p === 'salutespeech' ? 'salutespeech' : 'local');
+        setSaluteKeySet(!!settings?.['salutespeech.auth_key'] && settings['salutespeech.auth_key'].length > 0);
+      } catch {
+        // default to local
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+
+  const choose = (p: 'local' | 'salutespeech') => {
+    setProvider(p);
+    invoke('set_app_setting', { key: 'diarization.provider', value: p })
+      .catch((error) => console.error('Failed to save diarization provider:', error));
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="space-y-2 border-t border-[var(--border-subtle)] pt-4">
+      <Label className="block text-sm font-medium text-[var(--fg2)]">{t('Speaker detection')}</Label>
+      <p className="text-sm text-[var(--fg2)]">{t('Who said each line — runs after a meeting via the “Speakers” button.')}</p>
+      <div className="grid gap-2">
+        <EngineOption
+          active={provider === 'local'}
+          onClick={() => choose('local')}
+          title={t('Local · on-device')}
+          subtitle={t('pyannote-style models (~35 MB, one-time download). Private — audio stays on your machine.')}
+        />
+        <EngineOption
+          active={provider === 'salutespeech'}
+          onClick={() => choose('salutespeech')}
+          title={t('SaluteSpeech · Sber cloud')}
+          subtitle={saluteKeySet
+            ? t('Cloud speaker separation using your SaluteSpeech key. Audio is sent to Sber.')
+            : t('Needs a SaluteSpeech Authorization Key (set it above). Audio is sent to Sber.')}
+        />
+      </div>
     </div>
   );
 }

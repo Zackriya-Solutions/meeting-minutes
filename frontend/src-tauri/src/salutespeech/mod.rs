@@ -15,6 +15,7 @@
 //! local diarization / channel tagging — the sync REST API returns no speaker labels.
 
 pub mod auth;
+pub mod diarize;
 pub mod rest;
 
 pub use rest::SaluteSpeechProvider;
