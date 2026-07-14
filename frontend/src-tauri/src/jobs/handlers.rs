@@ -469,9 +469,18 @@ impl JobHandler for ExtractHandler {
             extraction.entities.len(),
             extraction.action_items.len()
         );
-        // TODO(Phase 3 persistence): resolve entities (extraction::resolve_entity) into
-        // entities/pending_merges, map quotes to chunks, insert entity_mentions +
-        // action_items. The extraction call itself (providers) is now wired end-to-end.
+        let persisted = crate::pipeline::extraction_persistence::persist_extraction(
+            pool,
+            meeting_id,
+            &extraction,
+        ).await?;
+        log::info!(
+            "[extract] meeting {meeting_id}: persisted {} entities, {} mentions, {} reviews, {} actions",
+            persisted.entities_created,
+            persisted.mentions_created,
+            persisted.pending_merges_created,
+            persisted.action_items_created,
+        );
         Ok(())
     }
 }

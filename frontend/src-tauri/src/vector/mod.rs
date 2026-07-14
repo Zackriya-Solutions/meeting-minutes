@@ -116,6 +116,42 @@ pub async fn knn(
     Ok(rows)
 }
 
+/// Exact KNN over an allowed chunk-id set. Batching avoids SQLite parameter limits;
+/// merging each batch's top-k is equivalent to global top-k over the allowed set.
+pub async fn knn_filtered(
+    pool: &SqlitePool,
+    query_embedding: &[f32],
+    allowed_chunk_ids: &[i64],
+    k: i64,
+) -> Result<Vec<(i64, f64)>, sqlx::Error> {
+    if allowed_chunk_ids.is_empty() || k <= 0 {
+        return Ok(Vec::new());
+    }
+    let bytes = serialize_embedding(query_embedding);
+    let mut candidates = Vec::new();
+    for batch in allowed_chunk_ids.chunks(400) {
+        let placeholders = vec!["?"; batch.len()].join(",");
+        let sql = format!(
+            "SELECT chunk_id, vec_distance_cosine(embedding, ?) AS distance \
+             FROM chunk_embeddings WHERE chunk_id IN ({placeholders}) \
+             ORDER BY distance, chunk_id LIMIT ?"
+        );
+        let mut query = sqlx::query_as::<_, (i64, f64)>(&sql).bind(bytes.clone());
+        for id in batch {
+            query = query.bind(*id);
+        }
+        candidates.extend(query.bind(k).fetch_all(pool).await?);
+    }
+    candidates.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    candidates.dedup_by_key(|row| row.0);
+    candidates.truncate(k as usize);
+    Ok(candidates)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +191,10 @@ mod tests {
         let ids: Vec<i64> = results.iter().map(|(id, _)| *id).collect();
         assert_eq!(&ids[..2], &[1, 4], "expected exact match then near-duplicate");
         assert!(!ids[..2].contains(&2), "orthogonal vector ranked too high");
+
+        let filtered = knn_filtered(&pool, &[1.0, 0.0, 0.0, 0.0], &[2, 3, 4], 2)
+            .await
+            .expect("filtered knn");
+        assert_eq!(filtered.iter().map(|row| row.0).collect::<Vec<_>>(), vec![4, 2]);
     }
 }

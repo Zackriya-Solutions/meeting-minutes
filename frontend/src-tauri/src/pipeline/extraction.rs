@@ -117,9 +117,15 @@ pub fn parse_and_validate(raw: &str) -> Result<Extraction, String> {
     let extraction: Extraction =
         serde_json::from_str(cleaned).map_err(|e| format!("invalid extraction JSON: {e}"))?;
     for ent in &extraction.entities {
+        if ent.name.trim().is_empty() {
+            return Err("entity name must not be empty".to_string());
+        }
         if !VALID_ENTITY_TYPES.contains(&ent.entity_type.as_str()) {
             return Err(format!("invalid entity type: {}", ent.entity_type));
         }
+    }
+    if extraction.action_items.iter().any(|item| item.text.trim().is_empty()) {
+        return Err("action item text must not be empty".to_string());
     }
     Ok(extraction)
 }

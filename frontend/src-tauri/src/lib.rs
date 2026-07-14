@@ -569,6 +569,7 @@ pub fn run() {
             gigaam_engine::commands::gigaam_download_model,
             gigaam_engine::commands::gigaam_select_variant,
             gigaam_engine::commands::gigaam_transcribe_audio,
+            salutespeech::salutespeech_is_configured,
             collections::commands::create_collection,
             collections::commands::add_meeting_to_collection,
             collections::commands::list_collections,

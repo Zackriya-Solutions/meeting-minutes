@@ -1,0 +1,25 @@
+{
+  "minimum_counts": {
+    "transcription": 1,
+    "diarization": 1,
+    "retrieval": 2,
+    "summary": 1
+  },
+  "maximum": {
+    "transcription.wer": 0.25,
+    "diarization.der": 0.25,
+    "retrieval.no_answer_false_positive_rate": 0.1,
+    "summary.p95_latency_ms": 60000,
+    "summary.mean_unsupported_claim_rate": 0.05
+  },
+  "minimum": {
+    "retrieval.answerable_count": 1,
+    "retrieval.unanswerable_count": 1,
+    "retrieval.recall_at_k": 0.8,
+    "retrieval.mrr": 0.7,
+    "summary.success_rate": 0.95,
+    "summary.quality_count": 1,
+    "summary.mean_fact_coverage": 0.8,
+    "summary.mean_action_item_f1": 0.75
+  }
+}

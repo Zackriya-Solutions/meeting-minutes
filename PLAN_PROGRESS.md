@@ -2,6 +2,36 @@
 
 Tracking implementation of [PLAN.md](PLAN.md) in this repository.
 
+## Release gates (2026-07-14)
+
+### 1. Privacy and correctness gate — IMPLEMENTED
+
+- Remote LLM operations now load the privacy policy before credentials or network-client
+  construction and fail closed if the policy cannot be read. The guard covers routed
+  extraction/chat, the existing summary service, and SaluteSpeech transcription and
+  diarization. Local transcription, BuiltInAI, and Ollama remain available in local-only
+  mode.
+- Settings → Privacy exposes `local_only`, extraction, and chat controls. Provider secrets
+  are write-only across Tauri IPC: the renderer receives only `__configured__`, while Rust
+  resolves the stored credential for connection/model-list calls.
+- Extraction results are persisted atomically and idempotently to entities, mentions,
+  pending merge reviews, and action items, including source chunk/timestamp provenance.
+- Scoped hybrid search applies meeting/date/speaker/collection filters before FTS and
+  vector ranking. Empty/low-confidence retrieval returns “not found” before any LLM call.
+
+### 2. Russian quality gate — HARNESS IMPLEMENTED, REAL CORPUS REQUIRED
+
+- `frontend/evals/quality-gate.mjs` measures WER, DER, Recall@k, MRR, no-answer false
+  positives, summary success/latency, fact coverage, unsupported claims, and action-item
+  F1 without copying meeting content into reports.
+- `pnpm quality:smoke` verifies the evaluator and CI wiring on synthetic data.
+- `pnpm quality:gate` is the release gate. It intentionally cannot pass without a private
+  corpus of real Russian meetings (minimum sample counts and reviewed thresholds are in
+  `frontend/evals/thresholds.release.json`). Until that corpus is supplied and passes,
+  model quality is **not certified for release**.
+- Pull requests and pushes to `main` run production TypeScript checking, frontend tests,
+  the smoke evaluator, and Rust correctness tests via `.github/workflows/quality-gate.yml`.
+
 ## Baseline verification (PLAN.md §1) — REPORTED
 
 PLAN.md assumes a **Russian GigaAM fork**. This repo is **upstream English Meetily**.
@@ -35,16 +65,16 @@ silently reimplemented:
 ## Phase status
 
 - [x] **Phase 0 — Data Foundation** (complete + verified)
-- [~] **Phase 1 — Semantic + Hybrid Search** (search core + embedder + search/chat UI all
-  done & verified; only the model-download UI button and eval harness remain)
+- [~] **Phase 1 — Semantic + Hybrid Search** (search core + embedder + search/chat UI and
+  eval harness done & verified; real-corpus benchmark remains)
 - [~] **Phase 2 — Diarization + Speakers** (resolution algorithms complete + verified;
   ONNX diarizer scaffolded, degrades safely)
-- [~] **Phase 3 — Entities + Action Items** (resolution/validation complete + verified;
-  LLM extraction wiring + DB writes scaffolded)
+- [~] **Phase 3 — Entities + Action Items** (resolution/validation, LLM extraction, and
+  atomic idempotent DB persistence complete + verified; review/product UI remains)
 - [~] **Phase 4 — RAG Chat** (grounding/citation/guard logic complete + verified; answer
   generation + chat UI scaffolded)
 - [~] **Phase 5 — Collections/Backfill/Privacy** (series detection + backfill + privacy
-  guard complete + verified; UI scaffolded)
+  guard/settings complete + verified; collections product workflow remains)
 
 `[~]` = algorithmic core implemented, unit-tested, and wired; the remaining pieces are
 external-resource-gated (ONNX models, LLM provider config, frontend UI) and clearly
@@ -346,17 +376,16 @@ the sidecar, runs). Or `cargo check --lib` in `frontend/src-tauri` after buildin
 
 ## Remaining / not done
 
-- **Eval harness** (`evals/search/`): recall@5 / MRR (FTS-only vs vector-only vs hybrid) —
-  still needs the user's 30 real Russian queries (PLAN.md §11 #3).
+- **Real quality corpus**: the aggregate evaluator and release thresholds are implemented;
+  the gate still needs real Russian recordings/transcripts, at least 30 labelled retrieval
+  questions, and reviewed summaries (see `frontend/evals/README.md`).
 - **Phase 2 diarization** — the ONNX diarizer (pyannote/Sortformer) is scaffolded but not
   wired to a real model; segments stay `speaker_id = NULL` until a model + audio wiring land.
   Speaker-resolution algorithms are done + tested.
-- **Phase 3 extraction DB persistence** — the LLM extraction call is wired (privacy-guarded,
-  routed to GigaChat/DeepSeek, JSON validated); resolving entities into
-  `entities`/`entity_mentions`/`action_items` + `pending_merges` is scaffolded (the pure
-  resolution logic is tested) but the DB inserts are TODO.
-- **Phase 4/5 UI depth** — entity page, action board, collections/series-suggestion UI,
-  saved-searches pinning, and the privacy toggles screen aren't built (backend/logic exist).
+- **Phase 3 review/product UI** — extraction and atomic DB persistence are implemented;
+  entity merge review, entity pages, and the action board are not yet built.
+- **Phase 4/5 UI depth** — collections/series workflow and saved-search pinning remain.
+  Privacy controls are now available in Settings → Privacy.
 - **Embedding model default** — `multilingual-e5-small`/384 (downloadable in Settings →
   Search). Reconfirm after the eval benchmark (PLAN.md §11 #1); changing the dim just
   drops/recreates the empty `chunk_embeddings` table.
