@@ -56,7 +56,34 @@ pub async fn enqueue_unique(
     payload: &serde_json::Value,
 ) -> Result<EnqueueOutcome, sqlx::Error> {
     let payload_str = payload.to_string();
-    let inserted = sqlx::query_scalar::<_, i64>(
+    if let Some(id) = try_insert_unique(pool, kind, meeting_id, &payload_str).await? {
+        return Ok(EnqueueOutcome { id, created: true });
+    }
+
+    if let Some(id) = find_active_job(pool, kind, meeting_id).await? {
+        return Ok(EnqueueOutcome { id, created: false });
+    }
+
+    // The blocking job may have completed between the INSERT and SELECT above.
+    // Retry the atomic insert once; if another caller wins that retry, return the
+    // active job it created instead of surfacing a benign RowNotFound race.
+    if let Some(id) = try_insert_unique(pool, kind, meeting_id, &payload_str).await? {
+        return Ok(EnqueueOutcome { id, created: true });
+    }
+
+    let id = find_active_job(pool, kind, meeting_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    Ok(EnqueueOutcome { id, created: false })
+}
+
+async fn try_insert_unique(
+    pool: &SqlitePool,
+    kind: &str,
+    meeting_id: Option<&str>,
+    payload: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
         "INSERT INTO jobs (kind, meeting_id, payload, status, updated_at) \
          SELECT ?, ?, ?, 'queued', datetime('now') \
          WHERE NOT EXISTS ( \
@@ -67,26 +94,27 @@ pub async fn enqueue_unique(
     )
     .bind(kind)
     .bind(meeting_id)
-    .bind(payload_str)
+    .bind(payload)
     .bind(kind)
     .bind(meeting_id)
     .fetch_optional(pool)
-    .await?;
+    .await
+}
 
-    if let Some(id) = inserted {
-        return Ok(EnqueueOutcome { id, created: true });
-    }
-
-    let id = sqlx::query_scalar::<_, i64>(
+async fn find_active_job(
+    pool: &SqlitePool,
+    kind: &str,
+    meeting_id: Option<&str>,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
         "SELECT id FROM jobs \
          WHERE kind = ? AND meeting_id IS ? AND status IN ('queued', 'running') \
          ORDER BY id LIMIT 1",
     )
     .bind(kind)
     .bind(meeting_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(EnqueueOutcome { id, created: false })
+    .fetch_optional(pool)
+    .await
 }
 
 /// Startup recovery: any job left in `running` (app killed mid-flight) is returned to

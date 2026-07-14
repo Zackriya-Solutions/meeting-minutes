@@ -142,7 +142,8 @@ impl JobHandler for ChunkEmbedHandler {
                         embedding_needs_repair = true;
                         log::warn!("[chunk_embed] embedding count mismatch; marking chunks failed");
                         let _ = sqlx::query(
-                            "UPDATE chunks SET embedding_status='failed' WHERE meeting_id=?",
+                            "UPDATE chunks SET embedding_status='failed' \
+                             WHERE meeting_id=? AND embedding_status != 'done'",
                         )
                         .bind(meeting_id)
                         .execute(pool)
@@ -152,7 +153,8 @@ impl JobHandler for ChunkEmbedHandler {
                         embedding_needs_repair = true;
                         log::warn!("[chunk_embed] embedding failed: {e}");
                         let _ = sqlx::query(
-                            "UPDATE chunks SET embedding_status='failed' WHERE meeting_id=?",
+                            "UPDATE chunks SET embedding_status='failed' \
+                             WHERE meeting_id=? AND embedding_status != 'done'",
                         )
                         .bind(meeting_id)
                         .execute(pool)
