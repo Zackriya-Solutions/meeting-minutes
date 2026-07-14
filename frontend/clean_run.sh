@@ -3,6 +3,22 @@
 # Exit on error
 set -e
 
+# Local development gateway credential. Release builds receive this from CI;
+# developers can keep it in an ignored file instead of macOS Keychain.
+DEV_ENV_FILE="${MEMENTO_DEV_ENV_FILE:-.env.local-dev}"
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] && [ -f "$DEV_ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a
+    source "$DEV_ENV_FILE"
+    set +a
+fi
+
+if [ -z "${MEMENTO_REGISTRATION_KEY:-}" ] || [ "$MEMENTO_REGISTRATION_KEY" = "replace-with-development-registration-key" ]; then
+    echo "Missing MEMENTO_REGISTRATION_KEY for local development."
+    echo "Copy .env.local-dev.example to .env.local-dev and add the development key."
+    exit 1
+fi
+
 # Add log level selector with default to INFO
 LOG_LEVEL=${1:-info}
 
@@ -50,4 +66,3 @@ echo "Setting up build environment..."
 echo "Building Tauri app..."
 pnpm run tauri dev
 sleep
-
