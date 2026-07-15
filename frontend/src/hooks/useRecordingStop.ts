@@ -11,7 +11,7 @@ import { storageService } from '@/services/storageService';
 import { recordingService } from '@/services/recordingService';
 import { transcriptService } from '@/services/transcriptService';
 import { migrateMarkedMoments } from '@/lib/markedMoments';
-import { migrateStandupLiveState } from '@/lib/standupLiveState';
+import { clearStandupLiveState, migrateStandupLiveState } from '@/lib/standupLiveState';
 import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
@@ -142,6 +142,8 @@ export function useRecordingStop(
     setIsRecording(false);
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
+    const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+    let nativeRecordingStopped = false;
 
     try {
       console.log('Post-stop processing (new implementation)...', {
@@ -159,6 +161,7 @@ export function useRecordingStop(
         const dataDir = await appDataDir();
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         await recordingService.stopRecording(`${dataDir}/recording-${timestamp}.wav`);
+        nativeRecordingStopped = true;
         console.log('Native stop_recording completed');
       } catch (stopError) {
         console.error('Failed to stop native recording:', stopError);
@@ -324,7 +327,6 @@ export function useRecordingStop(
           // Move marked moments from the temporary recording id onto the saved
           // meeting id so meeting-details can find them. Must run before
           // markMeetingAsSaved(), which clears the temporary id.
-          const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
           migrateMarkedMoments(tempMeetingId, meetingId);
           migrateStandupLiveState(tempMeetingId, meetingId);
 
@@ -469,6 +471,12 @@ export function useRecordingStop(
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
     } finally {
+      // Once native recording has stopped, a temporary live-facilitation key
+      // must not survive a discard or a failed database save. Successful saves
+      // have already migrated it, so this cleanup is harmless in that path.
+      if (nativeRecordingStopped) {
+        clearStandupLiveState(tempMeetingId);
+      }
       // Always reset the guard flag when done
       stopInProgressRef.current = false;
     }

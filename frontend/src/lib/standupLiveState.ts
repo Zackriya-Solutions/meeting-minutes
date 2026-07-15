@@ -153,3 +153,12 @@ export function migrateStandupLiveState(
     // The saved meeting still has the merged state; source cleanup is best effort.
   }
 }
+
+export function clearStandupLiveState(meetingId: string | null | undefined): void {
+  if (!meetingId) return;
+  try {
+    window.localStorage.removeItem(keyFor(meetingId));
+  } catch {
+    // Cleanup is best effort; recording shutdown must not fail on storage access.
+  }
+}
