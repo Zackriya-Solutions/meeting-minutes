@@ -471,10 +471,11 @@ export function useRecordingStop(
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
     } finally {
-      // Once native recording has stopped, a temporary live-facilitation key
-      // must not survive a discard or a failed database save. Successful saves
-      // have already migrated it, so this cleanup is harmless in that path.
-      if (nativeRecordingStopped) {
+      // Explicit discard is the only path that should destroy the temporary
+      // facilitation state. A timeout or failed database save remains
+      // recoverable under tempMeetingId, while a successful save has already
+      // migrated and removed the temporary key.
+      if (nativeRecordingStopped && !isCallApi) {
         clearStandupLiveState(tempMeetingId);
       }
       // Always reset the guard flag when done
