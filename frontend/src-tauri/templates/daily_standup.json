@@ -1,6 +1,6 @@
 {
   "name": "Daily Standup",
-  "description": "Evidence-backed status updates, decisions, actions, blockers, and separated deep dives.",
+  "description": "Evidence-backed status updates rendered by the fixed Standup V2 pipeline. The section list below is display and cache metadata; extraction rules live in summary/standup.rs.",
   "pipeline": "standup_v2",
   "sections": [
     {
