@@ -827,6 +827,12 @@ fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesIn
 
     if let Some(latest) = digest.period_end.as_deref().and_then(parse_digest_datetime) {
         for action in &digest.open_actions {
+            // Missing ownership/due metadata already creates a higher-priority card
+            // above. Keep one actionable insight per source record instead of a
+            // second carried-over card pointing at the same evidence.
+            if is_missing(action.owner.as_ref()) || is_missing(action.due_date.as_ref()) {
+                continue;
+            }
             if parse_digest_datetime(&action.source_occurred_at)
                 .map(|occurred_at| occurred_at < latest)
                 .unwrap_or(false)
@@ -1281,13 +1287,15 @@ mod tests {
 
     #[test]
     fn proactive_insights_are_prioritized_and_keep_accepted_sources() {
-        let carried_action = digest_test_item(
+        let mut carried_action = digest_test_item(
             1,
             "action",
             "Проверить сборку",
             "previous",
             "2026-07-14T10:00:00Z",
         );
+        carried_action.owner = Some("Анна".into());
+        carried_action.due_date = Some("2026-07-16".into());
         let later_action = digest_test_item(
             5,
             "action",
@@ -1328,7 +1336,7 @@ mod tests {
         let insights = build_proactive_insights(&digest);
         assert_eq!(insights[0].priority, "high");
         assert!(insights.iter().any(|insight| {
-            insight.kind == "action_missing_owner_and_due" && insight.sources[0].record_id == 1
+            insight.kind == "action_missing_owner_and_due" && insight.sources[0].record_id == 5
         }));
         assert!(insights.iter().any(|insight| {
             insight.kind == "recurring_risk"
@@ -1344,6 +1352,16 @@ mod tests {
         assert!(insights
             .iter()
             .any(|insight| insight.kind == "carried_open_action"));
+        for record_id in [1, 5] {
+            assert_eq!(
+                insights
+                    .iter()
+                    .filter(|insight| insight.sources[0].record_id == record_id)
+                    .count(),
+                1,
+                "record {record_id} produced duplicate insight cards"
+            );
+        }
         assert!(!insights.iter().any(|insight| {
             insight.kind == "carried_open_action" && insight.sources[0].record_id == 5
         }));
