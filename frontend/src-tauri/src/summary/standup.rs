@@ -99,6 +99,7 @@ const STANDUP_JSON_SCHEMA: &str = r##"{
     }
   }
 }"##;
+const STANDUP_RETRY_JSON_SCHEMA: &str = r#"{"type":"object"}"#;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct EvidenceRef {
@@ -1448,7 +1449,7 @@ pub async fn generate_standup_report(
                         Some(1.0),
                         request.app_data_dir,
                         request.cancellation_token,
-                        Some(STANDUP_JSON_SCHEMA),
+                        Some(STANDUP_RETRY_JSON_SCHEMA),
                     )
                     .await
                     .map_err(|error| {
@@ -1902,6 +1903,9 @@ mod tests {
         assert!(extraction_system_prompt().contains("one most-specific section"));
 
         let schema: serde_json::Value = serde_json::from_str(STANDUP_JSON_SCHEMA).unwrap();
+        let retry_schema: serde_json::Value =
+            serde_json::from_str(STANDUP_RETRY_JSON_SCHEMA).unwrap();
+        assert_eq!(retry_schema["type"], "object");
         assert_eq!(
             schema["properties"]["schema_version"]["const"],
             STANDUP_SCHEMA_VERSION
