@@ -1305,7 +1305,7 @@ pub async fn generate_standup_report(
     let mut extracted = Vec::with_capacity(chunks.len());
     let mut failed_chunks = 0usize;
     let extraction_token_ceiling = if request.provider == &LLMProvider::BuiltInAI {
-        896
+        640
     } else {
         2_048
     };
