@@ -120,6 +120,26 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
 // Public API
 // ============================================================================
 
+fn resolve_max_tokens(value: Option<u32>) -> i32 {
+    value
+        .map(|value| i32::try_from(value).unwrap_or(i32::MAX))
+        .unwrap_or(models::DEFAULT_MAX_TOKENS)
+        .clamp(1, models::DEFAULT_MAX_TOKENS)
+}
+
+fn resolve_temperature(value: Option<f32>, fallback: f32) -> f32 {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| value.max(0.0))
+        .unwrap_or(fallback)
+}
+
+fn resolve_top_p(value: Option<f32>, fallback: f32) -> f32 {
+    value
+        .filter(|value| value.is_finite() && *value > 0.0 && *value <= 1.0)
+        .unwrap_or(fallback)
+}
+
 /// Generate text using built-in AI
 ///
 /// # Arguments
@@ -145,6 +165,9 @@ pub async fn generate_with_builtin(
         user_prompt,
         cancellation_token,
         None,
+        None,
+        None,
+        None,
     )
     .await
 }
@@ -157,6 +180,9 @@ pub async fn generate_with_builtin_json_schema(
     user_prompt: &str,
     cancellation_token: Option<&CancellationToken>,
     json_schema: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
 ) -> Result<String> {
     // Check cancellation at start
     if let Some(token) = cancellation_token {
@@ -200,14 +226,17 @@ pub async fn generate_with_builtin_json_schema(
 
     // Prepare generation request with model-specific sampling parameters
     let sampling = model_def.sampling.sanitize_for_llama_helper();
+    let max_tokens = resolve_max_tokens(max_tokens);
+    let temperature = resolve_temperature(temperature, sampling.temperature);
+    let top_p = resolve_top_p(top_p, sampling.top_p);
     let request = Request::Generate {
         prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        max_tokens: Some(max_tokens),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
-        temperature: Some(sampling.temperature),
+        temperature: Some(temperature),
         top_k: Some(sampling.top_k),
-        top_p: Some(sampling.top_p),
+        top_p: Some(top_p),
         presence_penalty: Some(sampling.presence_penalty),
         frequency_penalty: Some(sampling.frequency_penalty),
         repeat_penalty: Some(sampling.repeat_penalty),
@@ -351,6 +380,19 @@ mod tests {
         assert!(json.contains("\"repeat_penalty\":1.05"));
         assert!(json.contains("\"penalty_last_n\":256"));
         assert!(json.contains("\"json_schema\":\"{\\\"type\\\":\\\"object\\\"}\""));
+    }
+
+    #[test]
+    fn constrained_generation_honors_bounded_overrides() {
+        assert_eq!(resolve_max_tokens(Some(2_048)), 2_048);
+        assert_eq!(
+            resolve_max_tokens(Some(u32::MAX)),
+            models::DEFAULT_MAX_TOKENS
+        );
+        assert_eq!(resolve_temperature(Some(0.0), 0.8), 0.0);
+        assert_eq!(resolve_temperature(Some(f32::NAN), 0.8), 0.8);
+        assert_eq!(resolve_top_p(Some(1.0), 0.8), 1.0);
+        assert_eq!(resolve_top_p(Some(0.0), 0.8), 0.8);
     }
 
     #[test]
