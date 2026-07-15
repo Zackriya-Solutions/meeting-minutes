@@ -138,14 +138,12 @@ export function migrateStandupLiveState(
   if (!fromMeetingId || !toMeetingId || fromMeetingId === toMeetingId) return;
   const source = read(fromMeetingId);
   const target = read(toMeetingId);
-  if (
-    !source.enabled &&
-    source.completedUpdates === 0 &&
-    source.markers.length === 0
-  ) return;
+  const hasSourceActivity =
+    source.enabled || source.completedUpdates > 0 || source.markers.length > 0;
+  if (!hasSourceActivity) return;
   write(toMeetingId, {
     enabled: source.enabled || target.enabled,
-    targetMinutes: source.enabled ? source.targetMinutes : target.targetMinutes,
+    targetMinutes: source.targetMinutes,
     completedUpdates: Math.max(source.completedUpdates, target.completedUpdates),
     markers: [...target.markers, ...source.markers],
   });
