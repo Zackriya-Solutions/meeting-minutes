@@ -83,7 +83,7 @@ export function SummaryUpdaterButtonGroup({
           className="cursor-pointer"
         >
           <Search />
-          <span className="hidden lg:inline">Find</span>
+          <span className="hidden lg:inline">{t('sidebar.find')}</span>
         </Button>
       )} */}
     </ButtonGroup>

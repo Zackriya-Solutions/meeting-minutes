@@ -9,7 +9,8 @@ import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
 
 export function SummaryLanguageSettings() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const languageLabel = (code: string) => labelForCode(code, i18n.language);
   const { recents, pinned, addRecent, removeRecent, setPinned } = useRecentLanguages();
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -41,7 +42,7 @@ export function SummaryLanguageSettings() {
             >
               <button
                 type="button"
-                aria-label={isPinned ? t('summarySettings.unpinAsDefault', { name: labelForCode(code) }) : t('summarySettings.pinAsDefault', { name: labelForCode(code) })}
+                aria-label={isPinned ? t('summarySettings.unpinAsDefault', { name: languageLabel(code) }) : t('summarySettings.pinAsDefault', { name: languageLabel(code) })}
                 aria-pressed={isPinned}
                 title={isPinned ? t('summarySettings.clickToUnsetDefault') : t('summarySettings.clickToSetDefault')}
                 onClick={() => togglePin(code)}
@@ -54,11 +55,11 @@ export function SummaryLanguageSettings() {
                   className={isPinned ? 'text-blue-600' : 'text-gray-400'}
                   fill={isPinned ? 'currentColor' : 'none'}
                 />
-                {labelForCode(code)}
+                {languageLabel(code)}
               </button>
               <button
                 type="button"
-                aria-label={t('summarySettings.removeLanguage', { name: labelForCode(code) })}
+                aria-label={t('summarySettings.removeLanguage', { name: languageLabel(code) })}
                 onClick={() => removeRecent(code)}
                 className={`pr-2.5 pl-0.5 py-1 leading-none ${isPinned ? 'text-blue-400 hover:text-blue-700' : 'text-gray-400 hover:text-gray-700'}`}
               >
@@ -94,7 +95,7 @@ export function SummaryLanguageSettings() {
 
       <p className="text-xs text-gray-400 mt-3">
         {pinned
-          ? t('summarySettings.pinnedDefaultHint', { name: labelForCode(pinned) })
+          ? t('summarySettings.pinnedDefaultHint', { name: languageLabel(pinned) })
           : t('summarySettings.dominantLangQuickSwitch')}
       </p>
     </div>

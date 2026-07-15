@@ -4,6 +4,7 @@ import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranslation } from 'react-i18next';
+import { getLanguageDisplayName } from '@/constants/languages';
 
 export interface Language {
   code: string;
@@ -130,7 +131,13 @@ export function LanguageSelection({
 }: LanguageSelectionProps) {
   const [saving, setSaving] = useState(false);
   const { setSelectedLanguage } = useConfig();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const languageName = (code: string) => getLanguageDisplayName(
+    code,
+    i18n.language,
+    t('languagePicker.autoOriginal'),
+    t('languagePicker.autoTranslate'),
+  );
 
   // Parakeet only supports auto-detection (doesn't support manual language selection)
   const isParakeet = provider === 'parakeet';
@@ -171,9 +178,7 @@ export function LanguageSelection({
   };
 
   // Find the selected language name for display
-  const selectedLanguageName = LANGUAGES.find(
-    lang => lang.code === selectedLanguage
-  )?.name || 'Auto Detect (Original Language)';
+  const selectedLanguageName = languageName(selectedLanguage);
 
   return (
     <div className="space-y-4">
@@ -193,7 +198,7 @@ export function LanguageSelection({
         >
           {availableLanguages.map((language) => (
             <option key={language.code} value={language.code}>
-              {language.name}
+              {languageName(language.code)}
               {language.code !== 'auto' && language.code !== 'auto-translate' && ` (${language.code})`}
             </option>
           ))}
@@ -210,7 +215,7 @@ export function LanguageSelection({
         {/* Info text */}
         <div className="text-xs space-y-2 pt-2">
           <p className="text-gray-600">
-            <strong>{t('transcriptSettings.currentlyUsing')}:</strong> {selectedLanguageName}
+            <strong>{t('transcriptSettings.currentlyUsing')}</strong> {selectedLanguageName}
           </p>
           {selectedLanguage === 'auto' && (
             <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">

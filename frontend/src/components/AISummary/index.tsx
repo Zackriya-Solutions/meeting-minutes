@@ -21,7 +21,7 @@ interface Props {
 }
 
 export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerateSummary, meeting }: Props) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const generateUniqueId = (sectionKey: string) => {
     return `${sectionKey}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
@@ -560,12 +560,17 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   };
 
   const convertToMarkdown = () => {
-    let markdown = `# AI Generated Summary of Meeting: ${meeting?.id || 'Unknown'} - ${meeting?.title || 'Untitled Meeting'}\n\n`;
-    markdown += `## Date: ${meeting?.created_at ? new Date(meeting.created_at).toLocaleDateString() : new Date().toLocaleDateString()}\n\n`;
+    let markdown = `# ${t('exports.aiGeneratedTitle', {
+      id: meeting?.id || t('common.unknown'),
+      title: meeting?.title || t('sidebar.untitledMeeting'),
+    })}\n\n`;
+    markdown += `## ${t('exports.date')}: ${meeting?.created_at
+      ? new Date(meeting.created_at).toLocaleDateString(i18n.language)
+      : new Date().toLocaleDateString(i18n.language)}\n\n`;
     
     Object.entries(currentSummary).forEach(([key, section]) => {
       if (key === 'title') {
-        markdown = `# ${section.title || 'AI Enhanced Summary'}\n\n`;
+        markdown = `# ${section.title || t('exports.enhancedSummary')}\n\n`;
       } else {
         markdown += `## ${section.title || key}\n\n`;
         section.blocks.forEach(block => {
@@ -600,7 +605,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${currentSummary.title || 'ai-summary'}.md`;
+    a.download = `${currentSummary.title || t('exports.summaryFilename')}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -624,12 +629,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
         <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
         <div>
           <h3 className="text-blue-700 font-medium">
-            {status === 'processing' ? 'Processing Transcript' : 'Generating Summary'}
+            {status === 'processing'
+              ? t('summarySettings.processingTranscript')
+              : t('summarySettings.generating')}
           </h3>
           <p className="text-blue-600 text-sm">
             {status === 'processing' 
-              ? 'Analyzing your transcript...' 
-              : 'Creating a detailed summary of your meeting...'}
+              ? t('summarySettings.analyzingTranscript')
+              : t('summarySettings.creatingDetailedSummary')}
           </p>
         </div>
       </div>
@@ -787,7 +794,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            <span className="ml-1">Regenerate</span>
+            <span className="ml-1">{t('summarySettings.regenerate')}</span>
           </button>
         </div>
       </div> */}

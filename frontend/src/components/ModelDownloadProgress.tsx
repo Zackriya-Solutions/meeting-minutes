@@ -117,10 +117,10 @@ export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: 
     <div className="bg-gray-50 rounded-lg p-3 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-gray-700">
-          📦 {downloadedModels}/{totalModels} models available
+          {t('modelSettings.modelsAvailable', { downloaded: downloadedModels, total: totalModels })}
         </span>
         <span className="text-gray-600">
-          💾 {formatSize(totalSizeMb)} total
+          {t('modelSettings.totalSize', { size: formatSize(totalSizeMb) })}
         </span>
       </div>
       {downloadedModels > 0 && (

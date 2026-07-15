@@ -261,7 +261,7 @@ export function BuiltInModelManager({
     return (
       <div className="text-center py-8 text-muted-foreground">
         <RefreshCw className="mx-auto h-8 w-8 animate-spin mb-2" />
-        Loading models...
+        {t('modelSettings.loadingModels')}
       </div>
     );
   }
@@ -390,7 +390,7 @@ export function BuiltInModelManager({
                       }}
                     >
                       <RefreshCw className="mr-2 h-4 w-4" />
-                      Retry
+                      {t('common.retry')}
                     </Button>
                   )}
                   {/* Corrupted - Show both Retry and Delete buttons */}
@@ -405,7 +405,7 @@ export function BuiltInModelManager({
                         }}
                       >
                         <RefreshCw className="mr-2 h-4 w-4" />
-                        Retry
+                        {t('common.retry')}
                       </Button>
                       <Button
                         variant="outline"
@@ -416,7 +416,7 @@ export function BuiltInModelManager({
                         }}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
+                        {t('common.delete')}
                       </Button>
                     </>
                   )}

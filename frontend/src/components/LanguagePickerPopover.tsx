@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LANGUAGE_OPTIONS, labelForCode } from "@/lib/summary-languages";
 import { useRecentLanguages } from "@/hooks/useRecentLanguages";
 import { useTranslation } from "react-i18next";
 
@@ -21,7 +21,8 @@ export function LanguagePickerPopover({
   autoSubtitle,
 }: LanguagePickerPopoverProps) {
   const { recents } = useRecentLanguages();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const languageLabel = useCallback((code: string) => labelForCode(code, i18n.language), [i18n.language]);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,9 +58,9 @@ export function LanguagePickerPopover({
     return options.filter(
       (l) =>
         l.code.toLowerCase().includes(filter) ||
-        l.label.toLowerCase().includes(filter),
+        languageLabel(l.code).toLowerCase().includes(filter),
     );
-  }, [filter, mode, recentCodes]);
+  }, [filter, mode, recentCodes, languageLabel]);
 
   const recentsResolved = useMemo(
     () =>
@@ -70,9 +71,9 @@ export function LanguagePickerPopover({
           (l) =>
             !filter ||
             l.code.toLowerCase().includes(filter) ||
-            l.label.toLowerCase().includes(filter),
+            languageLabel(l.code).toLowerCase().includes(filter),
         ),
-    [recents, filter],
+    [recents, filter, languageLabel],
   );
 
   const showAuto = mode === "meeting" && (!filter || "auto".includes(filter));
@@ -103,7 +104,7 @@ export function LanguagePickerPopover({
         {showRecents && (
           <>
             <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-              Recently Used
+              {t('languagePicker.recentlyUsed')}
             </div>
             {recentsResolved.map((opt) => (
               <button
@@ -116,7 +117,7 @@ export function LanguagePickerPopover({
                 }`}
               >
                 <span>
-                  {opt.label}{" "}
+                  {languageLabel(opt.code)}{" "}
                   <span className="text-xs text-gray-400">({opt.code})</span>
                 </span>
                 {value === opt.code && <span className="text-blue-600" aria-hidden="true">✓</span>}
@@ -162,7 +163,7 @@ export function LanguagePickerPopover({
             }`}
           >
             <span>
-              {opt.label}{" "}
+              {languageLabel(opt.code)}{" "}
               <span className="text-xs text-gray-400">({opt.code})</span>
             </span>
             {value === opt.code && <span className="text-blue-600" aria-hidden="true">✓</span>}

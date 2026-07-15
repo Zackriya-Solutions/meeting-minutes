@@ -157,7 +157,7 @@ function LayoutInner({
       setShowImportDialog(true);
     } else if (paths.length > 0) {
       toast.error(t('importAudio.dropAudioFileOnly'), {
-        description: `Supported formats: ${getAudioFormatsDisplayList()}`
+        description: t('importAudio.supportedFormatsDesc', { formats: getAudioFormatsDisplayList() })
       });
     }
   }, []);

@@ -28,7 +28,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
     >
       <FileQuestion className="w-16 h-16 text-gray-300 mb-4" />
       <h3 className="text-lg font-semibold text-gray-900 mb-2">
-        No Summary Generated Yet
+        {t('summarySettings.noSummaryYet')}
       </h3>
       <p className="text-sm text-gray-500 mb-6 max-w-md">
         {t('summarySettings.canGenerateAnytime')}
@@ -44,7 +44,9 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
                 className="gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                {isGenerating ? 'Generating...' : 'Generate Summary'}
+                {isGenerating
+                  ? t('summarySettings.generating')
+                  : t('summarySettings.generateSummary')}
               </Button>
             </div>
           </TooltipTrigger>

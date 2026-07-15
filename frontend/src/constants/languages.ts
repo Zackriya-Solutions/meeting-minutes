@@ -38,3 +38,19 @@ export const LANGUAGES = [
   { code: 'bg', name: 'Bulgarian' },
   { code: 'lt', name: 'Lithuanian' },
 ];
+
+export function getLanguageDisplayName(
+  code: string,
+  locale: string,
+  autoLabel = 'Auto Detect (Original Language)',
+  autoTranslateLabel = 'Auto Detect (Translate to English)',
+): string {
+  if (code === 'auto') return autoLabel;
+  if (code === 'auto-translate') return autoTranslateLabel;
+
+  try {
+    return new Intl.DisplayNames([locale], { type: 'language' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}

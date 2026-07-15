@@ -60,6 +60,10 @@ export function normaliseLanguageCode(raw: string | null | undefined): string | 
   return null;
 }
 
-export function labelForCode(code: string): string {
-  return LANGUAGE_OPTIONS.find((l) => l.code === code)?.label ?? code;
+export function labelForCode(code: string, locale = 'en'): string {
+  try {
+    return new Intl.DisplayNames([locale], { type: 'language' }).of(code) ?? code;
+  } catch {
+    return LANGUAGE_OPTIONS.find((l) => l.code === code)?.label ?? code;
+  }
 }

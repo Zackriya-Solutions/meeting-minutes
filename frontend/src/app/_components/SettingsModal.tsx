@@ -90,7 +90,7 @@ export function SettingsModals({
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Summarization Model
+                    {t('modelSettings.title')}
                   </label>
                   <div className="flex space-x-2">
                     <select
@@ -312,7 +312,7 @@ export function SettingsModals({
               onClick={() => onClose('errorAlert')}
               className="ml-2 text-red-600 hover:text-red-800 underline"
             >
-              Dismiss
+              {t('common.dismiss')}
             </button>
           </AlertDescription>
         </Alert>
@@ -330,7 +330,7 @@ export function SettingsModals({
               onClick={() => onClose('chunkDropWarning')}
               className="ml-2 text-yellow-600 hover:text-yellow-800 underline"
             >
-              Dismiss
+              {t('common.dismiss')}
             </button>
           </AlertDescription>
         </Alert>

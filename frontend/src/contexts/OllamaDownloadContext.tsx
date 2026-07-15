@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
+import i18n from '@/i18n/config';
 
 /**
  * Ollama download state synchronized with backend
@@ -78,8 +79,8 @@ export function OllamaDownloadProvider({ children }: { children: React.ReactNode
             const { modelName } = event.payload;
             console.log(`✅ [OllamaDownloadContext] Download complete for ${modelName}`);
 
-            toast.success(`Model ${modelName} downloaded!`, {
-              description: 'Model is now ready to use',
+            toast.success(i18n.t('notifications.ollamaModelDownloaded', { model: modelName }), {
+              description: i18n.t('notifications.modelReadyToUse'),
               duration: 4000
             });
 
@@ -106,7 +107,7 @@ export function OllamaDownloadProvider({ children }: { children: React.ReactNode
             const { modelName, error } = event.payload;
             console.error(`❌ [OllamaDownloadContext] Download error for ${modelName}:`, error);
 
-            toast.error(`Download failed: ${modelName}`, {
+            toast.error(i18n.t('notifications.modelDownloadFailed', { model: modelName }), {
               description: error,
               duration: 6000
             });

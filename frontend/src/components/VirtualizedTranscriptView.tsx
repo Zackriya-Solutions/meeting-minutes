@@ -314,7 +314,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
                                 <span className="text-sm text-gray-400">
-                                    Showing {loadedCount} of {totalCount} segments
+                                    {t('transcriptPanel.showingSegments', { shown: loadedCount, total: totalCount })}
                                 </span>
                             ) : null}
                         </div>
@@ -370,7 +370,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
                                 <span className="text-sm text-gray-400">
-                                    Showing {loadedCount} of {totalCount} segments
+                                    {t('transcriptPanel.showingSegments', { shown: loadedCount, total: totalCount })}
                                 </span>
                             ) : null}
                         </div>

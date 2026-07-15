@@ -75,8 +75,7 @@ export function SetupOverviewStep() {
                                 </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
-                                You can also select external AI providers like OpenAI, Claude, or
-                                Ollama for summary generation in settings.
+                                {t('onboarding.externalProvidersHint')}
                                 </TooltipContent>
                             </Tooltip>
                             </TooltipProvider>
@@ -105,7 +104,7 @@ export function SetupOverviewStep() {
               rel="noopener noreferrer"
               className="text-xs text-gray-600 hover:underline"
             >
-              Report issues on GitHub
+              {t('onboarding.reportIssues')}
             </a>
           </div>
         </div>

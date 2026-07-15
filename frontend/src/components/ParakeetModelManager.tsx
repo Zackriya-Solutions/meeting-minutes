@@ -60,7 +60,7 @@ export function ParakeetModelManager({
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize Parakeet:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load models');
+        setError(err instanceof Error ? err.message : t('modelSettings.failedToLoadModels'));
         toast.error(t('transcriptSettings.modelSetupRequired'), {
           description: err instanceof Error ? err.message : t('common.unknown'),
           duration: 5000
@@ -407,7 +407,7 @@ export function ParakeetModelManager({
           animate={{ opacity: 1, y: 0 }}
           className="text-xs text-gray-500 text-center pt-2"
         >
-          {t('transcriptSettings.using')} {getModelDisplayName(selectedModel)} {t('transcriptSettings.audioAvailable').toLowerCase()}
+          {t('transcriptSettings.selectedModelReady', { name: getModelDisplayName(selectedModel) })}
         </motion.div>
       )}
     </div>
@@ -476,7 +476,7 @@ function ModelCard({
       {/* Recommended Badge */}
       {isRecommended && (
         <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          Recommended
+          {t('modelCard.recommended')}
         </div>
       )}
 
@@ -566,7 +566,7 @@ function ModelCard({
                   }}
                   className="bg-orange-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-orange-700 transition-colors"
                 >
-                  Delete
+                  {t('common.delete')}
                 </button>
                 <button
                   onClick={(e) => {
@@ -575,7 +575,7 @@ function ModelCard({
                   }}
                   className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
-                  Re-download
+                  {t('modelCard.redownload')}
                 </button>
               </div>
             )}

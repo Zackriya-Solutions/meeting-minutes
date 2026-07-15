@@ -7,6 +7,7 @@ import ja from './locales/ja.json';
 import ko from './locales/ko.json';
 import de from './locales/de.json';
 import fr from './locales/fr.json';
+import ru from './locales/ru.json';
 
 const resources = {
   en: { translation: en },
@@ -15,6 +16,7 @@ const resources = {
   ko: { translation: ko },
   de: { translation: de },
   fr: { translation: fr },
+  ru: { translation: ru },
 } as const;
 
 i18n
@@ -23,7 +25,7 @@ i18n
   .init({
     resources,
     fallbackLng: 'en',
-    supportedLngs: ['en', 'zh-CN', 'ja', 'ko', 'de', 'fr'],
+    supportedLngs: ['en', 'zh-CN', 'ja', 'ko', 'de', 'fr', 'ru'],
     interpolation: {
       escapeValue: false,
     },

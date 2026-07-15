@@ -8,6 +8,7 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
+import i18n from '@/i18n/config';
 import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
@@ -183,7 +184,10 @@ export function useRecordingStop(
           // Update user with current status
           if (status.chunks_in_queue > 0) {
             console.log(`Processing ${status.chunks_in_queue} remaining audio chunks...`);
-            setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, `Processing ${status.chunks_in_queue} remaining chunks...`);
+            setStatus(
+              RecordingStatus.PROCESSING_TRANSCRIPTS,
+              i18n.t('recording.processingRemainingChunks', { count: status.chunks_in_queue })
+            );
           }
 
           // Wait before next check
@@ -270,8 +274,8 @@ export function useRecordingStop(
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
           } catch (error) {
             console.warn('Failed to apply pinned summary language preference for new meeting:', error);
-            toast.warning('Could not apply default summary language', {
-              description: 'The meeting was saved, but the default summary language was not applied.',
+            toast.warning(i18n.t('notifications.defaultSummaryLanguageFailed'), {
+              description: i18n.t('notifications.savedMeetingLanguageFailedDesc'),
             });
           }
 
@@ -283,8 +287,8 @@ export function useRecordingStop(
               );
             } catch (error) {
               console.warn('Failed to detect summary language for new meeting:', error);
-              toast.warning('Could not detect summary language', {
-                description: 'The meeting was saved, but Auto could not detect the summary language.',
+              toast.warning(i18n.t('notifications.summaryLanguageDetectionFailed'), {
+                description: i18n.t('notifications.summaryLanguageDetectionFailedDesc'),
               });
             }
           }
@@ -323,10 +327,10 @@ export function useRecordingStop(
           setStatus(RecordingStatus.COMPLETED);
 
           // Show success toast with navigation option
-          toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+          toast.success(i18n.t('notifications.recordingSaved'), {
+            description: i18n.t('notifications.transcriptSegmentsSaved', { count: freshTranscripts.length }),
             action: {
-              label: 'View Meeting',
+              label: i18n.t('notifications.viewMeeting'),
               onClick: () => {
                 router.push(`/meeting-details?id=${meetingId}`);
                 Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
@@ -397,9 +401,9 @@ export function useRecordingStop(
 
         } catch (saveError) {
           console.error('Failed to save meeting to database:', saveError);
-          setStatus(RecordingStatus.ERROR, saveError instanceof Error ? saveError.message : 'Unknown error');
-          toast.error('Failed to save meeting', {
-            description: saveError instanceof Error ? saveError.message : 'Unknown error'
+          setStatus(RecordingStatus.ERROR, saveError instanceof Error ? saveError.message : i18n.t('notifications.unknownError'));
+          toast.error(i18n.t('notifications.meetingSaveFailed'), {
+            description: saveError instanceof Error ? saveError.message : i18n.t('notifications.unknownError')
           });
           throw saveError;
         }
@@ -413,7 +417,7 @@ export function useRecordingStop(
       setIsRecordingDisabled(false);
     } catch (error) {
       console.error('Error in handleRecordingStop:', error);
-      setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Unknown error');
+      setStatus(RecordingStatus.ERROR, i18n.t('notifications.unknownError'));
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
     } finally {

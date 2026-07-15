@@ -115,10 +115,10 @@ export function SummaryPanel({
     };
   } | null>(null);
   activeMeetingIdRef.current = meeting.id;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { addRecent } = useRecentLanguages();
 
-  const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : 'Auto';
+  const effectiveLangLabel = summaryLang ? labelForCode(summaryLang, i18n.language) : t('common.auto');
   const isLocalFallbackLanguage = summaryLangStorage === 'local_fallback';
   const autoSubtitle = isLocalFallbackLanguage
     ? 'Saved on this device for folderless meetings'

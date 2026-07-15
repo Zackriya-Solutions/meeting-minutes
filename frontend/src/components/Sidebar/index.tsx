@@ -345,7 +345,7 @@ const Sidebar: React.FC = () => {
 
       // If deleting the active meeting, navigate to home
       if (currentMeeting?.id === itemId) {
-        setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
+        setCurrentMeeting({ id: 'intro-call', title: t('sidebar.untitledMeeting') });
         router.push('/');
       }
     } catch (error) {

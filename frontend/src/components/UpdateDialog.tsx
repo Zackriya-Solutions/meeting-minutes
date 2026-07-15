@@ -137,7 +137,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
       await relaunch();
     } catch (err: any) {
       console.error('Update failed:', err);
-      setError(err.message || 'Failed to download or install update');
+      setError(err.message || t('updateDialog.updateFailed', { error: t('common.unknown') }));
       setIsDownloading(false);
       toast.error(t('updateDialog.updateFailed', { error: err.message || t('transcriptRecovery.unknownError') }));
     }
@@ -192,17 +192,17 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             {isDownloading ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Downloading Update
+                {t('updateDialog.downloadingUpdate')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Update Error
+                {t('updateDialog.updateError')}
               </>
             ) : (
               <>
                 <Download className="h-5 w-5 text-blue-600" />
-                Update Available
+                {t('updateDialog.title')}
               </>
             )}
           </DialogTitle>
@@ -264,7 +264,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
                 </div>
               </div>
               <p className="text-sm text-muted-foreground text-center">
-                t('updateDialog.restartAfterInstall')
+                {t('updateDialog.restartAfterInstall')}
               </p>
             </div>
           )}
@@ -280,17 +280,17 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           {!isDownloading && !error && (
             <>
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
-                Later
+                {t('onboarding.later')}
               </Button>
               <Button onClick={handleDownloadAndInstall} className="bg-blue-600 hover:bg-blue-700">
                 <Download className="h-4 w-4 mr-2" />
-                Download & Install
+                {t('onboarding.downloadAndInstall')}
               </Button>
             </>
           )}
           {error && (
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
-              Close
+              {t('common.close')}
             </Button>
           )}
         </DialogFooter>

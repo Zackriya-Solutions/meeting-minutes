@@ -171,7 +171,7 @@ export function PreferenceSettings() {
         <div className="space-y-4">
           {/* Database Location */}
           {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Database</div>
+            <div className="font-medium mb-2">{t('preferences.database')}</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
             </div>
@@ -186,7 +186,7 @@ export function PreferenceSettings() {
 
           {/* Models Location */}
           {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Whisper Models</div>
+            <div className="font-medium mb-2">{t('transcriptSettings.whisperModels')}</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
             </div>

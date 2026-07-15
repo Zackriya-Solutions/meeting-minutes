@@ -44,7 +44,7 @@ export function BetaSettings() {
                   {t('beta.importAudioRetranscribe')}
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-                  BETA
+                  {t('beta.badge')}
                 </span>
               </div>
               <p className="text-sm text-gray-600">

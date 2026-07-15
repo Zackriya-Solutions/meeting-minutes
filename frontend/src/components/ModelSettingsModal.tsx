@@ -1185,7 +1185,7 @@ export function ModelSettingsModal({
                 {ollamaEndpointChanged && !error && (
                   <Alert className="mt-3 border-yellow-500 bg-yellow-50">
                     <AlertDescription className="text-yellow-800">
-                      Endpoint changed. Please click "{t('modelSettings.fetchModels')}" to load models from the new endpoint before saving.
+                      {t('modelSettings.endpointChangedBeforeSave', { action: t('modelSettings.fetchModels') })}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -1200,7 +1200,7 @@ export function ModelSettingsModal({
               <h4 className="text-sm font-bold">{t('modelSettings.availableOllamaModels')}</h4>
               {lastFetchedEndpoint && models.length > 0 && (
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('transcriptSettings.using')}:</span>
+                  <span className="text-muted-foreground">{t('transcriptSettings.using')}</span>
                   <code className="px-2 py-1 bg-muted rounded text-xs">
                     {lastFetchedEndpoint || 'http://localhost:11434'}
                   </code>
@@ -1239,7 +1239,7 @@ export function ModelSettingsModal({
                       className="w-full bg-blue-600 hover:bg-blue-700"
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
-                      Download Ollama
+                      {t('modelSettings.downloadOllama')}
                     </Button>
                     <div className="text-sm text-muted-foreground text-center">
                       {t('modelSettings.afterInstallingOllama')}
@@ -1251,7 +1251,7 @@ export function ModelSettingsModal({
                     <Alert className="mb-4">
                       <AlertDescription>
                         {ollamaEndpointChanged
-                          ? `Endpoint changed. Click "${t('modelSettings.fetchModels')}" to load models from the new endpoint.`
+                          ? t('modelSettings.endpointChanged', { action: t('modelSettings.fetchModels') })
                           : t('misc.noModelsDownload')}
                       </AlertDescription>
                     </Alert>
@@ -1272,7 +1272,7 @@ export function ModelSettingsModal({
                           ) : (
                             <>
                               <Download className="mr-2 h-4 w-4" />
-                              Download gemma3:1b (Recommended, ~800MB)
+                              {t('modelSettings.downloadRecommendedModel', { name: 'gemma3:1b', size: '~800 MB' })}
                             </>
                           )}
                         </Button>
@@ -1331,7 +1331,7 @@ export function ModelSettingsModal({
                         >
                           <div>
                             <b className="font-bold">{model.name}&nbsp;</b>
-                            <span className="text-muted-foreground">with a size of </span>
+                            <span className="text-muted-foreground">{t('modelSettings.withSize')} </span>
                             <span className="font-mono font-bold text-sm">{model.size}</span>
                           </div>
 

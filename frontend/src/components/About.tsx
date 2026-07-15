@@ -56,7 +56,7 @@ export function About() {
                 <div className="mb-3">
                     <Image
                         src="icon_128x128.png"
-                        alt="Meetily Logo"
+                        alt={t('app.name')}
                         width={64}
                         height={64}
                         className="mx-auto"

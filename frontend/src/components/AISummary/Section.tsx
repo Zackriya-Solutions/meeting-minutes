@@ -5,6 +5,7 @@ import { BlockComponent } from './Block';
 import { EditableTitle } from '../EditableTitle';
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 
 interface SectionProps {
   section: SectionType;
@@ -41,6 +42,7 @@ export const Section: React.FC<SectionProps> = ({
   onBlockNavigate,
   onCreateNewBlock,
 }) => {
+  const { t } = useTranslation();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -77,7 +79,7 @@ export const Section: React.FC<SectionProps> = ({
             onClick={() => onSectionDelete(sectionKey)}
             className="text-gray-400 hover:text-gray-600"
           >
-            Delete
+            {t('common.delete')}
           </button>
         )}
       </div>

@@ -12,6 +12,8 @@ import {
   getModelPerformanceBadge,
   isQuantizedModel,
   getModelTagline,
+  getAccuracyLabel,
+  getSpeedLabel,
   WhisperAPI
 } from '../lib/whisper';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -108,7 +110,7 @@ export function ModelManager({
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize Whisper:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load models');
+        setError(err instanceof Error ? err.message : t('modelSettings.failedToLoadModels'));
         toast.error(t('transcriptSettings.modelSetupRequired'), {
           description: err instanceof Error ? err.message : t('common.unknown'),
           duration: 5000
@@ -484,7 +486,7 @@ export function ModelManager({
           animate={{ opacity: 1, y: 0 }}
           className="text-xs text-gray-500 text-center pt-2"
         >
-          Using {getDisplayName(selectedModel)} for transcription
+          {t('transcriptSettings.usingModel', { name: getDisplayName(selectedModel) })}
         </motion.div>
       )}
     </div>
@@ -551,7 +553,7 @@ function ModelCard({
       {/* Recommended Badge */}
       {isRecommended && (
         <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          Recommended
+          {t('modelCard.recommended')}
         </div>
       )}
 
@@ -593,11 +595,11 @@ function ModelCard({
               </span>
               <span className="flex items-center space-x-1">
                 <span>🎯</span>
-                <span>{model.accuracy} {t('modelSettings.accuracy')}</span>
+                <span>{getAccuracyLabel(model.accuracy)} {t('modelSettings.accuracy')}</span>
               </span>
               <span className="flex items-center space-x-1">
                 <span>⚡</span>
-                <span>{model.speed} {t('modelSettings.processingLabel')}</span>
+                <span>{getSpeedLabel(model.speed)} {t('modelSettings.processingLabel')}</span>
               </span>
             </div>
           </div>
