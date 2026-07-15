@@ -55,7 +55,7 @@ interface SeriesDigestItem {
 
 interface StandupSeriesInsight {
   kind: string;
-  priority: 'high' | 'medium' | 'low' | string;
+  priority: 'high' | 'medium' | 'low';
   text: string;
   sources: SeriesDigestItem[];
 }
@@ -150,6 +150,11 @@ function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
     carried_open_action: t('Action carried over from an earlier meeting'),
     unresolved_parking_lot: t('Topic remains in the parking lot'),
   };
+  const priorityLabels: Record<StandupSeriesInsight['priority'], string> = {
+    high: t('High priority'),
+    medium: t('Medium priority'),
+    low: t('Low priority'),
+  };
   return (
     <section className="rounded-2xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-4 lg:col-span-2">
       <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">
@@ -161,10 +166,20 @@ function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {insights.map((insight, index) => {
           const source = insight.sources[0];
+          const priorityClass = insight.priority === 'high'
+            ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
+            : insight.priority === 'medium'
+              ? 'bg-[var(--gold-soft)] text-[var(--gold)]'
+              : 'bg-[var(--bg-sheet)] text-[var(--fg3)]';
           const content = (
             <>
-              <span className="block text-xs font-medium text-[var(--gold)]">
-                {labels[insight.kind] ?? t('Review accepted fact')}
+              <span className="flex items-center justify-between gap-2">
+                <span className="block text-xs font-medium text-[var(--gold)]">
+                  {labels[insight.kind] ?? t('Review accepted fact')}
+                </span>
+                <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide', priorityClass)}>
+                  {priorityLabels[insight.priority]}
+                </span>
               </span>
               <span className="mt-1 block text-sm text-[var(--fg1)]">{insight.text}</span>
               {source ? (
