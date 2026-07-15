@@ -265,6 +265,17 @@ pub struct StandupGenerationRequest<'a> {
     pub cancellation_token: Option<&'a CancellationToken>,
 }
 
+const DEFAULT_STANDUP_EXTRACTION_MAX_TOKENS: u32 = 4_096;
+const MAX_STANDUP_EXTRACTION_INPUT_TOKENS: usize = 8_000;
+
+fn resolve_standup_extraction_max_tokens(requested: Option<u32>) -> Option<u32> {
+    Some(
+        requested
+            .unwrap_or(DEFAULT_STANDUP_EXTRACTION_MAX_TOKENS)
+            .clamp(512, DEFAULT_STANDUP_EXTRACTION_MAX_TOKENS),
+    )
+}
+
 pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
     let cleaned = strip_code_fence(raw);
     let (mut report, repaired_eof): (StandupReport, bool) = match serde_json::from_str(cleaned) {
@@ -1342,10 +1353,14 @@ pub async fn generate_standup_report(
     }
 
     let token_count = rough_token_count(request.transcript);
-    let chunks = if token_count < request.token_threshold {
+    let extraction_token_threshold = request
+        .token_threshold
+        .min(MAX_STANDUP_EXTRACTION_INPUT_TOKENS)
+        .max(1);
+    let chunks = if token_count < extraction_token_threshold {
         vec![request.transcript.to_string()]
     } else {
-        let chunk_size = request.token_threshold.saturating_sub(700).max(1);
+        let chunk_size = extraction_token_threshold.saturating_sub(700).max(1);
         chunk_text(request.transcript, chunk_size, 100)
     };
     if chunks.is_empty() {
@@ -1354,17 +1369,7 @@ pub async fn generate_standup_report(
 
     let mut extracted = Vec::with_capacity(chunks.len());
     let mut failed_chunks = 0usize;
-    let extraction_token_ceiling = if request.provider == &LLMProvider::BuiltInAI {
-        640
-    } else {
-        2_048
-    };
-    let extraction_max_tokens = Some(
-        request
-            .max_tokens
-            .unwrap_or(extraction_token_ceiling)
-            .clamp(512, extraction_token_ceiling),
-    );
+    let extraction_max_tokens = resolve_standup_extraction_max_tokens(request.max_tokens);
     for (index, chunk) in chunks.iter().enumerate() {
         if request
             .cancellation_token
@@ -1496,6 +1501,16 @@ mod tests {
             text: text.to_string(),
             evidence: evidence(timestamp),
         }
+    }
+
+    #[test]
+    fn extraction_budget_is_large_enough_for_evidence_rich_json() {
+        assert_eq!(resolve_standup_extraction_max_tokens(None), Some(4_096));
+        assert_eq!(resolve_standup_extraction_max_tokens(Some(640)), Some(640));
+        assert_eq!(
+            resolve_standup_extraction_max_tokens(Some(16_000)),
+            Some(4_096)
+        );
     }
 
     #[test]
