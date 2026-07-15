@@ -18,6 +18,8 @@ import { TranscriptProvider } from '@/contexts/TranscriptContext'
 import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { OnboardingFlow } from '@/components/onboarding'
+// VALUEOS: branded shell entry point (single seam — see frontend/src/valueos/shell)
+import { ValueOsShell, valueOsShellEnabled } from '@/valueos/shell'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
@@ -247,8 +249,11 @@ export default function RootLayout({
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
 
+                              {/* VALUEOS: launch into the branded shell first (single seam) */}
                               {/* Show onboarding or main app */}
-                              {showOnboarding ? (
+                              {valueOsShellEnabled ? (
+                                <ValueOsShell />
+                              ) : showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
                               ) : (
                                 <div className="flex">
