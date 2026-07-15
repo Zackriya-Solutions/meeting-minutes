@@ -318,6 +318,16 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    sqlx::query("DELETE FROM pending_merges WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM entity_mentions WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
     // Delete from the older related tables in proper order.
     sqlx::query("DELETE FROM transcript_chunks WHERE meeting_id = ?")
         .bind(meeting_id)
@@ -420,6 +430,8 @@ mod tests {
             "CREATE TABLE standup_records(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE standup_private_notes(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
             "CREATE TABLE meeting_collections(meeting_id TEXT, collection_id INTEGER)",
+            "CREATE TABLE pending_merges(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE entity_mentions(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
@@ -435,6 +447,8 @@ mod tests {
             "INSERT INTO standup_records(meeting_id) VALUES('m1')",
             "INSERT INTO standup_private_notes(meeting_id, text) VALUES('m1', 'secret')",
             "INSERT INTO meeting_collections VALUES('m1', 1)",
+            "INSERT INTO pending_merges(meeting_id) VALUES('m1')",
+            "INSERT INTO entity_mentions(meeting_id) VALUES('m1')",
             "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
             "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
             "INSERT INTO transcripts(meeting_id) VALUES('m1')",
@@ -451,6 +465,8 @@ mod tests {
             "standup_records",
             "standup_private_notes",
             "meeting_collections",
+            "pending_merges",
+            "entity_mentions",
             "transcript_chunks",
             "summary_processes",
             "transcripts",
