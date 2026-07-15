@@ -15,6 +15,15 @@ from pathlib import Path
 from typing import Any
 
 ALLOWED_SPLITS = {"train", "dev", "test"}
+ALLOWED_MEETING_TYPES = {
+    "pure_status",
+    "status_plus_deep_dive",
+    "planning_sync",
+    "one_to_one",
+    "general_meeting",
+    "uncertain",
+}
+ALLOWED_RECORDING_SCOPES = {"complete", "partial", "unknown"}
 ALLOWED_KINDS = {
     "participant_update",
     "decision",
@@ -71,10 +80,16 @@ def gold_by_meeting(gold: dict[str, Any]) -> dict[str, dict[str, Any]]:
             raise ValueError(f"duplicate gold meeting_id: {meeting_id}")
         series_id = entry.get("series_id")
         split = entry.get("split")
+        meeting_type = entry.get("meeting_type")
+        recording_scope = entry.get("recording_scope")
         if not isinstance(series_id, str) or not series_id or series_id == "UNASSIGNED":
             raise ValueError(f"{meeting_id} requires a reviewed series_id")
         if split not in ALLOWED_SPLITS:
             raise ValueError(f"{meeting_id} requires train/dev/test split")
+        if meeting_type not in ALLOWED_MEETING_TYPES:
+            raise ValueError(f"{meeting_id} requires a reviewed meeting_type")
+        if recording_scope not in ALLOWED_RECORDING_SCOPES:
+            raise ValueError(f"{meeting_id} requires a reviewed recording_scope")
         previous_split = split_by_series.setdefault(series_id, split)
         if previous_split != split:
             raise ValueError(f"series {series_id} appears in multiple splits")
@@ -109,6 +124,8 @@ def apply_gold(dataset: dict[str, Any], gold: dict[str, Any]) -> tuple[dict[str,
         sample["series_id"] = entry["series_id"]
         sample["series_names"] = entry.get("series_names") or []
         sample["split"] = entry["split"]
+        sample["meeting_type"] = entry["meeting_type"]
+        sample["recording_scope"] = entry["recording_scope"]
         sample["reference_records"] = entry["reference_records"]
         sample["review_state"] = "manual_gold_complete"
         seen.add(meeting_id)

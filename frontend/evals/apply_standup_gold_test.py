@@ -26,6 +26,8 @@ gold = {
             "series_id": "series-a",
             "series_names": ["A"],
             "split": "test",
+            "meeting_type": "pure_status",
+            "recording_scope": "complete",
             "reference_records": [
                 {
                     "id": "gold-1",
@@ -46,6 +48,8 @@ assert sample["hypothesis_records"][0]["text"] == "raw model output"
 assert sample["reference_records"][0]["text"] == "reviewed action"
 assert sample["series_id"] == "series-a"
 assert sample["split"] == "test"
+assert sample["meeting_type"] == "pure_status"
+assert sample["recording_scope"] == "complete"
 assert sample["review_state"] == "manual_gold_complete"
 
 conflicting_split = {
@@ -55,12 +59,16 @@ conflicting_split = {
             "meeting_id": "meeting-1",
             "series_id": "series-a",
             "split": "train",
+            "meeting_type": "pure_status",
+            "recording_scope": "complete",
             "reference_records": [],
         },
         {
             "meeting_id": "meeting-2",
             "series_id": "series-a",
             "split": "test",
+            "meeting_type": "pure_status",
+            "recording_scope": "complete",
             "reference_records": [],
         },
     ],

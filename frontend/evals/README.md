@@ -71,10 +71,11 @@ python3 evals/apply_standup_gold.py \
 ```
 
 The gold file uses `schema_version: standup_gold_v1` and provides `meeting_id`, one reviewed
-`series_id`, a series-level `train`/`dev`/`test` split, and `reference_records`. The tool refuses
-unknown meeting IDs, duplicate IDs, unassigned series, invalid splits, record kinds, or empty
-reference text. It leaves `hypothesis_records` unchanged, writes atomically with mode `0600`, and
-prints counts only.
+`series_id`, a series-level `train`/`dev`/`test` split, reviewed `meeting_type` and
+`recording_scope`, and `reference_records`. The tool refuses unknown meeting IDs, duplicate IDs,
+unassigned series, invalid splits, meeting types, recording scopes, record kinds, or empty
+reference text. It copies all reviewed classification fields, leaves `hypothesis_records`
+unchanged, writes atomically with mode `0600`, and prints counts only.
 
 The exporter refuses to replace an existing output by default so a rerun cannot silently
 destroy reviewed references. Use a new path for a frozen set. `--overwrite` is available only
