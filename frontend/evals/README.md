@@ -90,6 +90,9 @@ Each link includes the hypothesis position, kind, SHA-256 fingerprint, and refer
 clears stale links first and rejects changed hypotheses, missing records, duplicate positions, and
 cross-kind matches. This keeps provider-specific review separate from reusable gold labels.
 
+Both overlay tools refuse to replace an existing output by default. Use a new path for reviewed
+artifacts, or pass `--overwrite` only when intentionally replacing a disposable derived file.
+
 The exporter refuses to replace an existing output by default so a rerun cannot silently
 destroy reviewed references. Use a new path for a frozen set. `--overwrite` is available only
 for intentionally disposable drafts. Output is written atomically with owner-only (`0600`)

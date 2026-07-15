@@ -148,15 +148,25 @@ def atomic_private_write(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def ensure_output_available(path: Path, overwrite: bool) -> None:
+    if path.exists() and not overwrite:
+        raise ValueError(f"output already exists: {path}; pass --overwrite to replace it")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--gold", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     input_paths = {args.dataset.resolve(), args.gold.resolve()}
     if args.output.resolve() in input_paths:
         parser.error("output must differ from dataset and gold inputs")
+    try:
+        ensure_output_available(args.output, args.overwrite)
+    except ValueError as error:
+        parser.error(str(error))
     dataset = load_object(args.dataset)
     gold = load_object(args.gold)
     annotated, count = apply_gold(dataset, gold)

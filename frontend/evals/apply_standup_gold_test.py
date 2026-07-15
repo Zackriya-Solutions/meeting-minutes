@@ -3,7 +3,12 @@
 import tempfile
 from pathlib import Path
 
-from apply_standup_gold import apply_gold, atomic_private_write, gold_by_meeting
+from apply_standup_gold import (
+    apply_gold,
+    atomic_private_write,
+    ensure_output_available,
+    gold_by_meeting,
+)
 
 
 dataset = {
@@ -83,5 +88,11 @@ with tempfile.TemporaryDirectory() as directory:
     output = Path(directory) / "private.json"
     atomic_private_write(output, result)
     assert output.stat().st_mode & 0o777 == 0o600
+    try:
+        ensure_output_available(output, overwrite=False)
+        raise AssertionError("existing private output must fail closed")
+    except ValueError as error:
+        assert "already exists" in str(error)
+    ensure_output_available(output, overwrite=True)
 
 print("ok - private standup gold overlay")

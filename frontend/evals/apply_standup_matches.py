@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from apply_standup_gold import atomic_private_write, load_object
+from apply_standup_gold import atomic_private_write, ensure_output_available, load_object
 
 FINGERPRINT_FIELDS = ("kind", "text", "participant", "owner", "due_date")
 
@@ -105,9 +105,14 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--matches", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     if args.output.resolve() in {args.dataset.resolve(), args.matches.resolve()}:
         parser.error("output must differ from dataset and match inputs")
+    try:
+        ensure_output_available(args.output, args.overwrite)
+    except ValueError as error:
+        parser.error(str(error))
     dataset = load_object(args.dataset)
     overlay = load_object(args.matches)
     linked, count = apply_matches(dataset, overlay)
