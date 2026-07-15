@@ -279,26 +279,38 @@ impl ParakeetEngine {
             return Err(anyhow!("Preprocessor (nemo128.onnx) not found"));
         }
 
-        // Define minimum file sizes (90% of expected to allow some variance)
-        // These are critical to catch partial downloads that would crash on load
-        let expected_sizes: Vec<(&str, u64)> = if is_int8 {
+        // Use a narrow range for the hosted int8 artifacts. A minimum-only check
+        // accepts corrupt files created by an interrupted/resumed download that
+        // appended duplicate data to an otherwise plausible ONNX file.
+        let expected_sizes: Vec<(&str, u64, Option<u64>)> = if is_int8 {
+            let is_v2 = model_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains("-v2-"));
+            let decoder_size = if is_v2 { 8_998_286 } else { 18_202_004 };
+            let vocab_size = if is_v2 { 9_384 } else { 93_939 };
+
             vec![
-                ("encoder-model.int8.onnx", 580_000_000),    // ~652 MB, min 580 MB (89%)
-                ("decoder_joint-model.int8.onnx", 8_000_000), // ~18 MB, min 8 MB
-                ("nemo128.onnx", 100_000),                    // ~140 KB, min 100 KB
-                ("vocab.txt", 5_000),                         // ~94 KB, min 5 KB
+                ("encoder-model.int8.onnx", 645_000_000, Some(659_000_000)),
+                (
+                    "decoder_joint-model.int8.onnx",
+                    decoder_size * 99 / 100,
+                    Some(decoder_size * 101 / 100),
+                ),
+                ("nemo128.onnx", 138_000, Some(142_000)),
+                ("vocab.txt", vocab_size * 99 / 100, Some(vocab_size * 101 / 100)),
             ]
         } else {
             vec![
-                ("encoder-model.onnx", 2_200_000_000),        // ~2.44 GB, min 2.2 GB
-                ("decoder_joint-model.onnx", 65_000_000),     // ~72 MB, min 65 MB
-                ("nemo128.onnx", 100_000),                    // ~140 KB, min 100 KB
-                ("vocab.txt", 5_000),                         // ~94 KB, min 5 KB
+                ("encoder-model.onnx", 2_200_000_000, None),
+                ("decoder_joint-model.onnx", 65_000_000, None),
+                ("nemo128.onnx", 100_000, None),
+                ("vocab.txt", 5_000, None),
             ]
         };
 
         // Validate each file exists AND has sufficient size
-        for (filename, min_size) in expected_sizes {
+        for (filename, min_size, max_size) in expected_sizes {
             let file_path = model_dir.join(filename);
             if !file_path.exists() {
                 return Err(anyhow!("{} not found", filename));
@@ -314,6 +326,16 @@ impl ParakeetEngine {
                             actual_size,
                             min_size
                         ));
+                    }
+                    if let Some(max_size) = max_size {
+                        if actual_size > max_size {
+                            return Err(anyhow!(
+                                "{} is invalid: {} bytes (expected at most {} bytes)",
+                                filename,
+                                actual_size,
+                                max_size
+                            ));
+                        }
                     }
                 }
                 Err(e) => {
