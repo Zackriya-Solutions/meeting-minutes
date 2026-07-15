@@ -152,25 +152,31 @@ jobs:
           echo "Sidecar binaries present:"
           ls -la frontend/src-tauri/binaries/
 
+      - name: Apply ValueOS branding (icons)
+        shell: bash
+        run: |
+          # Stage the ValueOS Agent icons into src-tauri/icons in the throwaway CI working
+          # tree only — never committed, no upstream file changed in git. See
+          # valueos/branding/README.md.
+          bash valueos/branding/apply-branding.sh
+
       - name: Build Tauri app (unsigned dev build)
         id: build
         shell: bash
         working-directory: frontend
         run: |
           # Direct Tauri CLI build (equivalent to `pnpm run tauri:build`, but with an
-          # explicit --target for deterministic output paths). The --config override
-          # disables updater-artifact generation so no TAURI_SIGNING_PRIVATE_KEY is
-          # needed — see valueos/CI-BUILD.md. FFmpeg is auto-downloaded by build.rs;
-          # whisper/parakeet models download at RUNTIME, not needed for the build.
+          # explicit --target for deterministic output paths). The generated overlay
+          # renames the app to "ValueOS Agent" (valueos/branding/tauri.valueos.json) AND
+          # disables updater-artifact generation so no TAURI_SIGNING_PRIVATE_KEY is needed
+          # — see valueos/CI-BUILD.md and valueos/branding/README.md. FFmpeg is
+          # auto-downloaded by build.rs; whisper/parakeet models download at RUNTIME.
           # No signing secrets are provided: macOS ad-hoc signs (signingIdentity "-")
           # and the Windows signCommand no-ops when DIGICERT_KEYPAIR_ALIAS is unset.
           #
-          # The override is written to a slash-free, relative file and passed by path
-          # rather than as inline JSON: on windows-latest this runs under Git Bash, where
-          # inline '{"..."}' can be mangled by MSYS arg conversion or the pnpm .cmd shim
-          # re-quoting. A bare filename (resolved relative to this cwd, frontend/) avoids
-          # both. It is a throwaway CI file, not a committed edit to any upstream file.
-          printf '%s' '{"bundle":{"createUpdaterArtifacts":false}}' > valueos-ci.config.json
+          # The overlay is produced by a small node script (not inline JSON) and passed by
+          # relative path, so nothing can be mangled by Git Bash / MSYS on windows-latest.
+          node ../valueos/branding/make-ci-config.js valueos-ci.config.json
           pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
 
       - name: List and verify produced installers
