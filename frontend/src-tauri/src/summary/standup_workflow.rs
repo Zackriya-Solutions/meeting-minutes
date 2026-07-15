@@ -444,6 +444,21 @@ pub async fn review_record(
         Some(serde_json::to_string(&effective).map_err(|error| error.to_string())?)
     };
 
+    if kind == "action" && input.status != "accepted" {
+        let action_status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM action_items WHERE standup_record_id = ?")
+                .bind(input.record_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|error| error.to_string())?;
+        if action_status.is_some_and(|status| matches!(status.as_str(), "done" | "cancelled")) {
+            return Err(
+                "Completed or cancelled actions must be reopened before rejecting their source"
+                    .to_string(),
+            );
+        }
+    }
+
     sqlx::query(
         "UPDATE standup_records SET review_status = ?, reviewed_payload = ?, \
          updated_at = datetime('now') WHERE id = ?",
@@ -750,6 +765,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(text, "Проверить release-сборку");
+
+        sqlx::query("UPDATE action_items SET status = 'done'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let error = review_record(
+            &pool,
+            ReviewStandupRecordInput {
+                record_id: action_id,
+                status: "rejected".into(),
+                edited_text: None,
+                owner: None,
+                due_date: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("must be reopened"));
+        let review_status: String =
+            sqlx::query_scalar("SELECT review_status FROM standup_records WHERE id = ?")
+                .bind(action_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(review_status, "accepted");
+        sqlx::query("UPDATE action_items SET status = 'open'")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // Regeneration replaces pending facts but preserves the reviewed action.
         assert_eq!(
