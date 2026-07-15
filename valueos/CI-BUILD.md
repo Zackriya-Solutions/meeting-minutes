@@ -11,7 +11,8 @@ left untouched, and ours has a distinct name so upstream merges never conflict w
 
 ## What it does
 
-Whenever it runs, GitHub spins up two fresh machines — one **macOS** and one
+Whenever it runs, a quick **setup** step decides which platforms to build (see the
+triggers below), then GitHub spins up a fresh machine per platform — **macOS** and/or
 **Windows** — and on each one it:
 
 1. Checks out the repository (including the `whisper.cpp` git submodule).
@@ -20,11 +21,11 @@ Whenever it runs, GitHub spins up two fresh machines — one **macOS** and one
 3. Builds the `llama-helper` sidecar (a small Rust helper the app bundles).
 4. Compiles the whole Tauri desktop app and packages the installers.
 5. Uploads the installers as **downloadable artifacts**.
-6. Writes a short **summary** onto the run page (platform, success/fail, version,
-   commit, artifact name, installer files).
+6. Writes a short **summary** onto the run page (platform, success/fail, build mode,
+   version, commit, artifact name, installer files).
 
-The two machines run independently: if the Windows build fails, the macOS build still
-finishes and uploads its installer (and vice-versa).
+When both platforms build, they run independently: if the Windows build fails, the
+macOS build still finishes and uploads its installer (and vice-versa).
 
 **Outputs:**
 
@@ -37,17 +38,28 @@ finishes and uploads its installer (and vice-versa).
 
 ## How to trigger a build
 
-There are three ways, all automatic once set up:
+The pipeline builds automatically — you rarely have to click anything:
 
-1. **Push to `main`.** Every time code lands on `main`, a build starts. This is the one
-   we cut installers from day-to-day. (It's also what runs the *first* time these CI
-   changes reach `main`.)
-2. **Manual run.** Go to the repo on GitHub → **Actions** tab → pick
-   **"ValueOS Agent — Build (macOS + Windows)"** in the left sidebar → click
-   **"Run workflow"** (top right) → choose the branch → **Run workflow**. Use this to
-   test a build without pushing new commits.
-3. **Version tag.** Pushing a tag like `v0.4.1` also triggers a build — handy later
-   when we want a build tied to a specific release version.
+1. **Push to any branch (including `main`).** Every push builds **all supported
+   platforms** (macOS + Windows). So working on your own `feature/…` branch still gets
+   you full builds — you don't have to merge to `main` first.
+2. **macOS-only quick test.** Push the fixed tag **`macos-test`** to build **just
+   macOS** (much faster — no waiting on Windows). It's reusable, so re-run it by
+   force-updating the tag:
+   ```bash
+   git tag -f macos-test
+   git push -f origin macos-test
+   ```
+3. **Version tag.** Pushing a tag like `v0.4.1` builds all platforms — handy later for
+   builds tied to a specific release version.
+4. **Manual run.** Actions tab → **"ValueOS Agent — Build (macOS + Windows)"** →
+   **"Run workflow"** → optionally choose **all / macos / windows** → **Run workflow**.
+   (The manual button only appears once the workflow file is on the default branch,
+   `main`.)
+
+> Building every branch push on both platforms uses CI minutes (Windows builds are
+> slow). If that becomes a concern, narrow the `branches:` list in the workflow (e.g. to
+> `feature/**`) or lean on the `macos-test` tag for quick iterations.
 
 ---
 
