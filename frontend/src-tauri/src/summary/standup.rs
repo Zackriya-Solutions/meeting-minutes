@@ -266,7 +266,7 @@ pub struct StandupGenerationRequest<'a> {
 }
 
 const DEFAULT_STANDUP_EXTRACTION_MAX_TOKENS: u32 = 4_096;
-const MAX_STANDUP_EXTRACTION_INPUT_TOKENS: usize = 8_000;
+const MAX_STANDUP_EXTRACTION_INPUT_TOKENS: usize = 3_000;
 
 fn resolve_standup_extraction_max_tokens(requested: Option<u32>) -> Option<u32> {
     Some(
@@ -276,23 +276,24 @@ fn resolve_standup_extraction_max_tokens(requested: Option<u32>) -> Option<u32> 
     )
 }
 
+fn resolve_standup_extraction_input_tokens(requested: usize) -> usize {
+    requested.min(MAX_STANDUP_EXTRACTION_INPUT_TOKENS).max(1)
+}
+
 pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
     let cleaned = strip_code_fence(raw);
-    let (mut report, repaired_eof): (StandupReport, bool) = match serde_json::from_str(cleaned) {
+    let (mut report, repaired_tail): (StandupReport, bool) = match serde_json::from_str(cleaned) {
         Ok(report) => (report, false),
-        Err(error) if error.is_eof() => {
+        Err(error) => {
             let repaired = close_truncated_json_containers(cleaned)
                 .ok_or_else(|| format!("invalid Standup V2 JSON: {error}"))?;
             let report = serde_json::from_str(&repaired)
                 .map_err(|_| format!("invalid Standup V2 JSON: {error}"))?;
-            log::warn!(
-                "Standup V2 repaired an EOF-truncated JSON response by closing complete containers"
-            );
+            log::warn!("Standup V2 repaired a truncated JSON tail by closing complete containers");
             (report, true)
         }
-        Err(error) => return Err(format!("invalid Standup V2 JSON: {error}")),
     };
-    if repaired_eof {
+    if repaired_tail {
         let dropped = drop_structurally_incomplete_records(&mut report);
         if dropped > 0 {
             log::warn!(
@@ -337,10 +338,14 @@ fn drop_structurally_incomplete_records(report: &mut StandupReport) -> usize {
 }
 
 fn close_truncated_json_containers(raw: &str) -> Option<String> {
+    const MAX_MISMATCHED_TAIL_CHARS: usize = 32;
+
+    let trimmed = raw.trim();
     let mut expected_closers = Vec::new();
     let mut in_string = false;
     let mut escaped = false;
-    for character in raw.trim().chars() {
+    let mut repair_end = trimmed.len();
+    for (byte_index, character) in trimmed.char_indices() {
         if in_string {
             if escaped {
                 escaped = false;
@@ -355,7 +360,16 @@ fn close_truncated_json_containers(raw: &str) -> Option<String> {
             '"' => in_string = true,
             '{' => expected_closers.push('}'),
             '[' => expected_closers.push(']'),
-            '}' | ']' if expected_closers.pop() != Some(character) => return None,
+            '}' | ']' if expected_closers.last().copied() == Some(character) => {
+                expected_closers.pop();
+            }
+            '}' | ']' => {
+                if trimmed[byte_index..].chars().count() > MAX_MISMATCHED_TAIL_CHARS {
+                    return None;
+                }
+                repair_end = byte_index;
+                break;
+            }
             _ => {}
         }
     }
@@ -363,7 +377,7 @@ fn close_truncated_json_containers(raw: &str) -> Option<String> {
         return None;
     }
 
-    let mut repaired = raw.trim().to_string();
+    let mut repaired = trimmed[..repair_end].trim_end().to_string();
     loop {
         repaired.truncate(repaired.trim_end().len());
         if repaired.ends_with(',') {
@@ -1353,10 +1367,8 @@ pub async fn generate_standup_report(
     }
 
     let token_count = rough_token_count(request.transcript);
-    let extraction_token_threshold = request
-        .token_threshold
-        .min(MAX_STANDUP_EXTRACTION_INPUT_TOKENS)
-        .max(1);
+    let extraction_token_threshold =
+        resolve_standup_extraction_input_tokens(request.token_threshold);
     let chunks = if token_count < extraction_token_threshold {
         vec![request.transcript.to_string()]
     } else {
@@ -1368,7 +1380,6 @@ pub async fn generate_standup_report(
     }
 
     let mut extracted = Vec::with_capacity(chunks.len());
-    let mut failed_chunks = 0usize;
     let extraction_max_tokens = resolve_standup_extraction_max_tokens(request.max_tokens);
     for (index, chunk) in chunks.iter().enumerate() {
         if request
@@ -1414,30 +1425,7 @@ pub async fn generate_standup_report(
         .await;
         let mut parsed = match chunk_result {
             Ok(parsed) => parsed,
-            Err(error) => {
-                if request
-                    .cancellation_token
-                    .is_some_and(CancellationToken::is_cancelled)
-                    || chunks.len() == 1
-                {
-                    return Err(error);
-                }
-                failed_chunks += 1;
-                let bounded_error = error
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .chars()
-                    .take(300)
-                    .collect::<String>();
-                log::warn!(
-                    "Standup V2 skipped failed chunk {}/{}: {}",
-                    index + 1,
-                    chunks.len(),
-                    bounded_error
-                );
-                continue;
-            }
+            Err(error) => return Err(error),
         };
         let evidence_filter = filter_unsupported_records(&mut parsed, chunk);
         if evidence_filter.dropped_references > 0 {
@@ -1466,14 +1454,6 @@ pub async fn generate_standup_report(
         ));
     }
     let successful_chunk_count = extracted.len() as i64;
-    if failed_chunks > 0 {
-        log::warn!(
-            "Standup V2 completed from {} of {} chunks; {} failed chunk(s) were omitted",
-            extracted.len(),
-            chunks.len(),
-            failed_chunks
-        );
-    }
 
     let report = merge_standup_reports(extracted);
     validate_report(&report)?;
@@ -1511,6 +1491,8 @@ mod tests {
             resolve_standup_extraction_max_tokens(Some(16_000)),
             Some(4_096)
         );
+        assert_eq!(resolve_standup_extraction_input_tokens(32_468), 3_000);
+        assert_eq!(resolve_standup_extraction_input_tokens(1_748), 1_748);
     }
 
     #[test]
@@ -1543,7 +1525,7 @@ mod tests {
     }
 
     #[test]
-    fn repairs_only_complete_eof_truncated_json_containers() {
+    fn repairs_only_complete_truncated_json_tails() {
         let atomic_first = r#"{
             "schema_version":"standup_v2",
             "participant_updates":[],
@@ -1578,6 +1560,16 @@ mod tests {
         let report = parse_standup_extraction(truncated).unwrap();
         assert_eq!(report.overview.len(), 1);
         assert_eq!(report.overview[0].text, "Факт");
+
+        let mismatched_tail = r#"{
+            "schema_version":"standup_v2",
+            "action_items":[
+                {"task":"Проверить пороги","owner":null,"due_date":null,"evidence":["[05:29]"]}
+            },
+            "overview":[]]
+        }"#;
+        let report = parse_standup_extraction(mismatched_tail).unwrap();
+        assert_eq!(report.action_items.len(), 1);
 
         let incomplete_string = r#"{"schema_version":"standup_v2","overview":[{"text":"оборвано"#;
         assert!(parse_standup_extraction(incomplete_string)
