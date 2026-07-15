@@ -4,17 +4,103 @@
 //! module instead asks every transcript chunk for validated JSON facts, merges only
 //! strongly matching records, and renders Markdown without another LLM call.
 
-use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::llm_client::{generate_summary_with_builtin_json_schema, LLMProvider};
 use crate::summary::processor::{chunk_text, rough_token_count};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
 pub const STANDUP_SCHEMA_VERSION: &str = "standup_v2";
 const MAX_COLLECTION_ITEMS: usize = 500;
 const MAX_TEXT_CHARS: usize = 4_000;
+const STANDUP_JSON_SCHEMA: &str = r##"{
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": "standup_v2"},
+    "overview": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/evidenced_text"}},
+    "participant_updates": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/participant_update"}},
+    "decisions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/decision"}},
+    "action_items": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/action"}},
+    "risks_and_blockers": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/risk"}},
+    "deep_dives": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/deep_dive"}},
+    "unattributed_facts": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/evidenced_text"}}
+  },
+  "required": ["schema_version", "overview", "participant_updates", "decisions", "action_items", "risks_and_blockers", "deep_dives", "unattributed_facts"],
+  "additionalProperties": false,
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "properties": {"timestamp": {"type": "string"}, "quote": {"type": "string"}},
+      "required": ["timestamp", "quote"],
+      "additionalProperties": false
+    },
+    "evidenced_text": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string"},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["text", "evidence"],
+      "additionalProperties": false
+    },
+    "participant_update": {
+      "type": "object",
+      "properties": {
+        "participant": {"type": ["string", "null"]},
+        "completed_or_recent": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
+        "next": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
+        "blockers": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}}
+      },
+      "required": ["participant", "completed_or_recent", "next", "blockers"],
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "decision": {"type": "string"},
+        "rationale": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["decision", "rationale", "evidence"],
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "task": {"type": "string"},
+        "owner": {"type": ["string", "null"]},
+        "due_date": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["task", "owner", "due_date", "evidence"],
+      "additionalProperties": false
+    },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "blocker_or_risk": {"type": "string"},
+        "impact": {"type": ["string", "null"]},
+        "owner": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["blocker_or_risk", "impact", "owner", "evidence"],
+      "additionalProperties": false
+    },
+    "deep_dive": {
+      "type": "object",
+      "properties": {
+        "topic": {"type": "string"},
+        "outcome": {"type": ["string", "null"]},
+        "parking_lot": {"type": "boolean"},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["topic", "outcome", "parking_lot", "evidence"],
+      "additionalProperties": false
+    }
+  }
+}"##;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvidenceRef {
@@ -152,11 +238,66 @@ pub struct StandupGenerationRequest<'a> {
 
 pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
     let cleaned = strip_code_fence(raw);
-    let mut report: StandupReport = serde_json::from_str(cleaned)
-        .map_err(|error| format!("invalid Standup V2 JSON: {error}"))?;
+    let mut report: StandupReport = match serde_json::from_str(cleaned) {
+        Ok(report) => report,
+        Err(error) if error.is_eof() => {
+            let repaired = close_truncated_json_containers(cleaned)
+                .ok_or_else(|| format!("invalid Standup V2 JSON: {error}"))?;
+            let report = serde_json::from_str(&repaired)
+                .map_err(|_| format!("invalid Standup V2 JSON: {error}"))?;
+            log::warn!(
+                "Standup V2 repaired an EOF-truncated JSON response by closing complete containers"
+            );
+            report
+        }
+        Err(error) => return Err(format!("invalid Standup V2 JSON: {error}")),
+    };
     normalize_optional_fields(&mut report);
     validate_report(&report)?;
     Ok(report)
+}
+
+fn close_truncated_json_containers(raw: &str) -> Option<String> {
+    let mut expected_closers = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in raw.trim().chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => expected_closers.push('}'),
+            '[' => expected_closers.push(']'),
+            '}' | ']' if expected_closers.pop() != Some(character) => return None,
+            _ => {}
+        }
+    }
+    if in_string || expected_closers.is_empty() {
+        return None;
+    }
+
+    let mut repaired = raw.trim().to_string();
+    loop {
+        repaired.truncate(repaired.trim_end().len());
+        if repaired.ends_with(',') {
+            repaired.pop();
+        } else {
+            break;
+        }
+    }
+    if repaired.ends_with(':') {
+        return None;
+    }
+    repaired.extend(expected_closers.into_iter().rev());
+    Some(repaired)
 }
 
 fn strip_code_fence(raw: &str) -> &str {
@@ -300,51 +441,150 @@ fn visit_evidence(
     Ok(())
 }
 
+trait HasEvidence {
+    fn evidence_mut(&mut self) -> &mut Vec<EvidenceRef>;
+}
+
+macro_rules! impl_has_evidence {
+    ($($record:ty),+ $(,)?) => {
+        $(
+            impl HasEvidence for $record {
+                fn evidence_mut(&mut self) -> &mut Vec<EvidenceRef> {
+                    &mut self.evidence
+                }
+            }
+        )+
+    };
+}
+
+impl_has_evidence!(
+    EvidencedText,
+    StandupDecision,
+    StandupAction,
+    StandupRisk,
+    StandupDeepDive,
+);
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct EvidenceFilterStats {
+    dropped_references: usize,
+    dropped_records: usize,
+}
+
+fn transcript_lines_by_timestamp(transcript_chunk: &str) -> HashMap<String, Vec<String>> {
+    let mut lines = HashMap::<String, Vec<String>>::new();
+    for line in transcript_chunk.lines() {
+        let line = line.trim_start();
+        if !line.starts_with('[') {
+            continue;
+        }
+        let Some(end) = line.find(']') else {
+            continue;
+        };
+        let timestamp = &line[..=end];
+        if parse_timestamp_seconds(timestamp).is_none() {
+            continue;
+        }
+        lines
+            .entry(timestamp.to_string())
+            .or_default()
+            .push(line[end + 1..].trim().to_lowercase());
+    }
+    lines
+}
+
+fn evidence_is_supported(reference: &EvidenceRef, lines: &HashMap<String, Vec<String>>) -> bool {
+    let Some(quote) = reference
+        .quote
+        .as_deref()
+        .map(str::trim)
+        .filter(|quote| !quote.is_empty())
+    else {
+        return false;
+    };
+    lines
+        .get(reference.timestamp.trim())
+        .is_some_and(|candidates| {
+            let quote = quote.to_lowercase();
+            candidates.iter().any(|line| line.contains(&quote))
+        })
+}
+
+fn filter_records<T: HasEvidence>(
+    records: &mut Vec<T>,
+    lines: &HashMap<String, Vec<String>>,
+    stats: &mut EvidenceFilterStats,
+) {
+    records.retain_mut(|record| {
+        let evidence = record.evidence_mut();
+        let before = evidence.len();
+        evidence.retain(|reference| evidence_is_supported(reference, lines));
+        stats.dropped_references += before.saturating_sub(evidence.len());
+        if evidence.is_empty() {
+            stats.dropped_records += 1;
+            false
+        } else {
+            true
+        }
+    });
+}
+
+fn filter_unsupported_records(
+    report: &mut StandupReport,
+    transcript_chunk: &str,
+) -> EvidenceFilterStats {
+    let lines = transcript_lines_by_timestamp(transcript_chunk);
+    let mut stats = EvidenceFilterStats::default();
+    filter_records(&mut report.overview, &lines, &mut stats);
+    for update in &mut report.participant_updates {
+        filter_records(&mut update.completed_or_recent, &lines, &mut stats);
+        filter_records(&mut update.next, &lines, &mut stats);
+        filter_records(&mut update.blockers, &lines, &mut stats);
+    }
+    report.participant_updates.retain(|update| {
+        !update.completed_or_recent.is_empty()
+            || !update.next.is_empty()
+            || !update.blockers.is_empty()
+    });
+    filter_records(&mut report.decisions, &lines, &mut stats);
+    filter_records(&mut report.action_items, &lines, &mut stats);
+    filter_records(&mut report.risks_and_blockers, &lines, &mut stats);
+    filter_records(&mut report.deep_dives, &lines, &mut stats);
+    filter_records(&mut report.unattributed_facts, &lines, &mut stats);
+    stats
+}
+
 pub fn validate_evidence_against_transcript_chunk(
     report: &StandupReport,
     transcript_chunk: &str,
 ) -> Result<(), String> {
-    let timestamps: HashSet<&str> = transcript_chunk
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim_start();
-            if !line.starts_with('[') {
-                return None;
-            }
-            let end = line.find(']')?;
-            let timestamp = &line[..=end];
-            parse_timestamp_seconds(timestamp).map(|_| timestamp)
-        })
-        .collect();
-    let normalized_chunk = transcript_chunk.to_lowercase();
+    let lines = transcript_lines_by_timestamp(transcript_chunk);
 
     visit_evidence(report, |reference| {
-        if !timestamps.contains(reference.timestamp.trim()) {
+        if !lines.contains_key(reference.timestamp.trim()) {
             return Err(format!(
                 "evidence timestamp '{}' does not exist in the transcript chunk",
                 reference.timestamp
             ));
         }
-        if let Some(quote) = reference.quote.as_deref() {
-            if !normalized_chunk.contains(&quote.trim().to_lowercase()) {
-                return Err(format!(
-                    "evidence quote for {} is not verbatim in the transcript chunk",
-                    reference.timestamp
-                ));
-            }
+        if reference.quote.as_deref().map_or(true, str::is_empty) {
+            return Err(format!(
+                "evidence for {} must include a verbatim quote",
+                reference.timestamp
+            ));
+        }
+        if !evidence_is_supported(reference, &lines) {
+            return Err(format!(
+                "evidence quote for {} is not verbatim on its timestamped transcript line",
+                reference.timestamp
+            ));
         }
         Ok(())
     })
 }
 
-pub fn validate_report(report: &StandupReport) -> Result<(), String> {
-    if report.schema_version != STANDUP_SCHEMA_VERSION {
-        return Err(format!(
-            "unsupported standup schema version '{}'",
-            report.schema_version
-        ));
-    }
-    let total_items = report.overview.len()
+fn report_record_count(report: &StandupReport) -> usize {
+    report.overview.len()
         + report.decisions.len()
         + report.action_items.len()
         + report.risks_and_blockers.len()
@@ -356,7 +596,45 @@ pub fn validate_report(report: &StandupReport) -> Result<(), String> {
             .map(|update| {
                 update.completed_or_recent.len() + update.next.len() + update.blockers.len()
             })
-            .sum::<usize>();
+            .sum::<usize>()
+}
+
+fn truncate_records<T>(records: &mut Vec<T>, remaining: &mut usize) {
+    let keep = records.len().min(*remaining);
+    records.truncate(keep);
+    *remaining -= keep;
+}
+
+fn truncate_merged_report(report: &mut StandupReport) {
+    let mut remaining = MAX_COLLECTION_ITEMS;
+    // Keep operational records before overview prose when an exceptionally long
+    // multi-chunk meeting reaches the global safety bound.
+    truncate_records(&mut report.action_items, &mut remaining);
+    truncate_records(&mut report.risks_and_blockers, &mut remaining);
+    truncate_records(&mut report.decisions, &mut remaining);
+    for update in &mut report.participant_updates {
+        truncate_records(&mut update.blockers, &mut remaining);
+        truncate_records(&mut update.next, &mut remaining);
+        truncate_records(&mut update.completed_or_recent, &mut remaining);
+    }
+    report.participant_updates.retain(|update| {
+        !update.completed_or_recent.is_empty()
+            || !update.next.is_empty()
+            || !update.blockers.is_empty()
+    });
+    truncate_records(&mut report.deep_dives, &mut remaining);
+    truncate_records(&mut report.overview, &mut remaining);
+    truncate_records(&mut report.unattributed_facts, &mut remaining);
+}
+
+pub fn validate_report(report: &StandupReport) -> Result<(), String> {
+    if report.schema_version != STANDUP_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported standup schema version '{}'",
+            report.schema_version
+        ));
+    }
+    let total_items = report_record_count(report);
     if total_items > MAX_COLLECTION_ITEMS {
         return Err(format!(
             "standup extraction contains too many records: {total_items}"
@@ -520,8 +798,13 @@ pub fn merge_standup_reports(reports: impl IntoIterator<Item = StandupReport>) -
         for action in report.action_items {
             if let Some(existing) = merged.action_items.iter_mut().find(|existing| {
                 same_fact(&existing.task, &action.task)
-                    && same_optional_identity(existing.owner.as_deref(), action.owner.as_deref())
+                    && (same_optional_identity(existing.owner.as_deref(), action.owner.as_deref())
+                        || existing.owner.is_none()
+                        || action.owner.is_none())
             }) {
+                if existing.owner.is_none() {
+                    existing.owner = action.owner;
+                }
                 if existing.due_date.is_none() {
                     existing.due_date = action.due_date;
                 }
@@ -565,6 +848,7 @@ pub fn merge_standup_reports(reports: impl IntoIterator<Item = StandupReport>) -
             }
         }
     }
+    truncate_merged_report(&mut merged);
     merged
 }
 
@@ -582,8 +866,36 @@ fn evidence_markdown(evidence: &[EvidenceRef], meeting_id: &str) -> String {
         .join(", ")
 }
 
+fn escape_markdown_inline(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut escaped = String::with_capacity(collapsed.len());
+    for character in collapsed.chars() {
+        if matches!(
+            character,
+            '\\' | '`'
+                | '*'
+                | '_'
+                | '{'
+                | '}'
+                | '['
+                | ']'
+                | '<'
+                | '>'
+                | '#'
+                | '+'
+                | '-'
+                | '!'
+                | '|'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 fn escape_table_cell(value: &str) -> String {
-    value.replace('|', "\\|").replace('\n', " ")
+    escape_markdown_inline(value)
 }
 
 struct Labels {
@@ -676,7 +988,7 @@ fn render_evidenced_list(
     for item in items {
         markdown.push_str(&format!(
             "- {} — {}\n",
-            item.text.trim(),
+            escape_markdown_inline(item.text.trim()),
             evidence_markdown(&item.evidence, meeting_id)
         ));
     }
@@ -697,7 +1009,7 @@ pub fn render_standup_markdown(
     let participants = report
         .participant_updates
         .iter()
-        .filter_map(|update| update.participant.as_deref())
+        .filter_map(|update| update.participant.as_deref().map(escape_markdown_inline))
         .collect::<Vec<_>>();
     markdown.push_str(&format!("## {}\n\n", labels.participants));
     if participants.is_empty() {
@@ -715,7 +1027,7 @@ pub fn render_standup_markdown(
     for update in &report.participant_updates {
         markdown.push_str(&format!(
             "### {}\n\n",
-            update.participant.as_deref().unwrap_or(labels.unknown)
+            escape_markdown_inline(update.participant.as_deref().unwrap_or(labels.unknown))
         ));
         markdown.push_str(&format!("**{}**\n\n", labels.completed));
         render_evidenced_list(
@@ -739,11 +1051,11 @@ pub fn render_standup_markdown(
             let rationale = decision
                 .rationale
                 .as_deref()
-                .map(|value| format!(" ({value})"))
+                .map(|value| format!(" ({})", escape_markdown_inline(value)))
                 .unwrap_or_default();
             markdown.push_str(&format!(
                 "- {}{} — {}\n",
-                decision.decision,
+                escape_markdown_inline(&decision.decision),
                 rationale,
                 evidence_markdown(&decision.evidence, meeting_id)
             ));
@@ -805,9 +1117,9 @@ pub fn render_standup_markdown(
             };
             markdown.push_str(&format!(
                 "- **{}**{}: {} — {}\n",
-                deep_dive.topic,
+                escape_markdown_inline(&deep_dive.topic),
                 parking_lot,
-                outcome,
+                escape_markdown_inline(outcome),
                 evidence_markdown(&deep_dive.evidence, meeting_id)
             ));
         }
@@ -834,7 +1146,10 @@ Rules:
 4. `participant` is allowed only when the transcript line has that exact speaker prefix. Do not infer a participant name from a mention, direct address, role, or insult. Owner/due date is null unless explicitly supported.
 5. Separate the status round from technical deep dives. A long discussion does not become a participant update merely because it happened during a standup.
 6. Put useful facts without safe speaker attribution in `unattributed_facts`.
-7. Quotes must be short and verbatim. Return no Markdown and no commentary."#
+7. Quotes must be 3-12 words, verbatim, and copied from the same transcript line as their timestamp. Never paraphrase a quote.
+8. Prefer omission to repetition: capture only final status, explicit commitments, decisions, blockers, and concrete deep-dive outcomes. Put each fact in one most-specific section only.
+9. Keep the whole result below 60 records: at most 5 overview facts; 3 items per participant category; 10 decisions; 10 actions; 10 risks; 5 deep dives; and 10 unattributed facts.
+10. Return minified one-line JSON with no Markdown, commentary, or extra whitespace."#
 }
 
 fn extraction_user_prompt(chunk: &str, output_language: &str, custom_prompt: &str) -> String {
@@ -867,6 +1182,7 @@ Return this exact JSON shape:
 }}
 
 Use empty arrays when the chunk has no supported records of a type.
+Keep descriptive values concise and never repeat a record in multiple arrays. Return the JSON on one line.
 
 <transcript_chunk>
 {chunk}
@@ -896,6 +1212,7 @@ pub async fn generate_standup_report(
     }
 
     let mut extracted = Vec::with_capacity(chunks.len());
+    let mut failed_chunks = 0usize;
     for (index, chunk) in chunks.iter().enumerate() {
         if request
             .cancellation_token
@@ -903,37 +1220,78 @@ pub async fn generate_standup_report(
         {
             return Err("Summary generation was cancelled".to_string());
         }
-        let raw = generate_summary(
-            request.client,
-            request.provider,
-            request.model_name,
-            request.api_key,
-            extraction_system_prompt(),
-            &extraction_user_prompt(chunk, request.output_language, request.custom_prompt),
-            request.ollama_endpoint,
-            request.custom_openai_endpoint,
-            request.deepseek_base_url,
-            request.max_tokens,
-            request.temperature,
-            request.top_p,
-            request.app_data_dir,
-            request.cancellation_token,
-        )
-        .await
-        .map_err(|error| {
-            format!(
-                "Standup V2 extraction chunk {}/{} failed: {error}",
-                index + 1,
-                chunks.len()
+        let chunk_result: Result<StandupReport, String> = async {
+            let raw = generate_summary_with_builtin_json_schema(
+                request.client,
+                request.provider,
+                request.model_name,
+                request.api_key,
+                extraction_system_prompt(),
+                &extraction_user_prompt(chunk, request.output_language, request.custom_prompt),
+                request.ollama_endpoint,
+                request.custom_openai_endpoint,
+                request.deepseek_base_url,
+                request.max_tokens,
+                request.temperature,
+                request.top_p,
+                request.app_data_dir,
+                request.cancellation_token,
+                Some(STANDUP_JSON_SCHEMA),
             )
-        })?;
-        let parsed = parse_standup_extraction(&raw).map_err(|error| {
-            format!(
-                "Standup V2 extraction chunk {}/{} was invalid: {error}",
+            .await
+            .map_err(|error| {
+                format!(
+                    "Standup V2 extraction chunk {}/{} failed: {error}",
+                    index + 1,
+                    chunks.len()
+                )
+            })?;
+            parse_standup_extraction(&raw).map_err(|error| {
+                format!(
+                    "Standup V2 extraction chunk {}/{} was invalid: {error}",
+                    index + 1,
+                    chunks.len()
+                )
+            })
+        }
+        .await;
+        let mut parsed = match chunk_result {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                if request
+                    .cancellation_token
+                    .is_some_and(CancellationToken::is_cancelled)
+                    || chunks.len() == 1
+                {
+                    return Err(error);
+                }
+                failed_chunks += 1;
+                let bounded_error = error
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(300)
+                    .collect::<String>();
+                log::warn!(
+                    "Standup V2 skipped failed chunk {}/{}: {}",
+                    index + 1,
+                    chunks.len(),
+                    bounded_error
+                );
+                continue;
+            }
+        };
+        let evidence_filter = filter_unsupported_records(&mut parsed, chunk);
+        if evidence_filter.dropped_references > 0 {
+            log::warn!(
+                "Standup V2 chunk {}/{} dropped {} unsupported record(s) and {} evidence reference(s)",
                 index + 1,
-                chunks.len()
-            )
-        })?;
+                chunks.len(),
+                evidence_filter.dropped_records,
+                evidence_filter.dropped_references
+            );
+        }
         validate_evidence_against_transcript_chunk(&parsed, chunk).map_err(|error| {
             format!(
                 "Standup V2 extraction chunk {}/{} had unsupported evidence: {error}",
@@ -944,13 +1302,29 @@ pub async fn generate_standup_report(
         extracted.push(parsed);
     }
 
+    if extracted.is_empty() {
+        return Err(format!(
+            "Standup V2 generation failed: all {} transcript chunks failed",
+            chunks.len()
+        ));
+    }
+    let successful_chunk_count = extracted.len() as i64;
+    if failed_chunks > 0 {
+        log::warn!(
+            "Standup V2 completed from {} of {} chunks; {} failed chunk(s) were omitted",
+            extracted.len(),
+            chunks.len(),
+            failed_chunks
+        );
+    }
+
     let report = merge_standup_reports(extracted);
     validate_report(&report)?;
     let markdown = render_standup_markdown(&report, request.meeting_id, request.output_language);
     Ok(GeneratedStandup {
         markdown,
         report,
-        chunk_count: chunks.len() as i64,
+        chunk_count: successful_chunk_count,
     })
 }
 
@@ -985,6 +1359,28 @@ mod tests {
         assert_eq!(report.overview.len(), 1);
         assert_eq!(report.action_items[0].owner, None);
         assert_eq!(report.action_items[0].due_date, None);
+    }
+
+    #[test]
+    fn repairs_only_complete_eof_truncated_json_containers() {
+        let truncated = r#"{
+            "schema_version":"standup_v2",
+            "overview":[
+                {"text":"Факт","evidence":[{"timestamp":"[00:01]","quote":"точная цитата"}]},
+        "#;
+        let report = parse_standup_extraction(truncated).unwrap();
+        assert_eq!(report.overview.len(), 1);
+        assert_eq!(report.overview[0].text, "Факт");
+
+        let incomplete_string = r#"{"schema_version":"standup_v2","overview":[{"text":"оборвано"#;
+        assert!(parse_standup_extraction(incomplete_string)
+            .unwrap_err()
+            .contains("EOF while parsing a string"));
+
+        let incomplete_value = r#"{"schema_version":"standup_v2","overview":"#;
+        assert!(parse_standup_extraction(incomplete_value)
+            .unwrap_err()
+            .contains("EOF while parsing a value"));
     }
 
     #[test]
@@ -1027,6 +1423,63 @@ mod tests {
                 .unwrap_err()
                 .contains("not verbatim")
         );
+        assert!(validate_evidence_against_transcript_chunk(
+            &report,
+            "[01:02] Анна: Сборка готова\n[01:03] Анна: Релиз готов к проверке",
+        )
+        .unwrap_err()
+        .contains("timestamped transcript line"));
+
+        let no_quote = parse_standup_extraction(
+            r#"{"schema_version":"standup_v2","overview":[{"text":"Релиз готов","evidence":[{"timestamp":"[01:02]"}]}]}"#,
+        )
+        .unwrap();
+        assert!(validate_evidence_against_transcript_chunk(
+            &no_quote,
+            "[01:02] Анна: Релиз готов к проверке",
+        )
+        .unwrap_err()
+        .contains("must include a verbatim quote"));
+    }
+
+    #[test]
+    fn unsupported_records_are_dropped_without_discarding_supported_facts() {
+        let mut report = parse_standup_extraction(
+            r#"{
+                "schema_version":"standup_v2",
+                "overview":[
+                    {"text":"Релиз готов","evidence":[{"timestamp":"[01:02]","quote":"Релиз готов"}]},
+                    {"text":"Выдуманный факт","evidence":[{"timestamp":"[01:03]","quote":"такого текста нет"}]}
+                ],
+                "action_items":[
+                    {"task":"Проверить релиз","evidence":[
+                        {"timestamp":"[01:02]","quote":"Релиз готов"},
+                        {"timestamp":"[01:03]","quote":"другая строка"}
+                    ]}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let stats = filter_unsupported_records(
+            &mut report,
+            "[01:02] Анна: Релиз готов к проверке\n[01:03] Борис: Блокеров нет",
+        );
+
+        assert_eq!(
+            stats,
+            EvidenceFilterStats {
+                dropped_references: 2,
+                dropped_records: 1,
+            }
+        );
+        assert_eq!(report.overview.len(), 1);
+        assert_eq!(report.action_items.len(), 1);
+        assert_eq!(report.action_items[0].evidence.len(), 1);
+        validate_evidence_against_transcript_chunk(
+            &report,
+            "[01:02] Анна: Релиз готов к проверке\n[01:03] Борис: Блокеров нет",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1034,7 +1487,7 @@ mod tests {
         let mut first = StandupReport::default();
         first.action_items.push(StandupAction {
             task: "Проверить метрики релиза".to_string(),
-            owner: Some("Анна".to_string()),
+            owner: None,
             due_date: None,
             evidence: evidence("[10:00]"),
         });
@@ -1048,8 +1501,35 @@ mod tests {
 
         let merged = merge_standup_reports([first, second]);
         assert_eq!(merged.action_items.len(), 1);
+        assert_eq!(merged.action_items[0].owner.as_deref(), Some("анна"));
         assert_eq!(merged.action_items[0].due_date.as_deref(), Some("пятница"));
         assert_eq!(merged.action_items[0].evidence.len(), 2);
+    }
+
+    #[test]
+    fn merge_bounds_large_reports_without_dropping_operational_records() {
+        let mut report = StandupReport::default();
+        report.action_items.push(StandupAction {
+            task: "Критическое действие".to_string(),
+            owner: None,
+            due_date: None,
+            evidence: evidence("[00:01]"),
+        });
+        report.risks_and_blockers.push(StandupRisk {
+            blocker_or_risk: "Критический блокер".to_string(),
+            impact: None,
+            owner: None,
+            evidence: evidence("[00:02]"),
+        });
+        report.unattributed_facts = (0..600)
+            .map(|index| item(&format!("Факт {index}"), "[00:03]"))
+            .collect();
+
+        let merged = merge_standup_reports([report]);
+        assert_eq!(report_record_count(&merged), MAX_COLLECTION_ITEMS);
+        assert_eq!(merged.action_items.len(), 1);
+        assert_eq!(merged.risks_and_blockers.len(), 1);
+        validate_report(&merged).unwrap();
     }
 
     #[test]
@@ -1070,10 +1550,41 @@ mod tests {
     }
 
     #[test]
+    fn renderer_escapes_untrusted_markdown_and_collapses_newlines() {
+        let mut report = StandupReport::default();
+        report.overview.push(item(
+            "Готово\n## Поддельный раздел [ссылка](https://example.test)",
+            "[01:02]",
+        ));
+        report.decisions.push(StandupDecision {
+            decision: "**Не поддельный bold**".to_string(),
+            rationale: None,
+            evidence: evidence("[01:03]"),
+        });
+
+        let markdown = render_standup_markdown(&report, "meeting-123", "Russian");
+        assert!(!markdown.contains("\n## Поддельный"));
+        assert!(!markdown.contains("[ссылка](https://example.test)"));
+        assert!(!markdown.contains("**Не поддельный bold**"));
+        assert!(markdown.contains("\\[ссылка\\]"));
+    }
+
+    #[test]
     fn prompt_separates_context_from_evidence() {
         let prompt = extraction_user_prompt("[00:01] текст", "Russian", "Команда Альфа");
         assert!(prompt.contains("context_not_evidence"));
         assert!(prompt.contains("never evidence"));
         assert!(prompt.contains("schema_version"));
+        assert!(prompt.contains("Return the JSON on one line"));
+        assert!(extraction_system_prompt().contains("below 60 records"));
+        assert!(extraction_system_prompt().contains("one most-specific section"));
+
+        let schema: serde_json::Value = serde_json::from_str(STANDUP_JSON_SCHEMA).unwrap();
+        assert_eq!(
+            schema["properties"]["schema_version"]["const"],
+            STANDUP_SCHEMA_VERSION
+        );
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["$defs"]["evidence"]["required"][1], "quote");
     }
 }
