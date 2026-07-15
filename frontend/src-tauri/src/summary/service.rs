@@ -570,7 +570,29 @@ impl SummaryService {
                     structured_result,
                 );
 
-                // Update database with completed status
+                // Review records must be visible before the completed status wakes the UI.
+                if let Some(report) = standup_report.as_ref() {
+                    match crate::summary::standup_workflow::sync_standup_records(
+                        &pool,
+                        &meeting_id,
+                        report,
+                    )
+                    .await
+                    {
+                        Ok(count) => info!(
+                            "Synced {} pending Standup V2 review records for meeting_id: {}",
+                            count, meeting_id
+                        ),
+                        Err(error) => {
+                            let message =
+                                format!("Failed to sync Standup V2 review records: {error}");
+                            Self::update_process_failed(&pool, &meeting_id, &message).await;
+                            return;
+                        }
+                    }
+                }
+
+                // Publish completed only after all user-visible persisted state is ready.
                 if let Err(e) = SummaryProcessesRepository::update_process_completed(
                     &pool,
                     &meeting_id,
@@ -583,24 +605,6 @@ impl SummaryService {
                     error!("Failed to save completed process for {}: {}", meeting_id, e);
                 } else {
                     info!("Summary saved successfully for meeting_id: {}", meeting_id);
-                    if let Some(report) = standup_report.as_ref() {
-                        match crate::summary::standup_workflow::sync_standup_records(
-                            &pool,
-                            &meeting_id,
-                            report,
-                        )
-                        .await
-                        {
-                            Ok(count) => info!(
-                                "Synced {} pending Standup V2 review records for meeting_id: {}",
-                                count, meeting_id
-                            ),
-                            Err(error) => error!(
-                                "Failed to sync Standup V2 review records for {}: {}",
-                                meeting_id, error
-                            ),
-                        }
-                    }
                 }
             }
             Err(e) => {

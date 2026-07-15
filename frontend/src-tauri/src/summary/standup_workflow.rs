@@ -602,10 +602,16 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
-               AND julianday(COALESCE(source.occurred_at, source.created_at)) < \
-                   julianday(COALESCE(current.occurred_at, current.created_at)) \
+               AND CASE WHEN source.occurred_at IS NOT NULL \
+                        THEN julianday(source.occurred_at, 'utc') \
+                        ELSE julianday(source.created_at) END < \
+                   CASE WHEN current.occurred_at IS NOT NULL \
+                        THEN julianday(current.occurred_at, 'utc') \
+                        ELSE julianday(current.created_at) END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
-             ORDER BY julianday(COALESCE(source.occurred_at, source.created_at)) DESC, ai.id DESC LIMIT 50",
+             ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
+                           THEN julianday(source.occurred_at, 'utc') \
+                           ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -640,7 +646,9 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
         "WITH eligible AS ( \
              SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
                     source.id AS source_id, source.title AS source_title, \
-                    julianday(COALESCE(source.occurred_at, source.created_at)) AS source_time \
+                    CASE WHEN source.occurred_at IS NOT NULL \
+                         THEN julianday(source.occurred_at, 'utc') \
+                         ELSE julianday(source.created_at) END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -648,8 +656,12 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
-               AND julianday(COALESCE(source.occurred_at, source.created_at)) < \
-                   julianday(COALESCE(current.occurred_at, current.created_at)) \
+               AND CASE WHEN source.occurred_at IS NOT NULL \
+                        THEN julianday(source.occurred_at, 'utc') \
+                        ELSE julianday(source.created_at) END < \
+                   CASE WHEN current.occurred_at IS NOT NULL \
+                        THEN julianday(current.occurred_at, 'utc') \
+                        ELSE julianday(current.created_at) END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
@@ -771,25 +783,10 @@ fn escape_digest_markdown(value: &str) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut escaped = String::with_capacity(collapsed.len());
     for character in collapsed.chars() {
-        if matches!(
-            character,
-            '\\' | '`'
-                | '*'
-                | '_'
-                | '{'
-                | '}'
-                | '['
-                | ']'
-                | '('
-                | ')'
-                | '<'
-                | '>'
-                | '#'
-                | '+'
-                | '-'
-                | '!'
-                | '|'
-        ) {
+        // Values are collapsed to one line and rendered after our own list marker, so
+        // block-prefix characters such as '-', '+', '#', and '!' are harmless here.
+        // Escape only inline syntax that can still alter or inject rendered Markdown.
+        if matches!(character, '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '>' | '|') {
             escaped.push('\\');
         }
         escaped.push(character);
@@ -1439,7 +1436,7 @@ mod tests {
             participant: Some("**Anna**".into()),
             category: None,
             owner: Some("[owner](https://example.test)".into()),
-            due_date: Some("tomorrow | now".into()),
+            due_date: Some("2026-07-15 | now".into()),
             action_status: None,
             parking_lot: false,
             source_meeting_id: "meeting id&unsafe".into(),
@@ -1458,6 +1455,8 @@ mod tests {
         assert!(!digest.markdown.contains("\n# heading"));
         assert!(!digest.markdown.contains("[meeting](https://example.test)"));
         assert!(digest.markdown.contains("meeting+id%26unsafe"));
+        assert!(digest.markdown.contains("2026-07-15"));
+        assert!(!digest.markdown.contains("2026\\-07\\-15"));
     }
 
     #[tokio::test]
