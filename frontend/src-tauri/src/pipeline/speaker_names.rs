@@ -227,9 +227,14 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             });
         }
         if let Some(capture) = DIRECT_ADDRESS.captures(&segment.text) {
+            let Some(addressing_speaker_id) = segment.speaker_id else {
+                // Without an attributed addressing turn, a later speaker is not
+                // reliable evidence of who the name referred to.
+                continue;
+            };
             let next = segments.iter().skip(index + 1).find(|next| {
                 next.speaker_id.is_some()
-                    && next.speaker_id != segment.speaker_id
+                    && next.speaker_id != Some(addressing_speaker_id)
                     && match (segment.start_ms, next.start_ms) {
                         (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
                         _ => false,
@@ -329,11 +334,19 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
             }
         };
         let hash = candidate_hash(&salt, &normalized);
+        let speaker_key = candidate.speaker_id.unwrap_or(-1);
         let rejected: i64 = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM rejected_speaker_name_fingerprints \
-             WHERE candidate_hash=?)",
+             WHERE candidate_hash=? AND reason!='user_rejected') \
+             OR EXISTS(SELECT 1 FROM rejected_speaker_name_candidate_instances \
+             WHERE meeting_id=? AND candidate_hash=? AND proposed_speaker_key=? \
+               AND evidence_kind=?)",
         )
         .bind(&hash)
+        .bind(meeting_id)
+        .bind(&hash)
+        .bind(speaker_key)
+        .bind(candidate.evidence_kind)
         .fetch_one(pool)
         .await
         .map_err(|error| error.to_string())?;
@@ -423,24 +436,45 @@ pub async fn review_candidate(
         return Err("Candidate status must be accepted or rejected".to_string());
     }
     let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
-    let row: Option<(Option<i64>, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT proposed_speaker_id, candidate_text, normalized_name, candidate_hash \
+    let row: Option<(
+        String,
+        Option<i64>,
+        i64,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+    )> = sqlx::query_as(
+        "SELECT meeting_id, proposed_speaker_id, proposed_speaker_key, candidate_text, \
+                normalized_name, candidate_hash, evidence_kind \
          FROM speaker_name_candidates WHERE id=? AND status='pending'",
     )
     .bind(input.candidate_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|error| error.to_string())?;
-    let (proposed_speaker_id, candidate_text, normalized_name, hash) =
-        row.ok_or_else(|| "Pending speaker name candidate not found".to_string())?;
+    let (
+        meeting_id,
+        proposed_speaker_id,
+        proposed_speaker_key,
+        candidate_text,
+        normalized_name,
+        hash,
+        evidence_kind,
+    ) = row.ok_or_else(|| "Pending speaker name candidate not found".to_string())?;
 
     if input.status == "rejected" {
         sqlx::query(
-            "INSERT INTO rejected_speaker_name_fingerprints(candidate_hash, reason) \
-             VALUES(?, 'user_rejected') ON CONFLICT(candidate_hash) DO UPDATE SET \
-             occurrence_count=occurrence_count+1, last_seen_at=datetime('now')",
+            "INSERT INTO rejected_speaker_name_candidate_instances \
+             (meeting_id, candidate_hash, proposed_speaker_key, evidence_kind) \
+             VALUES(?, ?, ?, ?) \
+             ON CONFLICT(meeting_id, candidate_hash, proposed_speaker_key, evidence_kind) \
+             DO UPDATE SET occurrence_count=occurrence_count+1, last_seen_at=datetime('now')",
         )
+        .bind(&meeting_id)
         .bind(&hash)
+        .bind(proposed_speaker_key)
+        .bind(&evidence_kind)
         .execute(&mut *tx)
         .await
         .map_err(|error| error.to_string())?;
@@ -557,6 +591,18 @@ mod tests {
     }
 
     #[test]
+    fn extraction_does_not_link_direct_address_from_unattributed_turn() {
+        let rows = vec![
+            segment("Иван, расскажи про релиз", None, 5_000),
+            segment("Сборка готова", Some(8), 7_000),
+        ];
+
+        assert!(extract_candidates(&rows)
+            .iter()
+            .all(|item| item.evidence_kind != "direct_address"));
+    }
+
+    #[test]
     fn salted_hash_is_stable_per_install_and_changes_with_salt() {
         assert_eq!(candidate_hash("a", "анна"), candidate_hash("a", "анна"));
         assert_ne!(candidate_hash("a", "анна"), candidate_hash("b", "анна"));
@@ -576,6 +622,7 @@ mod tests {
             "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT, proposed_speaker_id INTEGER, proposed_speaker_key INTEGER NOT NULL, candidate_text TEXT, normalized_name TEXT, candidate_hash TEXT, evidence_kind TEXT, evidence_quote TEXT, evidence_start_ms INTEGER, confidence REAL, occurrence_count INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
             "CREATE TABLE speaker_aliases(id INTEGER PRIMARY KEY, speaker_id INTEGER, alias TEXT, normalized_alias TEXT, source_candidate_id INTEGER, is_confirmed INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(speaker_id,normalized_alias))",
             "CREATE TABLE rejected_speaker_name_fingerprints(candidate_hash TEXT PRIMARY KEY, reason TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE rejected_speaker_name_candidate_instances(meeting_id TEXT, candidate_hash TEXT, proposed_speaker_key INTEGER, evidence_kind TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
@@ -656,6 +703,27 @@ mod tests {
         assert_eq!(removed, (None, None, "rejected".into()));
         scan_candidates(&pool, "m1").await.unwrap();
         assert!(list_candidates(&pool, "m1").await.unwrap().is_empty());
+
+        for (id, text, speaker_id, start) in [
+            ("7", "Иван, расскажи", 7, 5.0),
+            ("8", "Первый ответ", 8, 6.0),
+            ("9", "Иван, продолжай", 7, 10.0),
+            ("10", "Второй ответ", 8, 11.0),
+        ] {
+            sqlx::query("INSERT INTO transcripts VALUES(?, 'm2', ?, ?, ?)")
+                .bind(id)
+                .bind(text)
+                .bind(speaker_id)
+                .bind(start)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        scan_candidates(&pool, "m2").await.unwrap();
+        let m2_candidates = list_candidates(&pool, "m2").await.unwrap();
+        assert!(m2_candidates
+            .iter()
+            .any(|candidate| candidate.candidate_text.as_deref() == Some("Иван")));
 
         let raw_rejections: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM rejected_speaker_name_fingerprints WHERE candidate_hash LIKE '%мудак%'",

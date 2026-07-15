@@ -43,3 +43,15 @@ CREATE TABLE IF NOT EXISTS rejected_speaker_name_fingerprints (
     occurrence_count INTEGER NOT NULL DEFAULT 1,
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- A user's rejection is a judgment about one proposed link, not a global ban on the
+-- name. Keep it scoped without retaining the rejected raw text.
+CREATE TABLE IF NOT EXISTS rejected_speaker_name_candidate_instances (
+    meeting_id TEXT NOT NULL,
+    candidate_hash TEXT NOT NULL,
+    proposed_speaker_key INTEGER NOT NULL,
+    evidence_kind TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (meeting_id, candidate_hash, proposed_speaker_key, evidence_kind)
+);
