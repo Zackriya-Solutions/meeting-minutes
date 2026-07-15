@@ -589,9 +589,16 @@ impl ModelState {
                 break;
             }
 
-            // llama-cpp-2's `sample` is sample-and-accept. Calling `accept` again
-            // double-advances grammar and repetition samplers.
-            let token = sampler.as_mut().sample(&ctx, batch.n_tokens() - 1);
+            // Apply the CPU sampler chain to the raw logits explicitly. With GPU
+            // backend sampling enabled, llama_sampler_sample() may return a token
+            // selected by the backend and skip every CPU sampler in the chain,
+            // including the JSON grammar. Accept exactly once after selecting.
+            let mut candidates = ctx.token_data_array_ith(batch.n_tokens() - 1);
+            sampler.as_ref().apply(&mut candidates);
+            let token = candidates
+                .selected_token()
+                .context("Sampler chain did not select a token")?;
+            sampler.as_mut().accept(token);
 
             if model.is_eog_token(token) {
                 eprintln!(
