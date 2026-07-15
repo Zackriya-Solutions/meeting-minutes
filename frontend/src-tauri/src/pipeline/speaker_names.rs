@@ -202,7 +202,7 @@ fn normalize_name(value: &str) -> String {
 }
 
 fn display_name(value: &str) -> String {
-    let normalized = value.trim();
+    let normalized = value.trim().to_lowercase();
     let mut characters = normalized.chars();
     match characters.next() {
         Some(first) => first.to_uppercase().chain(characters).collect(),
@@ -387,7 +387,7 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
         let speaker_key = candidate.speaker_id.unwrap_or(-1);
         let rejected: i64 = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM rejected_speaker_name_fingerprints \
-             WHERE candidate_hash=? AND reason!='user_rejected') \
+             WHERE candidate_hash=?) \
              OR EXISTS(SELECT 1 FROM rejected_speaker_name_candidate_instances \
              WHERE meeting_id=? AND candidate_hash=? AND proposed_speaker_key=? \
                AND evidence_kind=?)",
@@ -623,6 +623,12 @@ mod tests {
         assert_eq!(validate_candidate("Хер"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Иван123"), Err("invalid_shape"));
         assert_eq!(validate_candidate("Ааааа"), Err("implausible_shape"));
+    }
+
+    #[test]
+    fn display_name_normalizes_asr_casing() {
+        assert_eq!(display_name("АННА"), "Анна");
+        assert_eq!(display_name("иВаН"), "Иван");
     }
 
     #[test]

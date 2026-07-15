@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { Tag, Loader2, Check, X } from '@/components/memento/LucideCompat';
@@ -27,6 +28,12 @@ interface Candidate {
   occurrence_count: number;
 }
 
+const EVIDENCE_LABELS: Record<string, string> = {
+  self_introduction: 'Self introduction',
+  explicit_introduction: 'Explicit introduction',
+  direct_address: 'Direct address',
+};
+
 export function SpeakerNameCandidatesButton({
   meetingId,
   onApplied,
@@ -35,6 +42,7 @@ export function SpeakerNameCandidatesButton({
   onApplied?: () => Promise<void> | void;
 }) {
   const t = useT();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -130,16 +138,20 @@ export function SpeakerNameCandidatesButton({
                       <div>
                         <strong>{candidate.candidate_text}</strong>
                         <span className="ml-2 text-xs text-[var(--fg3)]">
-                          {t(candidate.evidence_kind)} · {Math.round(candidate.confidence * 100)}%
+                          {t(EVIDENCE_LABELS[candidate.evidence_kind] ?? 'Name evidence')} · {Math.round(candidate.confidence * 100)}%
                           {candidate.occurrence_count > 1 ? ` · ×${candidate.occurrence_count}` : ''}
                         </span>
                       </div>
-                      <a
+                      <button
+                        type="button"
                         className="text-xs text-[var(--gold)] hover:underline"
-                        href={`/meeting-details?id=${encodeURIComponent(meetingId)}&t=${seconds}`}
+                        onClick={() => {
+                          setOpen(false);
+                          router.push(`/meeting-details?id=${encodeURIComponent(meetingId)}&t=${seconds}`);
+                        }}
                       >
                         {t('Open evidence')}
-                      </a>
+                      </button>
                     </div>
                     {candidate.evidence_quote && (
                       <p className="mt-2 line-clamp-3 text-sm text-[var(--fg2)]">{candidate.evidence_quote}</p>

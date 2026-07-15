@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS rejected_speaker_name_fingerprints (
 -- A user's rejection is a judgment about one proposed link, not a global ban on the
 -- name. Keep it scoped without retaining the rejected raw text.
 CREATE TABLE IF NOT EXISTS rejected_speaker_name_candidate_instances (
-    meeting_id TEXT NOT NULL,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
     candidate_hash TEXT NOT NULL,
     proposed_speaker_key INTEGER NOT NULL,
     evidence_kind TEXT NOT NULL,
