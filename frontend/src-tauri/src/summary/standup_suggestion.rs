@@ -40,12 +40,13 @@ fn hour_minute_is_standup_like(hour: u8, minute: u8) -> bool {
 }
 
 fn time_is_standup_like(value: &str) -> bool {
-    value.split_once('T').is_some_and(|(_, time)| {
-        let hour = time.get(0..2).and_then(|value| value.parse::<u8>().ok());
-        let minute = time.get(3..5).and_then(|value| value.parse::<u8>().ok());
-        hour.zip(minute)
-            .is_some_and(|(hour, minute)| hour_minute_is_standup_like(hour, minute))
-    })
+    matches!(value.as_bytes().get(10), Some(b'T' | b' '))
+        && value.get(11..).is_some_and(|time| {
+            let hour = time.get(0..2).and_then(|value| value.parse::<u8>().ok());
+            let minute = time.get(3..5).and_then(|value| value.parse::<u8>().ok());
+            hour.zip(minute)
+                .is_some_and(|(hour, minute)| hour_minute_is_standup_like(hour, minute))
+        })
 }
 
 fn title_time_is_standup_like(title: &str) -> bool {
@@ -310,6 +311,7 @@ mod tests {
             "Обсудили обратную связь и атмосферу в команде."
         ));
         assert!(time_is_standup_like("2026-07-15T11:05:00"));
+        assert!(time_is_standup_like("2026-07-15 11:05:00 UTC"));
         assert!(!time_is_standup_like("2026-07-15T17:35:00"));
         assert!(!time_is_standup_like("2026-07-15T12:30:00"));
         assert!(title_time_is_standup_like(
