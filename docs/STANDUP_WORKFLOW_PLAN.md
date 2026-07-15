@@ -8,15 +8,17 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 
 | Request | Current status | Missing work |
 | --- | --- | --- |
-| Improve the weak standup template | Standup V2 pipeline is being implemented | Real-provider and held-out corpus evaluation |
-| Use the 11:00 standups and 17:30 project/productivity meetings | Batch import is running; filename classes are weak labels | Content classification and reviewed labels for all recordings |
-| Use the additional archive and earlier files | 50 unique local recordings prepared; duplicate earlier files removed by SHA-256 | Finish transcription and final integrity report |
+| Improve the weak standup template | PR #24 implements Standup V2 with evidence-bound structured records | Real-provider and held-out corpus evaluation |
+| Use the 11:00 standups and 17:30 project/productivity meetings | 20/50 unique recordings are imported; the private eval draft currently has six strong standup candidates and contrast meetings | Finish import, content labels, and the frozen 12-15-meeting set |
+| Use the additional archive and earlier files | 50 unique local recordings prepared; duplicate earlier files removed by SHA-256; partial integrity is 20 unique hashes, zero duplicate hashes, zero missing DB meetings, and zero empty transcripts | Finish transcription and final integrity report |
 | Rename archive files by date/time | Done only where evidence supports the date; unknown dates remain explicit | Optional user review for the 35 unknown dates |
 | Avoid per-file UI import | PR #23 adds one-folder Tauri batch import, picker-free Tauri command, console startup mode, hash dedupe, resume, and JSON report | Finish the 50-file run and publish the integrity report |
-| Learn from roughly 50 meetings | Corpus/evaluation plan exists | Gold labels, frozen split, evaluation runner, feedback capture |
+| Learn from roughly 50 meetings | PR #26 adds private evidence-level metrics and explicit frozen meeting selection; PR #29 adds a resumable ordinary-provider runner | Complete human reference labels and run the same frozen set through local and DeepSeek providers |
 | Infer speaker names and aliases safely | PR #27 adds a local candidate store, abuse filtering, evidence UI, confirmation, aliases, and salted rejection fingerprints | Evaluate precision after diarization is available on the corpus |
 | Keep DeepSeek summaries reliable | PR #21 implements bounded generation and direct Russian output | Merge/review and Standup V2 provider evaluation |
 | Automatic meeting detection | PR #22 is open | Merge/review and false-positive/false-negative evaluation |
+| Prepare and facilitate rather than only summarize | PR #30 adds private planned updates/parking/scratchpad; PR #32 adds explicit live time-box, manual update count, and timestamped markers | Validate the workflow in real standups and avoid adding surveillance metrics |
+| Make cross-meeting retrieval usable | PR #31 supplies the ONNX `token_type_ids` input required by the installed embedding model and passes an end-to-end 384-dimensional inference test | Re-run pending embedding jobs after the import |
 
 The database previously treated import time as meeting time. The standup-series slice adds a
 separate `occurred_at` value and backfills it only from the safely normalized
