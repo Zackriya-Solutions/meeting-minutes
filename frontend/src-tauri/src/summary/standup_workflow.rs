@@ -504,6 +504,21 @@ pub async fn review_record(
         Some(serde_json::to_string(&effective).map_err(|error| error.to_string())?)
     };
 
+    if kind == "action" && input.status != "accepted" {
+        let action_status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM action_items WHERE standup_record_id = ?")
+                .bind(input.record_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|error| error.to_string())?;
+        if action_status.is_some_and(|status| matches!(status.as_str(), "done" | "cancelled")) {
+            return Err(
+                "Completed or cancelled actions must be reopened before rejecting their source"
+                    .to_string(),
+            );
+        }
+    }
+
     sqlx::query(
         "UPDATE standup_records SET review_status = ?, reviewed_payload = ?, \
          updated_at = datetime('now') WHERE id = ?",
@@ -752,7 +767,7 @@ fn markdown_evidence(item: &SeriesDigestItem) -> String {
 }
 
 fn is_missing(value: Option<&String>) -> bool {
-    value.is_none_or(|value| value.trim().is_empty())
+    value.map_or(true, |value| value.trim().is_empty())
 }
 
 fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesInsight> {
@@ -893,6 +908,14 @@ fn render_insight_section(markdown: &mut String, insights: &[StandupSeriesInsigh
     markdown.push('\n');
 }
 
+fn digest_category_label(category: Option<&str>) -> Option<&'static str> {
+    match category {
+        Some("completed_or_recent") => Some("completed"),
+        Some("next") => Some("next"),
+        Some("blockers") => Some("blocker"),
+        _ => None,
+    }
+}
 fn render_digest_section(markdown: &mut String, title: &str, items: &[SeriesDigestItem]) {
     markdown.push_str(&format!("## {title}\n\n"));
     if items.is_empty() {
@@ -900,6 +923,9 @@ fn render_digest_section(markdown: &mut String, title: &str, items: &[SeriesDige
         return;
     }
     for item in items {
+        let category = digest_category_label(item.category.as_deref())
+            .map(|value| format!("**[{value}]** "))
+            .unwrap_or_default();
         let participant = item
             .participant
             .as_deref()
@@ -916,7 +942,7 @@ fn render_digest_section(markdown: &mut String, title: &str, items: &[SeriesDige
             .map(|value| format!(" · due: {value}"))
             .unwrap_or_default();
         markdown.push_str(&format!(
-            "- {participant}{}{}{} {}\n",
+            "- {category}{participant}{}{}{} {}\n",
             item.text,
             owner,
             due,
@@ -1020,13 +1046,23 @@ pub async fn get_series_digest(
     let included_meetings: HashMap<String, String> = meetings
         .into_iter()
         .filter(|(_, occurred_at)| {
-            cutoff.is_none_or(|cutoff| {
+            cutoff.map_or(true, |cutoff| {
                 parse_digest_datetime(occurred_at)
                     .map(|value| value >= cutoff)
                     .unwrap_or(true)
             })
         })
         .collect();
+    let period_start = included_meetings
+        .values()
+        .filter_map(|value| parse_digest_datetime(value))
+        .min()
+        .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    let period_end = included_meetings
+        .values()
+        .filter_map(|value| parse_digest_datetime(value))
+        .max()
+        .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
 
     let rows: Vec<DigestRecordRow> = sqlx::query_as(
         "SELECT sr.id, m.id AS meeting_id, m.title AS meeting_title, \
@@ -1049,8 +1085,8 @@ pub async fn get_series_digest(
         collection_id,
         series_name,
         window_days,
-        period_start: included_meetings.values().min().cloned(),
-        period_end: included_meetings.values().max().cloned(),
+        period_start,
+        period_end,
         meeting_count: included_meetings.len(),
         ..StandupSeriesDigest::default()
     };
@@ -1321,6 +1357,35 @@ mod tests {
             .unwrap();
         assert_eq!(text, "Проверить release-сборку");
 
+        sqlx::query("UPDATE action_items SET status = 'done'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let error = review_record(
+            &pool,
+            ReviewStandupRecordInput {
+                record_id: action_id,
+                status: "rejected".into(),
+                edited_text: None,
+                owner: None,
+                due_date: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("must be reopened"));
+        let review_status: String =
+            sqlx::query_scalar("SELECT review_status FROM standup_records WHERE id = ?")
+                .bind(action_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(review_status, "accepted");
+        sqlx::query("UPDATE action_items SET status = 'open'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
         // Regeneration replaces pending facts but preserves the reviewed action.
         assert_eq!(
             sync_standup_records(&pool, "m1", &report()).await.unwrap(),
@@ -1407,17 +1472,27 @@ mod tests {
     #[tokio::test]
     async fn series_digest_is_windowed_reviewed_and_evidence_linked() {
         let pool = test_pool().await;
-        for (id, title, occurred_at) in [
-            ("old", "Standup old", "2026-05-01T10:00:00Z"),
-            ("accepted", "Standup accepted", "2026-07-14T10:00:00Z"),
-            ("pending", "Standup pending", "2026-07-15T10:00:00Z"),
+        for (id, title, created_at, occurred_at) in [
+            (
+                "old",
+                "Standup old",
+                "2026-05-01T10:00:00Z",
+                Some("2026-05-01T10:00:00Z"),
+            ),
+            (
+                "accepted",
+                "Standup accepted",
+                "2026-07-15T09:00:00Z",
+                Some("2026-07-15T09:00:00Z"),
+            ),
+            ("pending", "Standup pending", "2026-07-15 10:00:00", None),
         ] {
             sqlx::query(
                 "INSERT INTO meetings(id, title, created_at, occurred_at) VALUES(?, ?, ?, ?)",
             )
             .bind(id)
             .bind(title)
-            .bind(occurred_at)
+            .bind(created_at)
             .bind(occurred_at)
             .execute(&pool)
             .await
@@ -1477,6 +1552,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(digest.meeting_count, 2);
+        assert_eq!(digest.period_start.as_deref(), Some("2026-07-15T09:00:00Z"));
+        assert_eq!(digest.period_end.as_deref(), Some("2026-07-15T10:00:00Z"));
         assert_eq!(digest.meetings_with_accepted_records, 1);
         assert_eq!(digest.pending_review_count, 3);
         assert!(digest.open_actions.is_empty());
@@ -1492,5 +1569,16 @@ mod tests {
             .markdown
             .contains("/meeting-details?id=accepted&t=62"));
         assert!(!digest.markdown.contains("Standup old"));
+    }
+
+    #[test]
+    fn digest_categories_preserve_update_semantics() {
+        assert_eq!(
+            digest_category_label(Some("completed_or_recent")),
+            Some("completed")
+        );
+        assert_eq!(digest_category_label(Some("next")), Some("next"));
+        assert_eq!(digest_category_label(Some("blockers")), Some("blocker"));
+        assert_eq!(digest_category_label(None), None);
     }
 }

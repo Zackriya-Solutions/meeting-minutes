@@ -107,6 +107,56 @@ fn merge_manual_summary_with_generated_fields(
     incoming
 }
 
+async fn save_manual_summary_preserving_generated_fields(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    incoming: serde_json::Value,
+) -> Result<bool, String> {
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+    let meeting_exists = sqlx::query("SELECT 1 FROM meetings WHERE id = ?")
+        .bind(meeting_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?
+        .is_some();
+    if !meeting_exists {
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(false);
+    }
+    let existing_result: Option<String> = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT result FROM summary_processes WHERE meeting_id = ?",
+    )
+    .bind(meeting_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| error.to_string())?
+    .flatten();
+    let merged = merge_manual_summary_with_generated_fields(existing_result.as_deref(), incoming);
+    let result_json = serde_json::to_string(&merged).map_err(|error| error.to_string())?;
+    let now = chrono::Utc::now();
+    sqlx::query("UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?")
+        .bind(result_json)
+        .bind(now)
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
+        .bind(now)
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
 /// Saves a meeting summary (Native SQLx implementation)
 ///
 /// Expected format: { "markdown": "...", "summary_json": [...BlockNote blocks...] }
@@ -124,17 +174,7 @@ pub async fn api_save_meeting_summary<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    let existing_result: Option<String> = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT result FROM summary_processes WHERE meeting_id = ?",
-    )
-    .bind(&meeting_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| format!("Failed to load generated summary fields: {error}"))?
-    .flatten();
-    let summary = merge_manual_summary_with_generated_fields(existing_result.as_deref(), summary);
-
-    match SummaryProcessesRepository::update_meeting_summary(pool, &meeting_id, &summary).await {
+    match save_manual_summary_preserving_generated_fields(pool, &meeting_id, summary).await {
         Ok(true) => {
             log_info!("Summary saved successfully for meeting_id: {}", meeting_id);
 

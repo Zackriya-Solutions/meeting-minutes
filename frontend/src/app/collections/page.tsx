@@ -97,11 +97,14 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 function digestSourceHref(item: SeriesDigestItem): string {
-  const seconds = Math.max(0, Math.floor((item.source_start_ms ?? 0) / 1000));
-  return `/meeting-details?id=${encodeURIComponent(item.source_meeting_id)}&t=${seconds}`;
+  const base = `/meeting-details?id=${encodeURIComponent(item.source_meeting_id)}`;
+  if (item.source_start_ms == null) return base;
+  const seconds = Math.max(0, Math.floor(item.source_start_ms / 1000));
+  return `${base}&t=${seconds}`;
 }
 
 function DigestSection({ title, items }: { title: string; items: SeriesDigestItem[] }) {
+  const t = useT();
   if (items.length === 0) return null;
   return (
     <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
@@ -113,6 +116,15 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
             href={digestSourceHref(item)}
             className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
           >
+            {item.category ? (
+              <span className="mb-1 inline-flex rounded-full bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[.08em] text-[var(--gold)]">
+                {item.category === 'blockers'
+                  ? t('Blocker')
+                  : item.category === 'next'
+                    ? t('Next')
+                    : t('Completed')}
+              </span>
+            ) : null}
             <span className="block text-[var(--fg1)]">
               {item.participant ? <strong>{item.participant}: </strong> : null}
               {item.text}

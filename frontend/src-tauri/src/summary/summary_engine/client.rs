@@ -37,6 +37,8 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        json_schema: Option<String>,
     },
 }
 
@@ -56,9 +58,8 @@ lazy_static::lazy_static! {
 }
 
 // Model path cache to avoid repeated filesystem I/O and model lookups
-static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> = Lazy::new(|| {
-    RwLock::new(HashMap::new())
-});
+static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Initialize the global sidecar manager
 pub async fn init_sidecar_manager(app_data_dir: PathBuf) -> Result<()> {
@@ -137,6 +138,26 @@ pub async fn generate_with_builtin(
     user_prompt: &str,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
+    generate_with_builtin_json_schema(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        cancellation_token,
+        None,
+    )
+    .await
+}
+
+/// Generate text using built-in AI with an optional llama.cpp-constrained JSON schema.
+pub async fn generate_with_builtin_json_schema(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    cancellation_token: Option<&CancellationToken>,
+    json_schema: Option<&str>,
+) -> Result<String> {
     // Check cancellation at start
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -155,8 +176,7 @@ pub async fn generate_with_builtin(
     let model_path = get_cached_model_path(app_data_dir, model_name)?;
 
     // Apply model-specific chat template
-    let formatted_prompt =
-        models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+    let formatted_prompt = models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
     // Get or initialize sidecar manager
     let manager = {
         let mut global_manager = SIDECAR_MANAGER.lock().await;
@@ -193,6 +213,7 @@ pub async fn generate_with_builtin(
         repeat_penalty: Some(sampling.repeat_penalty),
         penalty_last_n: Some(sampling.penalty_last_n),
         stop_tokens: Some(sampling.stop_tokens),
+        json_schema: json_schema.map(str::to_string),
     };
 
     let request_json = serde_json::to_string(&request)?;
@@ -317,6 +338,7 @@ mod tests {
             repeat_penalty: Some(1.05),
             penalty_last_n: Some(256),
             stop_tokens: Some(vec!["<end_of_turn>".to_string()]),
+            json_schema: Some(r#"{"type":"object"}"#.to_string()),
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -328,6 +350,7 @@ mod tests {
         assert!(json.contains("\"frequency_penalty\":0.0"));
         assert!(json.contains("\"repeat_penalty\":1.05"));
         assert!(json.contains("\"penalty_last_n\":256"));
+        assert!(json.contains("\"json_schema\":\"{\\\"type\\\":\\\"object\\\"}\""));
     }
 
     #[test]
