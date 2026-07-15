@@ -844,6 +844,28 @@ fn same_optional_identity(left: Option<&str>, right: Option<&str>) -> bool {
     }
 }
 
+fn evidence_overlaps(left: &[EvidenceRef], right: &[EvidenceRef]) -> bool {
+    left.iter().any(|left_ref| {
+        right
+            .iter()
+            .any(|right_ref| left_ref.timestamp.trim() == right_ref.timestamp.trim())
+    })
+}
+
+fn actions_are_same_commitment(existing: &StandupAction, incoming: &StandupAction) -> bool {
+    if !same_fact(&existing.task, &incoming.task) {
+        return false;
+    }
+
+    match (existing.owner.as_deref(), incoming.owner.as_deref()) {
+        (Some(left), Some(right)) => normalize_for_match(left) == normalize_for_match(right),
+        // An unattributed extraction may only absorb/backfill an attributed one when
+        // both records point at the same transcript line. Matching on text alone can
+        // conflate two people making the same generic commitment in different chunks.
+        _ => evidence_overlaps(&existing.evidence, &incoming.evidence),
+    }
+}
+
 pub fn merge_standup_reports(reports: impl IntoIterator<Item = StandupReport>) -> StandupReport {
     let mut merged = StandupReport::default();
     for report in reports {
@@ -884,12 +906,11 @@ pub fn merge_standup_reports(reports: impl IntoIterator<Item = StandupReport>) -
         }
 
         for action in report.action_items {
-            if let Some(existing) = merged.action_items.iter_mut().find(|existing| {
-                same_fact(&existing.task, &action.task)
-                    && (same_optional_identity(existing.owner.as_deref(), action.owner.as_deref())
-                        || existing.owner.is_none()
-                        || action.owner.is_none())
-            }) {
+            if let Some(existing) = merged
+                .action_items
+                .iter_mut()
+                .find(|existing| actions_are_same_commitment(existing, &action))
+            {
                 if existing.owner.is_none() {
                     existing.owner = action.owner;
                 }
@@ -1011,8 +1032,8 @@ struct Labels {
 }
 
 fn labels(output_language: &str) -> Labels {
-    if output_language == "Russian" {
-        Labels {
+    match output_language {
+        "Russian" => Labels {
             title: "Стендап",
             outcome: "Главный итог",
             participants: "Участники с распознанными обновлениями",
@@ -1034,9 +1055,8 @@ fn labels(output_language: &str) -> Labels {
             unknown: "неизвестно",
             not_stated: "не указано",
             none: "Не зафиксировано.",
-        }
-    } else {
-        Labels {
+        },
+        "English" => Labels {
             title: "Standup",
             outcome: "Outcome",
             participants: "Participants with attributable updates",
@@ -1058,7 +1078,33 @@ fn labels(output_language: &str) -> Labels {
             unknown: "unknown",
             not_stated: "not stated",
             none: "None stated.",
-        }
+        },
+        // Structured fields are generated directly in the selected language. For
+        // languages without a bundled renderer translation, keep the scaffolding
+        // language-neutral instead of mixing English headings into that content.
+        _ => Labels {
+            title: "📋",
+            outcome: "🎯",
+            participants: "👥",
+            updates: "👤",
+            completed: "✓",
+            next: "→",
+            blockers: "⚠",
+            decisions: "✓",
+            actions: "☑",
+            task: "☑",
+            owner: "@",
+            due: "⏱",
+            evidence: "🔗",
+            risks: "⚠",
+            impact: "↳",
+            deep_dives: "🔍",
+            parking_lot: "🅿",
+            unattributed: "…",
+            unknown: "—",
+            not_stated: "—",
+            none: "—",
+        },
     }
 }
 
@@ -1656,14 +1702,37 @@ mod tests {
             task: "Проверить метрики релиза.".to_string(),
             owner: Some("анна".to_string()),
             due_date: Some("пятница".to_string()),
-            evidence: evidence("[10:08]"),
+            evidence: evidence("[10:00]"),
         });
 
         let merged = merge_standup_reports([first, second]);
         assert_eq!(merged.action_items.len(), 1);
         assert_eq!(merged.action_items[0].owner.as_deref(), Some("анна"));
         assert_eq!(merged.action_items[0].due_date.as_deref(), Some("пятница"));
-        assert_eq!(merged.action_items[0].evidence.len(), 2);
+        assert_eq!(merged.action_items[0].evidence.len(), 1);
+    }
+
+    #[test]
+    fn merge_keeps_same_text_actions_separate_without_shared_evidence() {
+        let mut first = StandupReport::default();
+        first.action_items.push(StandupAction {
+            task: "Обновить документацию".to_string(),
+            owner: None,
+            due_date: None,
+            evidence: evidence("[10:00]"),
+        });
+        let mut second = StandupReport::default();
+        second.action_items.push(StandupAction {
+            task: "Обновить документацию".to_string(),
+            owner: Some("Анна".to_string()),
+            due_date: Some("пятница".to_string()),
+            evidence: evidence("[24:00]"),
+        });
+
+        let merged = merge_standup_reports([first, second]);
+        assert_eq!(merged.action_items.len(), 2);
+        assert!(merged.action_items[0].owner.is_none());
+        assert_eq!(merged.action_items[1].owner.as_deref(), Some("Анна"));
     }
 
     #[test]
@@ -1707,6 +1776,19 @@ mod tests {
         assert!(markdown.contains("/meeting-details?id=meeting-123&t=754"));
         assert!(markdown.contains("неизвестно"));
         assert!(markdown.contains("не указано"));
+    }
+
+    #[test]
+    fn renderer_uses_language_neutral_scaffolding_for_other_languages() {
+        let mut report = StandupReport::default();
+        report.overview.push(item("Bereit für Release", "[01:02]"));
+        let markdown = render_standup_markdown(&report, "meeting-123", "German");
+
+        assert!(markdown.contains("# 📋"));
+        assert!(markdown.contains("Bereit für Release"));
+        assert!(!markdown.contains("# Standup"));
+        assert!(!markdown.contains("## Outcome"));
+        assert!(!markdown.contains("None stated"));
     }
 
     #[test]
