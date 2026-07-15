@@ -73,6 +73,9 @@ pub struct StandupCorpusRunItem {
     pub meeting_id: String,
     pub title: String,
     pub status: String,
+    pub provider: String,
+    pub model: String,
+    pub template_fingerprint: String,
     pub processing_time_ms: u64,
     pub chunk_count: i64,
     pub extracted_record_count: i64,
@@ -111,6 +114,13 @@ pub struct StandupCorpusRunStarted {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct CorpusRunProvenance {
+    provider: String,
+    model: String,
+    template_fingerprint: String,
+}
+
 fn normalized_ids(meeting_ids: Vec<String>) -> Result<Vec<String>, String> {
     let mut seen = HashSet::new();
     let ids = meeting_ids
@@ -137,6 +147,22 @@ fn has_standup_v2(result: Option<&str>) -> bool {
         .and_then(|value| value.as_str().map(str::to_string))
         .as_deref()
         == Some("standup_v2")
+}
+
+fn result_matches_provenance(result: Option<&str>, expected: &CorpusRunProvenance) -> bool {
+    let Some(source) = result
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|value| value.get("summary_generation").cloned())
+        .and_then(|value| value.get("source").cloned())
+    else {
+        return false;
+    };
+
+    source.get("model_provider").and_then(Value::as_str) == Some(expected.provider.as_str())
+        && source.get("model_name").and_then(Value::as_str) == Some(expected.model.as_str())
+        && source.get("template_id").and_then(Value::as_str) == Some(TEMPLATE_ID)
+        && source.get("template_fingerprint").and_then(Value::as_str)
+            == Some(expected.template_fingerprint.as_str())
 }
 
 fn standup_result_record_count(result: Option<&str>) -> Result<i64, String> {
@@ -289,11 +315,19 @@ fn build_report(
     }
 }
 
-fn failed_item(meeting_id: &str, title: String, error: impl ToString) -> StandupCorpusRunItem {
+fn failed_item(
+    meeting_id: &str,
+    title: String,
+    provenance: &CorpusRunProvenance,
+    error: impl ToString,
+) -> StandupCorpusRunItem {
     StandupCorpusRunItem {
         meeting_id: meeting_id.to_string(),
         title,
         status: "failed".to_string(),
+        provider: provenance.provider.clone(),
+        model: provenance.model.clone(),
+        template_fingerprint: provenance.template_fingerprint.clone(),
         processing_time_ms: 0,
         chunk_count: 0,
         extracted_record_count: 0,
@@ -306,8 +340,7 @@ async fn process_meeting<R: Runtime>(
     app: &AppHandle<R>,
     pool: &SqlitePool,
     meeting_id: &str,
-    provider: &str,
-    model: &str,
+    provenance: &CorpusRunProvenance,
     summary_language: &Option<String>,
     overwrite: bool,
     current: usize,
@@ -315,7 +348,7 @@ async fn process_meeting<R: Runtime>(
 ) -> StandupCorpusRunItem {
     let (title, transcript) = match meeting_input(pool, meeting_id).await {
         Ok(value) => value,
-        Err(error) => return failed_item(meeting_id, String::new(), error),
+        Err(error) => return failed_item(meeting_id, String::new(), provenance, error),
     };
     let _ = app.emit(
         "standup-corpus-run-progress",
@@ -330,23 +363,28 @@ async fn process_meeting<R: Runtime>(
 
     let existing = match SummaryProcessesRepository::get_summary_data(pool, meeting_id).await {
         Ok(value) => value,
-        Err(error) => return failed_item(meeting_id, title, error),
+        Err(error) => return failed_item(meeting_id, title, provenance, error),
     };
     if !overwrite
-        && existing
-            .as_ref()
-            .is_some_and(|row| row.status == "completed" && has_standup_v2(row.result.as_deref()))
+        && existing.as_ref().is_some_and(|row| {
+            row.status == "completed"
+                && has_standup_v2(row.result.as_deref())
+                && result_matches_provenance(row.result.as_deref(), provenance)
+        })
     {
         let extracted_record_count = match standup_result_record_count(
             existing.as_ref().and_then(|row| row.result.as_deref()),
         ) {
             Ok(count) => count,
-            Err(error) => return failed_item(meeting_id, title, error),
+            Err(error) => return failed_item(meeting_id, title, provenance, error),
         };
         return StandupCorpusRunItem {
             meeting_id: meeting_id.to_string(),
             title,
             status: "skipped".to_string(),
+            provider: provenance.provider.clone(),
+            model: provenance.model.clone(),
+            template_fingerprint: provenance.template_fingerprint.clone(),
             processing_time_ms: 0,
             chunk_count: existing
                 .as_ref()
@@ -359,28 +397,28 @@ async fn process_meeting<R: Runtime>(
 
     if let Err(error) = SummaryProcessesRepository::create_or_reset_process(pool, meeting_id).await
     {
-        return failed_item(meeting_id, title, error);
+        return failed_item(meeting_id, title, provenance, error);
     }
     if let Err(error) = TranscriptChunksRepository::save_transcript_data(
         pool,
         meeting_id,
         &transcript,
-        provider,
-        model,
+        &provenance.provider,
+        &provenance.model,
         40_000,
         1_000,
     )
     .await
     {
-        return failed_item(meeting_id, title, error);
+        return failed_item(meeting_id, title, provenance, error);
     }
     SummaryService::process_transcript_background(
         app.clone(),
         pool.clone(),
         meeting_id.to_string(),
         transcript,
-        provider.to_string(),
-        model.to_string(),
+        provenance.provider.clone(),
+        provenance.model.clone(),
         String::new(),
         TEMPLATE_ID.to_string(),
         summary_language.clone(),
@@ -393,16 +431,19 @@ async fn process_meeting<R: Runtime>(
             return failed_item(
                 meeting_id,
                 title,
+                provenance,
                 "Summary process disappeared after generation",
             )
         }
-        Err(error) => return failed_item(meeting_id, title, error),
+        Err(error) => return failed_item(meeting_id, title, provenance, error),
     };
-    let completed = outcome.status == "completed" && has_standup_v2(outcome.result.as_deref());
+    let completed = outcome.status == "completed"
+        && has_standup_v2(outcome.result.as_deref())
+        && result_matches_provenance(outcome.result.as_deref(), provenance);
     let extracted_record_count = if completed {
         match standup_result_record_count(outcome.result.as_deref()) {
             Ok(count) => count,
-            Err(error) => return failed_item(meeting_id, title, error),
+            Err(error) => return failed_item(meeting_id, title, provenance, error),
         }
     } else {
         0
@@ -411,13 +452,22 @@ async fn process_meeting<R: Runtime>(
         meeting_id: meeting_id.to_string(),
         title,
         status: if completed { "completed" } else { "failed" }.to_string(),
+        provider: provenance.provider.clone(),
+        model: provenance.model.clone(),
+        template_fingerprint: provenance.template_fingerprint.clone(),
         processing_time_ms: (outcome.processing_time.max(0.0) * 1_000.0).round() as u64,
         chunk_count: outcome.chunk_count,
         extracted_record_count,
         error: if completed {
             None
         } else {
-            bounded_error(outcome.error)
+            bounded_error(outcome.error.or_else(|| {
+                Some(if outcome.status == "completed" {
+                    "Completed result provenance does not match the requested corpus run".into()
+                } else {
+                    format!("Summary generation ended with status {}", outcome.status)
+                })
+            }))
         },
     }
 }
@@ -466,6 +516,13 @@ async fn run_standup_corpus_inner<R: Runtime>(
     if provider.is_empty() || model.is_empty() {
         return Err("Provider and model are required".to_string());
     }
+    let template = crate::summary::templates::get_template(TEMPLATE_ID)
+        .map_err(|error| format!("Failed to load corpus template: {error}"))?;
+    let provenance = CorpusRunProvenance {
+        provider: provider.clone(),
+        model: model.clone(),
+        template_fingerprint: crate::summary::service::template_cache_fingerprint(&template),
+    };
     let started_at = chrono::Utc::now().to_rfc3339();
     let mut items = Vec::with_capacity(meeting_ids.len());
 
@@ -490,8 +547,7 @@ async fn run_standup_corpus_inner<R: Runtime>(
             &app,
             &pool,
             meeting_id,
-            &provider,
-            &model,
+            &provenance,
             &summary_language,
             overwrite,
             index + 1,
@@ -504,6 +560,7 @@ async fn run_standup_corpus_inner<R: Runtime>(
             Err(_) => failed_item(
                 meeting_id,
                 String::new(),
+                &provenance,
                 "Standup pipeline panicked; inspect the local application log",
             ),
         };
@@ -641,6 +698,14 @@ pub async fn start_standup_corpus_run<R: Runtime>(
 mod tests {
     use super::*;
 
+    fn test_provenance() -> CorpusRunProvenance {
+        CorpusRunProvenance {
+            provider: "builtin-ai".into(),
+            model: "qwen3.5:4b".into(),
+            template_fingerprint: "prompt-v1".into(),
+        }
+    }
+
     #[test]
     fn ids_are_trimmed_deduplicated_and_bounded() {
         assert_eq!(
@@ -679,6 +744,32 @@ mod tests {
     }
 
     #[test]
+    fn resume_requires_exact_generation_provenance() {
+        let result = r#"{
+          "standup_v2": {"schema_version":"standup_v2"},
+          "summary_generation": {"source": {
+            "model_provider":"builtin-ai",
+            "model_name":"qwen3.5:4b",
+            "template_id":"daily_standup",
+            "template_fingerprint":"prompt-v1"
+          }}
+        }"#;
+        let expected = test_provenance();
+
+        assert!(result_matches_provenance(Some(result), &expected));
+        let mut changed = expected.clone();
+        changed.model = "qwen3.5:9b".into();
+        assert!(!result_matches_provenance(Some(result), &changed));
+        changed = expected.clone();
+        changed.template_fingerprint = "prompt-v2".into();
+        assert!(!result_matches_provenance(Some(result), &changed));
+        assert!(!result_matches_provenance(
+            Some(r#"{"standup_v2":{"schema_version":"standup_v2"}}"#),
+            &expected
+        ));
+    }
+
+    #[test]
     fn counts_only_records_from_the_current_structured_result() {
         let result = r#"{
           "standup_v2": {
@@ -710,11 +801,15 @@ mod tests {
 
     #[test]
     fn report_checkpoints_have_stable_state_and_counts() {
+        let provenance = test_provenance();
         let items = vec![
             StandupCorpusRunItem {
                 meeting_id: "m1".into(),
                 title: "Completed".into(),
                 status: "completed".into(),
+                provider: provenance.provider.clone(),
+                model: provenance.model.clone(),
+                template_fingerprint: provenance.template_fingerprint.clone(),
                 processing_time_ms: 10,
                 chunk_count: 2,
                 extracted_record_count: 3,
@@ -724,12 +819,15 @@ mod tests {
                 meeting_id: "m2".into(),
                 title: "Skipped".into(),
                 status: "skipped".into(),
+                provider: provenance.provider.clone(),
+                model: provenance.model.clone(),
+                template_fingerprint: provenance.template_fingerprint.clone(),
                 processing_time_ms: 0,
                 chunk_count: 4,
                 extracted_record_count: 5,
                 error: None,
             },
-            failed_item("m3", "Failed".into(), "provider error"),
+            failed_item("m3", "Failed".into(), &provenance, "provider error"),
         ];
         let language = Some("ru-RU".to_string());
 

@@ -119,7 +119,7 @@ fn build_summary_cache_source(
     }
 }
 
-fn template_cache_fingerprint(template: &Template) -> String {
+pub(crate) fn template_cache_fingerprint(template: &Template) -> String {
     let mut rendered_template = format!(
         "pipeline={}\n{}\n---SECTION-INSTRUCTIONS---\n{}",
         template.pipeline.as_deref().unwrap_or("generic"),
