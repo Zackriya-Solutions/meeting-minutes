@@ -28,6 +28,7 @@
     "summary.mean_action_item_f1": 0.75,
     "standup.success_rate": 0.95,
     "standup.quality_count": 1,
+    "standup.reviewed_standup_count": 1,
     "standup.test_count": 1,
     "standup.provider_count": 1,
     "standup.fact_coverage": 0.8,

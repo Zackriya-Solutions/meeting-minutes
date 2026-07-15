@@ -214,6 +214,8 @@ function standupMetrics(rows) {
     'general_meeting',
     'uncertain',
   ]);
+  const reviewedStandupTypes = new Set(['pure_status', 'status_plus_deep_dive']);
+  const contrastTypes = new Set(['planning_sync', 'one_to_one', 'general_meeting']);
   const successes = rows.filter((row) => row.success === true);
   const sampleIds = new Set();
   const seriesSplits = new Map();
@@ -330,6 +332,9 @@ function standupMetrics(rows) {
   );
   return {
     count: rows.length,
+    reviewed_standup_count: rows.filter((row) => reviewedStandupTypes.has(row.meeting_type)).length,
+    contrast_count: rows.filter((row) => contrastTypes.has(row.meeting_type)).length,
+    uncertain_count: rows.filter((row) => row.meeting_type === 'uncertain').length,
     train_count: rows.filter((row) => row.split === 'train').length,
     dev_count: rows.filter((row) => row.split === 'dev').length,
     test_count: rows.filter((row) => row.split === 'test').length,

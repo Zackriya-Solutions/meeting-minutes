@@ -22,7 +22,8 @@ MEMENTO_QUALITY_DATASET=/absolute/path/release-eval.json pnpm quality:gate
 
 The release dataset must contain at least 10 transcription samples, 10 diarization
 samples, 30 Russian retrieval questions (at least 20 answerable and 5 unanswerable), and
-10 summary runs and at least 12 reviewed standups. Every successful summary run must include a manually reviewed `quality`
+10 summary runs, at least 12 manually typed standups, and at least 2 manually typed contrast
+meetings. Filename hints do not count as those labels. Every successful summary run must include a manually reviewed `quality`
 object with values from 0 to 1: `fact_coverage`, `unsupported_claim_rate`, and
 `action_item_f1`. Use `fixtures/smoke.json` as the schema example. Generated reports
 contain only counts and aggregate metrics; keep the source dataset under `evals/private/`

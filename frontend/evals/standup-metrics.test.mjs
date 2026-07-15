@@ -12,6 +12,7 @@ test('split protocol rejects one series leaking across train and test', () => {
     { id: 'two', series_id: 'daily-team', split: 'test', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
   ]);
   assert.equal(metrics.protocol_error_count, 1);
+  assert.equal(metrics.reviewed_standup_count, 2);
 });
 
 test('record metrics penalize invented facts, duplicate actions, owners, and bad evidence', () => {
@@ -43,6 +44,8 @@ test('record metrics penalize invented facts, duplicate actions, owners, and bad
   assert.equal(metrics.unsupported_decision_action_rate, 1 / 3);
   assert.equal(metrics.invalid_evidence_rate, 2 / 3);
   assert.equal(metrics.duplicate_output_rate, 1 / 3);
+  assert.equal(metrics.reviewed_standup_count, 1);
+  assert.equal(metrics.contrast_count, 0);
 });
 
 test('provider failures count against success without pretending to have quality labels', () => {
@@ -66,4 +69,17 @@ test('meeting type must be manually reviewed before the corpus is valid', () => 
     success: false,
   }]);
   assert.equal(metrics.protocol_error_count, 1);
+  assert.equal(metrics.uncertain_count, 0);
+});
+
+test('standups and contrast meetings are counted separately', () => {
+  const common = { series_id: 'series', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', success: false };
+  const metrics = standupMetrics([
+    { ...common, id: 'status', meeting_type: 'status_plus_deep_dive' },
+    { ...common, id: 'planning', meeting_type: 'planning_sync' },
+    { ...common, id: 'uncertain', meeting_type: 'uncertain' },
+  ]);
+  assert.equal(metrics.reviewed_standup_count, 1);
+  assert.equal(metrics.contrast_count, 1);
+  assert.equal(metrics.uncertain_count, 1);
 });
