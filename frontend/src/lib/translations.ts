@@ -526,6 +526,7 @@ export const RU: Record<string, string> = {
   "Type '/' for commands...": "Введите «/» для команд…",
   "Failed to save changes. Please try again.": "Не удалось сохранить изменения. Попробуйте ещё раз.",
   "Edit section title": "Редактировать заголовок раздела",
+  "Edit": "Изменить",
   "Delete section": "Удалить раздел",
   "No Summary Generated Yet": "Суммаризация ещё не создана",
   "Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.": "Создайте суммаризацию транскрипта встречи с помощью ИИ, чтобы получить ключевые моменты, задачи и решения.",
