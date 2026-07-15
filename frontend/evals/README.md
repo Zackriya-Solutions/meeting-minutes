@@ -60,6 +60,22 @@ python3 evals/prepare_standup_corpus.py \
   --meeting-id meeting-second
 ```
 
+Keep manually reviewed gold labels separate from provider exports. Apply them only after exporting
+the raw hypotheses so corrected labels can never become the model's own output:
+
+```bash
+python3 evals/apply_standup_gold.py \
+  --dataset evals/private/standup-corpus-provider.json \
+  --gold evals/private/standup-gold.json \
+  --output evals/private/standup-corpus-reviewed.json
+```
+
+The gold file uses `schema_version: standup_gold_v1` and provides `meeting_id`, one reviewed
+`series_id`, a series-level `train`/`dev`/`test` split, and `reference_records`. The tool refuses
+unknown meeting IDs, duplicate IDs, unassigned series, invalid splits, record kinds, or empty
+reference text. It leaves `hypothesis_records` unchanged, writes atomically with mode `0600`, and
+prints counts only.
+
 The exporter refuses to replace an existing output by default so a rerun cannot silently
 destroy reviewed references. Use a new path for a frozen set. `--overwrite` is available only
 for intentionally disposable drafts. Output is written atomically with owner-only (`0600`)
