@@ -551,14 +551,14 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
-                        THEN julianday(source.occurred_at, 'utc') \
+                        THEN julianday(source.occurred_at) \
                         ELSE julianday(source.created_at) END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
-                        THEN julianday(current.occurred_at, 'utc') \
+                        THEN julianday(current.occurred_at) \
                         ELSE julianday(current.created_at) END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
              ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
-                           THEN julianday(source.occurred_at, 'utc') \
+                           THEN julianday(source.occurred_at) \
                            ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
@@ -595,7 +595,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
                     source.id AS source_id, source.title AS source_title, \
                     CASE WHEN source.occurred_at IS NOT NULL \
-                         THEN julianday(source.occurred_at, 'utc') \
+                         THEN julianday(source.occurred_at) \
                          ELSE julianday(source.created_at) END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
@@ -605,10 +605,10 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
-                        THEN julianday(source.occurred_at, 'utc') \
+                        THEN julianday(source.occurred_at) \
                         ELSE julianday(source.created_at) END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
-                        THEN julianday(current.occurred_at, 'utc') \
+                        THEN julianday(current.occurred_at) \
                         ELSE julianday(current.created_at) END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
@@ -897,5 +897,51 @@ mod tests {
         assert_eq!(prebrief.recent_risks.len(), 1);
         assert_eq!(prebrief.recent_decisions.len(), 1);
         assert_eq!(prebrief.open_actions[0].source_start_ms, Some(62_000));
+    }
+
+    #[tokio::test]
+    async fn prebrief_prefers_timezone_unknown_occurrence_order_over_import_order() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO meetings(id, title, created_at, occurred_at) VALUES \
+             ('previous', 'Standup previous', '2026-07-16T12:00:00Z', '2026-07-14T10:00:00'), \
+             ('current', 'Standup current', '2026-07-15T09:00:00Z', '2026-07-15T10:00:00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO collections VALUES(1, 'Команда', 'series')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for meeting_id in ["previous", "current"] {
+            sqlx::query("INSERT INTO meeting_collections VALUES(?, 1)")
+                .bind(meeting_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sync_standup_records(&pool, "previous", &report())
+            .await
+            .unwrap();
+        for record in list_records(&pool, "previous").await.unwrap() {
+            review_record(
+                &pool,
+                ReviewStandupRecordInput {
+                    record_id: record.id,
+                    status: "accepted".into(),
+                    edited_text: None,
+                    owner: None,
+                    due_date: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let prebrief = get_prebrief(&pool, "current").await.unwrap();
+        assert_eq!(prebrief.open_actions.len(), 1);
+        assert_eq!(prebrief.recent_risks.len(), 1);
+        assert_eq!(prebrief.recent_decisions.len(), 1);
     }
 }
