@@ -36,6 +36,7 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        #[serde(default)]
         json_schema: Option<String>,
     },
     Ping,
@@ -941,6 +942,16 @@ mod tests {
             guard_completed_json_grammar(llama_cpp_2::json_schema_to_grammar(&schema).unwrap());
         assert!(grammar.starts_with("constrained-root ::= root \"\\n\"\n"));
         assert!(grammar.contains("root ::="));
+    }
+
+    #[test]
+    fn generate_request_without_json_schema_remains_backward_compatible() {
+        let request: Request =
+            serde_json::from_str(r#"{"type":"generate","prompt":"summarize"}"#).unwrap();
+        let Request::Generate { json_schema, .. } = request else {
+            panic!("expected generate request");
+        };
+        assert!(json_schema.is_none());
     }
 
     #[test]

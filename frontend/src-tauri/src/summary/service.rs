@@ -120,12 +120,17 @@ fn build_summary_cache_source(
 }
 
 fn template_cache_fingerprint(template: &Template) -> String {
-    let rendered_template = format!(
+    let mut rendered_template = format!(
         "pipeline={}\n{}\n---SECTION-INSTRUCTIONS---\n{}",
         template.pipeline.as_deref().unwrap_or("generic"),
         template.to_markdown_structure(),
         template.to_section_instructions()
     );
+    if template.pipeline.as_deref() == Some("standup_v2") {
+        rendered_template.push_str("\n---STANDUP-EXTRACTION-CONTRACT---\n");
+        rendered_template
+            .push_str(&crate::summary::standup::extraction_contract_fingerprint_material());
+    }
     stable_text_fingerprint(&rendered_template)
 }
 
@@ -791,6 +796,23 @@ mod tests {
         assert_ne!(
             template_cache_fingerprint(&generic),
             template_cache_fingerprint(&standup)
+        );
+    }
+
+    #[test]
+    fn test_standup_template_fingerprint_includes_extraction_contract() {
+        let mut standup = test_template("Summary");
+        standup.pipeline = Some("standup_v2".to_string());
+        let template_only = format!(
+            "pipeline={}\n{}\n---SECTION-INSTRUCTIONS---\n{}",
+            standup.pipeline.as_deref().unwrap_or("generic"),
+            standup.to_markdown_structure(),
+            standup.to_section_instructions()
+        );
+
+        assert_ne!(
+            template_cache_fingerprint(&standup),
+            stable_text_fingerprint(&template_only)
         );
     }
 
