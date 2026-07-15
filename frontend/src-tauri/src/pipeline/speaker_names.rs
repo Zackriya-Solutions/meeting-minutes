@@ -69,6 +69,7 @@ const BLOCKED_EXACT: &[&str] = &[
     "client",
     "boss",
 ];
+const BLOCKED_ABUSIVE_EXACT: &[&str] = &["хер", "чмо", "лох", "падла", "гнида"];
 // Stems are checked only to reject a candidate. Rejected raw strings and quotes are never stored.
 const BLOCKED_STEMS: &[&str] = &[
     "бляд",
@@ -78,10 +79,14 @@ const BLOCKED_STEMS: &[&str] = &[
     "хуй",
     "хуе",
     "хуё",
+    "говн",
+    "дерьм",
+    "сран",
     "ебан",
     "ёбан",
     "ебат",
     "долбо",
+    "ублюд",
     "мудак",
     "мраз",
     "гандон",
@@ -174,11 +179,13 @@ fn validate_candidate(value: &str) -> Result<String, &'static str> {
     {
         return Err("invalid_shape");
     }
+    if BLOCKED_ABUSIVE_EXACT.contains(&normalized.as_str())
+        || BLOCKED_STEMS.iter().any(|stem| normalized.contains(stem))
+    {
+        return Err("abusive_or_profane");
+    }
     if BLOCKED_EXACT.contains(&normalized.as_str()) {
         return Err("role_or_generic_word");
-    }
-    if BLOCKED_STEMS.iter().any(|stem| normalized.contains(stem)) {
-        return Err("abusive_or_profane");
     }
     let mut previous = None;
     let mut repeated = 0;
@@ -526,6 +533,9 @@ mod tests {
             Err("role_or_generic_word")
         );
         assert_eq!(validate_candidate("мудак"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("Говно"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("Дерьмо"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("Хер"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Иван123"), Err("invalid_shape"));
         assert_eq!(validate_candidate("Ааааа"), Err("implausible_shape"));
     }
