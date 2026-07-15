@@ -53,6 +53,16 @@ interface StandupPrebrief {
   recent_decisions: PrebriefFact[];
 }
 
+type PrivateNoteKind = 'planned_update' | 'parking_lot' | 'private_note';
+
+interface StandupPrivateNote {
+  id: number;
+  meeting_id: string;
+  kind: PrivateNoteKind;
+  text: string;
+  status: 'open' | 'done';
+}
+
 interface Draft {
   text: string;
   owner: string;
@@ -108,6 +118,10 @@ export function StandupWorkflowPanel({
   const t = useT();
   const [records, setRecords] = useState<StandupRecordRow[]>([]);
   const [prebrief, setPrebrief] = useState<StandupPrebrief>(EMPTY_PREBRIEF);
+  const [privateNotes, setPrivateNotes] = useState<StandupPrivateNote[]>([]);
+  const [newNoteKind, setNewNoteKind] = useState<PrivateNoteKind>('planned_update');
+  const [newNoteText, setNewNoteText] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -115,12 +129,14 @@ export function StandupWorkflowPanel({
 
   const refresh = useCallback(async () => {
     try {
-      const [nextRecords, nextPrebrief] = await Promise.all([
+      const [nextRecords, nextPrebrief, nextPrivateNotes] = await Promise.all([
         invoke<StandupRecordRow[]>('list_standup_records', { meetingId }),
         invoke<StandupPrebrief>('get_standup_prebrief', { meetingId }),
+        invoke<StandupPrivateNote[]>('list_standup_private_notes', { meetingId }),
       ]);
       setRecords(nextRecords);
       setPrebrief(nextPrebrief);
+      setPrivateNotes(nextPrivateNotes);
     } catch (error) {
       console.error('Failed to load standup workflow:', error);
     } finally {
@@ -191,8 +207,39 @@ export function StandupWorkflowPanel({
     }
   };
 
+  const createPrivateNote = async () => {
+    const text = newNoteText.trim();
+    if (!text) return;
+    setNoteBusy(true);
+    try {
+      await invoke('create_standup_private_note', {
+        input: { meetingId, kind: newNoteKind, text },
+      });
+      setNewNoteText('');
+      await refresh();
+    } catch (error) {
+      console.error('Failed to save private standup note:', error);
+      toast.error(t('Failed to save private note'));
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+
+  const setPrivateNoteStatus = async (noteId: number, status: 'open' | 'done' | 'archived') => {
+    setNoteBusy(true);
+    try {
+      await invoke('set_standup_private_note_status', { noteId, status });
+      await refresh();
+    } catch (error) {
+      console.error('Failed to update private standup note:', error);
+      toast.error(t('Failed to update private note'));
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+
   const hasPrebrief = prebrief.series.length > 0;
-  if (loading || (!hasPrebrief && records.length === 0)) return null;
+  if (loading || (!hasPrebrief && records.length === 0 && privateNotes.length === 0)) return null;
 
   const kindLabel = (kind: string) => {
     const labels: Record<string, string> = {
@@ -269,6 +316,86 @@ export function StandupWorkflowPanel({
           </div>
         </details>
       )}
+
+      <details open={privateNotes.some((note) => note.status === 'open')} className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-[var(--fg)]">
+          <span>{t('Standup preparation and private notes')}</span>
+          <ChevronDown size={16} />
+        </summary>
+        <p className="mt-2 text-xs text-[var(--fg3)]">
+          {t('These notes stay local and are never treated as transcript evidence or sent to the summary model.')}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(['planned_update', 'parking_lot', 'private_note'] as PrivateNoteKind[]).map((kind) => (
+            <Button
+              key={kind}
+              size="sm"
+              variant={newNoteKind === kind ? 'default' : 'outline'}
+              onClick={() => setNewNoteKind(kind)}
+            >
+              {{
+                planned_update: t('Planned update'),
+                parking_lot: t('Parking lot'),
+                private_note: t('Private scratchpad'),
+              }[kind]}
+            </Button>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <Input
+            maxLength={4000}
+            placeholder={{
+              planned_update: t('What do you plan to share?'),
+              parking_lot: t('Topic to discuss after the status round'),
+              private_note: t('A note visible only in this local meeting'),
+            }[newNoteKind]}
+            value={newNoteText}
+            onChange={(event) => setNewNoteText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void createPrivateNote();
+              }
+            }}
+          />
+          <Button disabled={noteBusy || !newNoteText.trim()} onClick={() => void createPrivateNote()}>
+            {t('Add')}
+          </Button>
+        </div>
+        {privateNotes.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {privateNotes.map((note) => (
+              <div key={note.id} className="flex items-start justify-between gap-3 rounded-md border border-[var(--border-subtle)] p-2 text-sm">
+                <div>
+                  <div className="mb-1 text-xs text-[var(--fg3)]">
+                    {{
+                      planned_update: t('Planned update'),
+                      parking_lot: t('Parking lot'),
+                      private_note: t('Private scratchpad'),
+                    }[note.kind]}
+                    {note.status === 'done' && ` · ${t('Done')}`}
+                  </div>
+                  <p className={note.status === 'done' ? 'text-[var(--fg3)] line-through' : 'text-[var(--fg)]'}>{note.text}</p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  {note.status === 'open' ? (
+                    <Button size="sm" variant="ghost" disabled={noteBusy} onClick={() => void setPrivateNoteStatus(note.id, 'done')}>
+                      <Check size={14} /> {t('Done')}
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" disabled={noteBusy} onClick={() => void setPrivateNoteStatus(note.id, 'open')}>
+                      {t('Reopen')}
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" disabled={noteBusy} onClick={() => void setPrivateNoteStatus(note.id, 'archived')}>
+                    <X size={14} />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </details>
 
       {records.length > 0 && (
         <details open={pendingCount > 0} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">

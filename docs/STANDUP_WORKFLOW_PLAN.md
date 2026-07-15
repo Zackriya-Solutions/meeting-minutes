@@ -60,6 +60,11 @@ remain useful. Pending and rejected records never become facts; pending coverage
 - unresolved question list;
 - private personal scratchpad that is never treated as transcript evidence.
 
+The preparation-notes slice implements meeting-local planned updates, parking-lot topics, and a
+private scratchpad. They are stored separately from transcripts and generated records, never sent
+to the summary model, and can be completed, reopened, or archived by the user. This separation is
+intentional: a private thought must not silently become a claim that somebody said during the call.
+
 ## After the standup
 
 ### Primary artifact: Standup V2
