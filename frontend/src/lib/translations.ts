@@ -999,5 +999,9 @@ export const RU: Record<string, string> = {
   "Use full transcript": "Использовать всю расшифровку",
   "Primary meeting window selected": "Для саммари выбрана основная часть встречи",
   "Full transcript selected": "Для саммари выбрана полная расшифровка",
-  "Failed to save meeting content window": "Не удалось сохранить интервал встречи"
+  "Failed to save meeting content window": "Не удалось сохранить интервал встречи",
+  "Fast, general-purpose recognition. Recommended.": "Быстрое универсальное распознавание. Рекомендуется.",
+  "Highest accuracy, best for clear speech. A little slower.": "Максимальная точность, лучше для чёткой речи. Чуть медленнее.",
+  "Boost sensitivity for Bluetooth / quiet microphones": "Повысить чувствительность для Bluetooth / тихих микрофонов",
+  "Detects speech more aggressively for low-quality inputs like AirPods used as a mic (Bluetooth hands-free mode). Turn on if phrases are being skipped. Applies to the next recording.": "Активнее распознаёт речь для низкокачественных источников — например, AirPods в роли микрофона (режим Bluetooth hands-free). Включите, если фразы пропускаются. Применяется со следующей записи."
 };
