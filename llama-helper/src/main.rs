@@ -62,8 +62,68 @@ struct SamplingConfig {
     penalty_last_n: i32,
 }
 
-fn constrained_json_root_completed(output: &str, constrained: bool) -> bool {
-    constrained && serde_json::from_str::<serde_json::Value>(output).is_ok()
+#[derive(Debug, Default)]
+struct ConstrainedJsonTracker {
+    enabled: bool,
+    started: bool,
+    in_string: bool,
+    escaped: bool,
+    depth: usize,
+    scalar_fallback: bool,
+}
+
+impl ConstrainedJsonTracker {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Self::default()
+        }
+    }
+
+    fn push(&mut self, fragment: &str, full_output: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.scalar_fallback {
+            return serde_json::from_str::<serde_json::Value>(full_output).is_ok();
+        }
+        for character in fragment.chars() {
+            if !self.started {
+                if character.is_whitespace() {
+                    continue;
+                }
+                if matches!(character, '{' | '[') {
+                    self.started = true;
+                    self.depth = 1;
+                    continue;
+                }
+                self.scalar_fallback = true;
+                break;
+            }
+            if self.in_string {
+                if self.escaped {
+                    self.escaped = false;
+                } else if character == '\\' {
+                    self.escaped = true;
+                } else if character == '"' {
+                    self.in_string = false;
+                }
+                continue;
+            }
+            match character {
+                '"' => self.in_string = true,
+                '{' | '[' => self.depth += 1,
+                '}' | ']' => {
+                    self.depth = self.depth.saturating_sub(1);
+                    if self.depth == 0 {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.scalar_fallback && serde_json::from_str::<serde_json::Value>(full_output).is_ok()
+    }
 }
 
 fn guard_completed_json_grammar(grammar: String) -> String {
@@ -423,6 +483,7 @@ impl ModelState {
             .unwrap_or_default()
             .as_millis() as u32;
         let constrained_json = json_schema.is_some();
+        let mut constrained_json_tracker = ConstrainedJsonTracker::new(constrained_json);
         let mut samplers = Vec::new();
         if let Some(schema) = json_schema.as_deref() {
             let grammar = guard_completed_json_grammar(
@@ -503,7 +564,7 @@ impl ModelState {
             // The grammar sampler has no valid next token once the root JSON value is
             // complete. Stop before asking llama.cpp to sample again; otherwise its
             // empty grammar stack triggers a native assertion instead of returning EOG.
-            if constrained_json_root_completed(&output, constrained_json) {
+            if constrained_json_tracker.push(&token_text, &output) {
                 eprintln!(
                     "✓ Constrained JSON root completed (generated {} chars)",
                     output.len()
@@ -810,17 +871,14 @@ mod tests {
 
     #[test]
     fn constrained_json_stops_only_after_a_complete_root_value() {
-        assert!(!constrained_json_root_completed(
-            r#"{"value":"unfinished""#,
-            true
-        ));
-        assert!(constrained_json_root_completed(
-            r#" {"value":"complete"} "#,
-            true
-        ));
-        assert!(!constrained_json_root_completed(
-            r#"{"value":"complete"}"#,
-            false
-        ));
+        let mut tracker = ConstrainedJsonTracker::new(true);
+        assert!(!tracker.push(r#" {"nested":{"text":"}"}"#, r#" {"nested":{"text":"}"}"#));
+        assert!(tracker.push("}", r#" {"nested":{"text":"}"}}"#));
+
+        let mut scalar = ConstrainedJsonTracker::new(true);
+        assert!(scalar.push("true", "true"));
+
+        let mut disabled = ConstrainedJsonTracker::new(false);
+        assert!(!disabled.push(r#"{"value":"complete"}"#, r#"{"value":"complete"}"#));
     }
 }
