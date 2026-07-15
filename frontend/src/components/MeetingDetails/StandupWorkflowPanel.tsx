@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -124,6 +124,7 @@ export function StandupWorkflowPanel({
   const [newNoteKind, setNewNoteKind] = useState<PrivateNoteKind>('planned_update');
   const [newNoteText, setNewNoteText] = useState('');
   const [noteBusy, setNoteBusy] = useState(false);
+  const noteBusyRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -210,8 +211,10 @@ export function StandupWorkflowPanel({
   };
 
   const createPrivateNote = async () => {
+    if (noteBusyRef.current) return;
     const text = newNoteText.trim();
     if (!text) return;
+    noteBusyRef.current = true;
     setNoteBusy(true);
     try {
       await invoke('create_standup_private_note', {
@@ -223,11 +226,14 @@ export function StandupWorkflowPanel({
       console.error('Failed to save private standup note:', error);
       toast.error(t('Failed to save private note'));
     } finally {
+      noteBusyRef.current = false;
       setNoteBusy(false);
     }
   };
 
   const setPrivateNoteStatus = async (noteId: number, status: 'open' | 'done' | 'archived') => {
+    if (noteBusyRef.current) return;
+    noteBusyRef.current = true;
     setNoteBusy(true);
     try {
       await invoke('set_standup_private_note_status', { noteId, status });
@@ -236,6 +242,7 @@ export function StandupWorkflowPanel({
       console.error('Failed to update private standup note:', error);
       toast.error(t('Failed to update private note'));
     } finally {
+      noteBusyRef.current = false;
       setNoteBusy(false);
     }
   };
@@ -345,6 +352,7 @@ export function StandupWorkflowPanel({
         </div>
         <div className="mt-2 flex gap-2">
           <Input
+            disabled={noteBusy}
             maxLength={4000}
             placeholder={{
               planned_update: t('What do you plan to share?'),

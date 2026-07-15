@@ -296,26 +296,45 @@ async fn delete_meeting_with_transaction(
         return Ok(false);
     }
 
-    // Delete from related tables in proper order
-    // 1. Delete from transcript_chunks
+    // SQLite foreign-key enforcement is not guaranteed on every existing app
+    // connection, so meeting-scoped data is removed explicitly.
+    sqlx::query("DELETE FROM action_items WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM standup_records WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM standup_private_notes WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM meeting_collections WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    // Delete from the older related tables in proper order.
     sqlx::query("DELETE FROM transcript_chunks WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 2. Delete from summary_processes
     sqlx::query("DELETE FROM summary_processes WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 3. Delete from transcripts
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 4. Finally, delete the meeting
+    // Finally, delete the meeting itself.
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
@@ -386,5 +405,61 @@ mod tests {
             .unwrap());
         assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ").await.is_err());
         assert!(MeetingsRepository::set_diarization_prefs(&pool, "", None, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn deleting_meeting_removes_standup_and_private_workflow_data() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT)",
+            "CREATE TABLE action_items(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE standup_records(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE standup_private_notes(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
+            "CREATE TABLE meeting_collections(meeting_id TEXT, collection_id INTEGER)",
+            "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO meetings VALUES('m1', 'Standup')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for statement in [
+            "INSERT INTO action_items(meeting_id) VALUES('m1')",
+            "INSERT INTO standup_records(meeting_id) VALUES('m1')",
+            "INSERT INTO standup_private_notes(meeting_id, text) VALUES('m1', 'secret')",
+            "INSERT INTO meeting_collections VALUES('m1', 1)",
+            "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
+            "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
+            "INSERT INTO transcripts(meeting_id) VALUES('m1')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+
+        assert!(MeetingsRepository::delete_meeting(&pool, "m1")
+            .await
+            .unwrap());
+        for table in [
+            "meetings",
+            "action_items",
+            "standup_records",
+            "standup_private_notes",
+            "meeting_collections",
+            "transcript_chunks",
+            "summary_processes",
+            "transcripts",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 0, "{table} still contains meeting-scoped data");
+        }
     }
 }
