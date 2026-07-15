@@ -645,7 +645,16 @@ export default function CollectionsPage() {
                         </div>
                       </div>
 
-                      {seriesDigest.meetings_with_accepted_records === 0 ? (
+                      {[
+                        seriesDigest.open_actions,
+                        seriesDigest.done_actions,
+                        seriesDigest.decisions,
+                        seriesDigest.risks,
+                        seriesDigest.updates,
+                        seriesDigest.highlights,
+                        seriesDigest.deep_dives,
+                        seriesDigest.parking_lot,
+                      ].every((items) => items.length === 0) ? (
                         <div className="mt-3 rounded-2xl border border-dashed border-[var(--border-strong)] px-4 py-5 text-sm text-[var(--fg3)]">
                           {t('Review extracted records inside standup meetings to make the series digest trustworthy.')}
                         </div>
