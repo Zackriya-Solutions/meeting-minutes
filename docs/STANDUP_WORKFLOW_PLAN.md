@@ -24,6 +24,15 @@ separate `occurred_at` value and backfills it only from the safely normalized
 `YYYY-MM-DD_HH-MM_...` titles. Unknown source dates remain unknown and fall back to `created_at`;
 filesystem modification time is never silently promoted to meeting truth.
 
+### Boundary with 17:30 project meetings
+
+The first newly imported Gigatool recording is a release/product planning sync, not a standup:
+it sets a release target, changes task and sprint scope, discusses tester bugs, and evaluates
+product hypotheses. It should use the standard meeting pipeline plus collection-level decision,
+action, and hypothesis history. Standup V2 must not absorb every recurring team meeting merely
+because it contains status language. This recording also contains routine profanity, which is
+real-corpus evidence for the abuse filter and confirmation boundary in speaker-name candidates.
+
 The series-digest slice builds its weekly/sprint view deterministically from accepted records.
 It is anchored to the newest meeting in the series rather than today's date, so historical imports
 remain useful. Pending and rejected records never become facts; pending coverage stays visible.
