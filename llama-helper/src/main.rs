@@ -62,6 +62,10 @@ struct SamplingConfig {
     penalty_last_n: i32,
 }
 
+fn constrained_json_root_completed(output: &str, constrained: bool) -> bool {
+    constrained && serde_json::from_str::<serde_json::Value>(output).is_ok()
+}
+
 impl SamplingConfig {
     fn from_request(
         temperature: Option<f32>,
@@ -412,6 +416,7 @@ impl ModelState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u32;
+        let constrained_json = json_schema.is_some();
         let mut samplers = Vec::new();
         if let Some(schema) = json_schema.as_deref() {
             let grammar = llama_cpp_2::json_schema_to_grammar(schema)
@@ -485,6 +490,17 @@ impl ModelState {
             let mut token_text = String::with_capacity(32);
             let _ = decoder.decode_to_string(&output_bytes, &mut token_text, false);
             output.push_str(&token_text);
+
+            // The grammar sampler has no valid next token once the root JSON value is
+            // complete. Stop before asking llama.cpp to sample again; otherwise its
+            // empty grammar stack triggers a native assertion instead of returning EOG.
+            if constrained_json_root_completed(&output, constrained_json) {
+                eprintln!(
+                    "✓ Constrained JSON root completed (generated {} chars)",
+                    output.len()
+                );
+                break;
+            }
 
             // Check for model-specific stop tokens
             let mut should_stop = false;
@@ -762,5 +778,21 @@ mod tests {
         let schema = json_schema.expect("schema should be present");
         let grammar = llama_cpp_2::json_schema_to_grammar(&schema).unwrap();
         assert!(grammar.contains("root ::="));
+    }
+
+    #[test]
+    fn constrained_json_stops_only_after_a_complete_root_value() {
+        assert!(!constrained_json_root_completed(
+            r#"{"value":"unfinished""#,
+            true
+        ));
+        assert!(constrained_json_root_completed(
+            r#" {"value":"complete"} "#,
+            true
+        ));
+        assert!(!constrained_json_root_completed(
+            r#"{"value":"complete"}"#,
+            false
+        ));
     }
 }
