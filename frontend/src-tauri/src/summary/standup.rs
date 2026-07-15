@@ -19,12 +19,12 @@ const STANDUP_JSON_SCHEMA: &str = r##"{
   "type": "object",
   "properties": {
     "schema_version": {"const": "standup_v2"},
-    "action_items": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/action"}},
-    "decisions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/decision"}},
-    "risks_and_blockers": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/risk"}},
-    "participant_updates": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/participant_update"}},
-    "deep_dives": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/deep_dive"}},
-    "unattributed_facts": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/evidenced_text"}},
+    "action_items": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/action"}},
+    "decisions": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/decision"}},
+    "risks_and_blockers": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/risk"}},
+    "participant_updates": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/participant_update"}},
+    "deep_dives": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/deep_dive"}},
+    "unattributed_facts": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
     "overview": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/evidenced_text"}}
   },
   "required": ["schema_version", "action_items", "decisions", "risks_and_blockers", "participant_updates", "deep_dives", "unattributed_facts", "overview"],
@@ -47,9 +47,9 @@ const STANDUP_JSON_SCHEMA: &str = r##"{
       "type": "object",
       "properties": {
         "participant": {"type": ["string", "null"]},
-        "completed_or_recent": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
-        "next": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
-        "blockers": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}}
+        "completed_or_recent": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/evidenced_text"}},
+        "next": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/evidenced_text"}},
+        "blockers": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/evidenced_text"}}
       },
       "required": ["participant", "completed_or_recent", "next", "blockers"],
       "additionalProperties": false
@@ -1309,12 +1309,12 @@ Rules:
 3. Do not invent participants, owners, due dates, decisions, blockers, or outcomes.
 4. A non-null `participant` is allowed only when the transcript line has that exact speaker prefix. Do not infer a name from a mention, direct address, role, or insult. Use `participant: null` for a clear personal status/plan when the speaker identity is unavailable. Owner/due date is null unless explicitly supported.
 5. Separate the status round from technical deep dives. A long discussion does not become a participant update merely because it happened during a standup.
-6. Keep a clear completed/next/blocker status in `participant_updates` even when `participant` is null. Use `unattributed_facts` only for useful non-status context with no safe attribution.
-7. Before writing JSON, scan every timestamped line for explicit commitments: first-person future/commitment (for example “I will”, “I’ll check”, “я сделаю”, “я напишу”, “я буду”, “я проверю”), an accepted assignment, or an agreed “we need to”. Include each distinct commitment as its own action with the commitment line as evidence; do not stop after the first one and never combine different timestamps into one synthetic task.
-8. A question, suggestion, or tentative option is not a decision until the transcript contains explicit agreement or a final choice.
+6. Put only first-person status-round updates into `participant_updates`, even when `participant` is null. Consolidate the same speaker and category into one concise item when possible. Do not copy technical discussion details that already belong to an action, decision, risk, or deep dive. `unattributed_facts` is exceptional: include only context essential to understand an included operational record when no safer section fits. Omit dates, names, routine observations, and discussion trivia.
+7. Before writing JSON, scan for explicit future commitments: a first-person promise (for example “I will”, “I’ll check”, “я сделаю”, “я напишу”, “я проверю”), an accepted assignment, or an agreed “we need to” with concrete work. A bare infinitive, question, suggestion, reported past action, hypothetical option, or statement that work merely exists is not an action. Include each distinct supported commitment once and never split one commitment into several fragments.
+8. A question, suggestion, or tentative option is not a decision until the transcript contains explicit agreement or a final choice. A risk/blocker must be a current impediment with explicit impact or an explicitly stated material risk; omit resolved issues, missing information, routine cleanup, and speculative concerns.
 9. Add a `deep_dive` only when the discussion has an explicit outcome or is explicitly parked; omit topic-only discussion. `overview` is optional, limited to one non-duplicating fact, and must be serialized last.
 10. Prefer omission to repetition: capture only final status, explicit commitments, decisions, blockers, and concrete deep-dive outcomes. Put each fact in one most-specific section only.
-11. Keep the whole result below 60 records: at most 1 overview fact; 3 items per participant category; 10 decisions; 10 actions; 10 risks; 5 deep dives; and 10 unattributed facts.
+11. Keep the whole result below 35 records: at most 1 overview fact; 2 items per participant category; 6 decisions; 8 actions; 6 risks; 3 deep dives; and 3 exceptional unattributed facts. Empty arrays are better than low-value filler.
 12. Serialize fields in the exact order shown, finish all atomic arrays before `overview`, and close the JSON object before ending.
 13. Return minified one-line JSON with no Markdown, commentary, or extra whitespace."#
 }
@@ -1899,8 +1899,10 @@ mod tests {
             extraction_retry_user_prompt("[00:01] текст", "Russian", "Команда Альфа");
         assert!(retry_prompt.contains("RETRY AFTER INVALID JSON"));
         assert!(retry_prompt.contains("<transcript_chunk>"));
-        assert!(extraction_system_prompt().contains("below 60 records"));
+        assert!(extraction_system_prompt().contains("below 35 records"));
         assert!(extraction_system_prompt().contains("one most-specific section"));
+        assert!(extraction_system_prompt().contains("bare infinitive"));
+        assert!(extraction_system_prompt().contains("Empty arrays are better"));
 
         let schema: serde_json::Value = serde_json::from_str(STANDUP_JSON_SCHEMA).unwrap();
         let retry_schema: serde_json::Value =
@@ -1911,6 +1913,8 @@ mod tests {
             STANDUP_SCHEMA_VERSION
         );
         assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"]["action_items"]["maxItems"], 8);
+        assert_eq!(schema["properties"]["unattributed_facts"]["maxItems"], 3);
         assert_eq!(schema["$defs"]["evidence"]["type"], "string");
         assert_eq!(
             schema["$defs"]["evidence"]["pattern"],
