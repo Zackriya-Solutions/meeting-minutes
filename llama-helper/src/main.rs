@@ -36,6 +36,7 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        json_schema: Option<String>,
     },
     Ping,
     Shutdown,
@@ -351,6 +352,7 @@ impl ModelState {
         max_tokens: i32,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
+        json_schema: Option<String>,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
@@ -410,41 +412,43 @@ impl ModelState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u32;
-        let sampler = if sampling.temperature <= 0.0 {
+        let mut samplers = Vec::new();
+        if let Some(schema) = json_schema.as_deref() {
+            let grammar = llama_cpp_2::json_schema_to_grammar(schema)
+                .context("Failed to convert JSON schema to grammar")?;
+            samplers.push(
+                LlamaSampler::grammar(model, &grammar, "root")
+                    .context("Failed to initialize JSON grammar sampler")?,
+            );
+        }
+        if sampling.temperature <= 0.0 {
             if sampling.uses_penalties() {
-                LlamaSampler::chain_simple([
-                    LlamaSampler::penalties(
-                        sampling.penalty_last_n,
-                        sampling.repeat_penalty,
-                        sampling.frequency_penalty,
-                        sampling.presence_penalty,
-                    ),
-                    LlamaSampler::greedy(),
-                ])
-            } else {
-                LlamaSampler::chain_simple([LlamaSampler::greedy()])
-            }
-        } else if sampling.uses_penalties() {
-            LlamaSampler::chain_simple([
-                LlamaSampler::penalties(
+                samplers.push(LlamaSampler::penalties(
                     sampling.penalty_last_n,
                     sampling.repeat_penalty,
                     sampling.frequency_penalty,
                     sampling.presence_penalty,
-                ),
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
+                ));
+            }
+            samplers.push(LlamaSampler::greedy());
+        } else if sampling.uses_penalties() {
+            samplers.push(LlamaSampler::penalties(
+                sampling.penalty_last_n,
+                sampling.repeat_penalty,
+                sampling.frequency_penalty,
+                sampling.presence_penalty,
+            ));
+            samplers.push(LlamaSampler::top_k(sampling.top_k));
+            samplers.push(LlamaSampler::top_p(sampling.top_p, 1));
+            samplers.push(LlamaSampler::temp(sampling.temperature));
+            samplers.push(LlamaSampler::dist(seed));
         } else {
-            LlamaSampler::chain_simple([
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
-        };
+            samplers.push(LlamaSampler::top_k(sampling.top_k));
+            samplers.push(LlamaSampler::top_p(sampling.top_p, 1));
+            samplers.push(LlamaSampler::temp(sampling.temperature));
+            samplers.push(LlamaSampler::dist(seed));
+        }
+        let sampler = LlamaSampler::chain_simple(samplers);
         let mut sampler = pin!(sampler);
 
         loop {
@@ -600,6 +604,7 @@ fn main() -> Result<()> {
                         repeat_penalty,
                         penalty_last_n,
                         stop_tokens,
+                        json_schema,
                     }) => {
                         let max_tokens = max_tokens.unwrap_or(512);
                         let context_size = context_size.unwrap_or(2048);
@@ -628,12 +633,8 @@ fn main() -> Result<()> {
                         }
 
                         // Generate response with sampling parameters
-                        match state.generate(
-                            prompt,
-                            max_tokens,
-                            sampling,
-                            stop_tokens,
-                        ) {
+                        match state.generate(prompt, max_tokens, sampling, stop_tokens, json_schema)
+                        {
                             Ok(text) => {
                                 send_response(&Response::Response { text, error: None })?;
                             }
@@ -679,7 +680,8 @@ mod tests {
 
     #[test]
     fn generate_request_defaults_penalties_when_omitted() {
-        let json = r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
+        let json =
+            r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
         let request: Request = serde_json::from_str(json).unwrap();
         let Request::Generate {
             temperature,
@@ -690,7 +692,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -724,7 +727,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -746,5 +750,17 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.05);
         assert_eq!(sampling.penalty_last_n, 256);
         assert!(sampling.uses_penalties());
+    }
+
+    #[test]
+    fn generate_request_accepts_convertible_json_schema() {
+        let json = r#"{"type":"generate","prompt":"extract","json_schema":"{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"additionalProperties\":false}"}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Generate { json_schema, .. } = request else {
+            panic!("expected generate request");
+        };
+        let schema = json_schema.expect("schema should be present");
+        let grammar = llama_cpp_2::json_schema_to_grammar(&schema).unwrap();
+        assert!(grammar.contains("root ::="));
     }
 }
