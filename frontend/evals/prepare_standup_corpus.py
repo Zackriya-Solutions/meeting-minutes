@@ -102,9 +102,9 @@ def generation_identity(result: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
-def reviewed_records(
+def reviewed_references(
     db: sqlite3.Connection, meeting_id: str
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+) -> list[dict[str, Any]] | None:
     if not table_exists(db, "standup_records"):
         return None
     stored = db.execute(
@@ -115,24 +115,20 @@ def reviewed_records(
     if not stored:
         return None
     references: list[dict[str, Any]] = []
-    hypotheses: list[dict[str, Any]] = []
     for row in stored:
+        if row[4] != "accepted":
+            continue
         payload = json.loads(row[3] or row[2])
-        reference_id = f"review-{row[0]}" if row[4] == "accepted" else None
-        hypothesis = record_shape(row[1], payload, reference_id)
-        hypothesis["review_status"] = row[4]
-        hypotheses.append(hypothesis)
-        if reference_id:
-            references.append(
-                {
-                    "id": reference_id,
-                    "kind": row[1],
-                    "text": primary_text(row[1], payload),
-                    "owner": payload.get("owner"),
-                    "due_date": payload.get("due_date"),
-                }
-            )
-    return references, hypotheses
+        references.append(
+            {
+                "id": f"review-{row[0]}",
+                "kind": row[1],
+                "text": primary_text(row[1], payload),
+                "owner": payload.get("owner"),
+                "due_date": payload.get("due_date"),
+            }
+        )
+    return references
 
 
 def candidate_score(title: str, occurred_at: str, transcript: str, duration_seconds: float) -> tuple[int, list[str]]:
@@ -268,12 +264,10 @@ def main() -> None:
         except json.JSONDecodeError:
             pass
         provider, model, prompt_version = generation_identity(result)
-        reviewed = reviewed_records(db, meeting["id"])
-        if reviewed:
-            references, hypotheses = reviewed
-        else:
-            references = []
-            hypotheses = flatten_standup(result.get("standup_v2") or {})
+        references = reviewed_references(db, meeting["id"]) or []
+        # Evaluate the current raw model result. Reviewed edits are reference-label seeds only;
+        # treating them as hypotheses would leak human corrections into provider quality.
+        hypotheses = flatten_standup(result.get("standup_v2") or {})
 
         sample = {
             "id": f"meeting-{meeting['id']}",

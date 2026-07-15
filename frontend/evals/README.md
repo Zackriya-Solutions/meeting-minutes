@@ -82,10 +82,12 @@ reference set and keep the series split unchanged; the report includes per-provi
 and p95 latency alongside the shared record-quality metrics. The release gate requires at
 least two dev and three held-out test meetings.
 
-If the review workflow from the Standup V2 feature is present in the database, accepted and
-rejected records seed the annotation automatically. That review cannot reveal facts omitted
-by the model, so a human must still add missed reference records before changing
-`review_state` and using the sample as release evidence.
+If the review workflow from the Standup V2 feature is present in the database, accepted records
+seed reference labels automatically. Rejected records never become references. Hypotheses always
+come from the current raw Standup V2 result, never from reviewed or edited payloads, so human
+corrections cannot inflate provider quality. After every new provider run, a human must relink raw
+hypotheses to references and add facts omitted by the model before changing `review_state` and
+using the sample as release evidence.
 
 Run the focused gate while iterating on providers or prompts:
 
