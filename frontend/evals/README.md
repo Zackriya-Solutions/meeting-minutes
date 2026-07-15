@@ -59,6 +59,11 @@ python3 evals/prepare_standup_corpus.py \
   --meeting-id meeting-second
 ```
 
+The exporter refuses to replace an existing output by default so a rerun cannot silently
+destroy reviewed references. Use a new path for a frozen set. `--overwrite` is available only
+for intentionally disposable drafts. Output is written atomically with owner-only (`0600`)
+permissions because it contains private transcript text.
+
 Manually set each sample's `meeting_type` to one of the top-level
 `meeting_type_options`. `UNASSIGNED` deliberately counts as a protocol error. This makes
 pure status rounds, status-plus-deep-dive meetings, planning/syncs, one-to-ones, and general

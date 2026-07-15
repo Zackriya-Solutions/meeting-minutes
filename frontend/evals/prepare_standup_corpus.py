@@ -202,7 +202,18 @@ def main() -> None:
         default=[],
         help="Exact meeting ID to export; repeat to freeze a reviewed set in this order",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing output file (intended for disposable drafts only)",
+    )
     args = parser.parse_args()
+
+    if args.output.exists() and not args.overwrite:
+        parser.error(
+            f"Output already exists: {args.output}. Refusing to overwrite private labels; "
+            "choose another path or use --overwrite for a disposable draft."
+        )
 
     db = sqlite3.connect(f"file:{args.db.resolve()}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
@@ -297,7 +308,14 @@ def main() -> None:
         "standup": samples,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary = args.output.with_suffix(f"{args.output.suffix}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.chmod(0o600)
+    temporary.replace(args.output)
+    args.output.chmod(0o600)
     assigned = sum(row["series_id"] != "UNASSIGNED" for row in samples)
     generated = sum(row["success"] for row in samples)
     print(f"Exported {len(samples)} candidates to {args.output}")
