@@ -19,7 +19,9 @@ The suggestion never deletes or edits audio or transcript rows. It is only appli
 
 ## Evidence and follow-up
 
-The need was found while reviewing the imported corpus: a product/release sync had its primary conversation in roughly the first twenty minutes, followed by a gap longer than twenty minutes and a few isolated late fragments. The feature should be evaluated across the full imported corpus before any thresholds are relaxed.
+The need was found while reviewing the imported corpus: a product/release sync had its primary conversation in roughly the first twenty minutes, followed by a gap longer than twenty minutes and a few isolated late fragments.
+
+An interim check over 43 imported recordings produced three suggestions. Manual transcript review confirmed that all three excluded only sparse post-meeting/open-microphone fragments. A separate multi-session recording correctly produced no suggestion because its later conversation exceeded the sparse-tail limits. This is encouraging precision evidence, not a final benchmark; the check must be repeated after all 50 imports and future held-out recordings before thresholds are relaxed.
 
 Useful next steps:
 
