@@ -524,8 +524,41 @@ pub fn run() {
             // Load the GigaAM transcription model in the background if downloaded.
             {
                 let app_handle = _app.handle().clone();
+                let batch_folder = std::env::var_os("MEETILY_BATCH_IMPORT_FOLDER")
+                    .map(std::path::PathBuf::from);
+                let batch_provider = std::env::var("MEETILY_BATCH_IMPORT_PROVIDER").ok();
+                let batch_model = std::env::var("MEETILY_BATCH_IMPORT_MODEL").ok();
+                let batch_language = std::env::var("MEETILY_BATCH_IMPORT_LANGUAGE").ok();
+                let batch_report = std::env::var_os("MEETILY_BATCH_IMPORT_REPORT")
+                    .map(std::path::PathBuf::from);
                 tauri::async_runtime::spawn(async move {
                     gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
+                    if let Some(folder) = batch_folder {
+                        log::info!(
+                            "Starting configured resumable batch import from {}",
+                            folder.display()
+                        );
+                        match audio::import::start_batch_import_folder(
+                            app_handle,
+                            folder,
+                            batch_language,
+                            batch_model,
+                            batch_provider,
+                            batch_report,
+                        )
+                        .await
+                        {
+                            Ok(result) => log::info!(
+                                "Configured batch import complete: {} imported, {} skipped, {} failed",
+                                result.imported.len(),
+                                result.skipped.len(),
+                                result.failed.len()
+                            ),
+                            Err(error) => {
+                                log::error!("Configured batch import failed: {}", error)
+                            }
+                        }
+                    }
                 });
             }
 
@@ -807,6 +840,7 @@ pub fn run() {
             audio::import::validate_audio_file_command,
             audio::import::start_import_audio_command,
             audio::import::start_batch_import_audio_command,
+            audio::import::start_batch_import_folder_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
         ])

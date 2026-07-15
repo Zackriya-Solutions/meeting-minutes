@@ -10,12 +10,14 @@ use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
 use anyhow::{anyhow, Result};
+use futures_util::FutureExt;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Read};
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -232,6 +234,62 @@ fn collect_audio_files(root: &Path) -> Result<Vec<PathBuf>> {
 
     files.sort();
     Ok(files)
+}
+
+fn batch_items_from_folder(root: &Path) -> Result<Vec<BatchImportItem>> {
+    let files = collect_audio_files(root)?;
+    if files.is_empty() {
+        return Err(anyhow!(
+            "No supported audio files found in {}",
+            root.display()
+        ));
+    }
+
+    Ok(files
+        .into_iter()
+        .map(|path| {
+            let stem = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Imported meeting");
+            let title = strip_hash_suffix(stem);
+            BatchImportItem {
+                source_path: path.to_string_lossy().to_string(),
+                title,
+            }
+        })
+        .collect())
+}
+
+fn strip_hash_suffix(stem: &str) -> String {
+    let Some((title, suffix)) = stem.rsplit_once("__") else {
+        return stem.to_string();
+    };
+    if suffix.len() == 8 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        title.to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    "unknown panic payload".to_string()
+}
+
+fn write_batch_report(path: &Path, result: &BatchImportResult) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp_path = path.with_extension("json.tmp");
+    std::fs::write(&temp_path, serde_json::to_vec_pretty(result)?)?;
+    std::fs::rename(&temp_path, path)?;
+    Ok(())
 }
 
 fn collect_imported_hashes(recordings_folder: &Path) -> HashSet<String> {
@@ -519,7 +577,7 @@ pub async fn start_batch_import<R: Runtime>(
         }
 
         emit_batch_progress(&app, index + 1, &item, &result, "importing");
-        match run_import(
+        let import_result = AssertUnwindSafe(run_import(
             app.clone(),
             item.source_path.clone(),
             item.title.clone(),
@@ -527,9 +585,18 @@ pub async fn start_batch_import<R: Runtime>(
             model.clone(),
             provider.clone(),
             Some(source_sha256.clone()),
-        )
+        ))
+        .catch_unwind()
         .await
-        {
+        .unwrap_or_else(|payload| {
+            Err(anyhow!(
+                "Importer panicked while processing '{}': {}",
+                item.source_path,
+                panic_message(payload)
+            ))
+        });
+
+        match import_result {
             Ok(imported) => {
                 imported_hashes.insert(source_sha256);
                 result.imported.push(imported);
@@ -553,6 +620,27 @@ pub async fn start_batch_import<R: Runtime>(
 
     super::common::unload_engine_after_batch(provider.as_deref() == Some("parakeet")).await;
     let _ = app.emit("batch-import-complete", &result);
+    Ok(result)
+}
+
+/// Import every supported audio file under `folder` without opening a file picker.
+/// Existing source hashes are skipped, so the operation is safe to resume.
+pub async fn start_batch_import_folder<R: Runtime>(
+    app: AppHandle<R>,
+    folder: PathBuf,
+    language: Option<String>,
+    model: Option<String>,
+    provider: Option<String>,
+    report_path: Option<PathBuf>,
+) -> Result<BatchImportResult> {
+    let items = tokio::task::spawn_blocking(move || batch_items_from_folder(&folder))
+        .await
+        .map_err(|error| anyhow!("Folder scan task join error: {}", error))??;
+    let result = start_batch_import(app, items, language, model, provider).await?;
+    if let Some(path) = report_path {
+        write_batch_report(&path, &result)?;
+        info!("Wrote batch import report to {}", path.display());
+    }
     Ok(result)
 }
 
@@ -1449,6 +1537,58 @@ pub async fn start_batch_import_audio_command<R: Runtime>(
     })
 }
 
+/// Start a resumable batch import from a folder path supplied by automation or a
+/// trusted local caller. This is the picker-free counterpart to the folder UI.
+#[tauri::command]
+pub async fn start_batch_import_folder_command<R: Runtime>(
+    app: AppHandle<R>,
+    folder_path: String,
+    language: Option<String>,
+    model: Option<String>,
+    provider: Option<String>,
+    report_path: Option<String>,
+) -> Result<ImportStarted, String> {
+    if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
+        return Err("Import already in progress".to_string());
+    }
+    let folder = PathBuf::from(&folder_path);
+    if !folder.is_dir() {
+        return Err(format!(
+            "Import folder does not exist: {}",
+            folder.display()
+        ));
+    }
+    let report_path = report_path.map(PathBuf::from);
+
+    tauri::async_runtime::spawn(async move {
+        match start_batch_import_folder(app.clone(), folder, language, model, provider, report_path)
+            .await
+        {
+            Ok(result) => {
+                info!(
+                    "Folder batch import complete: {} imported, {} skipped, {} failed",
+                    result.imported.len(),
+                    result.skipped.len(),
+                    result.failed.len()
+                );
+            }
+            Err(error) => {
+                error!("Folder batch import failed: {}", error);
+                let _ = app.emit(
+                    "batch-import-error",
+                    ImportError {
+                        error: error.to_string(),
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(ImportStarted {
+        message: "Folder batch import started".to_string(),
+    })
+}
+
 /// Cancel ongoing import
 #[tauri::command]
 pub async fn cancel_import_command() -> Result<(), String> {
@@ -1475,6 +1615,34 @@ mod tests {
         assert!(AUDIO_EXTENSIONS.contains(&"wav"));
         assert!(AUDIO_EXTENSIONS.contains(&"mp3"));
         assert!(!AUDIO_EXTENSIONS.contains(&"txt"));
+    }
+
+    #[test]
+    fn test_strip_hash_suffix_only_removes_corpus_hash() {
+        assert_eq!(
+            strip_hash_suffix("2026-07-15_11-00_standup__deadbeef"),
+            "2026-07-15_11-00_standup"
+        );
+        assert_eq!(
+            strip_hash_suffix("standup__not-a-hash"),
+            "standup__not-a-hash"
+        );
+        assert_eq!(strip_hash_suffix("standup"), "standup");
+    }
+
+    #[test]
+    fn test_batch_items_from_folder_is_recursive_and_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(dir.path().join("b__deadbeef.mp3"), b"audio").unwrap();
+        std::fs::write(nested.join("a.wav"), b"audio").unwrap();
+        std::fs::write(dir.path().join("ignored.txt"), b"text").unwrap();
+
+        let items = batch_items_from_folder(dir.path()).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].title, "b");
+        assert_eq!(items[1].title, "a");
     }
 
     #[test]
