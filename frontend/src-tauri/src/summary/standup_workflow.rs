@@ -2,6 +2,7 @@
 
 use crate::state::AppState;
 use crate::summary::standup::{parse_timestamp_seconds, StandupReport};
+use crate::utils::format_timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
@@ -750,30 +751,38 @@ fn markdown_evidence(item: &SeriesDigestItem) -> String {
         return format!("— {}", item.source_meeting_title);
     };
     let seconds = start_ms.max(0) / 1_000;
-    let label = format!("{}:{:02}", seconds / 60, seconds % 60);
+    let label = format_timestamp(seconds as f64);
     format!(
         "— [{label}](/meeting-details?id={}&t={seconds}) · {}",
         item.source_meeting_id, item.source_meeting_title
     )
 }
 
-fn digest_category_label(category: Option<&str>) -> Option<&'static str> {
-    match category {
-        Some("completed_or_recent") => Some("completed"),
-        Some("next") => Some("next"),
-        Some("blockers") => Some("blocker"),
+fn digest_category_label(category: Option<&str>, russian: bool) -> Option<&'static str> {
+    match (category, russian) {
+        (Some("completed_or_recent"), true) => Some("сделано"),
+        (Some("next"), true) => Some("дальше"),
+        (Some("blockers"), true) => Some("блокер"),
+        (Some("completed_or_recent"), false) => Some("completed"),
+        (Some("next"), false) => Some("next"),
+        (Some("blockers"), false) => Some("blocker"),
         _ => None,
     }
 }
 
-fn render_digest_section(markdown: &mut String, title: &str, items: &[SeriesDigestItem]) {
+fn render_digest_section(
+    markdown: &mut String,
+    title: &str,
+    items: &[SeriesDigestItem],
+    russian: bool,
+) {
     markdown.push_str(&format!("## {title}\n\n"));
     if items.is_empty() {
         markdown.push_str("—\n\n");
         return;
     }
     for item in items {
-        let category = digest_category_label(item.category.as_deref())
+        let category = digest_category_label(item.category.as_deref(), russian)
             .map(|value| format!("**[{value}]** "))
             .unwrap_or_default();
         let participant = item
@@ -784,12 +793,22 @@ fn render_digest_section(markdown: &mut String, title: &str, items: &[SeriesDige
         let owner = item
             .owner
             .as_deref()
-            .map(|value| format!(" · owner: {value}"))
+            .map(|value| {
+                let label = if russian {
+                    "исполнитель"
+                } else {
+                    "owner"
+                };
+                format!(" · {label}: {value}")
+            })
             .unwrap_or_default();
         let due = item
             .due_date
             .as_deref()
-            .map(|value| format!(" · due: {value}"))
+            .map(|value| {
+                let label = if russian { "срок" } else { "due" };
+                format!(" · {label}: {value}")
+            })
             .unwrap_or_default();
         markdown.push_str(&format!(
             "- {category}{participant}{}{}{} {}\n",
@@ -821,7 +840,7 @@ fn render_series_digest_markdown(
                 "Решения",
                 "Риски и блокеры",
                 "Технические разборы",
-                "Parking lot",
+                "Отложенные темы",
             )
         } else {
             (
@@ -838,20 +857,33 @@ fn render_series_digest_markdown(
             )
         };
     let mut markdown = format!("# {title}: {}\n\n", digest.series_name);
+    let (meetings_label, accepted_label, pending_label) = if russian {
+        (
+            "Встречи",
+            "Встречи с принятыми записями",
+            "Ожидают проверки",
+        )
+    } else {
+        (
+            "Meetings",
+            "Meetings with accepted records",
+            "Pending review",
+        )
+    };
     markdown.push_str(&format!(
-        "## {coverage}\n\n- Meetings: {}\n- Meetings with accepted records: {}\n- Pending review: {}\n\n",
+        "## {coverage}\n\n- {meetings_label}: {}\n- {accepted_label}: {}\n- {pending_label}: {}\n\n",
         digest.meeting_count,
         digest.meetings_with_accepted_records,
         digest.pending_review_count
     ));
-    render_digest_section(&mut markdown, highlights, &digest.highlights);
-    render_digest_section(&mut markdown, updates, &digest.updates);
-    render_digest_section(&mut markdown, open, &digest.open_actions);
-    render_digest_section(&mut markdown, done, &digest.done_actions);
-    render_digest_section(&mut markdown, decisions, &digest.decisions);
-    render_digest_section(&mut markdown, risks, &digest.risks);
-    render_digest_section(&mut markdown, deep_dives, &digest.deep_dives);
-    render_digest_section(&mut markdown, parking, &digest.parking_lot);
+    render_digest_section(&mut markdown, highlights, &digest.highlights, russian);
+    render_digest_section(&mut markdown, updates, &digest.updates, russian);
+    render_digest_section(&mut markdown, open, &digest.open_actions, russian);
+    render_digest_section(&mut markdown, done, &digest.done_actions, russian);
+    render_digest_section(&mut markdown, decisions, &digest.decisions, russian);
+    render_digest_section(&mut markdown, risks, &digest.risks, russian);
+    render_digest_section(&mut markdown, deep_dives, &digest.deep_dives, russian);
+    render_digest_section(&mut markdown, parking, &digest.parking_lot, russian);
     markdown
 }
 
@@ -1326,17 +1358,27 @@ mod tests {
         assert!(digest
             .markdown
             .contains("/meeting-details?id=accepted&t=62"));
+        assert!(digest.markdown.contains("- Встречи: 2"));
+        assert!(digest.markdown.contains("Ожидают проверки: 3"));
+        assert!(!digest.markdown.contains("Pending review:"));
         assert!(!digest.markdown.contains("Standup old"));
     }
 
     #[test]
     fn digest_categories_preserve_update_semantics() {
         assert_eq!(
-            digest_category_label(Some("completed_or_recent")),
+            digest_category_label(Some("completed_or_recent"), false),
             Some("completed")
         );
-        assert_eq!(digest_category_label(Some("next")), Some("next"));
-        assert_eq!(digest_category_label(Some("blockers")), Some("blocker"));
-        assert_eq!(digest_category_label(None), None);
+        assert_eq!(digest_category_label(Some("next"), false), Some("next"));
+        assert_eq!(
+            digest_category_label(Some("blockers"), false),
+            Some("blocker")
+        );
+        assert_eq!(
+            digest_category_label(Some("blockers"), true),
+            Some("блокер")
+        );
+        assert_eq!(digest_category_label(None, true), None);
     }
 }
