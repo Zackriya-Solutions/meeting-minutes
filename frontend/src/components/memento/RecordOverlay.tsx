@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from './Button';
 import { Icon } from './Icon';
@@ -13,6 +13,15 @@ import {
   type RecordingDiarizationPrefs,
 } from '@/lib/diarizationPrefs';
 import { useT } from '@/lib/i18n';
+import {
+  addStandupLiveMarker,
+  changeCompletedStandupUpdates,
+  getStandupLiveState,
+  setStandupLiveEnabled,
+  setStandupTargetMinutes,
+  type StandupLiveMarkerKind,
+  type StandupLiveState,
+} from '@/lib/standupLiveState';
 
 interface RecordOverlayProps {
   title?: string;
@@ -36,6 +45,10 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
   const { activeDuration, isPaused } = useRecordingState();
   const [marks, setMarks] = useState<number[]>(() => getMarkedMoments(meetingId));
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [standup, setStandup] = useState<StandupLiveState>(() =>
+    getStandupLiveState(meetingId)
+  );
+  const timeboxWarnedRef = useRef(false);
   const [diarization, setDiarization] = useState<RecordingDiarizationPrefs>(() =>
     getDiarizationPrefs(meetingId)
   );
@@ -47,7 +60,23 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
   useEffect(() => {
     setMarks(getMarkedMoments(meetingId));
     setDiarization(getDiarizationPrefs(meetingId));
+    setStandup(getStandupLiveState(meetingId));
+    timeboxWarnedRef.current = false;
   }, [meetingId]);
+
+  useEffect(() => {
+    if (
+      standup.enabled &&
+      elapsed >= standup.targetMinutes * 60 &&
+      !timeboxWarnedRef.current
+    ) {
+      timeboxWarnedRef.current = true;
+      toast.warning(t('Standup time-box reached'), {
+        description: t('Finish the status round or move deep dives to the parking lot.'),
+        duration: 8000,
+      });
+    }
+  }, [elapsed, standup.enabled, standup.targetMinutes, t]);
 
   // Speaker-ID choices are written through to localStorage on every change so
   // they survive navigation/remount and are picked up by the save flow
@@ -113,6 +142,32 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
     }
   }, [isPaused, pauseBusy, t]);
 
+  const toggleStandup = useCallback(() => {
+    setStandup(setStandupLiveEnabled(meetingId, !standup.enabled));
+    timeboxWarnedRef.current = false;
+  }, [meetingId, standup.enabled]);
+
+  const cycleTarget = useCallback(() => {
+    const targets = [10, 15, 20, 30];
+    const current = targets.indexOf(standup.targetMinutes);
+    const next = targets[(current + 1) % targets.length];
+    setStandup(setStandupTargetMinutes(meetingId, next));
+    timeboxWarnedRef.current = false;
+  }, [meetingId, standup.targetMinutes]);
+
+  const changeUpdates = useCallback((delta: number) => {
+    setStandup(changeCompletedStandupUpdates(meetingId, delta));
+  }, [meetingId]);
+
+  const addLiveMarker = useCallback((kind: StandupLiveMarkerKind) => {
+    setStandup(addStandupLiveMarker(meetingId, kind, elapsed));
+    setMarks(addMarkedMoment(meetingId, elapsed));
+    toast.success(kind === 'parking_lot' ? t('Added to parking lot') : t('Question marked'), {
+      description: formatTime(elapsed),
+      duration: 2000,
+    });
+  }, [elapsed, meetingId, t]);
+
   return (
     <section className="mm-record-overlay" aria-label={t('Meeting recording')}>
       <header className="mm-record-header">
@@ -176,6 +231,84 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
           </div>
         )}
       </div>
+      <div className="mm-record-meta">
+        <button
+          type="button"
+          onClick={toggleStandup}
+          disabled={!meetingId}
+          aria-pressed={standup.enabled}
+          title={t('Enable manual standup facilitation for this recording')}
+          className="mm-press flex flex-none items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-40"
+          style={
+            standup.enabled
+              ? { borderColor: 'var(--gold-border)', color: 'var(--gold)' }
+              : { borderColor: 'var(--border-strong)', color: 'var(--fg3)' }
+          }
+        >
+          <Icon name="check-circle" size={14} />
+          <span>{t('Standup mode')}</span>
+        </button>
+        {standup.enabled && (
+          <button
+            type="button"
+            onClick={cycleTarget}
+            className="mm-press ml-auto rounded-full border border-[var(--border-strong)] px-2.5 py-1 text-xs text-[var(--fg2)]"
+            title={t('Change standup time-box')}
+          >
+            {t('Target')} {standup.targetMinutes}:00
+          </button>
+        )}
+      </div>
+      {standup.enabled && (
+        <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-2.5">
+          <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--border-subtle)]">
+            <div
+              className="h-full rounded-full bg-[var(--gold)] transition-[width]"
+              style={{ width: `${Math.min(100, (elapsed / (standup.targetMinutes * 60)) * 100)}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-[var(--fg2)]">
+            <span>{t('Updates covered')}: {standup.completedUpdates}</span>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={standup.completedUpdates === 0}
+                onClick={() => changeUpdates(-1)}
+                aria-label={t('Decrease updates covered')}
+                className="mm-press flex h-6 w-6 items-center justify-center rounded border border-[var(--border-strong)] disabled:opacity-40"
+              >
+                <Icon name="minus" size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => changeUpdates(1)}
+                aria-label={t('Mark next update covered')}
+                className="mm-press flex h-6 w-6 items-center justify-center rounded border border-[var(--gold-border)] text-[var(--gold)]"
+              >
+                <Icon name="plus" size={12} />
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Icon name="pin" size={14} />}
+              onClick={() => addLiveMarker('parking_lot')}
+            >
+              {t('Park topic')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Icon name="alert" size={14} />}
+              onClick={() => addLiveMarker('question')}
+            >
+              {t('Mark question')}
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="mm-record-actions">
         <Button
           variant="secondary"

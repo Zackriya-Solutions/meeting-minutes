@@ -65,6 +65,12 @@ private scratchpad. They are stored separately from transcripts and generated re
 to the summary model, and can be completed, reopened, or archived by the user. This separation is
 intentional: a private thought must not silently become a claim that somebody said during the call.
 
+The live-facilitation slice is explicitly enabled per recording. It adds a 10/15/20/30-minute
+time-box, a manual count of completed status updates, and timestamped parking-lot/question markers.
+The state stays local, follows the temporary recording ID to the saved meeting, and is shown next
+to the transcript afterwards. It is not model input, transcript evidence, participant scoring, or
+automatic performance analysis.
+
 ## After the standup
 
 ### Primary artifact: Standup V2
