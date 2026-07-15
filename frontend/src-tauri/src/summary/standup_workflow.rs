@@ -637,19 +637,28 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
         .collect();
 
     let fact_rows: Vec<(i64, String, String, String, String)> = sqlx::query_as(
-        "SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload), \
-                source.id, source.title \
-         FROM standup_records sr \
-         JOIN meetings source ON source.id = sr.meeting_id \
-         JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
-         JOIN meeting_collections current_mc ON current_mc.collection_id = source_mc.collection_id \
-         JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
-         JOIN meetings current ON current.id = current_mc.meeting_id \
-         WHERE current.id = ? AND source.id != current.id \
-           AND COALESCE(source.occurred_at, source.created_at) < \
-               COALESCE(current.occurred_at, current.created_at) \
-           AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
-         ORDER BY COALESCE(source.occurred_at, source.created_at) DESC, sr.id DESC LIMIT 40",
+        "WITH eligible AS ( \
+             SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
+                    source.id AS source_id, source.title AS source_title, \
+                    COALESCE(source.occurred_at, source.created_at) AS source_time \
+             FROM standup_records sr \
+             JOIN meetings source ON source.id = sr.meeting_id \
+             JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
+             JOIN meeting_collections current_mc ON current_mc.collection_id = source_mc.collection_id \
+             JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
+             JOIN meetings current ON current.id = current_mc.meeting_id \
+             WHERE current.id = ? AND source.id != current.id \
+               AND COALESCE(source.occurred_at, source.created_at) < \
+                   COALESCE(current.occurred_at, current.created_at) \
+               AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
+         ), ranked AS ( \
+             SELECT *, ROW_NUMBER() OVER ( \
+                 PARTITION BY kind ORDER BY source_time DESC, id DESC \
+             ) AS kind_rank \
+             FROM eligible \
+         ) \
+         SELECT id, kind, payload, source_id, source_title FROM ranked \
+         WHERE kind_rank <= 40 ORDER BY source_time DESC, id DESC",
     )
     .bind(meeting_id)
     .fetch_all(pool)

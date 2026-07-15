@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
@@ -106,6 +107,7 @@ export function StandupWorkflowPanel({
   summaryStatus: string;
 }) {
   const t = useT();
+  const router = useRouter();
   const [records, setRecords] = useState<StandupRecordRow[]>([]);
   const [prebrief, setPrebrief] = useState<StandupPrebrief>(EMPTY_PREBRIEF);
   const [loading, setLoading] = useState(true);
@@ -229,9 +231,9 @@ export function StandupWorkflowPanel({
                 <div key={action.id} className="mb-2 rounded-md bg-[var(--bg-canvas)] p-2 text-sm">
                   <div>{action.text}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--fg3)]">
-                    <a className="text-[var(--gold)] hover:underline" href={sourceHref(action.source_meeting_id, action.source_start_ms)}>
+                    <button type="button" className="text-[var(--gold)] hover:underline" onClick={() => router.push(sourceHref(action.source_meeting_id, action.source_start_ms))}>
                       {action.source_meeting_title}
-                    </a>
+                    </button>
                     {action.owner && <span>{action.owner}</span>}
                     {action.due_date && <span>{action.due_date}</span>}
                     <Button
@@ -251,9 +253,9 @@ export function StandupWorkflowPanel({
               {prebrief.recent_risks.length === 0 ? (
                 <p className="text-sm text-[var(--fg3)]">{t('None recorded')}</p>
               ) : prebrief.recent_risks.map((fact) => (
-                <a key={fact.record_id} className="mb-2 block rounded-md bg-[var(--bg-canvas)] p-2 text-sm hover:underline" href={sourceHref(fact.source_meeting_id, fact.source_start_ms)}>
+                <button type="button" key={fact.record_id} className="mb-2 block w-full rounded-md bg-[var(--bg-canvas)] p-2 text-left text-sm hover:underline" onClick={() => router.push(sourceHref(fact.source_meeting_id, fact.source_start_ms))}>
                   {fact.text}
-                </a>
+                </button>
               ))}
             </div>
             <div>
@@ -261,9 +263,9 @@ export function StandupWorkflowPanel({
               {prebrief.recent_decisions.length === 0 ? (
                 <p className="text-sm text-[var(--fg3)]">{t('None recorded')}</p>
               ) : prebrief.recent_decisions.map((fact) => (
-                <a key={fact.record_id} className="mb-2 block rounded-md bg-[var(--bg-canvas)] p-2 text-sm hover:underline" href={sourceHref(fact.source_meeting_id, fact.source_start_ms)}>
+                <button type="button" key={fact.record_id} className="mb-2 block w-full rounded-md bg-[var(--bg-canvas)] p-2 text-left text-sm hover:underline" onClick={() => router.push(sourceHref(fact.source_meeting_id, fact.source_start_ms))}>
                   {fact.text}
-                </a>
+                </button>
               ))}
             </div>
           </div>
@@ -346,9 +348,9 @@ export function StandupWorkflowPanel({
                     {evidence(record).map((item, index) => {
                       const href = evidenceHref(record.meeting_id, item.timestamp);
                       return href ? (
-                        <a key={`${item.timestamp}-${index}`} href={href} title={item.quote ?? undefined} className="text-[var(--gold)] hover:underline">
+                        <button type="button" key={`${item.timestamp}-${index}`} onClick={() => router.push(href)} title={item.quote ?? undefined} className="text-[var(--gold)] hover:underline">
                           {item.timestamp}
-                        </a>
+                        </button>
                       ) : null;
                     })}
                     {record.kind === 'action' && record.action_item_id && (
