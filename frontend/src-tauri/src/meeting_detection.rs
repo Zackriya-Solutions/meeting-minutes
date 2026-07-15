@@ -196,22 +196,26 @@ async fn run_detection_loop(app: AppHandle<Wry>, cancellation: CancellationToken
         tokio::select! {
             _ = cancellation.cancelled() => break,
             _ = interval.tick() => {
+                let enabled = detection_enabled(&app).await;
+                if !enabled {
+                    // Opt-out means no process or microphone inspection, not merely no prompt.
+                    session = DetectionSession::default();
+                    process_evidence = ProcessLaunchEvidence::default();
+                    continue;
+                }
+
                 system.refresh_processes(ProcessesToUpdate::All, true);
                 let running_native_apps = collect_native_apps(&system);
                 let launched_apps = process_evidence.observe(&running_native_apps, Instant::now());
                 let microphone_apps = active_microphone_apps();
-
-                let mut candidates = launched_apps;
-                candidates.extend(microphone_apps.iter().copied());
-
-                let enabled = detection_enabled(&app).await;
+                let (candidates, source) = select_detection_signal(
+                    launched_apps,
+                    microphone_apps,
+                    cfg!(target_os = "macos"),
+                );
                 let recording = crate::audio::recording_commands::is_recording().await;
-                if session.observe(!candidates.is_empty(), recording, enabled) {
-                    let source = if microphone_apps.is_empty() {
-                        DetectionSource::NativeProcess
-                    } else {
-                        DetectionSource::MicrophoneActivity
-                    };
+                if session.observe(!candidates.is_empty(), recording, true) {
+                    let Some(source) = source else { continue };
                     deliver_detection(
                         &app,
                         MeetingDetectedEvent {
@@ -224,6 +228,23 @@ async fn run_detection_loop(app: AppHandle<Wry>, cancellation: CancellationToken
             }
         }
     }
+}
+
+fn select_detection_signal(
+    launched_apps: BTreeSet<MeetingApp>,
+    microphone_apps: BTreeSet<MeetingApp>,
+    microphone_signal_supported: bool,
+) -> (BTreeSet<MeetingApp>, Option<DetectionSource>) {
+    if !microphone_apps.is_empty() {
+        return (microphone_apps, Some(DetectionSource::MicrophoneActivity));
+    }
+    // On macOS we can observe actual microphone use. A process launch alone is too weak:
+    // opening Telegram, Teams, or Zoom does not mean a meeting has started. Platforms that do
+    // not yet expose a microphone-session observer keep the bounded process-launch fallback.
+    if !microphone_signal_supported && !launched_apps.is_empty() {
+        return (launched_apps, Some(DetectionSource::NativeProcess));
+    }
+    (BTreeSet::new(), None)
 }
 
 async fn detection_enabled(app: &AppHandle<Wry>) -> bool {
@@ -425,6 +446,30 @@ mod tests {
             classify_audio_process("com.microsoft.VSCode", "Code Helper"),
             None
         );
+    }
+
+    #[test]
+    fn macos_requires_microphone_evidence_instead_of_process_launch_only() {
+        let (candidates, source) =
+            select_detection_signal(apps(&[MeetingApp::Telegram]), BTreeSet::new(), true);
+        assert!(candidates.is_empty());
+        assert_eq!(source, None);
+
+        let (candidates, source) = select_detection_signal(
+            apps(&[MeetingApp::Telegram]),
+            apps(&[MeetingApp::BrowserCall]),
+            true,
+        );
+        assert_eq!(candidates, apps(&[MeetingApp::BrowserCall]));
+        assert_eq!(source, Some(DetectionSource::MicrophoneActivity));
+    }
+
+    #[test]
+    fn unsupported_platforms_keep_bounded_native_process_fallback() {
+        let (candidates, source) =
+            select_detection_signal(apps(&[MeetingApp::Zoom]), BTreeSet::new(), false);
+        assert_eq!(candidates, apps(&[MeetingApp::Zoom]));
+        assert_eq!(source, Some(DetectionSource::NativeProcess));
     }
 
     #[test]

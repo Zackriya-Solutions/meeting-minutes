@@ -187,7 +187,7 @@ export function PreferenceSettings() {
             </p>
           </div>
           <Switch
-            checked={notificationSettings?.auto_meeting_detection ?? true}
+            checked={notificationSettings?.auto_meeting_detection ?? false}
             disabled={!notificationSettings}
             onCheckedChange={handleAutoMeetingDetectionChange}
           />
