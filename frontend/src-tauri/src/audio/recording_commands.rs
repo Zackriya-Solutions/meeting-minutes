@@ -45,6 +45,18 @@ static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
 
+fn transcription_validation_user_message(error: &str) -> &'static str {
+    let error = error.to_ascii_lowercase();
+
+    if error.contains("downloading") {
+        "Recording cannot start: The transcription model is still downloading. Please wait for the download to complete."
+    } else if error.contains("not downloaded") || error.contains("not found") {
+        "Recording cannot start: No transcription model is available. Please download a model in Settings."
+    } else {
+        "Recording cannot start: The transcription model could not be loaded. Check the model in Settings and try again."
+    }
+}
+
 // ============================================================================
 // PUBLIC TYPES
 // ============================================================================
@@ -98,7 +110,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+            "userMessage": transcription_validation_user_message(&validation_error),
             "actionable": false
         }));
 
@@ -344,7 +356,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+            "userMessage": transcription_validation_user_message(&validation_error),
             "actionable": false
         }));
 
