@@ -1,6 +1,7 @@
 {
   "name": "Daily Standup",
-  "description": "Time-boxed daily updates for engineering/product teams.",
+  "description": "Evidence-backed status updates, decisions, actions, blockers, and separated deep dives.",
+  "pipeline": "standup_v2",
   "sections": [
     {
       "title": "Date",
@@ -14,26 +15,31 @@
     },
     {
       "title": "Yesterday",
-      "instruction": "What I completed yesterday (short bullets)",
+      "instruction": "Per-participant completed or recent work. Do not require the literal word yesterday; include evidence timestamps.",
       "format": "list",
       "example_item_format": "| **Owner** | **Completed Work** |\n| --- | --- |"
     },
     {
       "title": "Today",
-      "instruction": "Planned work for today (short bullets)",
+      "instruction": "Per-participant next work or commitments. Never invent an owner; include evidence timestamps.",
       "format": "list",
       "example_item_format": "| **Owner** | **Planned Work** |\n| --- | --- |"
     },
     {
       "title": "Blockers",
-      "instruction": "Any impediments and owner if known",
+      "instruction": "Risks and impediments with owner only when explicitly stated, plus evidence timestamps.",
       "format": "list",
       "item_format": "| **Owner** | **Blocker** | Impact |\n| --- | --- | --- |"
     },
     {
-      "title": "Notes",
-      "instruction": "Optional quick notes or announcements",
-      "format": "paragraph"
+      "title": "Decisions and actions",
+      "instruction": "Decisions and action items with explicit owner/due date or unknown/not stated, plus evidence timestamps.",
+      "format": "list"
+    },
+    {
+      "title": "Deep dives and parking lot",
+      "instruction": "Technical discussions that followed the status round. Keep them separate from participant updates.",
+      "format": "list"
     }
   ]
 }

@@ -121,7 +121,8 @@ fn build_summary_cache_source(
 
 fn template_cache_fingerprint(template: &Template) -> String {
     let rendered_template = format!(
-        "{}\n---SECTION-INSTRUCTIONS---\n{}",
+        "pipeline={}\n{}\n---SECTION-INSTRUCTIONS---\n{}",
+        template.pipeline.as_deref().unwrap_or("generic"),
         template.to_markdown_structure(),
         template.to_section_instructions()
     );
@@ -132,15 +133,20 @@ fn build_summary_result_json(
     final_markdown: &str,
     source: SummaryCacheSource,
     output_language: &str,
+    structured_result: Option<serde_json::Value>,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut result = serde_json::json!({
         "markdown": strip_title_if_present(final_markdown),
         GENERATION_METADATA_FIELD: SummaryGenerationMetadata {
             source,
             output_language: output_language.to_string(),
             pipeline_version: SUMMARY_PIPELINE_VERSION,
         },
-    })
+    });
+    if let Some(structured_result) = structured_result {
+        result["standup_v2"] = structured_result;
+    }
+    result
 }
 
 /// Summary service - handles all summary generation logic
@@ -496,6 +502,7 @@ impl SummaryService {
             &provider,
             &model_name,
             &final_api_key,
+            &meeting_id,
             &text,
             &custom_prompt,
             &template_id,
@@ -520,28 +527,37 @@ impl SummaryService {
         Self::cleanup_cancellation_token(&meeting_id);
 
         match result {
-            Ok((final_markdown, output_language, num_chunks)) => {
+            Ok((final_markdown, output_language, num_chunks, structured_result)) => {
                 info!(
                     "✓ Successfully processed {} chunks for meeting_id: {}. Duration: {:.2}s",
                     num_chunks, meeting_id, duration
                 );
                 info!("Final markdown generated ({} chars)", final_markdown.len());
 
-                if let Some(name) =
-                    extract_meeting_name_from_markdown(&final_markdown).filter(|n| !n.is_empty())
-                {
-                    info!("Extracted meeting name from summary: '{}'", name);
-                    if let Err(e) =
-                        MeetingsRepository::update_meeting_name(&pool, &meeting_id, &name).await
+                // Standup V2 uses a stable renderer heading (`# Standup`) and keeps the
+                // meaningful source/series title. Generic summaries may still propose a
+                // descriptive H1 and retain the existing rename behavior.
+                if structured_result.is_none() {
+                    if let Some(name) = extract_meeting_name_from_markdown(&final_markdown)
+                        .filter(|n| !n.is_empty())
                     {
-                        error!("Failed to update meeting name for {}: {}", meeting_id, e);
-                    } else {
-                        info!("Successfully updated meeting name for {}", meeting_id);
+                        info!("Extracted meeting name from summary: '{}'", name);
+                        if let Err(e) =
+                            MeetingsRepository::update_meeting_name(&pool, &meeting_id, &name).await
+                        {
+                            error!("Failed to update meeting name for {}: {}", meeting_id, e);
+                        } else {
+                            info!("Successfully updated meeting name for {}", meeting_id);
+                        }
                     }
                 }
 
-                let result_json =
-                    build_summary_result_json(&final_markdown, cache_source, &output_language);
+                let result_json = build_summary_result_json(
+                    &final_markdown,
+                    cache_source,
+                    &output_language,
+                    structured_result,
+                );
 
                 // Update database with completed status
                 if let Err(e) = SummaryProcessesRepository::update_process_completed(
@@ -715,6 +731,7 @@ mod tests {
         Template {
             name: "Test".to_string(),
             description: "Test template".to_string(),
+            pipeline: None,
             sections: vec![crate::summary::templates::TemplateSection {
                 title: section_title.to_string(),
                 instruction: "Summarize this section".to_string(),
@@ -734,11 +751,23 @@ mod tests {
     }
 
     #[test]
+    fn test_template_cache_fingerprint_changes_with_pipeline() {
+        let generic = test_template("Summary");
+        let mut standup = generic.clone();
+        standup.pipeline = Some("standup_v2".to_string());
+        assert_ne!(
+            template_cache_fingerprint(&generic),
+            template_cache_fingerprint(&standup)
+        );
+    }
+
+    #[test]
     fn test_result_json_strips_title_and_records_pipeline_metadata() {
         let result = build_summary_result_json(
             "# Встреча\n## Решения\nГотово",
             sample_cache_source(),
             "Russian",
+            None,
         );
 
         assert_eq!(result["markdown"], "## Решения\nГотово");
@@ -751,11 +780,25 @@ mod tests {
     fn test_generation_metadata_keeps_source_fingerprint() {
         let source = sample_cache_source();
         let expected = source.transcript_fingerprint.clone();
-        let result = build_summary_result_json("# Title\nBody", source, "English");
+        let result = build_summary_result_json("# Title\nBody", source, "English", None);
 
         assert_eq!(
             result["summary_generation"]["source"]["transcript_fingerprint"],
             expected
         );
+    }
+
+    #[test]
+    fn test_structured_standup_result_is_preserved() {
+        let result = build_summary_result_json(
+            "# Standup\nBody",
+            sample_cache_source(),
+            "English",
+            Some(serde_json::json!({
+                "schema_version": "standup_v2",
+                "action_items": []
+            })),
+        );
+        assert_eq!(result["standup_v2"]["schema_version"], "standup_v2");
     }
 }

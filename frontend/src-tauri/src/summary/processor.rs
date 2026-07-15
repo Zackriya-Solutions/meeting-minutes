@@ -1,4 +1,5 @@
 use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::standup::{generate_standup_report, StandupGenerationRequest};
 use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -263,7 +264,8 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `detected_transcript_language` - Optional detected transcript language BCP-47 tag
 ///
 /// # Returns
-/// Tuple of (final_summary_markdown, output_language, number_of_chunks_processed).
+/// Tuple of (final_summary_markdown, output_language, number_of_chunks_processed,
+/// optional versioned structured result).
 /// The report is generated directly in output_language; there is no intermediate English
 /// draft or translation pass.
 pub async fn generate_meeting_summary(
@@ -271,6 +273,7 @@ pub async fn generate_meeting_summary(
     provider: &LLMProvider,
     model_name: &str,
     api_key: &str,
+    meeting_id: &str,
     text: &str,
     custom_prompt: &str,
     template_id: &str,
@@ -286,7 +289,7 @@ pub async fn generate_meeting_summary(
     cancellation_token: Option<&CancellationToken>,
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
-) -> Result<(String, String, i64), String> {
+) -> Result<(String, String, i64, Option<serde_json::Value>), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
             return Err("Summary generation was cancelled".to_string());
@@ -299,6 +302,37 @@ pub async fn generate_meeting_summary(
 
     let output_language = resolve_output_language(summary_language, detected_transcript_language);
     info!("Generating summary directly in {}", output_language);
+
+    if template.pipeline.as_deref() == Some("standup_v2") {
+        let generated = generate_standup_report(StandupGenerationRequest {
+            client,
+            provider,
+            model_name,
+            api_key,
+            meeting_id,
+            transcript: text,
+            custom_prompt,
+            token_threshold,
+            output_language,
+            ollama_endpoint,
+            custom_openai_endpoint,
+            deepseek_base_url,
+            max_tokens,
+            temperature,
+            top_p,
+            app_data_dir,
+            cancellation_token,
+        })
+        .await?;
+        let structured = serde_json::to_value(&generated.report)
+            .map_err(|error| format!("Failed to serialize Standup V2 result: {error}"))?;
+        return Ok((
+            generated.markdown,
+            output_language.to_string(),
+            generated.chunk_count,
+            Some(structured),
+        ));
+    }
 
     let total_tokens = rough_token_count(text);
     info!("Transcript length: {} tokens", total_tokens);
@@ -455,6 +489,7 @@ pub async fn generate_meeting_summary(
         final_markdown,
         output_language.to_string(),
         successful_chunk_count,
+        None,
     ))
 }
 
