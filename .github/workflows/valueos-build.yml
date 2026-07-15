@@ -1,0 +1,217 @@
+# VALUEOS: Value Accelerator cloud build pipeline for ValueOS Agent (fork of Meetily).
+# This file is intentionally named "valueos-build.yml" so it never collides with any
+# upstream workflow under .github/workflows/. It does NOT modify or depend on any of
+# upstream's workflows (build-macos.yml, build-windows.yml, build.yml, release.yml, ...).
+# It builds UNSIGNED developer installers on macOS + Windows and uploads them as
+# downloadable artifacts. See valueos/CI-BUILD.md for the plain-language guide.
+
+name: "ValueOS Agent — Build (macOS + Windows)"
+
+on:
+  # Build every time stable work lands on main.
+  push:
+    branches:
+      - main
+    # ...and whenever we push a version tag (so we can cut releases later).
+    tags:
+      - "v*"
+  # ...and on demand from the Actions tab ("Run workflow").
+  workflow_dispatch:
+
+# Only keep the newest run per ref; cancel superseded in-progress runs.
+concurrency:
+  group: valueos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+# We only read the repo and upload artifacts — no release publishing here.
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Resilient: if one platform fails, the other still runs to completion.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: "macOS (Apple Silicon)"
+            target: aarch64-apple-darwin
+            artifact: valueos-agent-macos
+            # llama-helper sidecar: build with Metal on macOS (mirrors upstream CI).
+            sidecar_features: "--features metal"
+            sidecar_src: "target/release/llama-helper"
+            sidecar_dst: "frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin"
+            # Installer paths (relative to repo root — root Cargo workspace target dir).
+            artifact_paths: |
+              target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+              target/aarch64-apple-darwin/release/bundle/macos/*.app
+          - os: windows-latest
+            label: "Windows (x64)"
+            target: x86_64-pc-windows-msvc
+            artifact: valueos-agent-windows
+            # llama-helper sidecar: CPU-only on Windows (mirrors upstream CI; the
+            # Vulkan sidecar build has a known CMake race in llama-cpp-sys-2).
+            sidecar_features: ""
+            sidecar_src: "target/release/llama-helper.exe"
+            sidecar_dst: "frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe"
+            artifact_paths: |
+              target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+              target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          # .gitmodules pulls in whisper.cpp; check out submodules recursively.
+          submodules: recursive
+
+      - name: Read app version from tauri.conf.json
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' frontend/src-tauri/tauri.conf.json | head -1 | cut -d'"' -f4)
+          echo "Application version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # Cache the pnpm store keyed on the frontend lockfile (speeds up reruns).
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + build (workspace target dir)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: ${{ matrix.target }}
+
+      - name: Show toolchain versions
+        shell: bash
+        run: |
+          echo "node:  $(node --version)"
+          echo "pnpm:  $(pnpm --version)"
+          echo "rustc: $(rustc --version)"
+          echo "cargo: $(cargo --version)"
+          echo "cmake: $(cmake --version | head -1 || echo 'cmake not found')"
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: |
+          cd frontend
+          # Plain install to match upstream's proven CI (pnpm auto-freezes when CI=true).
+          pnpm install
+
+      - name: Build llama-helper sidecar
+        shell: bash
+        run: |
+          # The Tauri bundle declares binaries/llama-helper as an externalBin, so the
+          # sidecar must exist (named with the target triple) BEFORE `tauri build`.
+          cargo build --release -p llama-helper ${{ matrix.sidecar_features }}
+          mkdir -p frontend/src-tauri/binaries
+          cp "${{ matrix.sidecar_src }}" "${{ matrix.sidecar_dst }}"
+          echo "Sidecar binaries present:"
+          ls -la frontend/src-tauri/binaries/
+
+      - name: Build Tauri app (unsigned dev build)
+        id: build
+        shell: bash
+        working-directory: frontend
+        run: |
+          # Direct Tauri CLI build (equivalent to `pnpm run tauri:build`, but with an
+          # explicit --target for deterministic output paths). The --config override
+          # disables updater-artifact generation so no TAURI_SIGNING_PRIVATE_KEY is
+          # needed — see valueos/CI-BUILD.md. FFmpeg is auto-downloaded by build.rs;
+          # whisper/parakeet models are downloaded at RUNTIME, not needed for the build.
+          # No signing secrets are provided: macOS ad-hoc signs (signingIdentity "-")
+          # and the Windows signCommand no-ops when DIGICERT_KEYPAIR_ALIAS is unset.
+          #
+          # The override is written to a slash-free, relative file and passed by path
+          # rather than as inline JSON: on windows-latest this runs under Git Bash, where
+          # inline '{"..."}' can be mangled by MSYS arg conversion or the pnpm .cmd shim
+          # re-quoting. A bare filename (resolved relative to this cwd, frontend/) avoids
+          # both. It is a throwaway CI file, not a committed edit to any upstream file.
+          printf '%s' '{"bundle":{"createUpdaterArtifacts":false}}' > valueos-ci.config.json
+          pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
+
+      - name: List and verify produced installers
+        if: success()
+        shell: bash
+        run: |
+          BUNDLE="target/${{ matrix.target }}/release/bundle"
+          echo "Installers under ${BUNDLE}:"
+          find "${BUNDLE}" -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \) 2>/dev/null || true
+          # Fail fast if the build reported success but produced no installer (e.g. a
+          # silently dropped --config override leaving updater signing to fail late).
+          if [ -z "$(find "${BUNDLE}" -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \) 2>/dev/null)" ]; then
+            echo "::error::No installer (.dmg/.msi/.exe) found under ${BUNDLE}"
+            exit 1
+          fi
+
+      - name: Upload installers
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Write build summary to run
+        if: always()
+        shell: bash
+        run: |
+          OUTCOME="${{ steps.build.outcome }}"
+          if [ "$OUTCOME" = "success" ]; then
+            STATUS="✅ Success"
+          else
+            STATUS="❌ Failed"
+          fi
+          {
+            echo "## ${{ matrix.label }} — ValueOS Agent build"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| Platform | ${{ matrix.label }} (\`${{ matrix.os }}\`) |"
+            echo "| Result | ${STATUS} |"
+            echo "| Version | ${{ steps.version.outputs.version }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Ref | \`${{ github.ref_name }}\` |"
+            echo "| Target | \`${{ matrix.target }}\` |"
+            echo "| Artifact name | \`${{ matrix.artifact }}\` |"
+            echo "| Signing | Unsigned dev build (macOS ad-hoc; no notarization) |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$OUTCOME" = "success" ]; then
+            {
+              echo "### 📦 Uploaded installers (artifact: \`${{ matrix.artifact }}\`)"
+              echo ""
+              echo '```'
+              find "target/${{ matrix.target }}/release/bundle" -type f \
+                \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \) 2>/dev/null || true
+              echo '```'
+              echo ""
+              echo "Download them from the **Artifacts** section of this run."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "> ⚠️ Build did not complete — no installers were produced. Check the step logs above." >> "$GITHUB_STEP_SUMMARY"
+          fi
