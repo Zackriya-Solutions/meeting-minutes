@@ -74,8 +74,9 @@ confirming accepted records. Give every output record a `match_id` only when it 
 by the reference fact of the same kind. Keep the transcript and record text in the private
 dataset. The generated report contains aggregate counts and rates only.
 
-Set `provider`, `schema_version`, and `prompt_version` from the actual run. Unknown values
-are protocol errors. For a provider comparison, run each provider against the same frozen
+The exporter reads `provider`, `model`, and `prompt_version` from the persisted summary-generation
+source when available; it never exports credentials or provider endpoints. Verify these values and
+set `schema_version` from the actual run. Unknown values are protocol errors. For a provider comparison, run each provider against the same frozen
 reference set and keep the series split unchanged; the report includes per-provider success
 and p95 latency alongside the shared record-quality metrics. The release gate requires at
 least two dev and three held-out test meetings.

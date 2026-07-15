@@ -92,6 +92,16 @@ def flatten_standup(report: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def generation_identity(result: dict[str, Any]) -> tuple[str, str, str]:
+    """Read non-secret run identity from the persisted summary cache source."""
+    source = ((result.get("summary_generation") or {}).get("source") or {})
+    return (
+        str(source.get("model_provider") or "unknown"),
+        str(source.get("model_name") or "unknown"),
+        str(source.get("template_fingerprint") or "UNASSIGNED"),
+    )
+
+
 def reviewed_records(
     db: sqlite3.Connection, meeting_id: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
@@ -257,6 +267,7 @@ def main() -> None:
             result = json.loads(meeting["result"] or "{}")
         except json.JSONDecodeError:
             pass
+        provider, model, prompt_version = generation_identity(result)
         reviewed = reviewed_records(db, meeting["id"])
         if reviewed:
             references, hypotheses = reviewed
@@ -271,13 +282,10 @@ def main() -> None:
             "split": split,
             "success": meeting["status"] == "completed" and bool(result.get("standup_v2")),
             "latency_ms": round((meeting["processing_time"] or 0) * 1000),
-            "provider": "unknown",
+            "provider": provider,
+            "model": model,
             "schema_version": (result.get("standup_v2") or {}).get("schema_version", "UNASSIGNED"),
-            "prompt_version": (
-                ((result.get("summary_generation") or {}).get("source") or {}).get(
-                    "template_fingerprint", "UNASSIGNED"
-                )
-            ),
+            "prompt_version": prompt_version,
             "candidate_score": score,
             "candidate_reasons": reasons,
             "meeting_type": "UNASSIGNED",
