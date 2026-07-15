@@ -23,6 +23,19 @@ const MAX_CORPUS_MEETINGS: usize = 50;
 const TEMPLATE_ID: &str = "daily_standup";
 static CORPUS_RUN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+fn corpus_mode_requested_from(raw: Option<&str>) -> bool {
+    raw.is_some_and(|raw| {
+        raw.split(',')
+            .map(str::trim)
+            .any(|meeting_id| !meeting_id.is_empty())
+    })
+}
+
+pub(crate) fn corpus_mode_requested() -> bool {
+    let raw = std::env::var("MEETILY_STANDUP_CORPUS_IDS").ok();
+    corpus_mode_requested_from(raw.as_deref())
+}
+
 struct CorpusRunGuard;
 
 impl CorpusRunGuard {
@@ -520,6 +533,14 @@ mod tests {
         assert!(
             normalized_ids((0..=MAX_CORPUS_MEETINGS).map(|i| format!("m{i}")).collect()).is_err()
         );
+    }
+
+    #[test]
+    fn corpus_mode_requires_at_least_one_nonempty_explicit_id() {
+        assert!(!corpus_mode_requested_from(None));
+        assert!(!corpus_mode_requested_from(Some(" ,  ,")));
+        assert!(corpus_mode_requested_from(Some(" meeting-1 ")));
+        assert!(corpus_mode_requested_from(Some(" , meeting-1,meeting-2")));
     }
 
     #[test]

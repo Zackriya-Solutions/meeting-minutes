@@ -10,6 +10,14 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(tauri_db_path: &str, backend_db_path: &str) -> Result<Self> {
+        Self::new_with_background_jobs(tauri_db_path, backend_db_path, true).await
+    }
+
+    async fn new_with_background_jobs(
+        tauri_db_path: &str,
+        backend_db_path: &str,
+        start_background_jobs: bool,
+    ) -> Result<Self> {
         if let Some(parent_dir) = Path::new(tauri_db_path).parent() {
             if !parent_dir.exists() {
                 fs::create_dir_all(parent_dir).map_err(|e| sqlx::Error::Io(e))?;
@@ -48,12 +56,16 @@ impl DatabaseManager {
         // Start the background job runner (PLAN.md Phase 0). Runs on the app's tokio
         // runtime; jobs are claimed atomically so this is safe even if a second
         // runner were ever started against the same database.
-        crate::jobs::JobRunner::new(
-            pool.clone(),
-            crate::jobs::JobRegistry::with_defaults(),
-            crate::jobs::RunnerConfig::default(),
-        )
-        .spawn();
+        if start_background_jobs {
+            crate::jobs::JobRunner::new(
+                pool.clone(),
+                crate::jobs::JobRegistry::with_defaults(),
+                crate::jobs::RunnerConfig::default(),
+            )
+            .spawn();
+        } else {
+            log::info!("Background job runner disabled for isolated corpus mode");
+        }
 
         Ok(DatabaseManager { pool })
     }
@@ -63,6 +75,13 @@ impl DatabaseManager {
     // the current app dir, So the system detects legacy db and copy it and starts with that data
     // (Newly created .sqlite with the copied content from .db)
     pub async fn new_from_app_handle(app_handle: &tauri::AppHandle) -> Result<Self> {
+        Self::new_from_app_handle_with_background_jobs(app_handle, true).await
+    }
+
+    pub(crate) async fn new_from_app_handle_with_background_jobs(
+        app_handle: &tauri::AppHandle,
+        start_background_jobs: bool,
+    ) -> Result<Self> {
         // Resolve the app's data directory
         let app_data_dir = app_handle
             .path()
@@ -91,7 +110,13 @@ impl DatabaseManager {
         log::info!("Legacy backend DB path: {}", backend_db_path);
 
         // Try to open database with defensive WAL handling
-        match Self::new(&tauri_db_path, &backend_db_path).await {
+        match Self::new_with_background_jobs(
+            &tauri_db_path,
+            &backend_db_path,
+            start_background_jobs,
+        )
+        .await
+        {
             Ok(db_manager) => {
                 log::info!("Database opened successfully");
                 Ok(db_manager)
@@ -119,13 +144,22 @@ impl DatabaseManager {
 
                     // Retry connection without WAL files
                     log::info!("Retrying database connection after WAL cleanup...");
-                    match Self::new(&tauri_db_path, &backend_db_path).await {
+                    match Self::new_with_background_jobs(
+                        &tauri_db_path,
+                        &backend_db_path,
+                        start_background_jobs,
+                    )
+                    .await
+                    {
                         Ok(db_manager) => {
                             log::info!("Database opened successfully after WAL recovery");
                             Ok(db_manager)
                         }
                         Err(retry_err) => {
-                            log::error!("Database connection failed even after WAL cleanup: {}", retry_err);
+                            log::error!(
+                                "Database connection failed even after WAL cleanup: {}",
+                                retry_err
+                            );
                             Err(retry_err)
                         }
                     }
