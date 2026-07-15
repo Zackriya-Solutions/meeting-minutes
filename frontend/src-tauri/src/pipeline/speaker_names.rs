@@ -15,7 +15,7 @@ static SELF_INTRO: Lazy<Regex> = Lazy::new(|| {
 });
 static EXPLICIT_INTRO: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?iu)(?:это|с\s+нами(?:\s+сегодня)?|представлю(?:\s+вам)?)\s+([\p{L}][\p{L}'’\-]{1,31})",
+        r"(?iu)(?:с\s+нами(?:\s+сегодня)?|представлю(?:\s+вам)?|познакомьтесь\s*[,—-]?\s*это|это\s+(?:наш|наша|новый|новая)(?:\s+коллега)?)\s+([\p{L}][\p{L}'’\-]{1,31})",
     )
     .expect("valid introduction regex")
 });
@@ -57,6 +57,26 @@ const BLOCKED_EXACT: &[&str] = &[
     "будет",
     "может",
     "просто",
+    "кстати",
+    "короче",
+    "например",
+    "итак",
+    "конечно",
+    "возможно",
+    "видимо",
+    "наверное",
+    "значит",
+    "вообще",
+    "впрочем",
+    "однако",
+    "правда",
+    "ладно",
+    "окей",
+    "хорошо",
+    "понятно",
+    "алло",
+    "ага",
+    "угу",
     "сегодня",
     "завтра",
     "hello",
@@ -69,7 +89,31 @@ const BLOCKED_EXACT: &[&str] = &[
     "client",
     "boss",
 ];
-const BLOCKED_ABUSIVE_EXACT: &[&str] = &["хер", "чмо", "лох", "падла", "гнида"];
+const BLOCKED_ABUSIVE_EXACT: &[&str] = &[
+    "хер",
+    "чмо",
+    "лох",
+    "падла",
+    "гнида",
+    "урод",
+    "дебил",
+    "идиот",
+    "мудак",
+    "мразь",
+    "сука",
+    "гандон",
+    "пидор",
+    "пидар",
+    "шлюха",
+    "тупица",
+    "козел",
+    "козёл",
+    "сволочь",
+    "fuck",
+    "shit",
+    "bitch",
+    "asshole",
+];
 // Stems are checked only to reject a candidate. Rejected raw strings and quotes are never stored.
 const BLOCKED_STEMS: &[&str] = &[
     "бляд",
@@ -180,7 +224,9 @@ fn validate_candidate(value: &str) -> Result<String, &'static str> {
         return Err("invalid_shape");
     }
     if BLOCKED_ABUSIVE_EXACT.contains(&normalized.as_str())
-        || BLOCKED_STEMS.iter().any(|stem| normalized.contains(stem))
+        || BLOCKED_STEMS
+            .iter()
+            .any(|stem| normalized.starts_with(stem))
     {
         return Err("abusive_or_profane");
     }
@@ -227,6 +273,10 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             });
         }
         if let Some(capture) = DIRECT_ADDRESS.captures(&segment.text) {
+            let candidate_text = display_name(&capture[1]);
+            if validate_candidate(&candidate_text).is_err() {
+                continue;
+            }
             let Some(addressing_speaker_id) = segment.speaker_id else {
                 // Without an attributed addressing turn, a later speaker is not
                 // reliable evidence of who the name referred to.
@@ -242,7 +292,7 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             });
             if let Some(next) = next {
                 extracted.push(ExtractedCandidate {
-                    text: display_name(&capture[1]),
+                    text: candidate_text,
                     speaker_id: next.speaker_id,
                     evidence_kind: "direct_address",
                     evidence_quote: segment.text.clone(),
@@ -562,6 +612,7 @@ mod tests {
     #[test]
     fn validation_rejects_roles_abuse_and_implausible_shapes() {
         assert_eq!(validate_candidate("Анна"), Ok("анна".into()));
+        assert_eq!(validate_candidate("Мурод"), Ok("мурод".into()));
         assert_eq!(
             validate_candidate("разработчик"),
             Err("role_or_generic_word")
@@ -600,6 +651,19 @@ mod tests {
         assert!(extract_candidates(&rows)
             .iter()
             .all(|item| item.evidence_kind != "direct_address"));
+    }
+
+    #[test]
+    fn extraction_rejects_discourse_markers_and_bare_eto_phrases() {
+        let rows = vec![
+            segment("Это хорошо", Some(7), 0),
+            segment("Кстати, расскажи про релиз", Some(7), 1_000),
+            segment("Первый ответ", Some(8), 2_000),
+            segment("Кстати, продолжай", Some(7), 3_000),
+            segment("Второй ответ", Some(8), 4_000),
+        ];
+
+        assert!(extract_candidates(&rows).is_empty());
     }
 
     #[test]
