@@ -1364,6 +1364,33 @@ fn extraction_retry_user_prompt(chunk: &str, output_language: &str, custom_promp
     )
 }
 
+/// Static extraction contract included in summary cache/evaluation identity.
+///
+/// The transcript, custom prompt, and detected output language are tracked separately. Sentinels
+/// make changes to the surrounding user-prompt shape visible without putting meeting content into
+/// the fingerprint material. Keeping this next to the prompt builders prevents a Standup prompt or
+/// JSON-schema change from being reported under the previous template version.
+pub(crate) fn extraction_contract_fingerprint_material() -> String {
+    const TRANSCRIPT_SENTINEL: &str = "<TRANSCRIPT>";
+    const LANGUAGE_SENTINEL: &str = "<OUTPUT_LANGUAGE>";
+    const CUSTOM_PROMPT_SENTINEL: &str = "<CUSTOM_PROMPT>";
+
+    format!(
+        "schema_version={STANDUP_SCHEMA_VERSION}\n{STANDUP_JSON_SCHEMA}\n---SYSTEM---\n{}\n---USER---\n{}\n---RETRY---\n{}",
+        extraction_system_prompt(),
+        extraction_user_prompt(
+            TRANSCRIPT_SENTINEL,
+            LANGUAGE_SENTINEL,
+            CUSTOM_PROMPT_SENTINEL,
+        ),
+        extraction_retry_user_prompt(
+            TRANSCRIPT_SENTINEL,
+            LANGUAGE_SENTINEL,
+            CUSTOM_PROMPT_SENTINEL,
+        ),
+    )
+}
+
 pub async fn generate_standup_report(
     request: StandupGenerationRequest<'_>,
 ) -> Result<GeneratedStandup, String> {
