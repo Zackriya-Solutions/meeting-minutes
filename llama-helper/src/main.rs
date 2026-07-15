@@ -36,6 +36,7 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        json_schema: Option<String>,
     },
     Ping,
     Shutdown,
@@ -59,6 +60,76 @@ struct SamplingConfig {
     frequency_penalty: f32,
     repeat_penalty: f32,
     penalty_last_n: i32,
+}
+
+#[derive(Debug, Default)]
+struct ConstrainedJsonTracker {
+    enabled: bool,
+    started: bool,
+    in_string: bool,
+    escaped: bool,
+    depth: usize,
+    scalar_fallback: bool,
+}
+
+impl ConstrainedJsonTracker {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Self::default()
+        }
+    }
+
+    fn push(&mut self, fragment: &str, full_output: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.scalar_fallback {
+            return serde_json::from_str::<serde_json::Value>(full_output).is_ok();
+        }
+        for character in fragment.chars() {
+            if !self.started {
+                if character.is_whitespace() {
+                    continue;
+                }
+                if matches!(character, '{' | '[') {
+                    self.started = true;
+                    self.depth = 1;
+                    continue;
+                }
+                self.scalar_fallback = true;
+                break;
+            }
+            if self.in_string {
+                if self.escaped {
+                    self.escaped = false;
+                } else if character == '\\' {
+                    self.escaped = true;
+                } else if character == '"' {
+                    self.in_string = false;
+                }
+                continue;
+            }
+            match character {
+                '"' => self.in_string = true,
+                '{' | '[' => self.depth += 1,
+                '}' | ']' => {
+                    self.depth = self.depth.saturating_sub(1);
+                    if self.depth == 0 {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.scalar_fallback && serde_json::from_str::<serde_json::Value>(full_output).is_ok()
+    }
+}
+
+fn guard_completed_json_grammar(grammar: String) -> String {
+    // Keep one required token on the native grammar stack after the JSON root.
+    // We stop as soon as the root parses, so this newline is never emitted.
+    format!("constrained-root ::= root \"\\n\"\n{grammar}")
 }
 
 impl SamplingConfig {
@@ -351,6 +422,7 @@ impl ModelState {
         max_tokens: i32,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
+        json_schema: Option<String>,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
@@ -410,41 +482,47 @@ impl ModelState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u32;
-        let sampler = if sampling.temperature <= 0.0 {
+        let constrained_json = json_schema.is_some();
+        let mut constrained_json_tracker = ConstrainedJsonTracker::new(constrained_json);
+        let mut samplers = Vec::new();
+        if let Some(schema) = json_schema.as_deref() {
+            let grammar = guard_completed_json_grammar(
+                llama_cpp_2::json_schema_to_grammar(schema)
+                    .context("Failed to convert JSON schema to grammar")?,
+            );
+            samplers.push(
+                LlamaSampler::grammar(model, &grammar, "constrained-root")
+                    .context("Failed to initialize JSON grammar sampler")?,
+            );
+        }
+        if sampling.temperature <= 0.0 {
             if sampling.uses_penalties() {
-                LlamaSampler::chain_simple([
-                    LlamaSampler::penalties(
-                        sampling.penalty_last_n,
-                        sampling.repeat_penalty,
-                        sampling.frequency_penalty,
-                        sampling.presence_penalty,
-                    ),
-                    LlamaSampler::greedy(),
-                ])
-            } else {
-                LlamaSampler::chain_simple([LlamaSampler::greedy()])
-            }
-        } else if sampling.uses_penalties() {
-            LlamaSampler::chain_simple([
-                LlamaSampler::penalties(
+                samplers.push(LlamaSampler::penalties(
                     sampling.penalty_last_n,
                     sampling.repeat_penalty,
                     sampling.frequency_penalty,
                     sampling.presence_penalty,
-                ),
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
+                ));
+            }
+            samplers.push(LlamaSampler::greedy());
+        } else if sampling.uses_penalties() {
+            samplers.push(LlamaSampler::penalties(
+                sampling.penalty_last_n,
+                sampling.repeat_penalty,
+                sampling.frequency_penalty,
+                sampling.presence_penalty,
+            ));
+            samplers.push(LlamaSampler::top_k(sampling.top_k));
+            samplers.push(LlamaSampler::top_p(sampling.top_p, 1));
+            samplers.push(LlamaSampler::temp(sampling.temperature));
+            samplers.push(LlamaSampler::dist(seed));
         } else {
-            LlamaSampler::chain_simple([
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
-        };
+            samplers.push(LlamaSampler::top_k(sampling.top_k));
+            samplers.push(LlamaSampler::top_p(sampling.top_p, 1));
+            samplers.push(LlamaSampler::temp(sampling.temperature));
+            samplers.push(LlamaSampler::dist(seed));
+        }
+        let sampler = LlamaSampler::chain_simple(samplers);
         let mut sampler = pin!(sampler);
 
         loop {
@@ -454,8 +532,9 @@ impl ModelState {
                 break;
             }
 
+            // llama-cpp-2's `sample` is sample-and-accept. Calling `accept` again
+            // double-advances grammar and repetition samplers.
             let token = sampler.as_mut().sample(&ctx, batch.n_tokens() - 1);
-            sampler.as_mut().accept(token);
 
             if model.is_eog_token(token) {
                 eprintln!(
@@ -481,6 +560,17 @@ impl ModelState {
             let mut token_text = String::with_capacity(32);
             let _ = decoder.decode_to_string(&output_bytes, &mut token_text, false);
             output.push_str(&token_text);
+
+            // The grammar sampler has no valid next token once the root JSON value is
+            // complete. Stop before asking llama.cpp to sample again; otherwise its
+            // empty grammar stack triggers a native assertion instead of returning EOG.
+            if constrained_json_tracker.push(&token_text, &output) {
+                eprintln!(
+                    "✓ Constrained JSON root completed (generated {} chars)",
+                    output.len()
+                );
+                break;
+            }
 
             // Check for model-specific stop tokens
             let mut should_stop = false;
@@ -600,6 +690,7 @@ fn main() -> Result<()> {
                         repeat_penalty,
                         penalty_last_n,
                         stop_tokens,
+                        json_schema,
                     }) => {
                         let max_tokens = max_tokens.unwrap_or(512);
                         let context_size = context_size.unwrap_or(2048);
@@ -628,12 +719,8 @@ fn main() -> Result<()> {
                         }
 
                         // Generate response with sampling parameters
-                        match state.generate(
-                            prompt,
-                            max_tokens,
-                            sampling,
-                            stop_tokens,
-                        ) {
+                        match state.generate(prompt, max_tokens, sampling, stop_tokens, json_schema)
+                        {
                             Ok(text) => {
                                 send_response(&Response::Response { text, error: None })?;
                             }
@@ -679,7 +766,8 @@ mod tests {
 
     #[test]
     fn generate_request_defaults_penalties_when_omitted() {
-        let json = r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
+        let json =
+            r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
         let request: Request = serde_json::from_str(json).unwrap();
         let Request::Generate {
             temperature,
@@ -690,7 +778,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -724,7 +813,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -746,5 +836,49 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.05);
         assert_eq!(sampling.penalty_last_n, 256);
         assert!(sampling.uses_penalties());
+    }
+
+    #[test]
+    fn generate_request_accepts_convertible_json_schema() {
+        let json = r#"{"type":"generate","prompt":"extract","json_schema":"{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"additionalProperties\":false}"}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Generate { json_schema, .. } = request else {
+            panic!("expected generate request");
+        };
+        let schema = json_schema.expect("schema should be present");
+        let grammar =
+            guard_completed_json_grammar(llama_cpp_2::json_schema_to_grammar(&schema).unwrap());
+        assert!(grammar.starts_with("constrained-root ::= root \"\\n\"\n"));
+        assert!(grammar.contains("root ::="));
+    }
+
+    #[test]
+    fn standup_schema_converts_to_a_nonempty_root_grammar() {
+        let source = include_str!("../../frontend/src-tauri/src/summary/standup.rs");
+        let schema = source
+            .split_once("const STANDUP_JSON_SCHEMA: &str = r##\"")
+            .and_then(|(_, remainder)| remainder.split_once("\"##;"))
+            .map(|(schema, _)| schema)
+            .expect("standup JSON schema constant should be extractable");
+        let grammar = llama_cpp_2::json_schema_to_grammar(schema).unwrap();
+        let root = grammar
+            .lines()
+            .find(|line| line.starts_with("root ::="))
+            .expect("converted grammar should define root");
+        eprintln!("{root}");
+        assert_ne!(root.trim(), "root ::= \"\"");
+    }
+
+    #[test]
+    fn constrained_json_stops_only_after_a_complete_root_value() {
+        let mut tracker = ConstrainedJsonTracker::new(true);
+        assert!(!tracker.push(r#" {"nested":{"text":"}"}"#, r#" {"nested":{"text":"}"}"#));
+        assert!(tracker.push("}", r#" {"nested":{"text":"}"}}"#));
+
+        let mut scalar = ConstrainedJsonTracker::new(true);
+        assert!(scalar.push("true", "true"));
+
+        let mut disabled = ConstrainedJsonTracker::new(false);
+        assert!(!disabled.push(r#"{"value":"complete"}"#, r#"{"value":"complete"}"#));
     }
 }
