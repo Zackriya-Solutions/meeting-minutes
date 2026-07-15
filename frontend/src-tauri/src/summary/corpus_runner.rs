@@ -52,8 +52,10 @@ pub struct StandupCorpusRunItem {
 #[derive(Debug, Clone, Serialize)]
 pub struct StandupCorpusRunReport {
     pub schema_version: String,
+    pub state: String,
     pub started_at: String,
-    pub completed_at: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
     pub provider: String,
     pub model: String,
     pub template_id: String,
@@ -170,6 +172,169 @@ fn write_report(path: &Path, report: &StandupCorpusRunReport) -> Result<(), Stri
 }
 
 #[allow(clippy::too_many_arguments)]
+fn build_report(
+    started_at: &str,
+    provider: &str,
+    model: &str,
+    summary_language: &Option<String>,
+    requested: usize,
+    items: &[StandupCorpusRunItem],
+    completed: bool,
+) -> StandupCorpusRunReport {
+    let now = chrono::Utc::now().to_rfc3339();
+    StandupCorpusRunReport {
+        schema_version: "standup_corpus_run_v2".to_string(),
+        state: if completed { "completed" } else { "running" }.to_string(),
+        started_at: started_at.to_string(),
+        updated_at: now.clone(),
+        completed_at: completed.then_some(now),
+        provider: provider.to_string(),
+        model: model.to_string(),
+        template_id: TEMPLATE_ID.to_string(),
+        summary_language: summary_language.clone(),
+        requested,
+        completed: items
+            .iter()
+            .filter(|item| item.status == "completed")
+            .count(),
+        skipped: items.iter().filter(|item| item.status == "skipped").count(),
+        failed: items.iter().filter(|item| item.status == "failed").count(),
+        items: items.to_vec(),
+    }
+}
+
+fn failed_item(meeting_id: &str, title: String, error: impl ToString) -> StandupCorpusRunItem {
+    StandupCorpusRunItem {
+        meeting_id: meeting_id.to_string(),
+        title,
+        status: "failed".to_string(),
+        processing_time_ms: 0,
+        chunk_count: 0,
+        extracted_record_count: 0,
+        error: bounded_error(Some(error.to_string())),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_meeting<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &SqlitePool,
+    meeting_id: &str,
+    provider: &str,
+    model: &str,
+    summary_language: &Option<String>,
+    overwrite: bool,
+    current: usize,
+    total: usize,
+) -> StandupCorpusRunItem {
+    let (title, transcript) = match meeting_input(pool, meeting_id).await {
+        Ok(value) => value,
+        Err(error) => return failed_item(meeting_id, String::new(), error),
+    };
+    let _ = app.emit(
+        "standup-corpus-run-progress",
+        StandupCorpusRunProgress {
+            current,
+            total,
+            meeting_id: meeting_id.to_string(),
+            title: title.clone(),
+            state: "processing".to_string(),
+        },
+    );
+
+    let existing = match SummaryProcessesRepository::get_summary_data(pool, meeting_id).await {
+        Ok(value) => value,
+        Err(error) => return failed_item(meeting_id, title, error),
+    };
+    if !overwrite
+        && existing
+            .as_ref()
+            .is_some_and(|row| row.status == "completed" && has_standup_v2(row.result.as_deref()))
+    {
+        let extracted_record_count =
+            sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
+                .bind(meeting_id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0);
+        return StandupCorpusRunItem {
+            meeting_id: meeting_id.to_string(),
+            title,
+            status: "skipped".to_string(),
+            processing_time_ms: 0,
+            chunk_count: existing
+                .as_ref()
+                .map(|row| row.chunk_count)
+                .unwrap_or_default(),
+            extracted_record_count,
+            error: None,
+        };
+    }
+
+    if let Err(error) = SummaryProcessesRepository::create_or_reset_process(pool, meeting_id).await
+    {
+        return failed_item(meeting_id, title, error);
+    }
+    if let Err(error) = TranscriptChunksRepository::save_transcript_data(
+        pool,
+        meeting_id,
+        &transcript,
+        provider,
+        model,
+        40_000,
+        1_000,
+    )
+    .await
+    {
+        return failed_item(meeting_id, title, error);
+    }
+    SummaryService::process_transcript_background(
+        app.clone(),
+        pool.clone(),
+        meeting_id.to_string(),
+        transcript,
+        provider.to_string(),
+        model.to_string(),
+        String::new(),
+        TEMPLATE_ID.to_string(),
+        summary_language.clone(),
+    )
+    .await;
+
+    let outcome = match SummaryProcessesRepository::get_summary_data(pool, meeting_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return failed_item(
+                meeting_id,
+                title,
+                "Summary process disappeared after generation",
+            )
+        }
+        Err(error) => return failed_item(meeting_id, title, error),
+    };
+    let extracted_record_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+    let completed = outcome.status == "completed" && has_standup_v2(outcome.result.as_deref());
+    StandupCorpusRunItem {
+        meeting_id: meeting_id.to_string(),
+        title,
+        status: if completed { "completed" } else { "failed" }.to_string(),
+        processing_time_ms: (outcome.processing_time.max(0.0) * 1_000.0).round() as u64,
+        chunk_count: outcome.chunk_count,
+        extracted_record_count,
+        error: if completed {
+            None
+        } else {
+            bounded_error(outcome.error)
+        },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run_standup_corpus<R: Runtime>(
     app: AppHandle<R>,
     pool: SqlitePool,
@@ -216,128 +381,72 @@ async fn run_standup_corpus_inner<R: Runtime>(
     let started_at = chrono::Utc::now().to_rfc3339();
     let mut items = Vec::with_capacity(meeting_ids.len());
 
+    if let Some(path) = report_path.as_deref() {
+        write_report(
+            path,
+            &build_report(
+                &started_at,
+                &provider,
+                &model,
+                &summary_language,
+                meeting_ids.len(),
+                &items,
+                false,
+            ),
+        )?;
+    }
+
     for (index, meeting_id) in meeting_ids.iter().enumerate() {
-        let (title, transcript) = match meeting_input(&pool, meeting_id).await {
-            Ok(value) => value,
-            Err(error) => {
-                items.push(StandupCorpusRunItem {
-                    meeting_id: meeting_id.clone(),
-                    title: String::new(),
-                    status: "failed".to_string(),
-                    processing_time_ms: 0,
-                    chunk_count: 0,
-                    extracted_record_count: 0,
-                    error: Some(error),
-                });
-                continue;
-            }
-        };
+        let item = process_meeting(
+            &app,
+            &pool,
+            meeting_id,
+            &provider,
+            &model,
+            &summary_language,
+            overwrite,
+            index + 1,
+            meeting_ids.len(),
+        )
+        .await;
         let _ = app.emit(
             "standup-corpus-run-progress",
             StandupCorpusRunProgress {
                 current: index + 1,
                 total: meeting_ids.len(),
                 meeting_id: meeting_id.clone(),
-                title: title.clone(),
-                state: "processing".to_string(),
+                title: item.title.clone(),
+                state: item.status.clone(),
             },
         );
-
-        let existing = SummaryProcessesRepository::get_summary_data(&pool, meeting_id)
-            .await
-            .map_err(|error| error.to_string())?;
-        if !overwrite
-            && existing.as_ref().is_some_and(|row| {
-                row.status == "completed" && has_standup_v2(row.result.as_deref())
-            })
-        {
-            items.push(StandupCorpusRunItem {
-                meeting_id: meeting_id.clone(),
-                title,
-                status: "skipped".to_string(),
-                processing_time_ms: 0,
-                chunk_count: existing
-                    .as_ref()
-                    .map(|row| row.chunk_count)
-                    .unwrap_or_default(),
-                extracted_record_count: 0,
-                error: None,
-            });
-            continue;
+        items.push(item);
+        if let Some(path) = report_path.as_deref() {
+            write_report(
+                path,
+                &build_report(
+                    &started_at,
+                    &provider,
+                    &model,
+                    &summary_language,
+                    meeting_ids.len(),
+                    &items,
+                    false,
+                ),
+            )?;
         }
-
-        SummaryProcessesRepository::create_or_reset_process(&pool, meeting_id)
-            .await
-            .map_err(|error| error.to_string())?;
-        TranscriptChunksRepository::save_transcript_data(
-            &pool,
-            meeting_id,
-            &transcript,
-            &provider,
-            &model,
-            40_000,
-            1_000,
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        SummaryService::process_transcript_background(
-            app.clone(),
-            pool.clone(),
-            meeting_id.clone(),
-            transcript,
-            provider.clone(),
-            model.clone(),
-            String::new(),
-            TEMPLATE_ID.to_string(),
-            summary_language.clone(),
-        )
-        .await;
-
-        let outcome = SummaryProcessesRepository::get_summary_data(&pool, meeting_id)
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "Summary process disappeared after generation".to_string())?;
-        let extracted_record_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
-                .bind(meeting_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap_or(0);
-        let completed = outcome.status == "completed" && has_standup_v2(outcome.result.as_deref());
-        items.push(StandupCorpusRunItem {
-            meeting_id: meeting_id.clone(),
-            title,
-            status: if completed { "completed" } else { "failed" }.to_string(),
-            processing_time_ms: (outcome.processing_time.max(0.0) * 1_000.0).round() as u64,
-            chunk_count: outcome.chunk_count,
-            extracted_record_count,
-            error: if completed {
-                None
-            } else {
-                bounded_error(outcome.error)
-            },
-        });
     }
 
-    let report = StandupCorpusRunReport {
-        schema_version: "standup_corpus_run_v1".to_string(),
-        started_at,
-        completed_at: chrono::Utc::now().to_rfc3339(),
-        provider,
-        model,
-        template_id: TEMPLATE_ID.to_string(),
-        summary_language,
-        requested: meeting_ids.len(),
-        completed: items
-            .iter()
-            .filter(|item| item.status == "completed")
-            .count(),
-        skipped: items.iter().filter(|item| item.status == "skipped").count(),
-        failed: items.iter().filter(|item| item.status == "failed").count(),
-        items,
-    };
-    if let Some(path) = report_path {
-        write_report(&path, &report)?;
+    let report = build_report(
+        &started_at,
+        &provider,
+        &model,
+        &summary_language,
+        meeting_ids.len(),
+        &items,
+        true,
+    );
+    if let Some(path) = report_path.as_deref() {
+        write_report(path, &report)?;
     }
     let _ = app.emit("standup-corpus-run-complete", &report);
     Ok(report)
@@ -355,8 +464,13 @@ pub async fn start_standup_corpus_run<R: Runtime>(
     overwrite: Option<bool>,
     report_path: Option<String>,
 ) -> Result<StandupCorpusRunStarted, String> {
-    let guard = CorpusRunGuard::acquire()?;
     let meeting_ids = normalized_ids(meeting_ids)?;
+    let provider = provider.trim().to_string();
+    let model = model.trim().to_string();
+    if provider.is_empty() || model.is_empty() {
+        return Err("Provider and model are required".to_string());
+    }
+    let guard = CorpusRunGuard::acquire()?;
     let pool = state.db_manager.pool().clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = run_standup_corpus_inner(
@@ -411,6 +525,63 @@ mod tests {
         let error = bounded_error(Some(format!("a\n{}", "b".repeat(800)))).unwrap();
         assert!(!error.contains('\n'));
         assert_eq!(error.chars().count(), 500);
+    }
+
+    #[test]
+    fn report_checkpoints_have_stable_state_and_counts() {
+        let items = vec![
+            StandupCorpusRunItem {
+                meeting_id: "m1".into(),
+                title: "Completed".into(),
+                status: "completed".into(),
+                processing_time_ms: 10,
+                chunk_count: 2,
+                extracted_record_count: 3,
+                error: None,
+            },
+            StandupCorpusRunItem {
+                meeting_id: "m2".into(),
+                title: "Skipped".into(),
+                status: "skipped".into(),
+                processing_time_ms: 0,
+                chunk_count: 4,
+                extracted_record_count: 5,
+                error: None,
+            },
+            failed_item("m3", "Failed".into(), "provider error"),
+        ];
+        let language = Some("ru-RU".to_string());
+
+        let running = build_report(
+            "2026-07-15T00:00:00Z",
+            "builtin-ai",
+            "qwen3.5:4b",
+            &language,
+            4,
+            &items,
+            false,
+        );
+        assert_eq!(running.schema_version, "standup_corpus_run_v2");
+        assert_eq!(running.state, "running");
+        assert!(running.completed_at.is_none());
+        assert_eq!(running.requested, 4);
+        assert_eq!(
+            (running.completed, running.skipped, running.failed),
+            (1, 1, 1)
+        );
+
+        let completed = build_report(
+            "2026-07-15T00:00:00Z",
+            "builtin-ai",
+            "qwen3.5:4b",
+            &language,
+            4,
+            &items,
+            true,
+        );
+        assert_eq!(completed.state, "completed");
+        assert!(completed.completed_at.is_some());
+        assert_eq!(completed.items.len(), 3);
     }
 
     #[tokio::test]

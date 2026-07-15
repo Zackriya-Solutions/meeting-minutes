@@ -21,6 +21,12 @@ The JSON report contains meeting IDs, titles, status, latency, chunk count, extr
 and bounded provider errors. It deliberately contains neither transcripts nor generated facts.
 Keep it under `evals/private/` anyway because titles may contain personal data.
 
+The report starts with `state: running` before the first meeting and is replaced atomically after
+every result. A database, model, or provider failure is recorded against that meeting and does not
+abort the rest of the corpus. The final checkpoint has `state: completed` and a non-null
+`completed_at`. Restarting without overwrite skips completed schema-versioned Standup V2 results
+and reports their stored record counts.
+
 For a fair comparison:
 
 1. Freeze 12–15 reviewed meetings and their series-level train/dev/test split.
