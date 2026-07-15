@@ -1356,6 +1356,13 @@ Keep descriptive values concise and never repeat a record in multiple arrays. Re
     )
 }
 
+fn extraction_retry_user_prompt(chunk: &str, output_language: &str, custom_prompt: &str) -> String {
+    format!(
+        "RETRY AFTER INVALID JSON: emit the smallest valid object matching the exact shape. Omit uncertain facts, use empty arrays, and close every string and container.\n\n{}",
+        extraction_user_prompt(chunk, output_language, custom_prompt)
+    )
+}
+
 pub async fn generate_standup_report(
     request: StandupGenerationRequest<'_>,
 ) -> Result<GeneratedStandup, String> {
@@ -1414,13 +1421,52 @@ pub async fn generate_standup_report(
                     chunks.len()
                 )
             })?;
-            parse_standup_extraction(&raw).map_err(|error| {
-                format!(
-                    "Standup V2 extraction chunk {}/{} was invalid: {error}",
-                    index + 1,
-                    chunks.len()
-                )
-            })
+            match parse_standup_extraction(&raw) {
+                Ok(parsed) => Ok(parsed),
+                Err(first_error) => {
+                    log::warn!(
+                        "Standup V2 extraction chunk {}/{} returned invalid JSON; retrying once",
+                        index + 1,
+                        chunks.len()
+                    );
+                    let retry_raw = generate_summary_with_builtin_json_schema(
+                        request.client,
+                        request.provider,
+                        request.model_name,
+                        request.api_key,
+                        extraction_system_prompt(),
+                        &extraction_retry_user_prompt(
+                            chunk,
+                            request.output_language,
+                            request.custom_prompt,
+                        ),
+                        request.ollama_endpoint,
+                        request.custom_openai_endpoint,
+                        request.deepseek_base_url,
+                        extraction_max_tokens,
+                        Some(0.0),
+                        Some(1.0),
+                        request.app_data_dir,
+                        request.cancellation_token,
+                        Some(STANDUP_JSON_SCHEMA),
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "Standup V2 extraction chunk {}/{} retry failed: {error}",
+                            index + 1,
+                            chunks.len()
+                        )
+                    })?;
+                    parse_standup_extraction(&retry_raw).map_err(|retry_error| {
+                        format!(
+                            "Standup V2 extraction chunk {}/{} was invalid after retry: {retry_error}; first attempt: {first_error}",
+                            index + 1,
+                            chunks.len()
+                        )
+                    })
+                }
+            }
         }
         .await;
         let mut parsed = match chunk_result {
@@ -1848,6 +1894,10 @@ mod tests {
         assert!(prompt.contains("never evidence"));
         assert!(prompt.contains("schema_version"));
         assert!(prompt.contains("Return the JSON on one line"));
+        let retry_prompt =
+            extraction_retry_user_prompt("[00:01] текст", "Russian", "Команда Альфа");
+        assert!(retry_prompt.contains("RETRY AFTER INVALID JSON"));
+        assert!(retry_prompt.contains("<transcript_chunk>"));
         assert!(extraction_system_prompt().contains("below 60 records"));
         assert!(extraction_system_prompt().contains("one most-specific section"));
 
