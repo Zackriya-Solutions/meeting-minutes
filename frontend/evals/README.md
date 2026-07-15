@@ -46,6 +46,23 @@ split: an unreviewed series remains `UNASSIGNED` and deliberately fails the gate
 must appear in exactly one of `train`, `dev`, or `test`; chunks from the same series must
 never be split across them.
 
+After reviewing the ranked draft, freeze the exact meetings by repeating `--meeting-id` in
+the desired order. An explicit ID that is missing or has no transcript fails loudly; `--limit`
+is ignored for an explicit selection:
+
+```bash
+python3 evals/prepare_standup_corpus.py \
+  --db "$HOME/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite" \
+  --output evals/private/standup-corpus-frozen.json \
+  --meeting-id meeting-first \
+  --meeting-id meeting-second
+```
+
+Manually set each sample's `meeting_type` to one of the top-level
+`meeting_type_options`. `UNASSIGNED` deliberately counts as a protocol error. This makes
+pure status rounds, status-plus-deep-dive meetings, planning/syncs, one-to-ones, and general
+meetings distinguishable instead of treating a filename hint as ground truth.
+
 For each sample, finish `reference_records` by adding facts the model missed as well as
 confirming accepted records. Give every output record a `match_id` only when it is supported
 by the reference fact of the same kind. Keep the transcript and record text in the private

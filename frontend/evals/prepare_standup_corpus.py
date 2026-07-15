@@ -17,6 +17,16 @@ from pathlib import Path
 from typing import Any
 
 
+MEETING_TYPES = (
+    "pure_status",
+    "status_plus_deep_dive",
+    "planning_sync",
+    "one_to_one",
+    "general_meeting",
+    "uncertain",
+)
+
+
 def table_exists(db: sqlite3.Connection, table: str) -> bool:
     return db.execute(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", (table,)
@@ -161,11 +171,37 @@ def series_for_meeting(db: sqlite3.Connection, meeting_id: str) -> tuple[str, st
     return series_id, split_for_series(series_id), [rows[0][1]]
 
 
+def select_samples(
+    candidates: list[tuple[int, dict[str, Any]]],
+    explicit_meeting_ids: list[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Freeze an explicit selection or return the current ranked candidate slice."""
+    if not explicit_meeting_ids:
+        return [item[1] for item in candidates[: limit or None]]
+    normalized = [value.strip() for value in explicit_meeting_ids if value.strip()]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("Explicit meeting IDs must be unique")
+    by_meeting_id = {
+        item[1]["annotation_source"]["meeting_id"]: item[1] for item in candidates
+    }
+    missing = [meeting_id for meeting_id in normalized if meeting_id not in by_meeting_id]
+    if missing:
+        raise ValueError(f"Meeting IDs not found or without transcripts: {', '.join(missing)}")
+    return [by_meeting_id[meeting_id] for meeting_id in normalized]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", required=True, type=Path, help="Path to meeting_minutes.sqlite")
     parser.add_argument("--output", type=Path, default=Path("evals/private/standup-corpus.json"))
     parser.add_argument("--limit", type=int, default=15, help="Top candidates to export; 0 exports all")
+    parser.add_argument(
+        "--meeting-id",
+        action="append",
+        default=[],
+        help="Exact meeting ID to export; repeat to freeze a reviewed set in this order",
+    )
     args = parser.parse_args()
 
     db = sqlite3.connect(f"file:{args.db.resolve()}?mode=ro", uri=True)
@@ -233,6 +269,7 @@ def main() -> None:
             ),
             "candidate_score": score,
             "candidate_reasons": reasons,
+            "meeting_type": "UNASSIGNED",
             "review_state": "needs_reference_completion",
             "valid_timestamps": sorted(set(valid_timestamps)),
             "reference_records": references,
@@ -248,11 +285,15 @@ def main() -> None:
         candidates.append((score, sample))
 
     candidates.sort(key=lambda item: (-item[0], item[1]["annotation_source"]["occurred_at"] or ""))
-    samples = [item[1] for item in candidates[: args.limit or None]]
+    try:
+        samples = select_samples(candidates, args.meeting_id, args.limit)
+    except ValueError as error:
+        parser.error(str(error))
     payload = {
         "dataset_id": f"memento-private-standup-{dt.datetime.now(dt.timezone.utc).date().isoformat()}",
         "schema_version": "standup_eval_v1",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "meeting_type_options": list(MEETING_TYPES),
         "standup": samples,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -8,8 +8,8 @@ function test(name, check) {
 
 test('split protocol rejects one series leaking across train and test', () => {
   const metrics = standupMetrics([
-    { id: 'one', series_id: 'daily-team', split: 'train', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', success: false },
-    { id: 'two', series_id: 'daily-team', split: 'test', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', success: false },
+    { id: 'one', series_id: 'daily-team', split: 'train', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
+    { id: 'two', series_id: 'daily-team', split: 'test', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
   ]);
   assert.equal(metrics.protocol_error_count, 1);
 });
@@ -22,6 +22,7 @@ test('record metrics penalize invented facts, duplicate actions, owners, and bad
     provider: 'deepseek',
     schema_version: 'v2',
     prompt_version: 'p1',
+    meeting_type: 'pure_status',
     success: true,
     latency_ms: 10,
     valid_timestamps: ['[01:00]'],
@@ -46,9 +47,23 @@ test('record metrics penalize invented facts, duplicate actions, owners, and bad
 
 test('provider failures count against success without pretending to have quality labels', () => {
   const metrics = standupMetrics([
-    { id: 'failed', series_id: 'daily-team', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', success: false },
+    { id: 'failed', series_id: 'daily-team', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
   ]);
   assert.equal(metrics.success_rate, 0);
   assert.equal(metrics.quality_count, 0);
   assert.equal(metrics.fact_coverage, null);
+});
+
+test('meeting type must be manually reviewed before the corpus is valid', () => {
+  const metrics = standupMetrics([{
+    id: 'unreviewed-type',
+    series_id: 'daily-team',
+    split: 'dev',
+    provider: 'deepseek',
+    schema_version: 'v2',
+    prompt_version: 'p1',
+    meeting_type: 'UNASSIGNED',
+    success: false,
+  }]);
+  assert.equal(metrics.protocol_error_count, 1);
 });

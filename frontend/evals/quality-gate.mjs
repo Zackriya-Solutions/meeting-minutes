@@ -206,6 +206,14 @@ function f1(precision, recall) {
 }
 
 function standupMetrics(rows) {
+  const meetingTypes = new Set([
+    'pure_status',
+    'status_plus_deep_dive',
+    'planning_sync',
+    'one_to_one',
+    'general_meeting',
+    'uncertain',
+  ]);
   const successes = rows.filter((row) => row.success === true);
   const sampleIds = new Set();
   const seriesSplits = new Map();
@@ -236,6 +244,7 @@ function standupMetrics(rows) {
       || !row.prompt_version || row.prompt_version === 'UNASSIGNED') {
       protocolErrors += 1;
     }
+    if (!meetingTypes.has(row.meeting_type)) protocolErrors += 1;
     if (row.provider && row.provider !== 'unknown') {
       const provider = providerRows.get(row.provider) ?? [];
       provider.push(row);

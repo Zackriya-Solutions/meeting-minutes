@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 
-from prepare_standup_corpus import candidate_score, flatten_standup, split_for_series, timestamp
+from prepare_standup_corpus import (
+    candidate_score,
+    flatten_standup,
+    select_samples,
+    split_for_series,
+    timestamp,
+)
 
 
 assert timestamp(62.9) == "[01:02]"
@@ -48,5 +54,16 @@ assert records == [
         "evidence": [{"timestamp": "[01:02]"}],
     }
 ]
+
+candidates = [
+    (20, {"annotation_source": {"meeting_id": "m1"}}),
+    (10, {"annotation_source": {"meeting_id": "m2"}}),
+]
+assert [row["annotation_source"]["meeting_id"] for row in select_samples(candidates, ["m2", "m1"], 1)] == ["m2", "m1"]
+try:
+    select_samples(candidates, ["missing"], 15)
+    raise AssertionError("missing explicit ID must fail")
+except ValueError:
+    pass
 
 print("ok - private corpus exporter helpers")
