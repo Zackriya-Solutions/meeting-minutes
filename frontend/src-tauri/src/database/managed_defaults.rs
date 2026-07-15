@@ -56,6 +56,14 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
     .map(|value| value == "true" || value == "1")
     .unwrap_or(false);
 
+    // Local-only is a reversible privacy preference, not a permanent decision
+    // to skip the managed-default migration. Leave the marker unset so a later
+    // startup can migrate the legacy defaults if the user disables local-only.
+    if local_only {
+        tx.commit().await?;
+        return Ok(report);
+    }
+
     if !local_only {
         if let Some(row) =
             sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
@@ -213,5 +221,21 @@ mod tests {
             values(&pool, "settings").await,
             ("builtin-ai".into(), "qwen3.5:4b".into())
         );
+
+        let marker: Option<String> =
+            sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
+                .bind(MARKER)
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert_eq!(marker, None);
+
+        sqlx::query("UPDATE app_settings_kv SET value='false' WHERE key='privacy.local_only'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let report = migrate(&pool).await.unwrap();
+        assert!(report.transcription_changed);
+        assert!(report.summary_changed);
     }
 }
