@@ -266,12 +266,21 @@ async fn process_meeting<R: Runtime>(
             .as_ref()
             .is_some_and(|row| row.status == "completed" && has_standup_v2(row.result.as_deref()))
     {
-        let extracted_record_count =
-            sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
+        let extracted_record_count: i64 =
+            match sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
                 .bind(meeting_id)
                 .fetch_one(pool)
                 .await
-                .unwrap_or(0);
+            {
+                Ok(count) => count,
+                Err(error) => {
+                    return failed_item(
+                        meeting_id,
+                        title,
+                        format!("Could not count stored Standup V2 records: {error}"),
+                    )
+                }
+            };
         return StandupCorpusRunItem {
             meeting_id: meeting_id.to_string(),
             title,
@@ -328,11 +337,20 @@ async fn process_meeting<R: Runtime>(
         Err(error) => return failed_item(meeting_id, title, error),
     };
     let extracted_record_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
+        match sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
             .bind(meeting_id)
             .fetch_one(pool)
             .await
-            .unwrap_or(0);
+        {
+            Ok(count) => count,
+            Err(error) => {
+                return failed_item(
+                    meeting_id,
+                    title,
+                    format!("Could not count generated Standup V2 records: {error}"),
+                )
+            }
+        };
     let completed = outcome.status == "completed" && has_standup_v2(outcome.result.as_deref());
     StandupCorpusRunItem {
         meeting_id: meeting_id.to_string(),
@@ -445,7 +463,7 @@ async fn run_standup_corpus_inner<R: Runtime>(
         );
         items.push(item);
         if let Some(path) = report_path.as_deref() {
-            write_report(
+            if let Err(error) = write_report(
                 path,
                 &build_report(
                     &started_at,
@@ -456,7 +474,14 @@ async fn run_standup_corpus_inner<R: Runtime>(
                     &items,
                     false,
                 ),
-            )?;
+            ) {
+                log::warn!(
+                    "Could not persist Standup corpus checkpoint after {} of {} meetings: {}",
+                    index + 1,
+                    meeting_ids.len(),
+                    bounded_error(Some(error)).unwrap_or_else(|| "unknown I/O error".to_string())
+                );
+            }
         }
     }
 
