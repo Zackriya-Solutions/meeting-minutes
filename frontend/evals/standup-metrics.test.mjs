@@ -49,6 +49,31 @@ test('record metrics penalize invented facts, duplicate actions, owners, and bad
   assert.equal(metrics.contrast_count, 0);
 });
 
+test('overview evidence is validated without counting overview as an atomic gold record', () => {
+  const metrics = standupMetrics([{
+    id: 'overview-sample',
+    series_id: 'daily-team',
+    split: 'test',
+    provider: 'builtin-ai',
+    schema_version: 'standup_v2',
+    prompt_version: 'p1',
+    meeting_type: 'pure_status',
+    recording_scope: 'complete',
+    success: true,
+    latency_ms: 10,
+    valid_timestamps: ['[00:01]'],
+    reference_records: [{ id: 'r1', kind: 'risk' }],
+    hypothesis_records: [
+      { kind: 'overview', match_id: null, evidence: [{ timestamp: '[00:01]' }] },
+      { kind: 'risk', match_id: 'r1', evidence: [{ timestamp: '[00:01]' }] },
+    ],
+  }]);
+  assert.equal(metrics.output_record_count, 1);
+  assert.equal(metrics.unsupported_claim_rate, 0);
+  assert.equal(metrics.fact_coverage, 1);
+  assert.equal(metrics.invalid_evidence_rate, 0);
+});
+
 test('provider failures count against success without pretending to have quality labels', () => {
   const metrics = standupMetrics([
     { id: 'failed', series_id: 'daily-team', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', recording_scope: 'complete', success: false },

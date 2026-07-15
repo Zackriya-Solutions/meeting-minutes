@@ -217,6 +217,14 @@ function standupMetrics(rows) {
   const reviewedStandupTypes = new Set(['pure_status', 'status_plus_deep_dive']);
   const contrastTypes = new Set(['planning_sync', 'one_to_one', 'general_meeting']);
   const recordingScopes = new Set(['complete', 'partial', 'unknown']);
+  const scoredRecordKinds = new Set([
+    'participant_update',
+    'decision',
+    'action',
+    'risk',
+    'deep_dive',
+    'unattributed_fact',
+  ]);
   const successes = rows.filter((row) => row.success === true);
   const sampleIds = new Set();
   const seriesSplits = new Map();
@@ -272,7 +280,8 @@ function standupMetrics(rows) {
         .filter((item) => item?.id && item?.kind)
         .map((item) => [item.id, item]),
     );
-    const outputs = (row.hypothesis_records ?? []).filter((item) => item?.kind);
+    const evidenceOutputs = (row.hypothesis_records ?? []).filter((item) => item?.kind);
+    const outputs = evidenceOutputs.filter((item) => scoredRecordKinds.has(item.kind));
     const validTimestamps = new Set(row.valid_timestamps ?? []);
     if (references.size > 0) qualityCount += 1;
     referenceRecords += references.size;
@@ -282,6 +291,14 @@ function standupMetrics(rows) {
 
     const covered = new Set();
     const matchedActionIds = new Set();
+    for (const output of evidenceOutputs) {
+      const evidence = Array.isArray(output.evidence) ? output.evidence : [];
+      if (evidence.length === 0) recordsMissingEvidence += 1;
+      for (const item of evidence) {
+        evidenceItems += 1;
+        if (!validTimestamps.has(item?.timestamp)) invalidEvidenceItems += 1;
+      }
+    }
     for (const output of outputs) {
       const reference = output.match_id ? references.get(output.match_id) : null;
       const validMatch = Boolean(reference && reference.kind === output.kind);
@@ -294,13 +311,6 @@ function standupMetrics(rows) {
         if (covered.has(reference.id)) duplicateOutputs += 1;
         covered.add(reference.id);
         if (output.kind === 'action') matchedActionIds.add(reference.id);
-      }
-
-      const evidence = Array.isArray(output.evidence) ? output.evidence : [];
-      if (evidence.length === 0) recordsMissingEvidence += 1;
-      for (const item of evidence) {
-        evidenceItems += 1;
-        if (!validTimestamps.has(item?.timestamp)) invalidEvidenceItems += 1;
       }
 
       const owner = normalizedOptional(output.owner);

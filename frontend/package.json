@@ -29,7 +29,7 @@
         "lint": "next lint",
         "typecheck": "tsc -p tsconfig.release.json --noEmit",
     "quality:smoke": "node evals/quality-gate.mjs --mode smoke --dataset evals/fixtures/smoke.json --thresholds evals/thresholds.smoke.json",
-    "quality:standup-test": "node evals/standup-metrics.test.mjs && python3 evals/prepare_standup_corpus_test.py",
+    "quality:standup-test": "node evals/standup-metrics.test.mjs && python3 evals/prepare_standup_corpus_test.py && python3 evals/apply_standup_gold_test.py && python3 evals/apply_standup_matches_test.py",
     "quality:standup": "node evals/quality-gate.mjs --mode standup --thresholds evals/thresholds.standup.json",
         "quality:gate": "node evals/quality-gate.mjs --mode release --thresholds evals/thresholds.release.json"
     },

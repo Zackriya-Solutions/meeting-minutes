@@ -77,6 +77,19 @@ unassigned series, invalid splits, meeting types, recording scopes, record kinds
 reference text. It copies all reviewed classification fields, leaves `hypothesis_records`
 unchanged, writes atomically with mode `0600`, and prints counts only.
 
+Link a provider's raw hypotheses to same-kind gold records with a separate private overlay:
+
+```bash
+python3 evals/apply_standup_matches.py \
+  --dataset evals/private/standup-corpus-reviewed.json \
+  --matches evals/private/standup-matches.json \
+  --output evals/private/standup-corpus-linked.json
+```
+
+Each link includes the hypothesis position, kind, SHA-256 fingerprint, and reference ID. The tool
+clears stale links first and rejects changed hypotheses, missing records, duplicate positions, and
+cross-kind matches. This keeps provider-specific review separate from reusable gold labels.
+
 The exporter refuses to replace an existing output by default so a rerun cannot silently
 destroy reviewed references. Use a new path for a frozen set. `--overwrite` is available only
 for intentionally disposable drafts. Output is written atomically with owner-only (`0600`)
