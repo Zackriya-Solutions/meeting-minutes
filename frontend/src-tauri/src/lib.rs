@@ -402,6 +402,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    if !summary::corpus_runner::corpus_mode_requested()
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             log_info!(
@@ -570,8 +571,7 @@ pub fn run() {
                         .unwrap_or_else(|_| "qwen3.5:4b".to_string());
                     let summary_language =
                         std::env::var("MEETILY_STANDUP_CORPUS_LANGUAGE").ok();
-                    let overwrite = std::env::var("MEETILY_STANDUP_CORPUS_OVERWRITE")
-                        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+                    let overwrite = summary::corpus_runner::corpus_overwrite_requested();
                     let report_path = std::env::var_os("MEETILY_STANDUP_CORPUS_REPORT")
                         .map(std::path::PathBuf::from);
                     let app_handle = _app.handle().clone();

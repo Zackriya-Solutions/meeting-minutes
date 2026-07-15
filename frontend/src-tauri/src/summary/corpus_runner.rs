@@ -36,6 +36,20 @@ pub(crate) fn corpus_mode_requested() -> bool {
     corpus_mode_requested_from(raw.as_deref())
 }
 
+fn truthy_env_value(raw: Option<&str>) -> bool {
+    raw.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
+pub(crate) fn corpus_overwrite_requested() -> bool {
+    let raw = std::env::var("MEETILY_STANDUP_CORPUS_OVERWRITE").ok();
+    truthy_env_value(raw.as_deref())
+}
+
 struct CorpusRunGuard;
 
 impl CorpusRunGuard {
@@ -567,14 +581,7 @@ pub async fn start_standup_corpus_run<R: Runtime>(
         );
     }
     let overwrite = overwrite.unwrap_or(false);
-    let overwrite_allowed = std::env::var("MEETILY_STANDUP_CORPUS_OVERWRITE")
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes"
-            )
-        })
-        .unwrap_or(false);
+    let overwrite_allowed = corpus_overwrite_requested();
     if overwrite && !overwrite_allowed {
         return Err(
             "Set MEETILY_STANDUP_CORPUS_OVERWRITE=true before replacing completed summaries"
@@ -634,6 +641,14 @@ mod tests {
         assert!(!corpus_mode_requested_from(Some(" ,  ,")));
         assert!(corpus_mode_requested_from(Some(" meeting-1 ")));
         assert!(corpus_mode_requested_from(Some(" , meeting-1,meeting-2")));
+    }
+
+    #[test]
+    fn overwrite_env_values_are_trimmed_and_case_insensitive() {
+        assert!(truthy_env_value(Some(" True ")));
+        assert!(truthy_env_value(Some("YES")));
+        assert!(!truthy_env_value(Some("on")));
+        assert!(!truthy_env_value(None));
     }
 
     #[test]
