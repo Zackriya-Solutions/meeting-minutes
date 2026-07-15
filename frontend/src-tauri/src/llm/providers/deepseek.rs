@@ -15,7 +15,17 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 /// than a long chain-of-thought. DeepSeek V4 enables thinking by default, so disable it
 /// explicitly and use conservative sampling for stable structured output.
 pub fn build_request_body(model: &str, system: &str, user: &str, max_tokens: Option<u32>) -> Value {
-    json!({
+    build_request_body_with_json_mode(model, system, user, max_tokens, false)
+}
+
+pub fn build_request_body_with_json_mode(
+    model: &str,
+    system: &str,
+    user: &str,
+    max_tokens: Option<u32>,
+    json_mode: bool,
+) -> Value {
+    let mut body = json!({
         "model": model,
         "messages": [
             {"role": "system", "content": system},
@@ -26,7 +36,11 @@ pub fn build_request_body(model: &str, system: &str, user: &str, max_tokens: Opt
         "temperature": 0.2,
         "top_p": 0.9,
         "stream": false,
-    })
+    });
+    if json_mode {
+        body["response_format"] = json!({"type": "json_object"});
+    }
+    body
 }
 
 /// Validate the OpenAI-shaped response contract used by DeepSeek. A 200 response is not
@@ -157,6 +171,20 @@ mod tests {
         assert_eq!(body["temperature"], 0.2);
         assert_eq!(body["top_p"], 0.9);
         assert_eq!(body["stream"], false);
+        assert!(body.get("response_format").is_none());
+    }
+
+    #[test]
+    fn structured_request_enables_supported_json_object_mode() {
+        let body = build_request_body_with_json_mode(
+            "deepseek-v4-pro",
+            "return json",
+            "extract",
+            Some(4_096),
+            true,
+        );
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert_eq!(body["max_tokens"], 4_096);
     }
 
     #[test]
