@@ -19,15 +19,15 @@ const STANDUP_JSON_SCHEMA: &str = r##"{
   "type": "object",
   "properties": {
     "schema_version": {"const": "standup_v2"},
-    "overview": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/evidenced_text"}},
     "participant_updates": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/participant_update"}},
-    "decisions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/decision"}},
     "action_items": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/action"}},
+    "decisions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/decision"}},
     "risks_and_blockers": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/risk"}},
     "deep_dives": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/deep_dive"}},
-    "unattributed_facts": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/evidenced_text"}}
+    "unattributed_facts": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/evidenced_text"}},
+    "overview": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/evidenced_text"}}
   },
-  "required": ["schema_version", "overview", "participant_updates", "decisions", "action_items", "risks_and_blockers", "deep_dives", "unattributed_facts"],
+  "required": ["schema_version", "participant_updates", "action_items", "decisions", "risks_and_blockers", "deep_dives", "unattributed_facts", "overview"],
   "additionalProperties": false,
   "$defs": {
     "evidence": {
@@ -1148,10 +1148,11 @@ Rules:
 6. Keep a clear completed/next/blocker status in `participant_updates` even when `participant` is null. Use `unattributed_facts` only for useful non-status context with no safe attribution.
 7. Quotes must be 3-12 words, verbatim, and copied from the same transcript line as their timestamp. Never paraphrase a quote.
 8. A question, suggestion, or tentative option is not a decision until the transcript contains explicit agreement or a final choice. An action requires an explicit commitment or assignment, not merely a discussed possibility.
-9. Add a `deep_dive` only when the discussion has an explicit outcome or is explicitly parked; omit topic-only discussion. `overview` is optional and must not duplicate another section.
+9. Add a `deep_dive` only when the discussion has an explicit outcome or is explicitly parked; omit topic-only discussion. `overview` is optional, limited to one non-duplicating fact, and must be serialized last.
 10. Prefer omission to repetition: capture only final status, explicit commitments, decisions, blockers, and concrete deep-dive outcomes. Put each fact in one most-specific section only.
-11. Keep the whole result below 60 records: at most 3 overview facts; 3 items per participant category; 10 decisions; 10 actions; 10 risks; 5 deep dives; and 10 unattributed facts.
-12. Return minified one-line JSON with no Markdown, commentary, or extra whitespace."#
+11. Keep the whole result below 60 records: at most 1 overview fact; 3 items per participant category; 10 decisions; 10 actions; 10 risks; 5 deep dives; and 10 unattributed facts.
+12. Serialize fields in the exact order shown, finish all atomic arrays before `overview`, and close the JSON object before ending.
+13. Return minified one-line JSON with no Markdown, commentary, or extra whitespace."#
 }
 
 fn extraction_user_prompt(chunk: &str, output_language: &str, custom_prompt: &str) -> String {
@@ -1169,18 +1170,18 @@ fn extraction_user_prompt(chunk: &str, output_language: &str, custom_prompt: &st
 Return this exact JSON shape:
 {{
   "schema_version": "standup_v2",
-  "overview": [{{"text":"...","evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
   "participant_updates": [{{
     "participant": null,
     "completed_or_recent": [{{"text":"...","evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
     "next": [],
     "blockers": []
   }}],
-  "decisions": [{{"decision":"...","rationale":null,"evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
   "action_items": [{{"task":"...","owner":null,"due_date":null,"evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
+  "decisions": [{{"decision":"...","rationale":null,"evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
   "risks_and_blockers": [{{"blocker_or_risk":"...","impact":null,"owner":null,"evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
   "deep_dives": [{{"topic":"...","outcome":null,"parking_lot":false,"evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
-  "unattributed_facts": [{{"text":"...","evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}]
+  "unattributed_facts": [{{"text":"...","evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}],
+  "overview": [{{"text":"...","evidence":[{{"timestamp":"[MM:SS]","quote":"..."}}]}}]
 }}
 
 Use empty arrays when the chunk has no supported records of a type.
@@ -1350,6 +1351,20 @@ mod tests {
     }
 
     #[test]
+    fn extraction_protocol_serializes_atomic_facts_before_overview() {
+        let schema_updates = STANDUP_JSON_SCHEMA.find("\"participant_updates\"").unwrap();
+        let schema_actions = STANDUP_JSON_SCHEMA.find("\"action_items\"").unwrap();
+        let schema_overview = STANDUP_JSON_SCHEMA.find("\"overview\"").unwrap();
+        assert!(schema_updates < schema_actions && schema_actions < schema_overview);
+
+        let prompt = extraction_user_prompt("[00:00] status", "Russian", "");
+        let prompt_updates = prompt.find("\"participant_updates\"").unwrap();
+        let prompt_actions = prompt.find("\"action_items\"").unwrap();
+        let prompt_overview = prompt.find("\"overview\"").unwrap();
+        assert!(prompt_updates < prompt_actions && prompt_actions < prompt_overview);
+    }
+
+    #[test]
     fn parses_fenced_json_and_normalizes_unknown_owner() {
         let raw = r#"```json
         {
@@ -1366,6 +1381,14 @@ mod tests {
 
     #[test]
     fn repairs_only_complete_eof_truncated_json_containers() {
+        let atomic_first = r#"{
+            "schema_version":"standup_v2",
+            "participant_updates":[],
+            "action_items":[{"task":"Проверить пороги","owner":null,"due_date":null,"evidence":[{"timestamp":"[05:29]","quote":"пороги подобрать"}] }],
+        "#;
+        let report = parse_standup_extraction(atomic_first).unwrap();
+        assert_eq!(report.action_items.len(), 1);
+
         let truncated = r#"{
             "schema_version":"standup_v2",
             "overview":[
