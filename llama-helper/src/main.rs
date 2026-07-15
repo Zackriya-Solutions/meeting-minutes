@@ -70,6 +70,8 @@ struct ConstrainedJsonTracker {
     escaped: bool,
     depth: usize,
     scalar_fallback: bool,
+    processed_bytes: usize,
+    repairable_prefix_len: Option<usize>,
 }
 
 impl ConstrainedJsonTracker {
@@ -87,7 +89,7 @@ impl ConstrainedJsonTracker {
         if self.scalar_fallback {
             return serde_json::from_str::<serde_json::Value>(full_output).is_ok();
         }
-        for character in fragment.chars() {
+        for (offset, character) in fragment.char_indices() {
             if !self.started {
                 if character.is_whitespace() {
                     continue;
@@ -116,13 +118,23 @@ impl ConstrainedJsonTracker {
                 '}' | ']' => {
                     self.depth = self.depth.saturating_sub(1);
                     if self.depth == 0 {
+                        self.processed_bytes += fragment.len();
                         return true;
+                    }
+                    if self.depth <= 2 {
+                        self.repairable_prefix_len =
+                            Some(self.processed_bytes + offset + character.len_utf8());
                     }
                 }
                 _ => {}
             }
         }
+        self.processed_bytes += fragment.len();
         self.scalar_fallback && serde_json::from_str::<serde_json::Value>(full_output).is_ok()
+    }
+
+    fn repairable_prefix_len(&self) -> Option<usize> {
+        self.repairable_prefix_len
     }
 }
 
@@ -484,6 +496,7 @@ impl ModelState {
             .as_millis() as u32;
         let constrained_json = json_schema.is_some();
         let mut constrained_json_tracker = ConstrainedJsonTracker::new(constrained_json);
+        let mut constrained_json_completed = false;
         let mut samplers = Vec::new();
         if let Some(schema) = json_schema.as_deref() {
             let grammar = guard_completed_json_grammar(
@@ -565,6 +578,7 @@ impl ModelState {
             // complete. Stop before asking llama.cpp to sample again; otherwise its
             // empty grammar stack triggers a native assertion instead of returning EOG.
             if constrained_json_tracker.push(&token_text, &output) {
+                constrained_json_completed = true;
                 eprintln!(
                     "✓ Constrained JSON root completed (generated {} chars)",
                     output.len()
@@ -597,6 +611,18 @@ impl ModelState {
                 .context("Failed to add generated token to batch")?;
             n_cur += 1;
             ctx.decode(&mut batch).context("failed to eval")?;
+        }
+
+        if constrained_json && !constrained_json_completed {
+            if let Some(prefix_len) = constrained_json_tracker.repairable_prefix_len() {
+                if prefix_len < output.len() {
+                    output.truncate(prefix_len);
+                    eprintln!(
+                        "✓ Truncated constrained JSON to the last complete record ({} chars)",
+                        output.len()
+                    );
+                }
+            }
         }
 
         // Generation statistics
@@ -880,5 +906,19 @@ mod tests {
 
         let mut disabled = ConstrainedJsonTracker::new(false);
         assert!(!disabled.push(r#"{"value":"complete"}"#, r#"{"value":"complete"}"#));
+    }
+
+    #[test]
+    fn constrained_json_tracks_the_last_repairable_record_boundary() {
+        let mut tracker = ConstrainedJsonTracker::new(true);
+        let complete = r#"{"items":[{"text":"first"}"#;
+        assert!(!tracker.push(complete, complete));
+        assert_eq!(tracker.repairable_prefix_len(), Some(complete.len()));
+
+        let incomplete = r#",{"text":"unfinished"#;
+        let full = format!("{complete}{incomplete}");
+        assert!(!tracker.push(incomplete, &full));
+        assert_eq!(tracker.repairable_prefix_len(), Some(complete.len()));
+        assert_eq!(&full[..tracker.repairable_prefix_len().unwrap()], complete);
     }
 }
