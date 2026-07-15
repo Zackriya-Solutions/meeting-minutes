@@ -25,6 +25,7 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
+        "i18n:check": "node scripts/check-i18n.mjs",
         "lint": "next lint"
     },
     "dependencies": {
