@@ -26,6 +26,17 @@ MEETING_TYPES = (
     "uncertain",
 )
 
+RECORDING_SCOPES = ("complete", "partial", "unknown")
+
+TRANSCRIPTION_QUALITY_FIELDS = (
+    "processable_segments",
+    "transcribed_segments",
+    "empty_segments",
+    "coverage_ratio",
+    "average_confidence",
+    "confidence_source",
+)
+
 
 def table_exists(db: sqlite3.Connection, table: str) -> bool:
     return db.execute(
@@ -35,6 +46,22 @@ def table_exists(db: sqlite3.Connection, table: str) -> bool:
 
 def column_exists(db: sqlite3.Connection, table: str, column: str) -> bool:
     return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})"))
+
+
+def read_transcription_quality(folder_path: str | None) -> dict[str, Any] | None:
+    """Read only non-identifying quality counters from local import metadata."""
+    if not folder_path:
+        return None
+    metadata_path = Path(folder_path) / "metadata.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    quality = metadata.get("transcription_quality")
+    if not isinstance(quality, dict):
+        return None
+    sanitized = {key: quality.get(key) for key in TRANSCRIPTION_QUALITY_FIELDS}
+    return sanitized if any(value is not None for value in sanitized.values()) else None
 
 
 def timestamp(seconds: float | None) -> str | None:
@@ -225,7 +252,8 @@ def main() -> None:
     db.row_factory = sqlite3.Row
     occurred = "COALESCE(m.occurred_at, m.created_at)" if column_exists(db, "meetings", "occurred_at") else "m.created_at"
     meetings = db.execute(
-        f"SELECT m.id, m.title, {occurred} AS occurred_at, sp.result, sp.status, sp.processing_time "
+        f"SELECT m.id, m.title, m.folder_path, {occurred} AS occurred_at, "
+        "sp.result, sp.status, sp.processing_time "
         "FROM meetings m LEFT JOIN summary_processes sp ON sp.meeting_id=m.id "
         "WHERE EXISTS(SELECT 1 FROM transcripts t WHERE t.meeting_id=m.id AND trim(t.transcript)!='')"
     ).fetchall()
@@ -283,6 +311,7 @@ def main() -> None:
             "candidate_score": score,
             "candidate_reasons": reasons,
             "meeting_type": "UNASSIGNED",
+            "recording_scope": "UNASSIGNED",
             "review_state": "needs_reference_completion",
             "valid_timestamps": sorted(set(valid_timestamps)),
             "reference_records": references,
@@ -292,6 +321,7 @@ def main() -> None:
                 "title": meeting["title"],
                 "occurred_at": meeting["occurred_at"],
                 "duration_seconds": duration,
+                "transcription_quality": read_transcription_quality(meeting["folder_path"]),
                 "transcript": transcript_rows,
             },
         }
@@ -307,6 +337,7 @@ def main() -> None:
         "schema_version": "standup_eval_v1",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "meeting_type_options": list(MEETING_TYPES),
+        "recording_scope_options": list(RECORDING_SCOPES),
         "standup": samples,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

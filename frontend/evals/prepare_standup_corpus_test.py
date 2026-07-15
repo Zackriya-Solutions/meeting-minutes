@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 
+import json
 import sqlite3
+import tempfile
+from pathlib import Path
 
 from prepare_standup_corpus import (
     candidate_score,
     flatten_standup,
     generation_identity,
+    read_transcription_quality,
     reviewed_references,
     select_samples,
     split_for_series,
@@ -108,5 +112,37 @@ identity = generation_identity(
 )
 assert identity == ("deepseek", "deepseek-chat", "abc:3")
 assert "secret" not in repr(identity)
+
+with tempfile.TemporaryDirectory() as folder:
+    Path(folder, "metadata.json").write_text(
+        json.dumps(
+            {
+                "source_filename": "private-name.mp3",
+                "source_sha256": "secret-hash",
+                "transcription_quality": {
+                    "processable_segments": 10,
+                    "transcribed_segments": 8,
+                    "empty_segments": 2,
+                    "coverage_ratio": 0.8,
+                    "average_confidence": None,
+                    "confidence_source": "unavailable",
+                    "private_extra": "must-not-leak",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    quality = read_transcription_quality(folder)
+    assert quality == {
+        "processable_segments": 10,
+        "transcribed_segments": 8,
+        "empty_segments": 2,
+        "coverage_ratio": 0.8,
+        "average_confidence": None,
+        "confidence_source": "unavailable",
+    }
+    assert "private-name" not in repr(quality)
+    assert "secret-hash" not in repr(quality)
+    assert "must-not-leak" not in repr(quality)
 
 print("ok - private corpus exporter helpers")

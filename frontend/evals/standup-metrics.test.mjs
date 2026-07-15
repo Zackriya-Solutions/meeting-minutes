@@ -8,8 +8,8 @@ function test(name, check) {
 
 test('split protocol rejects one series leaking across train and test', () => {
   const metrics = standupMetrics([
-    { id: 'one', series_id: 'daily-team', split: 'train', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
-    { id: 'two', series_id: 'daily-team', split: 'test', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
+    { id: 'one', series_id: 'daily-team', split: 'train', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', recording_scope: 'complete', success: false },
+    { id: 'two', series_id: 'daily-team', split: 'test', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', recording_scope: 'complete', success: false },
   ]);
   assert.equal(metrics.protocol_error_count, 1);
   assert.equal(metrics.reviewed_standup_count, 2);
@@ -24,6 +24,7 @@ test('record metrics penalize invented facts, duplicate actions, owners, and bad
     schema_version: 'v2',
     prompt_version: 'p1',
     meeting_type: 'pure_status',
+    recording_scope: 'complete',
     success: true,
     latency_ms: 10,
     valid_timestamps: ['[01:00]'],
@@ -50,7 +51,7 @@ test('record metrics penalize invented facts, duplicate actions, owners, and bad
 
 test('provider failures count against success without pretending to have quality labels', () => {
   const metrics = standupMetrics([
-    { id: 'failed', series_id: 'daily-team', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', success: false },
+    { id: 'failed', series_id: 'daily-team', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', meeting_type: 'pure_status', recording_scope: 'complete', success: false },
   ]);
   assert.equal(metrics.success_rate, 0);
   assert.equal(metrics.quality_count, 0);
@@ -66,6 +67,7 @@ test('meeting type must be manually reviewed before the corpus is valid', () => 
     schema_version: 'v2',
     prompt_version: 'p1',
     meeting_type: 'UNASSIGNED',
+    recording_scope: 'complete',
     success: false,
   }]);
   assert.equal(metrics.protocol_error_count, 1);
@@ -73,7 +75,7 @@ test('meeting type must be manually reviewed before the corpus is valid', () => 
 });
 
 test('standups and contrast meetings are counted separately', () => {
-  const common = { series_id: 'series', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', success: false };
+  const common = { series_id: 'series', split: 'dev', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', recording_scope: 'complete', success: false };
   const metrics = standupMetrics([
     { ...common, id: 'status', meeting_type: 'status_plus_deep_dive' },
     { ...common, id: 'planning', meeting_type: 'planning_sync' },
@@ -82,4 +84,32 @@ test('standups and contrast meetings are counted separately', () => {
   assert.equal(metrics.reviewed_standup_count, 1);
   assert.equal(metrics.contrast_count, 1);
   assert.equal(metrics.uncertain_count, 1);
+});
+
+test('partial recordings remain robustness cases but cannot satisfy release gold counts', () => {
+  const common = { series_id: 'series', split: 'test', provider: 'deepseek', schema_version: 'v2', prompt_version: 'p1', success: false };
+  const metrics = standupMetrics([
+    { ...common, id: 'complete', meeting_type: 'pure_status', recording_scope: 'complete' },
+    { ...common, id: 'partial', meeting_type: 'pure_status', recording_scope: 'partial' },
+  ]);
+  assert.equal(metrics.reviewed_standup_count, 1);
+  assert.equal(metrics.pure_status_count, 1);
+  assert.equal(metrics.complete_recording_count, 1);
+  assert.equal(metrics.partial_recording_count, 1);
+});
+
+test('recording scope must be manually reviewed', () => {
+  const metrics = standupMetrics([{
+    id: 'unreviewed-scope',
+    series_id: 'daily-team',
+    split: 'dev',
+    provider: 'deepseek',
+    schema_version: 'v2',
+    prompt_version: 'p1',
+    meeting_type: 'pure_status',
+    recording_scope: 'UNASSIGNED',
+    success: false,
+  }]);
+  assert.equal(metrics.protocol_error_count, 1);
+  assert.equal(metrics.reviewed_standup_count, 0);
 });

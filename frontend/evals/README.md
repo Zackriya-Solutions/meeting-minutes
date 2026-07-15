@@ -70,6 +70,12 @@ Manually set each sample's `meeting_type` to one of the top-level
 pure status rounds, status-plus-deep-dive meetings, planning/syncs, one-to-ones, and general
 meetings distinguishable instead of treating a filename hint as ground truth.
 
+Also review `recording_scope` as `complete`, `partial`, or `unknown`. A clipped `my-part`
+recording is useful as a robustness case but must not be scored as though the model saw the full
+meeting. When import metadata v1.1 is available, `annotation_source.transcription_quality`
+contains only sanitized segment counts, coverage, and measured-confidence status. Source paths,
+filenames, hashes, and arbitrary metadata fields are never copied into the evaluation dataset.
+
 For each sample, finish `reference_records` by adding facts the model missed as well as
 confirming accepted records. Give every output record a `match_id` only when it is supported
 by the reference fact of the same kind. Keep the transcript and record text in the private

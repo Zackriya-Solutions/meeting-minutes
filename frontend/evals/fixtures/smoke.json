@@ -58,6 +58,7 @@
       "schema_version": "standup_v2",
       "prompt_version": "synthetic-v1",
       "meeting_type": "pure_status",
+      "recording_scope": "complete",
       "success": true,
       "latency_ms": 1500,
       "valid_timestamps": ["[01:02]", "[02:03]"],

@@ -216,6 +216,7 @@ function standupMetrics(rows) {
   ]);
   const reviewedStandupTypes = new Set(['pure_status', 'status_plus_deep_dive']);
   const contrastTypes = new Set(['planning_sync', 'one_to_one', 'general_meeting']);
+  const recordingScopes = new Set(['complete', 'partial', 'unknown']);
   const successes = rows.filter((row) => row.success === true);
   const sampleIds = new Set();
   const seriesSplits = new Map();
@@ -247,6 +248,7 @@ function standupMetrics(rows) {
       protocolErrors += 1;
     }
     if (!meetingTypes.has(row.meeting_type)) protocolErrors += 1;
+    if (!recordingScopes.has(row.recording_scope)) protocolErrors += 1;
     if (row.provider && row.provider !== 'unknown') {
       const provider = providerRows.get(row.provider) ?? [];
       provider.push(row);
@@ -332,13 +334,22 @@ function standupMetrics(rows) {
   );
   return {
     count: rows.length,
-    reviewed_standup_count: rows.filter((row) => reviewedStandupTypes.has(row.meeting_type)).length,
-    pure_status_count: rows.filter((row) => row.meeting_type === 'pure_status').length,
-    status_plus_deep_dive_count: rows.filter(
-      (row) => row.meeting_type === 'status_plus_deep_dive',
+    reviewed_standup_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && reviewedStandupTypes.has(row.meeting_type),
     ).length,
-    contrast_count: rows.filter((row) => contrastTypes.has(row.meeting_type)).length,
+    pure_status_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && row.meeting_type === 'pure_status',
+    ).length,
+    status_plus_deep_dive_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && row.meeting_type === 'status_plus_deep_dive',
+    ).length,
+    contrast_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && contrastTypes.has(row.meeting_type),
+    ).length,
     uncertain_count: rows.filter((row) => row.meeting_type === 'uncertain').length,
+    complete_recording_count: rows.filter((row) => row.recording_scope === 'complete').length,
+    partial_recording_count: rows.filter((row) => row.recording_scope === 'partial').length,
+    unknown_recording_count: rows.filter((row) => row.recording_scope === 'unknown').length,
     train_count: rows.filter((row) => row.split === 'train').length,
     dev_count: rows.filter((row) => row.split === 'dev').length,
     test_count: rows.filter((row) => row.split === 'test').length,
