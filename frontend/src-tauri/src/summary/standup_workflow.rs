@@ -5,7 +5,7 @@ use crate::summary::standup::{parse_timestamp_seconds, StandupReport};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const MAX_EDIT_CHARS: usize = 4_000;
 const MAX_OWNER_CHARS: usize = 200;
@@ -69,6 +69,55 @@ pub struct StandupPrebrief {
     pub open_actions: Vec<PrebriefAction>,
     pub recent_risks: Vec<PrebriefFact>,
     pub recent_decisions: Vec<PrebriefFact>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SeriesDigestItem {
+    pub record_id: i64,
+    pub kind: String,
+    pub text: String,
+    pub participant: Option<String>,
+    pub category: Option<String>,
+    pub owner: Option<String>,
+    pub due_date: Option<String>,
+    pub action_status: Option<String>,
+    pub source_meeting_id: String,
+    pub source_meeting_title: String,
+    pub source_occurred_at: String,
+    pub source_start_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct StandupSeriesDigest {
+    pub collection_id: i64,
+    pub series_name: String,
+    pub window_days: Option<u32>,
+    pub period_start: Option<String>,
+    pub period_end: Option<String>,
+    pub meeting_count: usize,
+    pub meetings_with_accepted_records: usize,
+    pub pending_review_count: usize,
+    pub highlights: Vec<SeriesDigestItem>,
+    pub updates: Vec<SeriesDigestItem>,
+    pub decisions: Vec<SeriesDigestItem>,
+    pub risks: Vec<SeriesDigestItem>,
+    pub deep_dives: Vec<SeriesDigestItem>,
+    pub open_actions: Vec<SeriesDigestItem>,
+    pub done_actions: Vec<SeriesDigestItem>,
+    pub cancelled_actions: Vec<SeriesDigestItem>,
+    pub markdown: String,
+}
+
+#[derive(Debug, FromRow)]
+struct DigestRecordRow {
+    id: i64,
+    meeting_id: String,
+    meeting_title: String,
+    occurred_at: String,
+    kind: String,
+    payload: String,
+    review_status: String,
+    action_status: Option<String>,
 }
 
 fn normalized_identity(value: &str) -> String {
@@ -626,6 +675,277 @@ pub async fn get_standup_prebrief(
     get_prebrief(state.db_manager.pool(), &meeting_id).await
 }
 
+fn parse_digest_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    if let Ok(value) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Some(value.with_timezone(&chrono::Utc));
+    }
+    for format in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"] {
+        if let Ok(value) = chrono::NaiveDateTime::parse_from_str(value, format) {
+            return Some(chrono::DateTime::from_naive_utc_and_offset(
+                value,
+                chrono::Utc,
+            ));
+        }
+    }
+    None
+}
+
+fn digest_source_start_ms(payload: &Value) -> Option<i64> {
+    payload_start_ms(payload)
+}
+
+fn digest_item(row: &DigestRecordRow, payload: &Value) -> Option<SeriesDigestItem> {
+    let text = primary_text(&row.kind, payload)?;
+    Some(SeriesDigestItem {
+        record_id: row.id,
+        kind: row.kind.clone(),
+        text,
+        participant: payload
+            .get("participant")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        category: payload
+            .get("category")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        owner: payload
+            .get("owner")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        due_date: payload
+            .get("due_date")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        action_status: row.action_status.clone(),
+        source_meeting_id: row.meeting_id.clone(),
+        source_meeting_title: row.meeting_title.clone(),
+        source_occurred_at: row.occurred_at.clone(),
+        source_start_ms: digest_source_start_ms(payload),
+    })
+}
+
+fn markdown_evidence(item: &SeriesDigestItem) -> String {
+    let Some(start_ms) = item.source_start_ms else {
+        return format!("— {}", item.source_meeting_title);
+    };
+    let seconds = start_ms.max(0) / 1_000;
+    let label = format!("{}:{:02}", seconds / 60, seconds % 60);
+    format!(
+        "— [{label}](/meeting-details?id={}&t={seconds}) · {}",
+        item.source_meeting_id, item.source_meeting_title
+    )
+}
+
+fn render_digest_section(markdown: &mut String, title: &str, items: &[SeriesDigestItem]) {
+    markdown.push_str(&format!("## {title}\n\n"));
+    if items.is_empty() {
+        markdown.push_str("—\n\n");
+        return;
+    }
+    for item in items {
+        let participant = item
+            .participant
+            .as_deref()
+            .map(|value| format!("**{value}:** "))
+            .unwrap_or_default();
+        let owner = item
+            .owner
+            .as_deref()
+            .map(|value| format!(" · owner: {value}"))
+            .unwrap_or_default();
+        let due = item
+            .due_date
+            .as_deref()
+            .map(|value| format!(" · due: {value}"))
+            .unwrap_or_default();
+        markdown.push_str(&format!(
+            "- {participant}{}{}{} {}\n",
+            item.text,
+            owner,
+            due,
+            markdown_evidence(item)
+        ));
+    }
+    markdown.push('\n');
+}
+
+fn render_series_digest_markdown(
+    digest: &StandupSeriesDigest,
+    output_language: Option<&str>,
+) -> String {
+    let russian = output_language
+        .map(|value| value.to_lowercase().starts_with("ru"))
+        .unwrap_or(false);
+    let (title, coverage, highlights, updates, open, done, decisions, risks, deep_dives) =
+        if russian {
+            (
+                "Дайджест серии стендапов",
+                "Покрытие",
+                "Главное",
+                "Изменения по участникам",
+                "Открытые действия",
+                "Завершённые действия",
+                "Решения",
+                "Риски и блокеры",
+                "Технические разборы",
+            )
+        } else {
+            (
+                "Standup series digest",
+                "Coverage",
+                "Highlights",
+                "Participant updates",
+                "Open actions",
+                "Completed actions",
+                "Decisions",
+                "Risks and blockers",
+                "Deep dives",
+            )
+        };
+    let mut markdown = format!("# {title}: {}\n\n", digest.series_name);
+    markdown.push_str(&format!(
+        "## {coverage}\n\n- Meetings: {}\n- Meetings with accepted records: {}\n- Pending review: {}\n\n",
+        digest.meeting_count,
+        digest.meetings_with_accepted_records,
+        digest.pending_review_count
+    ));
+    render_digest_section(&mut markdown, highlights, &digest.highlights);
+    render_digest_section(&mut markdown, updates, &digest.updates);
+    render_digest_section(&mut markdown, open, &digest.open_actions);
+    render_digest_section(&mut markdown, done, &digest.done_actions);
+    render_digest_section(&mut markdown, decisions, &digest.decisions);
+    render_digest_section(&mut markdown, risks, &digest.risks);
+    render_digest_section(&mut markdown, deep_dives, &digest.deep_dives);
+    markdown
+}
+
+pub async fn get_series_digest(
+    pool: &SqlitePool,
+    collection_id: i64,
+    window_days: Option<u32>,
+    output_language: Option<&str>,
+) -> Result<StandupSeriesDigest, String> {
+    if matches!(window_days, Some(0 | 3651..)) {
+        return Err("Digest window must be between 1 and 3650 days".to_string());
+    }
+    let collection: Option<(String, String)> =
+        sqlx::query_as("SELECT name, kind FROM collections WHERE id = ?")
+            .bind(collection_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+    let (series_name, kind) = collection.ok_or_else(|| "Standup series not found".to_string())?;
+    if kind != "series" {
+        return Err("Digest is available only for a series collection".to_string());
+    }
+
+    let meetings: Vec<(String, String)> = sqlx::query_as(
+        "SELECT m.id, COALESCE(m.occurred_at, m.created_at) \
+         FROM meetings m JOIN meeting_collections mc ON mc.meeting_id = m.id \
+         WHERE mc.collection_id = ? ORDER BY COALESCE(m.occurred_at, m.created_at), m.id",
+    )
+    .bind(collection_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let anchor = meetings
+        .iter()
+        .filter_map(|(_, value)| parse_digest_datetime(value))
+        .max();
+    let cutoff = window_days
+        .zip(anchor)
+        .map(|(days, anchor)| anchor - chrono::Duration::days(i64::from(days)));
+    let included_meetings: HashMap<String, String> = meetings
+        .into_iter()
+        .filter(|(_, occurred_at)| {
+            cutoff.is_none_or(|cutoff| {
+                parse_digest_datetime(occurred_at)
+                    .map(|value| value >= cutoff)
+                    .unwrap_or(true)
+            })
+        })
+        .collect();
+
+    let rows: Vec<DigestRecordRow> = sqlx::query_as(
+        "SELECT sr.id, m.id AS meeting_id, m.title AS meeting_title, \
+                COALESCE(m.occurred_at, m.created_at) AS occurred_at, sr.kind, \
+                COALESCE(sr.reviewed_payload, sr.payload) AS payload, sr.review_status, \
+                ai.status AS action_status \
+         FROM standup_records sr \
+         JOIN meetings m ON m.id = sr.meeting_id \
+         JOIN meeting_collections mc ON mc.meeting_id = m.id \
+         LEFT JOIN action_items ai ON ai.standup_record_id = sr.id \
+         WHERE mc.collection_id = ? \
+         ORDER BY COALESCE(m.occurred_at, m.created_at) DESC, sr.id DESC",
+    )
+    .bind(collection_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let mut digest = StandupSeriesDigest {
+        collection_id,
+        series_name,
+        window_days,
+        period_start: included_meetings.values().min().cloned(),
+        period_end: included_meetings.values().max().cloned(),
+        meeting_count: included_meetings.len(),
+        ..StandupSeriesDigest::default()
+    };
+    let mut accepted_meetings = HashSet::new();
+    for row in rows {
+        if !included_meetings.contains_key(&row.meeting_id) {
+            continue;
+        }
+        if row.review_status == "pending" {
+            digest.pending_review_count += 1;
+            continue;
+        }
+        if row.review_status != "accepted" {
+            continue;
+        }
+        let payload: Value = serde_json::from_str(&row.payload)
+            .map_err(|error| format!("Stored standup record is invalid: {error}"))?;
+        let Some(item) = digest_item(&row, &payload) else {
+            continue;
+        };
+        accepted_meetings.insert(row.meeting_id);
+        match row.kind.as_str() {
+            "overview" | "unattributed_fact" => digest.highlights.push(item),
+            "participant_update" => digest.updates.push(item),
+            "decision" => digest.decisions.push(item),
+            "risk" => digest.risks.push(item),
+            "deep_dive" => digest.deep_dives.push(item),
+            "action" => match item.action_status.as_deref().unwrap_or("open") {
+                "done" => digest.done_actions.push(item),
+                "cancelled" => digest.cancelled_actions.push(item),
+                _ => digest.open_actions.push(item),
+            },
+            _ => {}
+        }
+    }
+    digest.meetings_with_accepted_records = accepted_meetings.len();
+    digest.markdown = render_series_digest_markdown(&digest, output_language);
+    Ok(digest)
+}
+
+#[tauri::command]
+pub async fn get_standup_series_digest(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+    window_days: Option<u32>,
+    output_language: Option<String>,
+) -> Result<StandupSeriesDigest, String> {
+    get_series_digest(
+        state.db_manager.pool(),
+        collection_id,
+        window_days,
+        output_language.as_deref(),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,5 +1152,81 @@ mod tests {
         assert_eq!(prebrief.recent_risks.len(), 1);
         assert_eq!(prebrief.recent_decisions.len(), 1);
         assert_eq!(prebrief.open_actions[0].source_start_ms, Some(62_000));
+    }
+
+    #[tokio::test]
+    async fn series_digest_is_windowed_reviewed_and_evidence_linked() {
+        let pool = test_pool().await;
+        for (id, title, occurred_at) in [
+            ("old", "Standup old", "2026-05-01T10:00:00Z"),
+            ("accepted", "Standup accepted", "2026-07-14T10:00:00Z"),
+            ("pending", "Standup pending", "2026-07-15T10:00:00Z"),
+        ] {
+            sqlx::query(
+                "INSERT INTO meetings(id, title, created_at, occurred_at) VALUES(?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(title)
+            .bind(occurred_at)
+            .bind(occurred_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("INSERT INTO collections VALUES(1, 'Команда', 'series')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for meeting_id in ["old", "accepted", "pending"] {
+            sqlx::query("INSERT INTO meeting_collections VALUES(?, 1)")
+                .bind(meeting_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sync_standup_records(&pool, meeting_id, &report())
+                .await
+                .unwrap();
+        }
+        for meeting_id in ["old", "accepted"] {
+            for record in list_records(&pool, meeting_id).await.unwrap() {
+                review_record(
+                    &pool,
+                    ReviewStandupRecordInput {
+                        record_id: record.id,
+                        status: "accepted".into(),
+                        edited_text: None,
+                        owner: None,
+                        due_date: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+        }
+        let accepted_action: i64 =
+            sqlx::query_scalar("SELECT id FROM action_items WHERE meeting_id = 'accepted'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        sqlx::query("UPDATE action_items SET status = 'done' WHERE id = ?")
+            .bind(accepted_action)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let digest = get_series_digest(&pool, 1, Some(14), Some("ru-RU"))
+            .await
+            .unwrap();
+        assert_eq!(digest.meeting_count, 2);
+        assert_eq!(digest.meetings_with_accepted_records, 1);
+        assert_eq!(digest.pending_review_count, 3);
+        assert!(digest.open_actions.is_empty());
+        assert_eq!(digest.done_actions.len(), 1);
+        assert_eq!(digest.decisions.len(), 1);
+        assert_eq!(digest.risks.len(), 1);
+        assert!(digest
+            .markdown
+            .contains("/meeting-details?id=accepted&t=62"));
+        assert!(!digest.markdown.contains("Standup old"));
     }
 }

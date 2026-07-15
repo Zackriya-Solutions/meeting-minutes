@@ -730,6 +730,7 @@ pub fn run() {
             summary::standup_workflow::review_standup_record,
             summary::standup_workflow::set_standup_action_status,
             summary::standup_workflow::get_standup_prebrief,
+            summary::standup_workflow::get_standup_series_digest,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,

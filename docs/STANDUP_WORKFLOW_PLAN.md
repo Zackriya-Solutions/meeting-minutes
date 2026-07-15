@@ -12,9 +12,9 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 | Use the 11:00 standups and 17:30 project/productivity meetings | Batch import is running; filename classes are weak labels | Content classification and reviewed labels for all recordings |
 | Use the additional archive and earlier files | 50 unique local recordings prepared; duplicate earlier files removed by SHA-256 | Finish transcription and final integrity report |
 | Rename archive files by date/time | Done only where evidence supports the date; unknown dates remain explicit | Optional user review for the 35 unknown dates |
-| Avoid per-file UI import | PR #23 adds one-folder Tauri batch import with hash dedupe | Optional headless command can come later; no HTTP backend is needed |
+| Avoid per-file UI import | PR #23 adds one-folder Tauri batch import, picker-free Tauri command, console startup mode, hash dedupe, resume, and JSON report | Finish the 50-file run and publish the integrity report |
 | Learn from roughly 50 meetings | Corpus/evaluation plan exists | Gold labels, frozen split, evaluation runner, feedback capture |
-| Infer speaker names and aliases safely | Safety design exists | Candidate store, profanity/name validation, evidence UI, confirmation flow |
+| Infer speaker names and aliases safely | PR #27 adds a local candidate store, abuse filtering, evidence UI, confirmation, aliases, and salted rejection fingerprints | Evaluate precision after diarization is available on the corpus |
 | Keep DeepSeek summaries reliable | PR #21 implements bounded generation and direct Russian output | Merge/review and Standup V2 provider evaluation |
 | Automatic meeting detection | PR #22 is open | Merge/review and false-positive/false-negative evaluation |
 
@@ -22,6 +22,10 @@ The database previously treated import time as meeting time. The standup-series 
 separate `occurred_at` value and backfills it only from the safely normalized
 `YYYY-MM-DD_HH-MM_...` titles. Unknown source dates remain unknown and fall back to `created_at`;
 filesystem modification time is never silently promoted to meeting truth.
+
+The series-digest slice builds its weekly/sprint view deterministically from accepted records.
+It is anchored to the newest meeting in the series rather than today's date, so historical imports
+remain useful. Pending and rejected records never become facts; pending coverage stays visible.
 
 ## Before the standup
 
@@ -87,6 +91,11 @@ filesystem modification time is never silently promoted to meeting truth.
 - summarize project movement over a week or sprint with citations;
 - support “what changed since I was away?” and handoff views;
 - surface terminology/custom-vocabulary candidates from repeated ASR corrections.
+
+The first implemented digest includes 7/14/30-day and all-history windows, accepted highlights,
+participant updates, open/completed actions, decisions, risks, and deep dives. Every row links to
+its source meeting and transcript time. Cancelled actions stay in the JSON result for auditability
+but are not promoted in the primary UI or Markdown.
 
 Do not produce productivity scores, speaking-time rankings, sentiment scores for people, or automatic performance judgments. These are easy to misuse and are not necessary for making standups more useful.
 

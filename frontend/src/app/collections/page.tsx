@@ -37,6 +37,41 @@ interface SeriesSuggestion {
   cadence: string;
 }
 
+interface SeriesDigestItem {
+  record_id: number;
+  kind: string;
+  text: string;
+  participant?: string | null;
+  category?: string | null;
+  owner?: string | null;
+  due_date?: string | null;
+  action_status?: string | null;
+  source_meeting_id: string;
+  source_meeting_title: string;
+  source_occurred_at: string;
+  source_start_ms?: number | null;
+}
+
+interface StandupSeriesDigest {
+  collection_id: number;
+  series_name: string;
+  window_days?: number | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  meeting_count: number;
+  meetings_with_accepted_records: number;
+  pending_review_count: number;
+  highlights: SeriesDigestItem[];
+  updates: SeriesDigestItem[];
+  decisions: SeriesDigestItem[];
+  risks: SeriesDigestItem[];
+  deep_dives: SeriesDigestItem[];
+  open_actions: SeriesDigestItem[];
+  done_actions: SeriesDigestItem[];
+  cancelled_actions: SeriesDigestItem[];
+  markdown: string;
+}
+
 type EditorMode = 'create' | 'rename';
 
 function formatMeetingDate(value: string): string {
@@ -49,6 +84,37 @@ function errorText(error: unknown, fallback: string): string {
   if (typeof error === 'string' && error.trim()) return error;
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+function digestSourceHref(item: SeriesDigestItem): string {
+  const seconds = Math.max(0, Math.floor((item.source_start_ms ?? 0) / 1000));
+  return `/meeting-details?id=${encodeURIComponent(item.source_meeting_id)}&t=${seconds}`;
+}
+
+function DigestSection({ title, items }: { title: string; items: SeriesDigestItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
+      <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">{title}</h4>
+      <div className="mt-3 grid gap-2">
+        {items.map((item) => (
+          <a
+            key={item.record_id}
+            href={digestSourceHref(item)}
+            className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
+          >
+            <span className="block text-[var(--fg1)]">
+              {item.participant ? <strong>{item.participant}: </strong> : null}
+              {item.text}
+            </span>
+            <span className="mt-1 block text-xs text-[var(--fg3)]">
+              {[item.owner, item.due_date, item.source_meeting_title].filter(Boolean).join(' · ')}
+            </span>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export default function CollectionsPage() {
@@ -73,6 +139,9 @@ export default function CollectionsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [acceptingSuggestion, setAcceptingSuggestion] = useState<string | null>(null);
+  const [digestWindowDays, setDigestWindowDays] = useState<number | null>(14);
+  const [seriesDigest, setSeriesDigest] = useState<StandupSeriesDigest | null>(null);
+  const [loadingDigest, setLoadingDigest] = useState(false);
 
   const selected = useMemo(
     () => collections.find((collection) => collection.id === selectedId) ?? null,
@@ -142,6 +211,45 @@ export default function CollectionsPage() {
       cancelled = true;
     };
   }, [selectedId, t]);
+
+  useEffect(() => {
+    if (!selected || selected.kind !== 'series') {
+      setSeriesDigest(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingDigest(true);
+    invoke<StandupSeriesDigest>('get_standup_series_digest', {
+      collectionId: selected.id,
+      windowDays: digestWindowDays,
+      outputLanguage: typeof navigator === 'undefined' ? 'en' : navigator.language,
+    })
+      .then((digest) => {
+        if (!cancelled) setSeriesDigest(digest);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSeriesDigest(null);
+          toast.error(errorText(error, t('Failed to build standup digest')));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDigest(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, digestWindowDays, t]);
+
+  const copySeriesDigest = async () => {
+    if (!seriesDigest?.markdown) return;
+    try {
+      await navigator.clipboard.writeText(seriesDigest.markdown);
+      toast.success(t('Digest copied'));
+    } catch (error) {
+      toast.error(errorText(error, t('Failed to copy digest')));
+    }
+  };
 
   const openCreate = () => {
     setEditorMode('create');
@@ -397,6 +505,88 @@ export default function CollectionsPage() {
                   </button>
                 </div>
               </div>
+
+              {selected.kind === 'series' && (
+                <div className="border-b border-[var(--border-subtle)] p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-[var(--fg1)]">{t('Standup series digest')}</h3>
+                      <p className="mt-1 text-sm text-[var(--fg3)]">
+                        {t('Built only from accepted records, with links back to transcript evidence.')}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1">
+                        {[
+                          { label: '7d', value: 7 },
+                          { label: '14d', value: 14 },
+                          { label: '30d', value: 30 },
+                          { label: t('All'), value: null },
+                        ].map((option) => (
+                          <button
+                            key={option.label}
+                            onClick={() => setDigestWindowDays(option.value)}
+                            className={cn(
+                              'rounded-lg px-2.5 py-1.5 text-xs transition-colors',
+                              digestWindowDays === option.value
+                                ? 'bg-[var(--gold-soft-strong)] text-[var(--fg1)]'
+                                : 'text-[var(--fg3)] hover:text-[var(--fg1)]',
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={copySeriesDigest}
+                        disabled={!seriesDigest?.markdown}
+                        icon={<Icon name="copy" size={15} />}
+                      >
+                        {t('Copy digest')}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {loadingDigest ? (
+                    <div className="py-8 text-center text-sm text-[var(--fg3)]">{t('Building digest…')}</div>
+                  ) : seriesDigest ? (
+                    <div className="mt-5">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-2xl bg-[var(--bg-sheet)] p-3">
+                          <div className="text-2xl font-semibold">{seriesDigest.meeting_count}</div>
+                          <div className="mt-1 text-xs text-[var(--fg3)]">{t('meetings in window')}</div>
+                        </div>
+                        <div className="rounded-2xl bg-[var(--bg-sheet)] p-3">
+                          <div className="text-2xl font-semibold">{seriesDigest.meetings_with_accepted_records}</div>
+                          <div className="mt-1 text-xs text-[var(--fg3)]">{t('reviewed meetings')}</div>
+                        </div>
+                        <div className={cn('rounded-2xl p-3', seriesDigest.pending_review_count > 0 ? 'bg-[var(--gold-soft)]' : 'bg-[var(--bg-sheet)]')}>
+                          <div className="text-2xl font-semibold">{seriesDigest.pending_review_count}</div>
+                          <div className="mt-1 text-xs text-[var(--fg3)]">{t('records pending review')}</div>
+                        </div>
+                      </div>
+
+                      {seriesDigest.meetings_with_accepted_records === 0 ? (
+                        <div className="mt-3 rounded-2xl border border-dashed border-[var(--border-strong)] px-4 py-5 text-sm text-[var(--fg3)]">
+                          {t('Review extracted records inside standup meetings to make the series digest trustworthy.')}
+                        </div>
+                      ) : (
+                        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                          <DigestSection title={t('Open actions')} items={seriesDigest.open_actions} />
+                          <DigestSection title={t('Completed actions')} items={seriesDigest.done_actions} />
+                          <DigestSection title={t('Decisions')} items={seriesDigest.decisions} />
+                          <DigestSection title={t('Risks and blockers')} items={seriesDigest.risks} />
+                          <DigestSection title={t('Participant updates')} items={seriesDigest.updates} />
+                          <DigestSection title={t('Highlights')} items={seriesDigest.highlights} />
+                          <DigestSection title={t('Deep dives')} items={seriesDigest.deep_dives} />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               <div className="p-6">
                 <div className="mb-4 flex items-center justify-between gap-3">
