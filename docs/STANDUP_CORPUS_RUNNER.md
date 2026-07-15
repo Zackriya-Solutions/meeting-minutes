@@ -15,7 +15,12 @@ pnpm run tauri:dev
 ```
 
 Set `MEETILY_STANDUP_CORPUS_OVERWRITE=true` only for an intentional rerun. The same operation is
-available to trusted local callers as `start_standup_corpus_run`.
+available to local callers as `start_standup_corpus_run`, but that command is confined to the IDs,
+overwrite permission, and exact report path declared by these environment variables.
+
+Fully quit Meetily (including its menu-bar/tray process) before starting the command. The desktop
+app enforces a single instance; if an older instance is still resident, the new corpus-mode process
+exits before its startup runner can execute.
 
 The JSON report contains meeting IDs, titles, status, latency, chunk count, extracted-record count,
 and bounded provider errors. It deliberately contains neither transcripts nor generated facts.

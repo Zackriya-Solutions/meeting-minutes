@@ -176,14 +176,37 @@ async fn meeting_input(pool: &SqlitePool, meeting_id: &str) -> Result<(String, S
     Ok((title, transcript))
 }
 
-fn write_report(path: &Path, report: &StandupCorpusRunReport) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let temp = path.with_extension("json.tmp");
+async fn write_report(path: &Path, report: &StandupCorpusRunReport) -> Result<(), String> {
+    let path = path.to_path_buf();
     let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
-    std::fs::write(&temp, bytes).map_err(|error| error.to_string())?;
-    std::fs::rename(&temp, path).map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let temp = path.with_extension("json.tmp");
+        std::fs::write(&temp, bytes).map_err(|error| error.to_string())?;
+        std::fs::rename(&temp, &path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Report writer task failed: {error}"))?
+}
+
+fn configured_report_path() -> Option<PathBuf> {
+    std::env::var_os("MEETILY_STANDUP_CORPUS_REPORT").map(PathBuf::from)
+}
+
+fn resolve_command_report_path(requested: Option<String>) -> Result<Option<PathBuf>, String> {
+    let configured = configured_report_path();
+    match (requested.map(PathBuf::from), configured) {
+        (None, configured) => Ok(configured),
+        (Some(requested), Some(configured)) if requested == configured => Ok(Some(configured)),
+        (Some(_), Some(_)) => {
+            Err("Corpus report path must exactly match MEETILY_STANDUP_CORPUS_REPORT".to_string())
+        }
+        (Some(_), None) => {
+            Err("Set MEETILY_STANDUP_CORPUS_REPORT before requesting a report file".to_string())
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -426,7 +449,8 @@ async fn run_standup_corpus_inner<R: Runtime>(
                 &items,
                 false,
             ),
-        )?;
+        )
+        .await?;
     }
 
     for (index, meeting_id) in meeting_ids.iter().enumerate() {
@@ -474,7 +498,9 @@ async fn run_standup_corpus_inner<R: Runtime>(
                     &items,
                     false,
                 ),
-            ) {
+            )
+            .await
+            {
                 log::warn!(
                     "Could not persist Standup corpus checkpoint after {} of {} meetings: {}",
                     index + 1,
@@ -495,7 +521,12 @@ async fn run_standup_corpus_inner<R: Runtime>(
         true,
     );
     if let Some(path) = report_path.as_deref() {
-        write_report(path, &report)?;
+        if let Err(error) = write_report(path, &report).await {
+            log::error!(
+                "Standup corpus processing completed, but the final report could not be persisted: {}",
+                bounded_error(Some(error)).unwrap_or_else(|| "unknown I/O error".to_string())
+            );
+        }
     }
     let _ = app.emit("standup-corpus-run-complete", &report);
     Ok(report)
@@ -520,6 +551,37 @@ pub async fn start_standup_corpus_run<R: Runtime>(
         );
     }
     let meeting_ids = normalized_ids(meeting_ids)?;
+    let allowed_ids = normalized_ids(
+        std::env::var("MEETILY_STANDUP_CORPUS_IDS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::to_string)
+            .collect(),
+    )?;
+    if meeting_ids
+        .iter()
+        .any(|meeting_id| !allowed_ids.contains(meeting_id))
+    {
+        return Err(
+            "Corpus command may process only IDs listed in MEETILY_STANDUP_CORPUS_IDS".to_string(),
+        );
+    }
+    let overwrite = overwrite.unwrap_or(false);
+    let overwrite_allowed = std::env::var("MEETILY_STANDUP_CORPUS_OVERWRITE")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false);
+    if overwrite && !overwrite_allowed {
+        return Err(
+            "Set MEETILY_STANDUP_CORPUS_OVERWRITE=true before replacing completed summaries"
+                .to_string(),
+        );
+    }
+    let report_path = resolve_command_report_path(report_path)?;
     let provider = provider.trim().to_string();
     let model = model.trim().to_string();
     if provider.is_empty() || model.is_empty() {
@@ -535,8 +597,8 @@ pub async fn start_standup_corpus_run<R: Runtime>(
             provider,
             model,
             summary_language,
-            overwrite.unwrap_or(false),
-            report_path.map(PathBuf::from),
+            overwrite,
+            report_path,
             guard,
         )
         .await
