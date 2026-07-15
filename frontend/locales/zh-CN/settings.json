@@ -69,7 +69,11 @@
   "transcript": {
     "title": "转写设置",
     "model_label": "转写模型",
-    "select_provider": "选择提供方"
+    "select_provider": "选择提供方",
+    "hotwords_label": "热词",
+    "hotwords_placeholder": "Meetily, OKR, K8s, project-Phoenix, 周会",
+    "hotwords_help": "用逗号分隔专有名词、项目名或术语，作为 Whisper 解码器提示（最多约 224 个 token）。",
+    "hotwords_save": "保存"
   },
   "summary": {
     "language": {

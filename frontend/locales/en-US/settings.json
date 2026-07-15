@@ -69,7 +69,11 @@
   "transcript": {
     "title": "Transcript Settings",
     "model_label": "Transcript Model",
-    "select_provider": "Select provider"
+    "select_provider": "Select provider",
+    "hotwords_label": "Hot words",
+    "hotwords_placeholder": "Meetily, OKR, K8s, project-Phoenix, iPhone",
+    "hotwords_help": "Comma-separated proper nouns, project names, or jargon. Passed to Whisper as a decoder hint (max ~224 tokens).",
+    "hotwords_save": "Save"
   },
   "summary": {
     "language": {

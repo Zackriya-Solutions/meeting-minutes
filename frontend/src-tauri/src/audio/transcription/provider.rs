@@ -53,6 +53,9 @@ pub trait TranscriptionProvider: Send + Sync {
     /// # Arguments
     /// * `audio` - Audio samples (16kHz mono, f32 format)
     /// * `language` - Optional language hint (e.g., "en", "es", "fr")
+    /// * `initial_prompt` - Optional vocabulary bias forwarded to engines that
+    ///   support it (e.g. whisper.cpp `set_initial_prompt`). Providers that
+    ///   do not support prompts must accept the argument and ignore it.
     ///
     /// # Returns
     /// * `TranscriptResult` with text, optional confidence, and partial flag
@@ -60,6 +63,7 @@ pub trait TranscriptionProvider: Send + Sync {
         &self,
         audio: Vec<f32>,
         language: Option<String>,
+        initial_prompt: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError>;
 
     /// Check if a model is currently loaded

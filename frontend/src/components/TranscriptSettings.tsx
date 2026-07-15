@@ -3,6 +3,7 @@ import { useTranslations } from 'next-intl';
 import { invoke } from '@tauri-apps/api/core';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
@@ -40,6 +41,36 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
+
+    // PR-45c-ui: hot-word list (whisper.cpp initial_prompt).
+    // Only meaningful for local Whisper; loaded lazily when the user opens
+    // the localWhisper provider so the SQL round-trip isn't paid on every render.
+    const [hotwords, setHotwords] = useState<string>('');
+    const [hotwordsStatus, setHotwordsStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    useEffect(() => {
+        if (uiProvider !== 'localWhisper') return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const value = await invoke<string>('api_get_transcript_hotwords');
+                if (!cancelled) setHotwords(value ?? '');
+            } catch (err) {
+                console.error('Error fetching hotwords:', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [uiProvider]);
+    const handleSaveHotwords = async () => {
+        setHotwordsStatus('saving');
+        try {
+            await invoke('api_save_transcript_hotwords', { hotwords });
+            setHotwordsStatus('saved');
+            setTimeout(() => setHotwordsStatus('idle'), 2000);
+        } catch (err) {
+            console.error('Error saving hotwords:', err);
+            setHotwordsStatus('error');
+        }
+    };
 
     const fetchApiKey = async (provider: string) => {
         try {
@@ -161,6 +192,40 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleWhisperModelSelect}
                                 autoSave={true}
                             />
+                        </div>
+                    )}
+
+                    {uiProvider === 'localWhisper' && (
+                        <div className="mt-6 space-y-2 mx-1">
+                            <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                {t('transcript.hotwords_label')}
+                            </Label>
+                            <Textarea
+                                value={hotwords}
+                                onChange={(e) => setHotwords(e.target.value)}
+                                placeholder={t('transcript.hotwords_placeholder')}
+                                rows={3}
+                                className="focus-visible:ring-1 focus-visible:ring-blue-500"
+                            />
+                            <p className="text-xs text-gray-500">
+                                {t('transcript.hotwords_help')}
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={handleSaveHotwords}
+                                    disabled={hotwordsStatus === 'saving'}
+                                >
+                                    {t('transcript.hotwords_save')}
+                                </Button>
+                                {hotwordsStatus === 'saved' && (
+                                    <span className="text-xs text-green-600">✓</span>
+                                )}
+                                {hotwordsStatus === 'error' && (
+                                    <span className="text-xs text-red-600">!</span>
+                                )}
+                            </div>
                         </div>
                     )}
 

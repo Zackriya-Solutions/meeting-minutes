@@ -578,7 +578,18 @@ async fn run_import<R: Runtime>(
             continue;
         }
 
-        // Transcribe
+        // PR-45c-ui: load hot-words once per segment so the Whisper decoder
+        // can bias toward user-defined vocabulary (company / project names).
+        let hotwords = if use_parakeet {
+            None
+        } else {
+            crate::database::repositories::setting::SettingsRepository::get_transcript_hotwords(
+                app.state::<crate::state::AppState>().db_manager.pool(),
+            )
+            .await
+            .ok()
+            .flatten()
+        };
         let (text, conf) = if use_parakeet {
             let engine = parakeet_engine.as_ref().unwrap();
             let text = engine
@@ -589,7 +600,7 @@ async fn run_import<R: Runtime>(
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine
-                .transcribe_audio_with_confidence(segment.samples.clone(), language.clone(), None)
+                .transcribe_audio_with_confidence(segment.samples.clone(), language.clone(), hotwords.clone())
                 .await
                 .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
             (text, conf)

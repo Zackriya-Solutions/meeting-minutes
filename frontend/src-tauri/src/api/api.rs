@@ -713,6 +713,39 @@ pub async fn api_get_transcript_api_key<R: Runtime>(
     }
 }
 
+/// PR-45c-ui: read the persisted hot-word list (whisper.cpp initial_prompt bias).
+/// Returns an empty string when nothing is set so the frontend can treat it as
+/// "no bias" without nullable handling on the TS side.
+#[tauri::command]
+pub async fn api_get_transcript_hotwords<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
+) -> Result<String, String> {
+    match SettingsRepository::get_transcript_hotwords(&state.db_manager.pool()).await {
+        Ok(Some(text)) => Ok(text),
+        Ok(None) => Ok(String::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// PR-45c-ui: persist the hot-word list. Empty / whitespace-only strings clear the column.
+#[tauri::command]
+pub async fn api_save_transcript_hotwords<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    hotwords: String,
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if let Err(e) =
+        SettingsRepository::save_transcript_hotwords(&state.db_manager.pool(), &hotwords).await
+    {
+        log_error!("Failed to save transcript hotwords: {}", e);
+        return Err(e.to_string());
+    }
+    Ok(serde_json::json!({ "status": "success" }))
+}
+
 #[tauri::command]
 pub async fn api_delete_api_key<R: Runtime>(
     _app: AppHandle<R>,

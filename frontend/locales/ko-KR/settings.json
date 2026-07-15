@@ -69,7 +69,11 @@
   "transcript": {
     "title": "전사 설정",
     "model_label": "전사 모델",
-    "select_provider": "공급자 선택"
+    "select_provider": "공급자 선택",
+    "hotwords_label": "핫워드",
+    "hotwords_placeholder": "Meetily, OKR, K8s, project-Phoenix",
+    "hotwords_help": "고유명사·프로젝트명·전문용어를 쉼표로 구분하세요. Whisper 디코더 힌트로 전달됩니다(최대 약 224 토큰).",
+    "hotwords_save": "저장"
   },
   "summary": {
     "language": {

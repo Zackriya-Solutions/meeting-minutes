@@ -24,6 +24,7 @@ impl TranscriptionProvider for ParakeetProvider {
         &self,
         audio: Vec<f32>,
         language: Option<String>,
+        initial_prompt: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
         // Log language preference warning if set (Parakeet doesn't support it yet)
         if let Some(ref lang) = language {
@@ -31,6 +32,11 @@ impl TranscriptionProvider for ParakeetProvider {
                 "Parakeet doesn't support language preference '{}' yet - transcribing in default language",
                 lang
             );
+        }
+        // Parakeet does not support decoder prompts; warn once if a hot-word
+        // list was supplied so the user knows their bias vocabulary is unused.
+        if initial_prompt.as_deref().map(str::is_empty) == Some(false) {
+            warn!("Parakeet ignores initial_prompt - hot-word list will not bias transcription");
         }
 
         match self.engine.transcribe_audio(audio).await {

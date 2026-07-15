@@ -69,7 +69,11 @@
   "transcript": {
     "title": "轉寫設定",
     "model_label": "轉寫模型",
-    "select_provider": "選擇提供方"
+    "select_provider": "選擇提供方",
+    "hotwords_label": "熱詞",
+    "hotwords_placeholder": "Meetily, OKR, K8s, project-Phoenix, 週會",
+    "hotwords_help": "用逗號分隔專有名詞、專案名稱或術語，作為 Whisper 解碼器提示（最多約 224 個 token）。",
+    "hotwords_save": "儲存"
   },
   "summary": {
     "language": {

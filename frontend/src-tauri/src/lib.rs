@@ -663,6 +663,8 @@ pub fn run() {
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
+            api::api_get_transcript_hotwords,
+            api::api_save_transcript_hotwords,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,

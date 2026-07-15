@@ -172,6 +172,45 @@ impl SettingsRepository {
         Ok(())
     }
 
+    /// Persist the hot-word list (PR-45c-ui) used as whisper.cpp initial_prompt bias.
+    /// Empty / whitespace-only strings are stored as NULL so the column can be
+    /// queried cheaply and the engine can short-circuit on `Option::None`.
+    pub async fn save_transcript_hotwords(
+        pool: &SqlitePool,
+        hotwords: &str,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let trimmed = hotwords.trim();
+        let value: Option<&str> = if trimmed.is_empty() { None } else { Some(trimmed) };
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, hotwords)
+            VALUES ('1', 'parakeet', $1, $2)
+            ON CONFLICT(id) DO UPDATE SET hotwords = excluded.hotwords
+            "#,
+        )
+        .bind(crate::config::DEFAULT_PARAKEET_MODEL)
+        .bind(value)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Read the persisted hot-word list. Returns `None` when no list is set.
+    pub async fn get_transcript_hotwords(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<String>, sqlx::Error> {
+        let value: Option<String> = sqlx::query_scalar(
+            "SELECT hotwords FROM transcript_settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+        Ok(value.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        }))
+    }
+
     pub async fn save_transcript_api_key(
         pool: &SqlitePool,
         provider: &str,

@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -445,11 +445,17 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
     // Transcribe using the appropriate engine (with improved error handling)
     match engine {
         TranscriptionEngine::Whisper(whisper_engine) => {
-            // Get language preference from global state
+            // Get language preference + hot-words (PR-45c-ui) from settings
             let language = crate::get_language_preference_internal();
+            let pool = app.state::<crate::state::AppState>().db_manager.pool();
+            let hotwords =
+                crate::database::repositories::setting::SettingsRepository::get_transcript_hotwords(pool)
+                    .await
+                    .ok()
+                    .flatten();
 
             match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language, None)
+                .transcribe_audio_with_confidence(speech_samples, language, hotwords)
                 .await
             {
                 Ok((text, confidence, is_partial)) => {
@@ -524,8 +530,14 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
         TranscriptionEngine::Provider(provider) => {
             // NEW: Trait-based provider (clean, unified interface)
             let language = crate::get_language_preference_internal();
+            let pool = app.state::<crate::state::AppState>().db_manager.pool();
+            let hotwords =
+                crate::database::repositories::setting::SettingsRepository::get_transcript_hotwords(pool)
+                    .await
+                    .ok()
+                    .flatten();
 
-            match provider.transcribe(speech_samples, language).await {
+            match provider.transcribe(speech_samples, language, hotwords).await {
                 Ok(result) => {
                     let cleaned_text = result.text.trim().to_string();
                     if cleaned_text.is_empty() {

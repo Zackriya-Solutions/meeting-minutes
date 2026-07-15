@@ -69,7 +69,11 @@
   "transcript": {
     "title": "文字起こし設定",
     "model_label": "文字起こしモデル",
-    "select_provider": "プロバイダーを選択"
+    "select_provider": "プロバイダーを選択",
+    "hotwords_label": "ホットワード",
+    "hotwords_placeholder": "Meetily, OKR, K8s, project-Phoenix",
+    "hotwords_help": "固有名詞・プロジェクト名・専門用語をカンマ区切りで。Whisper のデコーダーヒントとして渡されます（最大約 224 トークン）。",
+    "hotwords_save": "保存"
   },
   "summary": {
     "language": {
