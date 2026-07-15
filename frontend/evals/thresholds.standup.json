@@ -1,0 +1,22 @@
+{
+  "minimum_counts": {
+    "standup": 12
+  },
+  "maximum": {
+    "standup.p95_latency_ms": 60000,
+    "standup.protocol_error_count": 0,
+    "standup.invalid_evidence_rate": 0,
+    "standup.unsupported_decision_action_rate": 0.02,
+    "standup.duplicate_output_rate": 0.05
+  },
+  "minimum": {
+    "standup.success_rate": 0.95,
+    "standup.quality_count": 12,
+    "standup.dev_count": 2,
+    "standup.test_count": 3,
+    "standup.provider_count": 1,
+    "standup.fact_coverage": 0.8,
+    "standup.action_f1": 0.75,
+    "standup.owner_precision_when_shown": 0.95
+  }
+}
