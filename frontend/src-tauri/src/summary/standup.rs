@@ -595,6 +595,10 @@ fn filter_records<T: HasEvidence>(
             {
                 reference.quote = lines
                     .get(reference.timestamp.trim())
+                    // Compact evidence contains only a second-level timestamp. If
+                    // multiple transcript lines share it, choosing either quote
+                    // would manufacture support for an ambiguous model reference.
+                    .filter(|candidates| candidates.len() == 1)
                     .and_then(|candidates| candidates.first())
                     .map(|line| {
                         line.split_whitespace()
@@ -1668,6 +1672,22 @@ mod tests {
             "[01:02] Анна: Релиз готов к проверке\n[01:03] Борис: Блокеров нет",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn compact_evidence_drops_ambiguous_same_second_timestamp() {
+        let transcript = "[01:02] первая реплика\n[01:02] вторая реплика";
+        let raw = r#"{
+            "schema_version":"standup_v2",
+            "overview":[{"text":"Неоднозначный факт","evidence":["[01:02]"]}],
+            "participant_updates":[],"decisions":[],"action_items":[],
+            "risks_and_blockers":[],"deep_dives":[],"unattributed_facts":[]
+        }"#;
+
+        let mut report = parse_standup_extraction(raw).unwrap();
+        let stats = filter_unsupported_records(&mut report, transcript);
+        assert!(report.overview.is_empty());
+        assert_eq!(stats.dropped_records, 1);
     }
 
     #[test]
