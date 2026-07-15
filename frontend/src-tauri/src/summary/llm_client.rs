@@ -306,11 +306,12 @@ pub async fn generate_summary_with_builtin_json_schema(
 
     // Build request body based on provider
     let request_body = if provider == &LLMProvider::DeepSeek {
-        crate::llm::providers::deepseek::build_request_body(
+        crate::llm::providers::deepseek::build_request_body_with_json_mode(
             model_name,
             system_prompt,
             user_prompt,
             max_tokens,
+            builtin_json_schema.is_some(),
         )
     } else if provider != &LLMProvider::Claude {
         // For CustomOpenAI, apply optional parameters if provided
