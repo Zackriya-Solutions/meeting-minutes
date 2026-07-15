@@ -815,9 +815,12 @@ fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesIn
         }
     }
 
-    if let Some(latest) = digest.period_end.as_deref() {
+    if let Some(latest) = digest.period_end.as_deref().and_then(parse_digest_datetime) {
         for action in &digest.open_actions {
-            if action.source_occurred_at.as_str() < latest {
+            if parse_digest_datetime(&action.source_occurred_at)
+                .map(|occurred_at| occurred_at < latest)
+                .unwrap_or(false)
+            {
                 insights.push(StandupSeriesInsight {
                     kind: "carried_open_action".to_string(),
                     priority: "medium".to_string(),
@@ -1243,6 +1246,13 @@ mod tests {
             "previous",
             "2026-07-14T10:00:00Z",
         );
+        let later_action = digest_test_item(
+            5,
+            "action",
+            "Выпустить следующую сборку",
+            "current",
+            "2026-07-15 11:00:00",
+        );
         let first_risk = digest_test_item(
             2,
             "risk",
@@ -1267,7 +1277,7 @@ mod tests {
         parking.parking_lot = true;
         let digest = StandupSeriesDigest {
             period_end: Some("2026-07-15T10:00:00Z".into()),
-            open_actions: vec![carried_action],
+            open_actions: vec![carried_action, later_action],
             risks: vec![first_risk, second_risk],
             parking_lot: vec![parking],
             ..StandupSeriesDigest::default()
@@ -1292,6 +1302,9 @@ mod tests {
         assert!(insights
             .iter()
             .any(|insight| insight.kind == "carried_open_action"));
+        assert!(!insights.iter().any(|insight| {
+            insight.kind == "carried_open_action" && insight.sources[0].record_id == 5
+        }));
         assert!(insights
             .iter()
             .any(|insight| insight.kind == "unresolved_parking_lot"));
