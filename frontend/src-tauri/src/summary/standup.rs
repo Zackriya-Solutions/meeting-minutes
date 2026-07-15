@@ -137,6 +137,7 @@ impl<'de> Deserialize<'de> for EvidenceRef {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvidencedText {
+    #[serde(default)]
     pub text: String,
     #[serde(default)]
     pub evidence: Vec<EvidenceRef>,
@@ -157,6 +158,7 @@ pub struct ParticipantUpdate {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StandupDecision {
+    #[serde(default)]
     pub decision: String,
     #[serde(default)]
     pub rationale: Option<String>,
@@ -166,6 +168,7 @@ pub struct StandupDecision {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StandupAction {
+    #[serde(default)]
     pub task: String,
     /// Null unless the owner is explicit in the transcript.
     #[serde(default)]
@@ -179,6 +182,7 @@ pub struct StandupAction {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StandupRisk {
+    #[serde(default)]
     pub blocker_or_risk: String,
     #[serde(default)]
     pub impact: Option<String>,
@@ -190,6 +194,7 @@ pub struct StandupRisk {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StandupDeepDive {
+    #[serde(default)]
     pub topic: String,
     #[serde(default)]
     pub outcome: Option<String>,
@@ -262,8 +267,8 @@ pub struct StandupGenerationRequest<'a> {
 
 pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
     let cleaned = strip_code_fence(raw);
-    let mut report: StandupReport = match serde_json::from_str(cleaned) {
-        Ok(report) => report,
+    let (mut report, repaired_eof): (StandupReport, bool) = match serde_json::from_str(cleaned) {
+        Ok(report) => (report, false),
         Err(error) if error.is_eof() => {
             let repaired = close_truncated_json_containers(cleaned)
                 .ok_or_else(|| format!("invalid Standup V2 JSON: {error}"))?;
@@ -272,13 +277,52 @@ pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
             log::warn!(
                 "Standup V2 repaired an EOF-truncated JSON response by closing complete containers"
             );
-            report
+            (report, true)
         }
         Err(error) => return Err(format!("invalid Standup V2 JSON: {error}")),
     };
+    if repaired_eof {
+        let dropped = drop_structurally_incomplete_records(&mut report);
+        if dropped > 0 {
+            log::warn!(
+                "Standup V2 dropped {dropped} structurally incomplete trailing record(s) after EOF repair"
+            );
+        }
+    }
     normalize_optional_fields(&mut report);
     validate_report(&report)?;
     Ok(report)
+}
+
+fn drop_structurally_incomplete_records(report: &mut StandupReport) -> usize {
+    let before = report_record_count(report);
+    let complete_text =
+        |item: &EvidencedText| !item.text.trim().is_empty() && !item.evidence.is_empty();
+    report.overview.retain(complete_text);
+    for update in &mut report.participant_updates {
+        update.completed_or_recent.retain(complete_text);
+        update.next.retain(complete_text);
+        update.blockers.retain(complete_text);
+    }
+    report.participant_updates.retain(|update| {
+        !update.completed_or_recent.is_empty()
+            || !update.next.is_empty()
+            || !update.blockers.is_empty()
+    });
+    report
+        .decisions
+        .retain(|item| !item.decision.trim().is_empty() && !item.evidence.is_empty());
+    report
+        .action_items
+        .retain(|item| !item.task.trim().is_empty() && !item.evidence.is_empty());
+    report
+        .risks_and_blockers
+        .retain(|item| !item.blocker_or_risk.trim().is_empty() && !item.evidence.is_empty());
+    report
+        .deep_dives
+        .retain(|item| !item.topic.trim().is_empty() && !item.evidence.is_empty());
+    report.unattributed_facts.retain(complete_text);
+    before.saturating_sub(report_record_count(report))
 }
 
 fn close_truncated_json_containers(raw: &str) -> Option<String> {
@@ -1260,7 +1304,17 @@ pub async fn generate_standup_report(
 
     let mut extracted = Vec::with_capacity(chunks.len());
     let mut failed_chunks = 0usize;
-    let extraction_max_tokens = Some(request.max_tokens.unwrap_or(2_048).clamp(512, 2_048));
+    let extraction_token_ceiling = if request.provider == &LLMProvider::BuiltInAI {
+        896
+    } else {
+        2_048
+    };
+    let extraction_max_tokens = Some(
+        request
+            .max_tokens
+            .unwrap_or(extraction_token_ceiling)
+            .clamp(512, extraction_token_ceiling),
+    );
     for (index, chunk) in chunks.iter().enumerate() {
         if request
             .cancellation_token
@@ -1432,6 +1486,24 @@ mod tests {
         "#;
         let report = parse_standup_extraction(atomic_first).unwrap();
         assert_eq!(report.action_items.len(), 1);
+
+        let incomplete_trailing_record = r#"{
+            "schema_version":"standup_v2",
+            "action_items":[
+                {"task":"Проверить пороги","owner":null,"due_date":null,"evidence":["[05:29]"]},
+                {"owner":null
+        "#;
+        let report = parse_standup_extraction(incomplete_trailing_record).unwrap();
+        assert_eq!(report.action_items.len(), 1);
+        assert_eq!(report.action_items[0].task, "Проверить пороги");
+
+        let complete_but_malformed = r#"{
+            "schema_version":"standup_v2",
+            "action_items":[{"owner":null,"evidence":["[05:29]"]}]
+        }"#;
+        assert!(parse_standup_extraction(complete_but_malformed)
+            .unwrap_err()
+            .contains("must not be empty"));
 
         let truncated = r#"{
             "schema_version":"standup_v2",
