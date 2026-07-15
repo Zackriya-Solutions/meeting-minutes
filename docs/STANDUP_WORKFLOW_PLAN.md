@@ -18,6 +18,11 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 | Keep DeepSeek summaries reliable | PR #21 implements bounded generation and direct Russian output | Merge/review and Standup V2 provider evaluation |
 | Automatic meeting detection | PR #22 is open | Merge/review and false-positive/false-negative evaluation |
 
+The database previously treated import time as meeting time. The standup-series slice adds a
+separate `occurred_at` value and backfills it only from the safely normalized
+`YYYY-MM-DD_HH-MM_...` titles. Unknown source dates remain unknown and fall back to `created_at`;
+filesystem modification time is never silently promoted to meeting truth.
+
 ## Before the standup
 
 ### Pre-brief

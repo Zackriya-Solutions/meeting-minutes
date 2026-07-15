@@ -552,6 +552,17 @@ impl SummaryService {
                     }
                 }
 
+                let standup_report = structured_result.as_ref().and_then(|value| {
+                    match serde_json::from_value::<crate::summary::standup::StandupReport>(
+                        value.clone(),
+                    ) {
+                        Ok(report) => Some(report),
+                        Err(error) => {
+                            error!("Failed to decode Standup V2 result for review sync: {error}");
+                            None
+                        }
+                    }
+                });
                 let result_json = build_summary_result_json(
                     &final_markdown,
                     cache_source,
@@ -572,6 +583,24 @@ impl SummaryService {
                     error!("Failed to save completed process for {}: {}", meeting_id, e);
                 } else {
                     info!("Summary saved successfully for meeting_id: {}", meeting_id);
+                    if let Some(report) = standup_report.as_ref() {
+                        match crate::summary::standup_workflow::sync_standup_records(
+                            &pool,
+                            &meeting_id,
+                            report,
+                        )
+                        .await
+                        {
+                            Ok(count) => info!(
+                                "Synced {} pending Standup V2 review records for meeting_id: {}",
+                                count, meeting_id
+                            ),
+                            Err(error) => error!(
+                                "Failed to sync Standup V2 review records for {}: {}",
+                                meeting_id, error
+                            ),
+                        }
+                    }
                 }
             }
             Err(e) => {

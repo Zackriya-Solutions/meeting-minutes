@@ -726,6 +726,10 @@ pub fn run() {
             summary::commands::api_save_meeting_detected_summary_language,
             summary::commands::api_detect_transcript_summary_language,
             summary::commands::api_cancel_summary,
+            summary::standup_workflow::list_standup_records,
+            summary::standup_workflow::review_standup_record,
+            summary::standup_workflow::set_standup_action_status,
+            summary::standup_workflow::get_standup_prebrief,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
