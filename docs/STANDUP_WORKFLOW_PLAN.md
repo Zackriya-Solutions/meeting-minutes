@@ -13,7 +13,7 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 | Use the additional archive and earlier files | The 17-file priority pass finished with 7 imports, 10 hash-based skips, and 0 failures | Finish the remaining 18 recordings and final integrity report |
 | Rename archive files by date/time | Done only where evidence supports the date; unknown dates remain explicit | Optional user review for the 35 unknown dates |
 | Avoid per-file UI import | PR #23 adds one-folder Tauri batch import, picker-free Tauri command, console startup mode, hash dedupe, resume, and JSON report | Finish the 50-file run and publish the integrity report |
-| Learn from roughly 50 meetings | PR #26 adds the private quality gate and PR #29 the resumable runner; 18 recordings have content review notes | Gold labels, frozen series split, and provider runs |
+| Learn from roughly 50 meetings | PR #26 adds the private quality gate and PR #29 the resumable runner; 19 recordings have content review notes | Gold labels, frozen series split, and provider runs |
 | Infer speaker names and aliases safely | PR #27 adds a local candidate store, abuse filtering, evidence UI, confirmation, aliases, and salted rejection fingerprints | Evaluate precision after diarization is available on the corpus |
 | Keep DeepSeek summaries reliable | PR #21 implements bounded generation and direct Russian output | Merge/review and Standup V2 provider evaluation |
 | Automatic meeting detection | PR #22 is open | Merge/review and false-positive/false-negative evaluation |
