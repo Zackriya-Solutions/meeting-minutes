@@ -333,6 +333,10 @@ function standupMetrics(rows) {
   return {
     count: rows.length,
     reviewed_standup_count: rows.filter((row) => reviewedStandupTypes.has(row.meeting_type)).length,
+    pure_status_count: rows.filter((row) => row.meeting_type === 'pure_status').length,
+    status_plus_deep_dive_count: rows.filter(
+      (row) => row.meeting_type === 'status_plus_deep_dive',
+    ).length,
     contrast_count: rows.filter((row) => contrastTypes.has(row.meeting_type)).length,
     uncertain_count: rows.filter((row) => row.meeting_type === 'uncertain').length,
     train_count: rows.filter((row) => row.split === 'train').length,

@@ -13,6 +13,8 @@
     "standup.success_rate": 0.95,
     "standup.quality_count": 12,
     "standup.reviewed_standup_count": 12,
+    "standup.pure_status_count": 3,
+    "standup.status_plus_deep_dive_count": 3,
     "standup.contrast_count": 2,
     "standup.dev_count": 2,
     "standup.test_count": 3,
