@@ -146,7 +146,7 @@ async fn meeting_input(pool: &SqlitePool, meeting_id: &str) -> Result<(String, S
     let segments: Vec<(String, Option<f64>, String)> = sqlx::query_as(
         "SELECT transcript, audio_start_time, timestamp FROM transcripts \
          WHERE meeting_id = ? AND trim(transcript) != '' \
-         ORDER BY CASE WHEN audio_start_time IS NULL THEN 1 ELSE 0 END, audio_start_time, timestamp, id",
+         ORDER BY COALESCE(audio_start_time, 0.0), timestamp, id",
     )
     .bind(meeting_id)
     .fetch_all(pool)
@@ -488,6 +488,12 @@ pub async fn start_standup_corpus_run<R: Runtime>(
     overwrite: Option<bool>,
     report_path: Option<String>,
 ) -> Result<StandupCorpusRunStarted, String> {
+    if !corpus_mode_requested() {
+        return Err(
+            "Standup corpus commands are available only in explicit isolated corpus mode"
+                .to_string(),
+        );
+    }
     let meeting_ids = normalized_ids(meeting_ids)?;
     let provider = provider.trim().to_string();
     let model = model.trim().to_string();
@@ -648,9 +654,15 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts VALUES('t0', 'm1', 'Без таймкода', '[00:00]', NULL, NULL, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let (title, transcript) = meeting_input(&pool, "m1").await.unwrap();
         assert_eq!(title, "Standup");
-        assert_eq!(transcript, "[01:02] Готово");
+        assert_eq!(transcript, "[00:00] Без таймкода\n[01:02] Готово");
     }
 }

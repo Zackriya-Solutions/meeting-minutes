@@ -575,29 +575,35 @@ pub fn run() {
                     let report_path = std::env::var_os("MEETILY_STANDUP_CORPUS_REPORT")
                         .map(std::path::PathBuf::from);
                     let app_handle = _app.handle().clone();
-                    let pool = _app.state::<state::AppState>().db_manager.pool().clone();
-                    tauri::async_runtime::spawn(async move {
-                        match summary::corpus_runner::run_standup_corpus(
-                            app_handle,
-                            pool,
-                            meeting_ids,
-                            provider,
-                            model,
-                            summary_language,
-                            overwrite,
-                            report_path,
-                        )
-                        .await
-                        {
-                            Ok(report) => log::info!(
-                                "Standup corpus run complete: {} completed, {} skipped, {} failed",
-                                report.completed,
-                                report.skipped,
-                                report.failed
-                            ),
-                            Err(error) => log::error!("Standup corpus run failed: {error}"),
-                        }
-                    });
+                    if let Some(state) = _app.try_state::<state::AppState>() {
+                        let pool = state.db_manager.pool().clone();
+                        tauri::async_runtime::spawn(async move {
+                            match summary::corpus_runner::run_standup_corpus(
+                                app_handle,
+                                pool,
+                                meeting_ids,
+                                provider,
+                                model,
+                                summary_language,
+                                overwrite,
+                                report_path,
+                            )
+                            .await
+                            {
+                                Ok(report) => log::info!(
+                                    "Standup corpus run complete: {} completed, {} skipped, {} failed",
+                                    report.completed,
+                                    report.skipped,
+                                    report.failed
+                                ),
+                                Err(error) => log::error!("Standup corpus run failed: {error}"),
+                            }
+                        });
+                    } else {
+                        log::error!(
+                            "Standup corpus run cannot start before the local database is initialized"
+                        );
+                    }
                 }
             }
 
