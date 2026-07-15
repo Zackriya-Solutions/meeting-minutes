@@ -8,6 +8,7 @@ import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
+import i18n from '@/i18n/config';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -159,7 +160,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
       console.log('✅ Save successful');
     } catch (err) {
       console.error('❌ Save failed:', err);
-      alert('Failed to save changes. Please try again.');
+      alert(i18n.t('notifications.changesSaveFailed'));
     } finally {
       setIsSaving(false);
     }

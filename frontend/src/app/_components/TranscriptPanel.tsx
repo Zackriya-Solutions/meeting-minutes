@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ export function TranscriptPanel({
   isStopping,
   showModal
 }: TranscriptPanelProps) {
+  const { t } = useTranslation();
   // Contexts
   const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
@@ -62,11 +64,11 @@ export function TranscriptPanel({
                     variant="outline"
                     size="sm"
                     onClick={copyTranscript}
-                    title="Copy Transcript"
+                    title={t('common.copy')}
                   >
                     <Copy />
                     <span className='hidden md:inline'>
-                      Copy
+                      {t('common.copy')}
                     </span>
                   </Button>
                 )}
@@ -75,11 +77,11 @@ export function TranscriptPanel({
                     variant="outline"
                     size="sm"
                     onClick={() => showModal('languageSettings')}
-                    title="Language"
+                    title={t('common.language')}
                   >
                     <GlobeIcon />
                     <span className='hidden md:inline'>
-                      Language
+                      {t('common.language')}
                     </span>
                   </Button>
                 }

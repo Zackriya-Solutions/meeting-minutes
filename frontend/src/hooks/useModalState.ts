@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
+import i18n from '@/i18n/config';
 
 export type ModalType =
   | 'modelSettings'
@@ -134,15 +135,21 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
         console.log('Setting up transcription-error listener...');
         unlistenFn = await listen<{ error: string, userMessage: string, actionable: boolean }>('transcription-error', (event) => {
           console.log('Transcription error received:', event.payload);
-          const { userMessage, actionable } = event.payload;
+          const { error, userMessage, actionable } = event.payload;
+          const normalizedError = error.toLowerCase();
+          const localizedMessage = normalizedError.includes('downloading')
+            ? i18n.t('notifications.transcriptionDownloadWait')
+            : normalizedError.includes('not downloaded') || normalizedError.includes('not found')
+              ? i18n.t('notifications.downloadTranscriptionModel')
+              : i18n.t('notifications.transcriptionModelLoadFailedDesc');
 
           if (actionable) {
             // This is a model-related error that requires user action
-            showModal('modelSelector', userMessage);
+            showModal('modelSelector', localizedMessage || userMessage);
           } else {
             // Show toast instead of modal for non-actionable errors (consistent with sidebar)
             toast.error('', {
-              description: userMessage,
+              description: localizedMessage || userMessage,
               duration: 5000,
             });
           }
@@ -175,7 +182,7 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
 
         // Auto-close modal if the downloaded model matches the selected one
         if (transcriptModelConfig?.provider === 'localWhisper' && transcriptModelConfig?.model === modelName) {
-          toast.success('Model ready! Closing window...', { duration: 1500 });
+          toast.success(i18n.t('notifications.modelReadyClosing'), { duration: 1500 });
           setTimeout(() => hideModal('modelSelector'), 1500);
         }
       });

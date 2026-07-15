@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
@@ -10,19 +11,21 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
-// Tabs configuration (constant)
+// Tabs configuration - labels are set dynamically via t() in render
 const TABS = [
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
+  { value: 'general', labelKey: 'preferences.title', icon: Settings2 },
+  { value: 'recording', labelKey: 'recordingSettings.title', icon: Mic },
+  { value: 'Transcriptionmodels', labelKey: 'tabs.transcript', icon: DatabaseIcon },
+  { value: 'summaryModels', labelKey: 'tabs.aiSummary', icon: SparkleIcon },
+  { value: 'beta', labelKey: 'preferences.betaFeatures', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
@@ -73,9 +76,9 @@ export default function SettingsPage() {
               className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
+              <span>{t('common.back')}</span>
             </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
+            <h1 className="text-3xl font-bold">{t('common.settings')}</h1>
           </div>
         </div>
       </div>
@@ -96,7 +99,7 @@ export default function SettingsPage() {
                     className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
                   >
                     <Icon className="w-4 h-4" />
-                    {tab.label}
+                    {t(tab.labelKey)}
                   </TabsTrigger>
                 );
               })}
@@ -110,6 +113,13 @@ export default function SettingsPage() {
             </TabsList>
 
             <TabsContent value="general">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">{t('languageSwitcher.label')}</h2>
+                  <p className="text-sm text-muted-foreground mt-1">{t('languageSwitcher.label')}</p>
+                </div>
+                <LanguageSwitcher />
+              </div>
               <PreferenceSettings />
             </TabsContent>
             <TabsContent value="recording">

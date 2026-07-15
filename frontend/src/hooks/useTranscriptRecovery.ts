@@ -11,6 +11,7 @@ import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
+import i18n from '@/i18n/config';
 
 interface AudioRecoveryStatus {
   status: string; // "success" | "partial" | "failed" | "none"
@@ -149,7 +150,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
             status: 'failed',
             chunk_count: 0,
             estimated_duration_seconds: 0,
-            message: error instanceof Error ? error.message : 'Unknown error'
+            message: error instanceof Error ? error.message : i18n.t('notifications.unknownError')
           };
         }
       } else {
@@ -157,7 +158,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
           status: 'none',
           chunk_count: 0,
           estimated_duration_seconds: 0,
-          message: 'No folder path available'
+          message: i18n.t('notifications.noFolderPath')
         };
       }
 
@@ -188,8 +189,8 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
       } catch (error) {
         console.warn('Failed to apply pinned summary language to recovered meeting:', error);
-        toast.warning('Could not apply default summary language', {
-          description: 'The recovered meeting was saved, but the default summary language was not applied.',
+        toast.warning(i18n.t('notifications.defaultSummaryLanguageFailed'), {
+          description: i18n.t('notifications.recoveredMeetingLanguageFailedDesc'),
         });
       }
 

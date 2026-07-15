@@ -1,3 +1,5 @@
+import i18n from '@/i18n/config';
+
 // Types for Parakeet (NVIDIA NeMo) integration
 export interface ParakeetModelInfo {
   name: string;
@@ -98,13 +100,31 @@ export function getModelIcon(accuracy: ModelAccuracy): string {
 
 // Get user-friendly display name for a model
 export function getModelDisplayName(modelName: string): string {
-  const displayInfo = MODEL_DISPLAY_CONFIG[modelName];
+  const displayInfo = getModelDisplayInfo(modelName);
   return displayInfo?.friendlyName || modelName;
 }
 
 // Get model display info (icon, tagline, etc.)
 export function getModelDisplayInfo(modelName: string): ModelDisplayInfo | null {
-  return MODEL_DISPLAY_CONFIG[modelName] || null;
+  const displayInfo = MODEL_DISPLAY_CONFIG[modelName];
+  if (!displayInfo) return null;
+
+  const localized = {
+    'parakeet-tdt-0.6b-v3-int8': {
+      friendlyName: i18n.t('modelCard.parakeetLightning'),
+      tagline: i18n.t('modelCard.parakeetLightningTagline'),
+    },
+    'parakeet-tdt-0.6b-v2-int8': {
+      friendlyName: i18n.t('modelCard.parakeetCompact'),
+      tagline: i18n.t('modelCard.parakeetCompactTagline'),
+    },
+    'parakeet-tdt-0.6b-v3-fp32': {
+      friendlyName: i18n.t('modelCard.parakeetPrecise'),
+      tagline: i18n.t('modelCard.parakeetPreciseTagline'),
+    },
+  }[modelName];
+
+  return localized ? { ...displayInfo, ...localized } : displayInfo;
 }
 
 export function getStatusColor(status: ModelStatus): string {
@@ -131,11 +151,11 @@ export function isQuantizedModel(modelName: string): boolean {
 export function getModelPerformanceBadge(quantization: QuantizationType): { label: string; color: string } {
   switch (quantization) {
     case 'FP32':
-      return { label: 'Full Precision', color: 'blue' };
+      return { label: i18n.t('modelCard.fullPrecision'), color: 'blue' };
     case 'Int8':
-      return { label: 'Int8 Quantized', color: 'green' };
+      return { label: `Int8 ${i18n.t('modelCard.optimized')}`, color: 'green' };
     default:
-      return { label: 'Standard', color: 'gray' };
+      return { label: i18n.t('modelCard.standard'), color: 'gray' };
   }
 }
 

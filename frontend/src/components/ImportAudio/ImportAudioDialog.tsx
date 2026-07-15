@@ -31,11 +31,12 @@ import {
   SelectValue,
 } from '../ui/select';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportAudio, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
-import { LANGUAGES } from '@/constants/languages';
+import { LANGUAGES, getLanguageDisplayName } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 
 
@@ -73,6 +74,7 @@ export function ImportAudioDialog({
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
   const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { t, i18n } = useTranslation();
 
   const [title, setTitle] = useState('');
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
@@ -95,7 +97,7 @@ export function ImportAudioDialog({
   } = useTranscriptionModels(transcriptModelConfig);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
-    toast.success(`Import complete! ${result.segments_count} segments created.`);
+    toast.success(t('importAudio.importComplete', { count: result.segments_count }));
 
     // Refresh meetings list then navigate to the imported meeting
     refetchMeetings();
@@ -105,7 +107,7 @@ export function ImportAudioDialog({
   }, [router, refetchMeetings, onComplete, onOpenChange]);
 
   const handleImportError = useCallback((error: string) => {
-    toast.error('Import failed', { description: error });
+    toast.error(t('common.failed'), { description: error });
   }, []);
 
   const {
@@ -199,7 +201,7 @@ export function ImportAudioDialog({
   const handleCancel = async () => {
     if (isProcessing) {
       await cancelImport();
-      toast.info('Import cancelled');
+      toast.info(t('onboarding.importCancelled'));
     }
     onOpenChange(false);
   };
@@ -236,31 +238,31 @@ export function ImportAudioDialog({
             {isProcessing ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Importing Audio...
+                {t('importAudio.importingAudio')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Import Failed
+                {t('onboarding.importFailed')}
               </>
             ) : status === 'complete' ? (
               <>
                 <CheckCircle2 className="h-5 w-5 text-green-600" />
-                Import Complete
+                {t('onboarding.importComplete')}
               </>
             ) : (
               <>
                 <Upload className="h-5 w-5 text-blue-600" />
-                Import Audio File
+                {t('importAudio.title')}
               </>
             )}
           </DialogTitle>
           <DialogDescription>
             {isProcessing
-              ? progress?.message || 'Processing audio...'
+              ? progress?.message || t('importAudio.importingAudio')
               : error
-              ? 'An error occurred during import'
-              : 'Import an audio file to create a new meeting with transcripts'}
+              ? t('common.error')
+              : t('importAudio.dropAudioFile')}
           </DialogDescription>
         </DialogHeader>
 
@@ -290,19 +292,19 @@ export function ImportAudioDialog({
 
                   {/* Editable title */}
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700">Meeting Title</label>
+                    <label className="text-sm font-medium text-gray-700">{t("sidebar.meetingTitle")}</label>
                     <Input
                       value={title}
                       onChange={(e) => {
                         setTitle(e.target.value);
                         setTitleModifiedByUser(true);
                       }}
-                      placeholder="Enter meeting title"
+                      placeholder={t("sidebar.untitledMeeting")}
                     />
                   </div>
 
                   <Button variant="outline" size="sm" onClick={handleSelectFile} className="w-full">
-                    Choose Different File
+                    {t('meetingDetails.chooseDifferentFile')}
                   </Button>
                 </div>
               ) : (
@@ -312,16 +314,16 @@ export function ImportAudioDialog({
                     {status === 'validating' ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Validating...
+                        {t('importAudio.validating')}
                       </>
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Select Audio File
+                        {t('importAudio.selectAudioFile')}
                       </>
                     )}
                   </Button>
-                  <p className="text-sm text-gray-500 mt-2">MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA</p>
+                  <p className="text-sm text-gray-500 mt-2">{t('importAudio.supportedFormats')}</p>
                 </div>
               )}
 
@@ -332,7 +334,7 @@ export function ImportAudioDialog({
                     onClick={() => setShowAdvanced(!showAdvanced)}
                     className="w-full flex items-center justify-between p-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
-                    <span>Advanced Options</span>
+                    <span>{t('modelSettings.advancedOptions')}</span>
                     {showAdvanced ? (
                       <ChevronUp className="h-4 w-4" />
                     ) : (
@@ -347,16 +349,16 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Language</span>
+                            <span className="text-sm font-medium">{t("transcriptSettings.transcriptionLanguage")}</span>
                           </div>
                           <Select value={selectedLang} onValueChange={setSelectedLang}>
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Select language" />
+                              <SelectValue placeholder={t("languagePicker.selectLanguage")} />
                             </SelectTrigger>
                             <SelectContent className="max-h-60">
                               {LANGUAGES.map((lang) => (
                                 <SelectItem key={lang.code} value={lang.code}>
-                                  {lang.name}
+                                  {getLanguageDisplayName(lang.code, i18n.language, t('languagePicker.autoOriginal'), t('languagePicker.autoTranslate'))}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -366,10 +368,10 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Language</span>
+                            <span className="text-sm font-medium">{t("transcriptSettings.transcriptionLanguage")}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                            {t('transcriptSettings.languageSelectionNotSupported')}
                           </p>
                         </div>
                       )}
@@ -379,7 +381,7 @@ export function ImportAudioDialog({
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Cpu className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Model</span>
+                            <span className="text-sm font-medium">{t("modelSettings.aiModel")}</span>
                           </div>
                           <Select
                             value={selectedModelKey}
@@ -387,7 +389,7 @@ export function ImportAudioDialog({
                             disabled={loadingModels}
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder={loadingModels ? 'Loading models...' : 'Select model'} />
+                              <SelectValue placeholder={loadingModels ? t('modelSettings.fetchingModels') : t('transcriptSettings.transcriptionModel')} />
                             </SelectTrigger>
                             <SelectContent>
                               {availableModels.map((model) => (
@@ -440,7 +442,7 @@ export function ImportAudioDialog({
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 onClick={handleStartImport}
@@ -448,23 +450,23 @@ export function ImportAudioDialog({
                 disabled={!fileInfo}
               >
                 <Upload className="h-4 w-4 mr-2" />
-                Import
+                {t('common.import')}
               </Button>
             </>
           )}
           {isProcessing && (
             <Button variant="outline" onClick={handleCancel}>
               <X className="h-4 w-4 mr-2" />
-              Cancel
+              {t('common.cancel')}
             </Button>
           )}
           {error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Close
+                {t('common.close')}
               </Button>
               <Button onClick={reset} variant="outline">
-                Try Again
+                {t('common.retry')}
               </Button>
             </>
           )}

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useTranslation } from 'react-i18next';
 
 
 interface SidebarItem {
@@ -65,7 +66,11 @@ export const useSidebar = () => {
 };
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
+  const { t } = useTranslation();
+  const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>(() => ({
+    id: 'intro-call',
+    title: t('sidebar.untitledMeeting'),
+  }));
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
@@ -116,7 +121,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const baseItems: SidebarItem[] = [
     {
       id: 'meetings',
-      title: 'Meeting Notes',
+      title: t('sidebar.meetingNotes'),
       type: 'folder' as const,
       children: [
         ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
@@ -132,7 +137,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Update current meeting when on home page
   useEffect(() => {
     if (pathname === '/') {
-      setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
+      setCurrentMeeting({ id: 'intro-call', title: t('sidebar.untitledMeeting') });
     }
     setSidebarItems(baseItems);
   }, [pathname]);
@@ -214,7 +219,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         });
         onUpdate({
           status: 'error',
-          error: 'Summary generation timed out after 15 minutes. Please try again or check your model configuration.'
+          error: t('notifications.summaryPollingTimeout')
         });
         return;
       }
@@ -252,7 +257,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         // Report error to callback
         onUpdate({
           status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : t('notifications.unknownError')
         });
         clearInterval(pollInterval);
         setActiveSummaryPolls(prev => {

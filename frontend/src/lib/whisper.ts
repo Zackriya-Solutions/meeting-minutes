@@ -1,3 +1,5 @@
+import i18n from '@/i18n/config';
+
 // Types for whisper-rs integration
 export interface ModelInfo {
   name: string;
@@ -177,15 +179,15 @@ export function getModelPerformanceBadge(modelName: string): { label: string; co
   const type = getModelType(modelName);
   switch (type) {
     case 'f16':
-      return { label: 'Full Precision', color: 'blue' };
+      return { label: i18n.t('modelCard.fullPrecision'), color: 'blue' };
     case 'q5_1':
-      return { label: 'Balanced+', color: 'green' };
+      return { label: i18n.t('modelCard.balancedPlus'), color: 'green' };
     case 'q5_0':
-      return { label: 'Balanced', color: 'green' };
+      return { label: i18n.t('modelCard.balancedLabel'), color: 'green' };
     case 'q4_0':
-      return { label: 'Fast', color: 'orange' };
+      return { label: i18n.t('modelCard.fastLabel'), color: 'orange' };
     default:
-      return { label: 'Standard', color: 'gray' };
+      return { label: i18n.t('modelCard.standard'), color: 'gray' };
   }
 }
 
@@ -198,46 +200,65 @@ export function getModelTagline(modelName: string, speed: ProcessingSpeed, accur
   let speedText = '';
   switch (speed) {
     case 'Very Fast':
-      speedText = 'Real time';
+      speedText = i18n.t('modelCard.realTime');
       break;
     case 'Fast':
-      speedText = 'Fast processing';
+      speedText = i18n.t('modelCard.fastProcessing');
       break;
     case 'Medium':
-      speedText = 'Moderate speed';
+      speedText = i18n.t('modelCard.moderateSpeed');
       break;
     case 'Slow':
-      speedText = 'Slower processing';
+      speedText = i18n.t('modelCard.slowerProcessing');
       break;
   }
 
   // Key feature based on model and accuracy
   let featureText = '';
   if (baseName === 'large-v3') {
-    featureText = 'Most accurate';
+    featureText = i18n.t('modelCard.mostAccurate');
   } else if (baseName === 'large-v3-turbo') {
-    featureText = 'Best accuracy with speed';
+    featureText = i18n.t('modelCard.bestAccuracyWithSpeed');
   } else if (baseName === 'medium') {
-    featureText = accuracy === 'High' ? 'Professional quality' : 'Balanced quality';
+    featureText = i18n.t(accuracy === 'High' ? 'modelCard.professionalQuality' : 'modelCard.balancedQuality');
   } else if (baseName === 'small') {
-    featureText = 'Good accuracy';
+    featureText = i18n.t('modelCard.goodAccuracy');
   } else if (baseName === 'base') {
-    featureText = 'Balanced quality';
+    featureText = i18n.t('modelCard.balancedQuality');
   } else if (baseName === 'tiny') {
-    featureText = 'Fastest option';
+    featureText = i18n.t('modelCard.fastestOption');
   }
 
   // Add quantization note if applicable
   if (isQuantized) {
     const quantType = getModelType(modelName);
     if (quantType === 'q5_0') {
-      featureText += ', optimized';
+      featureText += `, ${i18n.t('modelCard.optimized')}`;
     } else if (quantType === 'q4_0') {
-      featureText += ', ultra fast';
+      featureText += `, ${i18n.t('modelCard.ultraFast')}`;
     }
   }
 
   return `${speedText} • ${featureText}`;
+}
+
+export function getAccuracyLabel(accuracy: ModelAccuracy): string {
+  const keys: Record<ModelAccuracy, string> = {
+    High: 'modelCard.accuracyHigh',
+    Good: 'modelCard.accuracyGood',
+    Decent: 'modelCard.accuracyDecent',
+  };
+  return i18n.t(keys[accuracy]);
+}
+
+export function getSpeedLabel(speed: ProcessingSpeed): string {
+  const keys: Record<ProcessingSpeed, string> = {
+    Slow: 'modelCard.speedSlow',
+    Medium: 'modelCard.speedMedium',
+    Fast: 'modelCard.speedFast',
+    'Very Fast': 'modelCard.speedVeryFast',
+  };
+  return i18n.t(keys[speed]);
 }
 
 // Group models by their base name for better UI organization

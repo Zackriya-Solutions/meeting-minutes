@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Info as InfoIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
@@ -9,6 +10,7 @@ interface InfoProps {
 }
 
 const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, ref) => {
+  const { t } = useTranslation();
   return (
     <Dialog aria-describedby={undefined}>
       <DialogTrigger asChild>
@@ -19,17 +21,17 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
               ? "bg-transparent p-2 hover:bg-gray-100 rounded-lg" 
               : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-200 rounded-lg shadow-sm"
           }`}
-          title="About Meetily"
+          title={t("app.name") + " - " + t("about.title")}
         >
           <InfoIcon className={`text-gray-600 ${isCollapsed ? "w-5 h-5" : "w-4 h-4"}`} />
           {!isCollapsed && (
-            <span className="ml-2 text-sm text-gray-700">About</span>
+            <span className="ml-2 text-sm text-gray-700">{t('about.title')}</span>
           )}
         </button>
       </DialogTrigger>
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>About Meetily</DialogTitle>
+          <DialogTitle>{t('about.title')} {t('app.name')}</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>

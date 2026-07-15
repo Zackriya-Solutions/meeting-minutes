@@ -1,7 +1,8 @@
 'use client';
 
 import { Block } from '@/types';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface BlockProps {
   block: Block;
@@ -71,6 +72,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
   onNavigate,
   onCreateNewBlock,
 }) => {
+  const { t } = useTranslation();
   const [showCommands, setShowCommands] = useState(false);
   const [commandFilter, setCommandFilter] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -100,7 +102,13 @@ export const BlockComponent: React.FC<BlockProps> = ({
     }
   }, [selectedCommandIndex, showCommands]);
 
-  const filteredCommands = COMMANDS.filter(cmd => 
+  const commands = useMemo(() => COMMANDS.map((command) => ({
+    ...command,
+    label: t(`editorCommands.${command.id}.label`),
+    description: t(`editorCommands.${command.id}.description`),
+  })), [t]);
+
+  const filteredCommands = commands.filter(cmd =>
     cmd.label.toLowerCase().includes(commandFilter.toLowerCase())
   );
 
@@ -250,7 +258,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
             ${block.type === 'heading1' ? 'text-xl font-bold' : ''}
             ${block.type === 'heading2' ? 'text-lg font-semibold' : ''}
           `}
-          placeholder="Type '/' for commands..."
+          placeholder={t('summarySettings.commandPlaceholder')}
         />
 
         {showCommands && (

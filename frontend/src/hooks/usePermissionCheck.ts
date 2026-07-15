@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import i18n from '@/i18n/config';
 
 export interface PermissionStatus {
   hasMicrophone: boolean;
@@ -53,7 +54,7 @@ export function usePermissionCheck() {
         hasMicrophone: false,
         hasSystemAudio: false,
         isChecking: false,
-        error: error instanceof Error ? error.message : 'Failed to check permissions',
+        error: error instanceof Error ? error.message : i18n.t('notifications.permissionCheckFailed'),
       });
       return { hasMicrophone: false, hasSystemAudio: false };
     }
