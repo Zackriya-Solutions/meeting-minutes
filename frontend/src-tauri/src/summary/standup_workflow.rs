@@ -771,25 +771,10 @@ fn escape_digest_markdown(value: &str) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut escaped = String::with_capacity(collapsed.len());
     for character in collapsed.chars() {
-        if matches!(
-            character,
-            '\\' | '`'
-                | '*'
-                | '_'
-                | '{'
-                | '}'
-                | '['
-                | ']'
-                | '('
-                | ')'
-                | '<'
-                | '>'
-                | '#'
-                | '+'
-                | '-'
-                | '!'
-                | '|'
-        ) {
+        // Values are collapsed to one line and rendered after our own list marker, so
+        // block-prefix characters such as '-', '+', '#', and '!' are harmless here.
+        // Escape only inline syntax that can still alter or inject rendered Markdown.
+        if matches!(character, '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '>' | '|') {
             escaped.push('\\');
         }
         escaped.push(character);
@@ -1439,7 +1424,7 @@ mod tests {
             participant: Some("**Anna**".into()),
             category: None,
             owner: Some("[owner](https://example.test)".into()),
-            due_date: Some("tomorrow | now".into()),
+            due_date: Some("2026-07-15 | now".into()),
             action_status: None,
             parking_lot: false,
             source_meeting_id: "meeting id&unsafe".into(),
@@ -1458,6 +1443,8 @@ mod tests {
         assert!(!digest.markdown.contains("\n# heading"));
         assert!(!digest.markdown.contains("[meeting](https://example.test)"));
         assert!(digest.markdown.contains("meeting+id%26unsafe"));
+        assert!(digest.markdown.contains("2026-07-15"));
+        assert!(!digest.markdown.contains("2026\\-07\\-15"));
     }
 
     #[tokio::test]
