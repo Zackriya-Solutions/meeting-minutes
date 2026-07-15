@@ -97,6 +97,19 @@ fn analyze_segments(mut segments: Vec<TimedSegment>) -> MeetingContentWindowSugg
     }
 }
 
+fn analyze_segments_with_untimed(
+    segments: Vec<TimedSegment>,
+    untimed_segment_count: usize,
+) -> MeetingContentWindowSuggestion {
+    if untimed_segment_count > 0 {
+        return MeetingContentWindowSuggestion {
+            reason: Some("untimed_transcript_segments".to_string()),
+            ..MeetingContentWindowSuggestion::default()
+        };
+    }
+    analyze_segments(segments)
+}
+
 fn preference_key(meeting_id: &str) -> String {
     format!("summary.content_window.{meeting_id}")
 }
@@ -125,13 +138,14 @@ async fn analyze_meeting(
     }
     let rows: Vec<(Option<f64>, Option<f64>, String)> = sqlx::query_as(
         "SELECT audio_start_time, audio_end_time, transcript FROM transcripts \
-         WHERE meeting_id = ? AND audio_start_time IS NOT NULL AND trim(transcript) != '' \
-         ORDER BY audio_start_time, timestamp, id",
+         WHERE meeting_id = ? AND trim(transcript) != '' \
+         ORDER BY COALESCE(audio_start_time, 0.0), timestamp, id",
     )
     .bind(meeting_id)
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
+    let untimed_segment_count = rows.iter().filter(|(start, _, _)| start.is_none()).count();
     let segments = rows
         .into_iter()
         .filter_map(|(start, end, text)| {
@@ -144,7 +158,7 @@ async fn analyze_meeting(
             })
         })
         .collect();
-    let mut result = analyze_segments(segments);
+    let mut result = analyze_segments_with_untimed(segments, untimed_segment_count);
     result.selected = result.suggested && preference_selected(pool, meeting_id).await?;
     Ok(result)
 }
@@ -239,6 +253,21 @@ mod tests {
             .map(|index| segment(index, index + 1, 100))
             .collect::<Vec<_>>();
         assert!(!analyze_segments(segments).suggested);
+    }
+
+    #[test]
+    fn refuses_to_trim_when_any_transcript_segment_has_no_relative_time() {
+        let mut segments = (0..10)
+            .map(|index| segment(index, index + 1, 100))
+            .collect::<Vec<_>>();
+        segments.extend([segment(31, 32, 20), segment(36, 37, 15)]);
+
+        let result = analyze_segments_with_untimed(segments, 1);
+        assert!(!result.suggested);
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("untimed_transcript_segments")
+        );
     }
 
     #[test]

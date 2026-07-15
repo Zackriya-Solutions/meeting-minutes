@@ -34,10 +34,16 @@ async function applyMeetingContentWindow(
     if (!suggestion.suggested || !suggestion.selected || endMs == null) {
       return transcripts;
     }
-    const filtered = transcripts.filter((transcript) => (
-      transcript.audio_start_time == null
-      || transcript.audio_start_time * 1_000 <= endMs
-    ));
+    // The backend never selects a primary window when an untimed row exists. Keep this
+    // fail-closed guard as well so a stale preference cannot silently mix unknown-position
+    // transcript text into a supposedly confirmed time window.
+    if (transcripts.some((transcript) => transcript.audio_start_time == null)) {
+      return transcripts;
+    }
+    const filtered = transcripts.filter((transcript) => {
+      const startTime = transcript.audio_start_time;
+      return startTime != null && startTime * 1_000 <= endMs;
+    });
     if (filtered.length === 0) return transcripts;
     console.info(
       `Using confirmed primary meeting window for summary: ${filtered.length}/${transcripts.length} segments`,
