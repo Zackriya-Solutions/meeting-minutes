@@ -138,6 +138,50 @@ impl ConstrainedJsonTracker {
     }
 }
 
+fn last_repairable_json_prefix_len(raw: &str) -> Option<usize> {
+    let mut started = false;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut depth = 0usize;
+    let mut last = None;
+    for (offset, character) in raw.char_indices() {
+        if !started {
+            if character.is_whitespace() {
+                continue;
+            }
+            if matches!(character, '{' | '[') {
+                started = true;
+                depth = 1;
+            } else {
+                return None;
+            }
+            continue;
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth <= 2 {
+                    last = Some(offset + character.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    last
+}
+
 fn guard_completed_json_grammar(grammar: String) -> String {
     // Keep one required token on the native grammar stack after the JSON root.
     // We stop as soon as the root parses, so this newline is never emitted.
@@ -614,7 +658,10 @@ impl ModelState {
         }
 
         if constrained_json && !constrained_json_completed {
-            if let Some(prefix_len) = constrained_json_tracker.repairable_prefix_len() {
+            if let Some(prefix_len) = constrained_json_tracker
+                .repairable_prefix_len()
+                .or_else(|| last_repairable_json_prefix_len(&output))
+            {
                 if prefix_len < output.len() {
                     output.truncate(prefix_len);
                     eprintln!(
@@ -920,5 +967,11 @@ mod tests {
         assert!(!tracker.push(incomplete, &full));
         assert_eq!(tracker.repairable_prefix_len(), Some(complete.len()));
         assert_eq!(&full[..tracker.repairable_prefix_len().unwrap()], complete);
+
+        let russian = format!(r#"{{"items":[{{"text":"Готово"}}{incomplete}"#);
+        assert_eq!(
+            last_repairable_json_prefix_len(&russian),
+            Some(russian.find(incomplete).unwrap())
+        );
     }
 }
