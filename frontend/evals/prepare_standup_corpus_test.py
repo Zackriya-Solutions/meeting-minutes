@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
+import sqlite3
+
 from prepare_standup_corpus import (
     candidate_score,
     flatten_standup,
+    generation_identity,
+    reviewed_references,
     select_samples,
     split_for_series,
     timestamp,
@@ -65,5 +69,44 @@ try:
     raise AssertionError("missing explicit ID must fail")
 except ValueError:
     pass
+
+db = sqlite3.connect(":memory:")
+db.execute(
+    "CREATE TABLE standup_records("
+    "id INTEGER PRIMARY KEY, meeting_id TEXT, kind TEXT, payload TEXT, "
+    "reviewed_payload TEXT, review_status TEXT)"
+)
+db.executemany(
+    "INSERT INTO standup_records VALUES(?, 'm1', 'action', ?, ?, ?)",
+    [
+        (1, '{"task":"raw"}', '{"task":"human correction"}', "accepted"),
+        (2, '{"task":"bad model claim"}', None, "rejected"),
+        (3, '{"task":"unreviewed"}', None, "pending"),
+    ],
+)
+assert reviewed_references(db, "m1") == [
+    {
+        "id": "review-1",
+        "kind": "action",
+        "text": "human correction",
+        "owner": None,
+        "due_date": None,
+    }
+]
+
+identity = generation_identity(
+    {
+        "summary_generation": {
+            "source": {
+                "model_provider": "deepseek",
+                "model_name": "deepseek-chat",
+                "template_fingerprint": "abc:3",
+                "custom_openai_endpoint": "https://secret.invalid",
+            }
+        }
+    }
+)
+assert identity == ("deepseek", "deepseek-chat", "abc:3")
+assert "secret" not in repr(identity)
 
 print("ok - private corpus exporter helpers")
