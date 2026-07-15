@@ -152,11 +152,66 @@ pub struct StandupGenerationRequest<'a> {
 
 pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
     let cleaned = strip_code_fence(raw);
-    let mut report: StandupReport = serde_json::from_str(cleaned)
-        .map_err(|error| format!("invalid Standup V2 JSON: {error}"))?;
+    let mut report: StandupReport = match serde_json::from_str(cleaned) {
+        Ok(report) => report,
+        Err(error) if error.is_eof() => {
+            let repaired = close_truncated_json_containers(cleaned)
+                .ok_or_else(|| format!("invalid Standup V2 JSON: {error}"))?;
+            let report = serde_json::from_str(&repaired)
+                .map_err(|_| format!("invalid Standup V2 JSON: {error}"))?;
+            log::warn!(
+                "Standup V2 repaired an EOF-truncated JSON response by closing complete containers"
+            );
+            report
+        }
+        Err(error) => return Err(format!("invalid Standup V2 JSON: {error}")),
+    };
     normalize_optional_fields(&mut report);
     validate_report(&report)?;
     Ok(report)
+}
+
+fn close_truncated_json_containers(raw: &str) -> Option<String> {
+    let mut expected_closers = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in raw.trim().chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => expected_closers.push('}'),
+            '[' => expected_closers.push(']'),
+            '}' | ']' if expected_closers.pop() != Some(character) => return None,
+            _ => {}
+        }
+    }
+    if in_string || expected_closers.is_empty() {
+        return None;
+    }
+
+    let mut repaired = raw.trim().to_string();
+    loop {
+        repaired.truncate(repaired.trim_end().len());
+        if repaired.ends_with(',') {
+            repaired.pop();
+        } else {
+            break;
+        }
+    }
+    if repaired.ends_with(':') {
+        return None;
+    }
+    repaired.extend(expected_closers.into_iter().rev());
+    Some(repaired)
 }
 
 fn strip_code_fence(raw: &str) -> &str {
@@ -1104,6 +1159,28 @@ mod tests {
         assert_eq!(report.overview.len(), 1);
         assert_eq!(report.action_items[0].owner, None);
         assert_eq!(report.action_items[0].due_date, None);
+    }
+
+    #[test]
+    fn repairs_only_complete_eof_truncated_json_containers() {
+        let truncated = r#"{
+            "schema_version":"standup_v2",
+            "overview":[
+                {"text":"Факт","evidence":[{"timestamp":"[00:01]","quote":"точная цитата"}]},
+        "#;
+        let report = parse_standup_extraction(truncated).unwrap();
+        assert_eq!(report.overview.len(), 1);
+        assert_eq!(report.overview[0].text, "Факт");
+
+        let incomplete_string = r#"{"schema_version":"standup_v2","overview":[{"text":"оборвано"#;
+        assert!(parse_standup_extraction(incomplete_string)
+            .unwrap_err()
+            .contains("EOF while parsing a string"));
+
+        let incomplete_value = r#"{"schema_version":"standup_v2","overview":"#;
+        assert!(parse_standup_extraction(incomplete_value)
+            .unwrap_err()
+            .contains("EOF while parsing a value"));
     }
 
     #[test]
