@@ -81,6 +81,7 @@ pub struct SeriesDigestItem {
     pub owner: Option<String>,
     pub due_date: Option<String>,
     pub action_status: Option<String>,
+    pub parking_lot: bool,
     pub source_meeting_id: String,
     pub source_meeting_title: String,
     pub source_occurred_at: String,
@@ -102,6 +103,7 @@ pub struct StandupSeriesDigest {
     pub decisions: Vec<SeriesDigestItem>,
     pub risks: Vec<SeriesDigestItem>,
     pub deep_dives: Vec<SeriesDigestItem>,
+    pub parking_lot: Vec<SeriesDigestItem>,
     pub open_actions: Vec<SeriesDigestItem>,
     pub done_actions: Vec<SeriesDigestItem>,
     pub cancelled_actions: Vec<SeriesDigestItem>,
@@ -717,6 +719,10 @@ fn digest_item(row: &DigestRecordRow, payload: &Value) -> Option<SeriesDigestIte
             .and_then(Value::as_str)
             .map(str::to_string),
         action_status: row.action_status.clone(),
+        parking_lot: payload
+            .get("parking_lot")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         source_meeting_id: row.meeting_id.clone(),
         source_meeting_title: row.meeting_title.clone(),
         source_occurred_at: row.occurred_at.clone(),
@@ -776,7 +782,7 @@ fn render_series_digest_markdown(
     let russian = output_language
         .map(|value| value.to_lowercase().starts_with("ru"))
         .unwrap_or(false);
-    let (title, coverage, highlights, updates, open, done, decisions, risks, deep_dives) =
+    let (title, coverage, highlights, updates, open, done, decisions, risks, deep_dives, parking) =
         if russian {
             (
                 "Дайджест серии стендапов",
@@ -788,6 +794,7 @@ fn render_series_digest_markdown(
                 "Решения",
                 "Риски и блокеры",
                 "Технические разборы",
+                "Parking lot",
             )
         } else {
             (
@@ -800,6 +807,7 @@ fn render_series_digest_markdown(
                 "Decisions",
                 "Risks and blockers",
                 "Deep dives",
+                "Parking lot",
             )
         };
     let mut markdown = format!("# {title}: {}\n\n", digest.series_name);
@@ -816,6 +824,7 @@ fn render_series_digest_markdown(
     render_digest_section(&mut markdown, decisions, &digest.decisions);
     render_digest_section(&mut markdown, risks, &digest.risks);
     render_digest_section(&mut markdown, deep_dives, &digest.deep_dives);
+    render_digest_section(&mut markdown, parking, &digest.parking_lot);
     markdown
 }
 
@@ -916,6 +925,7 @@ pub async fn get_series_digest(
             "participant_update" => digest.updates.push(item),
             "decision" => digest.decisions.push(item),
             "risk" => digest.risks.push(item),
+            "deep_dive" if item.parking_lot => digest.parking_lot.push(item),
             "deep_dive" => digest.deep_dives.push(item),
             "action" => match item.action_status.as_deref().unwrap_or("open") {
                 "done" => digest.done_actions.push(item),
@@ -950,7 +960,7 @@ pub async fn get_standup_series_digest(
 mod tests {
     use super::*;
     use crate::summary::standup::{
-        EvidenceRef, StandupAction, StandupDecision, StandupReport, StandupRisk,
+        EvidenceRef, StandupAction, StandupDecision, StandupDeepDive, StandupReport, StandupRisk,
     };
 
     async fn test_pool() -> SqlitePool {
@@ -1183,7 +1193,16 @@ mod tests {
                 .execute(&pool)
                 .await
                 .unwrap();
-            sync_standup_records(&pool, meeting_id, &report())
+            let mut source_report = report();
+            if meeting_id != "pending" {
+                source_report.deep_dives.push(StandupDeepDive {
+                    topic: "Сверить архитектуру авторизации".into(),
+                    outcome: None,
+                    parking_lot: true,
+                    evidence: evidence("[04:05]", "вернёмся после стендапа"),
+                });
+            }
+            sync_standup_records(&pool, meeting_id, &source_report)
                 .await
                 .unwrap();
         }
@@ -1224,6 +1243,8 @@ mod tests {
         assert_eq!(digest.done_actions.len(), 1);
         assert_eq!(digest.decisions.len(), 1);
         assert_eq!(digest.risks.len(), 1);
+        assert_eq!(digest.parking_lot.len(), 1);
+        assert!(digest.deep_dives.is_empty());
         assert!(digest
             .markdown
             .contains("/meeting-details?id=accepted&t=62"));

@@ -46,6 +46,7 @@ interface SeriesDigestItem {
   owner?: string | null;
   due_date?: string | null;
   action_status?: string | null;
+  parking_lot: boolean;
   source_meeting_id: string;
   source_meeting_title: string;
   source_occurred_at: string;
@@ -66,6 +67,7 @@ interface StandupSeriesDigest {
   decisions: SeriesDigestItem[];
   risks: SeriesDigestItem[];
   deep_dives: SeriesDigestItem[];
+  parking_lot: SeriesDigestItem[];
   open_actions: SeriesDigestItem[];
   done_actions: SeriesDigestItem[];
   cancelled_actions: SeriesDigestItem[];
@@ -581,6 +583,7 @@ export default function CollectionsPage() {
                           <DigestSection title={t('Participant updates')} items={seriesDigest.updates} />
                           <DigestSection title={t('Highlights')} items={seriesDigest.highlights} />
                           <DigestSection title={t('Deep dives')} items={seriesDigest.deep_dives} />
+                          <DigestSection title={t('Parking lot')} items={seriesDigest.parking_lot} />
                         </div>
                       )}
                     </div>
