@@ -939,7 +939,10 @@ Rules:
 4. `participant` is allowed only when the transcript line has that exact speaker prefix. Do not infer a participant name from a mention, direct address, role, or insult. Owner/due date is null unless explicitly supported.
 5. Separate the status round from technical deep dives. A long discussion does not become a participant update merely because it happened during a standup.
 6. Put useful facts without safe speaker attribution in `unattributed_facts`.
-7. Quotes must be short, verbatim, and copied from the same transcript line as their timestamp. Never paraphrase a quote. Return no Markdown and no commentary."#
+7. Quotes must be 3-12 words, verbatim, and copied from the same transcript line as their timestamp. Never paraphrase a quote.
+8. Prefer omission to repetition: capture only final status, explicit commitments, decisions, blockers, and concrete deep-dive outcomes. Put each fact in one most-specific section only.
+9. Keep the whole result below 60 records: at most 5 overview facts; 3 items per participant category; 10 decisions; 10 actions; 10 risks; 5 deep dives; and 10 unattributed facts.
+10. Return minified one-line JSON with no Markdown, commentary, or extra whitespace."#
 }
 
 fn extraction_user_prompt(chunk: &str, output_language: &str, custom_prompt: &str) -> String {
@@ -972,6 +975,7 @@ Return this exact JSON shape:
 }}
 
 Use empty arrays when the chunk has no supported records of a type.
+Keep descriptive values concise and never repeat a record in multiple arrays. Return the JSON on one line.
 
 <transcript_chunk>
 {chunk}
@@ -1247,5 +1251,8 @@ mod tests {
         assert!(prompt.contains("context_not_evidence"));
         assert!(prompt.contains("never evidence"));
         assert!(prompt.contains("schema_version"));
+        assert!(prompt.contains("Return the JSON on one line"));
+        assert!(extraction_system_prompt().contains("below 60 records"));
+        assert!(extraction_system_prompt().contains("one most-specific section"));
     }
 }
