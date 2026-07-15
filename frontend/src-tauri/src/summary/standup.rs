@@ -8,7 +8,7 @@ use crate::summary::llm_client::{generate_summary, LLMProvider};
 use crate::summary::processor::{chunk_text, rough_token_count};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
@@ -300,38 +300,143 @@ fn visit_evidence(
     Ok(())
 }
 
+trait HasEvidence {
+    fn evidence_mut(&mut self) -> &mut Vec<EvidenceRef>;
+}
+
+macro_rules! impl_has_evidence {
+    ($($record:ty),+ $(,)?) => {
+        $(
+            impl HasEvidence for $record {
+                fn evidence_mut(&mut self) -> &mut Vec<EvidenceRef> {
+                    &mut self.evidence
+                }
+            }
+        )+
+    };
+}
+
+impl_has_evidence!(
+    EvidencedText,
+    StandupDecision,
+    StandupAction,
+    StandupRisk,
+    StandupDeepDive,
+);
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct EvidenceFilterStats {
+    dropped_references: usize,
+    dropped_records: usize,
+}
+
+fn transcript_lines_by_timestamp(transcript_chunk: &str) -> HashMap<String, Vec<String>> {
+    let mut lines = HashMap::<String, Vec<String>>::new();
+    for line in transcript_chunk.lines() {
+        let line = line.trim_start();
+        if !line.starts_with('[') {
+            continue;
+        }
+        let Some(end) = line.find(']') else {
+            continue;
+        };
+        let timestamp = &line[..=end];
+        if parse_timestamp_seconds(timestamp).is_none() {
+            continue;
+        }
+        lines
+            .entry(timestamp.to_string())
+            .or_default()
+            .push(line[end + 1..].trim().to_lowercase());
+    }
+    lines
+}
+
+fn evidence_is_supported(reference: &EvidenceRef, lines: &HashMap<String, Vec<String>>) -> bool {
+    let Some(quote) = reference
+        .quote
+        .as_deref()
+        .map(str::trim)
+        .filter(|quote| !quote.is_empty())
+    else {
+        return false;
+    };
+    lines
+        .get(reference.timestamp.trim())
+        .is_some_and(|candidates| {
+            let quote = quote.to_lowercase();
+            candidates.iter().any(|line| line.contains(&quote))
+        })
+}
+
+fn filter_records<T: HasEvidence>(
+    records: &mut Vec<T>,
+    lines: &HashMap<String, Vec<String>>,
+    stats: &mut EvidenceFilterStats,
+) {
+    records.retain_mut(|record| {
+        let evidence = record.evidence_mut();
+        let before = evidence.len();
+        evidence.retain(|reference| evidence_is_supported(reference, lines));
+        stats.dropped_references += before.saturating_sub(evidence.len());
+        if evidence.is_empty() {
+            stats.dropped_records += 1;
+            false
+        } else {
+            true
+        }
+    });
+}
+
+fn filter_unsupported_records(
+    report: &mut StandupReport,
+    transcript_chunk: &str,
+) -> EvidenceFilterStats {
+    let lines = transcript_lines_by_timestamp(transcript_chunk);
+    let mut stats = EvidenceFilterStats::default();
+    filter_records(&mut report.overview, &lines, &mut stats);
+    for update in &mut report.participant_updates {
+        filter_records(&mut update.completed_or_recent, &lines, &mut stats);
+        filter_records(&mut update.next, &lines, &mut stats);
+        filter_records(&mut update.blockers, &lines, &mut stats);
+    }
+    report.participant_updates.retain(|update| {
+        !update.completed_or_recent.is_empty()
+            || !update.next.is_empty()
+            || !update.blockers.is_empty()
+    });
+    filter_records(&mut report.decisions, &lines, &mut stats);
+    filter_records(&mut report.action_items, &lines, &mut stats);
+    filter_records(&mut report.risks_and_blockers, &lines, &mut stats);
+    filter_records(&mut report.deep_dives, &lines, &mut stats);
+    filter_records(&mut report.unattributed_facts, &lines, &mut stats);
+    stats
+}
+
 pub fn validate_evidence_against_transcript_chunk(
     report: &StandupReport,
     transcript_chunk: &str,
 ) -> Result<(), String> {
-    let timestamps: HashSet<&str> = transcript_chunk
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim_start();
-            if !line.starts_with('[') {
-                return None;
-            }
-            let end = line.find(']')?;
-            let timestamp = &line[..=end];
-            parse_timestamp_seconds(timestamp).map(|_| timestamp)
-        })
-        .collect();
-    let normalized_chunk = transcript_chunk.to_lowercase();
+    let lines = transcript_lines_by_timestamp(transcript_chunk);
 
     visit_evidence(report, |reference| {
-        if !timestamps.contains(reference.timestamp.trim()) {
+        if !lines.contains_key(reference.timestamp.trim()) {
             return Err(format!(
                 "evidence timestamp '{}' does not exist in the transcript chunk",
                 reference.timestamp
             ));
         }
-        if let Some(quote) = reference.quote.as_deref() {
-            if !normalized_chunk.contains(&quote.trim().to_lowercase()) {
-                return Err(format!(
-                    "evidence quote for {} is not verbatim in the transcript chunk",
-                    reference.timestamp
-                ));
-            }
+        if reference.quote.as_deref().is_none_or(str::is_empty) {
+            return Err(format!(
+                "evidence for {} must include a verbatim quote",
+                reference.timestamp
+            ));
+        }
+        if !evidence_is_supported(reference, &lines) {
+            return Err(format!(
+                "evidence quote for {} is not verbatim on its timestamped transcript line",
+                reference.timestamp
+            ));
         }
         Ok(())
     })
@@ -834,7 +939,10 @@ Rules:
 4. `participant` is allowed only when the transcript line has that exact speaker prefix. Do not infer a participant name from a mention, direct address, role, or insult. Owner/due date is null unless explicitly supported.
 5. Separate the status round from technical deep dives. A long discussion does not become a participant update merely because it happened during a standup.
 6. Put useful facts without safe speaker attribution in `unattributed_facts`.
-7. Quotes must be short and verbatim. Return no Markdown and no commentary."#
+7. Quotes must be 3-12 words, verbatim, and copied from the same transcript line as their timestamp. Never paraphrase a quote.
+8. Prefer omission to repetition: capture only final status, explicit commitments, decisions, blockers, and concrete deep-dive outcomes. Put each fact in one most-specific section only.
+9. Keep the whole result below 60 records: at most 5 overview facts; 3 items per participant category; 10 decisions; 10 actions; 10 risks; 5 deep dives; and 10 unattributed facts.
+10. Return minified one-line JSON with no Markdown, commentary, or extra whitespace."#
 }
 
 fn extraction_user_prompt(chunk: &str, output_language: &str, custom_prompt: &str) -> String {
@@ -867,6 +975,7 @@ Return this exact JSON shape:
 }}
 
 Use empty arrays when the chunk has no supported records of a type.
+Keep descriptive values concise and never repeat a record in multiple arrays. Return the JSON on one line.
 
 <transcript_chunk>
 {chunk}
@@ -927,13 +1036,23 @@ pub async fn generate_standup_report(
                 chunks.len()
             )
         })?;
-        let parsed = parse_standup_extraction(&raw).map_err(|error| {
+        let mut parsed = parse_standup_extraction(&raw).map_err(|error| {
             format!(
                 "Standup V2 extraction chunk {}/{} was invalid: {error}",
                 index + 1,
                 chunks.len()
             )
         })?;
+        let evidence_filter = filter_unsupported_records(&mut parsed, chunk);
+        if evidence_filter.dropped_references > 0 {
+            log::warn!(
+                "Standup V2 chunk {}/{} dropped {} unsupported record(s) and {} evidence reference(s)",
+                index + 1,
+                chunks.len(),
+                evidence_filter.dropped_records,
+                evidence_filter.dropped_references
+            );
+        }
         validate_evidence_against_transcript_chunk(&parsed, chunk).map_err(|error| {
             format!(
                 "Standup V2 extraction chunk {}/{} had unsupported evidence: {error}",
@@ -1027,6 +1146,63 @@ mod tests {
                 .unwrap_err()
                 .contains("not verbatim")
         );
+        assert!(validate_evidence_against_transcript_chunk(
+            &report,
+            "[01:02] Анна: Сборка готова\n[01:03] Анна: Релиз готов к проверке",
+        )
+        .unwrap_err()
+        .contains("timestamped transcript line"));
+
+        let no_quote = parse_standup_extraction(
+            r#"{"schema_version":"standup_v2","overview":[{"text":"Релиз готов","evidence":[{"timestamp":"[01:02]"}]}]}"#,
+        )
+        .unwrap();
+        assert!(validate_evidence_against_transcript_chunk(
+            &no_quote,
+            "[01:02] Анна: Релиз готов к проверке",
+        )
+        .unwrap_err()
+        .contains("must include a verbatim quote"));
+    }
+
+    #[test]
+    fn unsupported_records_are_dropped_without_discarding_supported_facts() {
+        let mut report = parse_standup_extraction(
+            r#"{
+                "schema_version":"standup_v2",
+                "overview":[
+                    {"text":"Релиз готов","evidence":[{"timestamp":"[01:02]","quote":"Релиз готов"}]},
+                    {"text":"Выдуманный факт","evidence":[{"timestamp":"[01:03]","quote":"такого текста нет"}]}
+                ],
+                "action_items":[
+                    {"task":"Проверить релиз","evidence":[
+                        {"timestamp":"[01:02]","quote":"Релиз готов"},
+                        {"timestamp":"[01:03]","quote":"другая строка"}
+                    ]}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let stats = filter_unsupported_records(
+            &mut report,
+            "[01:02] Анна: Релиз готов к проверке\n[01:03] Борис: Блокеров нет",
+        );
+
+        assert_eq!(
+            stats,
+            EvidenceFilterStats {
+                dropped_references: 2,
+                dropped_records: 1,
+            }
+        );
+        assert_eq!(report.overview.len(), 1);
+        assert_eq!(report.action_items.len(), 1);
+        assert_eq!(report.action_items[0].evidence.len(), 1);
+        validate_evidence_against_transcript_chunk(
+            &report,
+            "[01:02] Анна: Релиз готов к проверке\n[01:03] Борис: Блокеров нет",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1075,5 +1251,8 @@ mod tests {
         assert!(prompt.contains("context_not_evidence"));
         assert!(prompt.contains("never evidence"));
         assert!(prompt.contains("schema_version"));
+        assert!(prompt.contains("Return the JSON on one line"));
+        assert!(extraction_system_prompt().contains("below 60 records"));
+        assert!(extraction_system_prompt().contains("one most-specific section"));
     }
 }
