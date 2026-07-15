@@ -811,7 +811,6 @@ fn is_missing(value: Option<&String>) -> bool {
 }
 
 fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesInsight> {
-    const MAX_INSIGHTS: usize = 24;
     let mut insights = Vec::new();
 
     for action in &digest.open_actions {
@@ -899,7 +898,6 @@ fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesIn
             .then_with(|| left.kind.cmp(&right.kind))
             .then_with(|| left.text.cmp(&right.text))
     });
-    insights.truncate(MAX_INSIGHTS);
     insights
 }
 
@@ -1407,6 +1405,27 @@ mod tests {
         assert!(insights
             .iter()
             .any(|insight| insight.kind == "unresolved_parking_lot"));
+    }
+
+    #[test]
+    fn proactive_insights_do_not_silently_drop_accepted_sources() {
+        let parking_lot = (0..30)
+            .map(|index| {
+                digest_test_item(
+                    index + 1,
+                    "deep_dive",
+                    &format!("Parking item {index}"),
+                    "current",
+                    "2026-07-15T10:00:00Z",
+                )
+            })
+            .collect::<Vec<_>>();
+        let digest = StandupSeriesDigest {
+            parking_lot,
+            ..StandupSeriesDigest::default()
+        };
+
+        assert_eq!(build_proactive_insights(&digest).len(), 30);
     }
 
     #[tokio::test]
