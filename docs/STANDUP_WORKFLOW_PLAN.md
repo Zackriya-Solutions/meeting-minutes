@@ -8,15 +8,16 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 
 | Request | Current status | Missing work |
 | --- | --- | --- |
-| Improve the weak standup template | PR #24 implements Standup V2; this slice adds an explainable local template suggestion | Real-provider and held-out corpus evaluation |
-| Use the 11:00 standups and 17:30 project/productivity meetings | Batch import is running; filename classes are weak labels | Content classification and reviewed labels for all recordings |
-| Use the additional archive and earlier files | 50 unique local recordings prepared; duplicate earlier files removed by SHA-256 | Finish transcription and final integrity report |
+| Improve the weak standup template | PR #24 implements Standup V2; PR #33 adds an explainable local suggestion hardened on a false-title recording | Real-provider and held-out corpus evaluation |
+| Use the 11:00 standups and 17:30 project/productivity meetings | 32 of 50 unique recordings are imported; the remaining 18 are running, and filename classes remain weak labels | Content classification and reviewed labels for all recordings |
+| Use the additional archive and earlier files | The 17-file priority pass finished with 7 imports, 10 hash-based skips, and 0 failures | Finish the remaining 18 recordings and final integrity report |
 | Rename archive files by date/time | Done only where evidence supports the date; unknown dates remain explicit | Optional user review for the 35 unknown dates |
 | Avoid per-file UI import | PR #23 adds one-folder Tauri batch import, picker-free Tauri command, console startup mode, hash dedupe, resume, and JSON report | Finish the 50-file run and publish the integrity report |
-| Learn from roughly 50 meetings | Corpus/evaluation plan exists | Gold labels, frozen split, evaluation runner, feedback capture |
+| Learn from roughly 50 meetings | PR #26 adds the private quality gate and PR #29 the resumable runner; 18 recordings have content review notes | Gold labels, frozen series split, and provider runs |
 | Infer speaker names and aliases safely | PR #27 adds a local candidate store, abuse filtering, evidence UI, confirmation, aliases, and salted rejection fingerprints | Evaluate precision after diarization is available on the corpus |
 | Keep DeepSeek summaries reliable | PR #21 implements bounded generation and direct Russian output | Merge/review and Standup V2 provider evaluation |
 | Automatic meeting detection | PR #22 is open | Merge/review and false-positive/false-negative evaluation |
+| Do more than summarize a standup | PRs #25, #28, #30, and #32 add reviewed facts, series digest, private preparation, and live facilitation; PR #34 adds a local evidence-backed insight inbox | Held-out workflow evaluation and explicit outbound integrations later |
 
 The database previously treated import time as meeting time. The standup-series slice adds a
 separate `occurred_at` value and backfills it only from the safely normalized
@@ -119,8 +120,10 @@ The reviewed `proactive-harness` recording adds a longer-term product direction 
   action, and keep a visible audit trail of the supporting meetings.
 
 The current series digest, embeddings/RAG, accepted-record workflow, and safe identity candidates
-are the foundation. The next implementation slice should rank insight candidates from accepted
-records only, never from private notes, rejected claims, sentiment, or employee-performance scores.
+are the foundation. PR #34 implements the first deterministic slice: it ranks missing action
+ownership/dates, recurring risks, carried actions, and unresolved parking-lot topics from accepted
+records only. Every suggestion links to its source; private notes, rejected claims, sentiment, and
+employee-performance scores are excluded, and nothing is sent or changed automatically.
 
 The first implemented digest includes 7/14/30-day and all-history windows, accepted highlights,
 participant updates, open/completed actions, decisions, risks, and deep dives. Every row links to
@@ -154,10 +157,15 @@ Initial gates: zero invalid timestamps, no silently invented owner/due date, at 
 
 ## Delivery sequence
 
-1. Merge PR #21 (summary reliability) and PR #23 (batch import); keep PR #22 independently reviewable.
-2. Ship Standup V2 schema, chunk extraction, conservative merge, deterministic renderer, and stored structured result.
-3. Finish corpus import, integrity validation, content classification, and a 12-15 meeting gold set.
-4. Add record-level review/evaluation UI and provider comparison.
-5. Add action carry-forward, pre-brief, parking lot, and weekly/sprint digest on top of reviewed series.
-6. Add safe speaker-name candidates and alias confirmation.
-7. Fix the ONNX `token_type_ids` regression before depending on RAG for cross-meeting output.
+1. Finish the remaining 18 imports and the exact 50-hash integrity check.
+2. Complete content labels and freeze a leakage-safe 12-15 meeting set by independent series.
+3. Run local Qwen on that set, review references, and publish only aggregate quality metrics.
+4. Run DeepSeek on the same set only when credentials and outbound consent are available; never silently substitute a provider.
+5. Merge/review the existing `feat/` stack, including #31 before depending on RAG for cross-meeting output.
+6. Validate suggestions, live facilitation, carry-forward, digest, insight inbox, and safe name candidates on held-out recordings.
+7. Add confirmed outbound integrations only after the local workflow and audit trail are trustworthy.
+
+The current reviewed data has only one confirmed `pure_status` meeting; most real standups include
+deep dives. The release diversity gate must stay at three pure-status examples. The next 50-recording
+batch should supply independent complete series rather than relabeling long discussions to make the
+gate pass.
