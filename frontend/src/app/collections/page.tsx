@@ -53,6 +53,13 @@ interface SeriesDigestItem {
   source_start_ms?: number | null;
 }
 
+interface StandupSeriesInsight {
+  kind: string;
+  priority: 'high' | 'medium' | 'low' | string;
+  text: string;
+  sources: SeriesDigestItem[];
+}
+
 interface StandupSeriesDigest {
   collection_id: number;
   series_name: string;
@@ -62,6 +69,7 @@ interface StandupSeriesDigest {
   meeting_count: number;
   meetings_with_accepted_records: number;
   pending_review_count: number;
+  insights: StandupSeriesInsight[];
   highlights: SeriesDigestItem[];
   updates: SeriesDigestItem[];
   decisions: SeriesDigestItem[];
@@ -114,6 +122,61 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
             </span>
           </a>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
+  const t = useT();
+  if (insights.length === 0) return null;
+  const labels: Record<string, string> = {
+    action_missing_owner_and_due: t('Action is missing owner and due date'),
+    action_missing_owner: t('Action is missing an owner'),
+    action_missing_due: t('Action is missing a due date'),
+    recurring_risk: t('Risk recurs across meetings'),
+    carried_open_action: t('Action carried over from an earlier meeting'),
+    unresolved_parking_lot: t('Topic remains in the parking lot'),
+  };
+  return (
+    <section className="rounded-2xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-4 lg:col-span-2">
+      <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">
+        {t('Suggested follow-ups')}
+      </h4>
+      <p className="mt-1 text-xs text-[var(--fg3)]">
+        {t('Derived locally from accepted records. Nothing is sent or changed automatically.')}
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {insights.map((insight, index) => {
+          const source = insight.sources[0];
+          const content = (
+            <>
+              <span className="block text-xs font-medium text-[var(--gold)]">
+                {labels[insight.kind] ?? t('Review accepted fact')}
+              </span>
+              <span className="mt-1 block text-sm text-[var(--fg1)]">{insight.text}</span>
+              {source ? (
+                <span className="mt-1 block text-xs text-[var(--fg3)]">
+                  {source.source_meeting_title}
+                  {insight.sources.length > 1 ? ` · ${t('sources')}: ${insight.sources.length}` : ''}
+                </span>
+              ) : null}
+            </>
+          );
+          return source ? (
+            <a
+              key={`${insight.kind}-${source.record_id}-${index}`}
+              href={digestSourceHref(source)}
+              className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 hover:ring-1 hover:ring-[var(--gold-border)]"
+            >
+              {content}
+            </a>
+          ) : (
+            <div key={`${insight.kind}-${index}`} className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5">
+              {content}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -576,6 +639,7 @@ export default function CollectionsPage() {
                         </div>
                       ) : (
                         <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                          <InsightSection insights={seriesDigest.insights} />
                           <DigestSection title={t('Open actions')} items={seriesDigest.open_actions} />
                           <DigestSection title={t('Completed actions')} items={seriesDigest.done_actions} />
                           <DigestSection title={t('Decisions')} items={seriesDigest.decisions} />
