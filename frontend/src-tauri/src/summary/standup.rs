@@ -1565,9 +1565,12 @@ mod tests {
             "schema_version":"standup_v2",
             "action_items":[
                 {"task":"Проверить пороги","owner":null,"due_date":null,"evidence":["[05:29]"]}
-            },
+            ],
             "overview":[]]
         }"#;
+        let repaired = close_truncated_json_containers(mismatched_tail).unwrap();
+        serde_json::from_str::<serde_json::Value>(&repaired)
+            .unwrap_or_else(|error| panic!("repair remained invalid ({error}): {repaired}"));
         let report = parse_standup_extraction(mismatched_tail).unwrap();
         assert_eq!(report.action_items.len(), 1);
 
