@@ -576,11 +576,10 @@ pub async fn review_candidate(
             .map_err(|error| error.to_string())?;
     }
     sqlx::query(
-        "UPDATE speaker_name_candidates SET proposed_speaker_id=?, proposed_speaker_key=?, \
+        "UPDATE speaker_name_candidates SET proposed_speaker_id=?, \
          status='accepted', \
          updated_at=datetime('now') WHERE id=?",
     )
-    .bind(speaker_id)
     .bind(speaker_id)
     .bind(input.candidate_id)
     .execute(&mut *tx)
@@ -696,7 +695,9 @@ mod tests {
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
-        sqlx::query("INSERT INTO speakers VALUES(7,'Speaker 7',0),(8,'Speaker 8',0)")
+        sqlx::query(
+            "INSERT INTO speakers VALUES(7,'Speaker 7',0),(8,'Speaker 8',0),(9,'Speaker 9',0)",
+        )
             .execute(&pool)
             .await
             .unwrap();
@@ -734,23 +735,61 @@ mod tests {
         let anna_id = anna.id;
         let ivan_id = ivan.id;
 
+        // Preserve the extracted identity key when the reviewer intentionally maps a
+        // candidate to another speaker. Rewriting it to the target would collide with
+        // an existing candidate for that same name/evidence kind.
+        let anna_hash: String = sqlx::query_scalar(
+            "SELECT candidate_hash FROM speaker_name_candidates WHERE id=?",
+        )
+        .bind(anna_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO speaker_name_candidates \
+             (meeting_id, proposed_speaker_id, proposed_speaker_key, candidate_text, \
+              normalized_name, candidate_hash, evidence_kind, confidence) \
+             VALUES('m1', 9, 9, 'Анна', 'анна', ?, 'self_introduction', 0.9)",
+        )
+        .bind(&anna_hash)
+        .execute(&pool)
+        .await
+        .unwrap();
+
         review_candidate(
             &pool,
             ReviewSpeakerNameCandidateInput {
                 candidate_id: anna_id,
                 status: "accepted".into(),
-                speaker_id: None,
+                speaker_id: Some(9),
                 set_as_display_name: true,
             },
         )
         .await
         .unwrap();
         let renamed: (String, i64) =
-            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id=7")
+            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id=9")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert_eq!(renamed, ("Анна".into(), 1));
+        let accepted_link: (Option<i64>, i64) = sqlx::query_as(
+            "SELECT proposed_speaker_id, proposed_speaker_key \
+             FROM speaker_name_candidates WHERE id=?",
+        )
+        .bind(anna_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(accepted_link, (Some(9), 7));
+        sqlx::query(
+            "DELETE FROM speaker_name_candidates \
+             WHERE candidate_hash=? AND proposed_speaker_key=9",
+        )
+        .bind(&anna_hash)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         review_candidate(
             &pool,
