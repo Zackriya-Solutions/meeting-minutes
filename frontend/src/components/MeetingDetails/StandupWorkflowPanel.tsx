@@ -126,7 +126,8 @@ export function StandupWorkflowPanel({
   const [noteBusy, setNoteBusy] = useState(false);
   const noteBusyRef = useRef(false);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyRecordId, setBusyRecordId] = useState<number | null>(null);
+  const [busyActionId, setBusyActionId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>({ text: '', owner: '', dueDate: '' });
 
@@ -174,7 +175,7 @@ export function StandupWorkflowPanel({
   };
 
   const review = async (record: StandupRecordRow, status: ReviewStatus, includeEdits = false) => {
-    setBusyId(record.id);
+    setBusyRecordId(record.id);
     try {
       await invoke('review_standup_record', {
         input: {
@@ -193,12 +194,12 @@ export function StandupWorkflowPanel({
       console.error('Failed to review standup record:', error);
       toast.error(t('Failed to save standup review'));
     } finally {
-      setBusyId(null);
+      setBusyRecordId(null);
     }
   };
 
   const setActionStatus = async (actionItemId: number, status: 'open' | 'done' | 'cancelled') => {
-    setBusyId(actionItemId);
+    setBusyActionId(actionItemId);
     try {
       await invoke('set_standup_action_status', { actionItemId, status });
       await refresh();
@@ -206,7 +207,7 @@ export function StandupWorkflowPanel({
       console.error('Failed to update standup action:', error);
       toast.error(t('Failed to update action'));
     } finally {
-      setBusyId(null);
+      setBusyActionId(null);
     }
   };
 
@@ -293,7 +294,7 @@ export function StandupWorkflowPanel({
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busyId === action.id}
+                      disabled={busyActionId === action.id}
                       onClick={() => void setActionStatus(action.id, 'done')}
                     >
                       <Check size={14} /> {t('Done')}
@@ -433,19 +434,19 @@ export function StandupWorkflowPanel({
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {record.review_status !== 'accepted' && (
-                        <Button size="sm" variant="outline" disabled={busyId === record.id} onClick={() => void review(record, 'accepted')}>
+                        <Button size="sm" variant="outline" disabled={busyRecordId === record.id} onClick={() => void review(record, 'accepted')}>
                           <Check size={14} /> {t('Accept')}
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" disabled={busyId === record.id} onClick={() => beginEdit(record)}>
+                      <Button size="sm" variant="ghost" disabled={busyRecordId === record.id} onClick={() => beginEdit(record)}>
                         <Pencil size={14} /> {t('Edit')}
                       </Button>
                       {record.review_status !== 'rejected' ? (
-                        <Button size="sm" variant="ghost" disabled={busyId === record.id} onClick={() => void review(record, 'rejected')}>
+                        <Button size="sm" variant="ghost" disabled={busyRecordId === record.id} onClick={() => void review(record, 'rejected')}>
                           <X size={14} /> {t('Reject')}
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" disabled={busyId === record.id} onClick={() => void review(record, 'pending')}>
+                        <Button size="sm" variant="ghost" disabled={busyRecordId === record.id} onClick={() => void review(record, 'pending')}>
                           <RefreshCw size={14} /> {t('Restore')}
                         </Button>
                       )}
@@ -462,7 +463,7 @@ export function StandupWorkflowPanel({
                         <Input placeholder={t('Due date, only when explicitly known')} value={draft.dueDate} onChange={(event) => setDraft((value) => ({ ...value, dueDate: event.target.value }))} />
                       )}
                       <div className="flex gap-2">
-                        <Button size="sm" disabled={busyId === record.id || !draft.text.trim()} onClick={() => void review(record, 'accepted', true)}>
+                        <Button size="sm" disabled={busyRecordId === record.id || !draft.text.trim()} onClick={() => void review(record, 'accepted', true)}>
                           {t('Save and accept')}
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>{t('Cancel')}</Button>
@@ -490,11 +491,11 @@ export function StandupWorkflowPanel({
                     })}
                     {record.kind === 'action' && record.action_item_id && (
                       record.action_status === 'done' ? (
-                        <Button size="sm" variant="ghost" disabled={busyId === record.action_item_id} onClick={() => void setActionStatus(record.action_item_id!, 'open')}>
+                        <Button size="sm" variant="ghost" disabled={busyActionId === record.action_item_id} onClick={() => void setActionStatus(record.action_item_id!, 'open')}>
                           {t('Reopen action')}
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" disabled={busyId === record.action_item_id} onClick={() => void setActionStatus(record.action_item_id!, 'done')}>
+                        <Button size="sm" variant="ghost" disabled={busyActionId === record.action_item_id} onClick={() => void setActionStatus(record.action_item_id!, 'done')}>
                           <Check size={14} /> {t('Mark done')}
                         </Button>
                       )
