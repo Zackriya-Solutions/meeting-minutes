@@ -734,6 +734,7 @@ pub fn run() {
             summary::standup_notes::list_standup_private_notes,
             summary::standup_notes::create_standup_private_note,
             summary::standup_notes::set_standup_private_note_status,
+            summary::standup_suggestion::suggest_summary_template,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,

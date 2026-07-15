@@ -38,6 +38,7 @@ pub mod processor;
 pub mod service;
 pub mod standup;
 pub mod standup_notes;
+pub mod standup_suggestion;
 pub mod standup_workflow;
 pub mod summary_engine;
 pub mod template_commands;

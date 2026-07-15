@@ -8,7 +8,7 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 
 | Request | Current status | Missing work |
 | --- | --- | --- |
-| Improve the weak standup template | Standup V2 pipeline is being implemented | Real-provider and held-out corpus evaluation |
+| Improve the weak standup template | PR #24 implements Standup V2; this slice adds an explainable local template suggestion | Real-provider and held-out corpus evaluation |
 | Use the 11:00 standups and 17:30 project/productivity meetings | Batch import is running; filename classes are weak labels | Content classification and reviewed labels for all recordings |
 | Use the additional archive and earlier files | 50 unique local recordings prepared; duplicate earlier files removed by SHA-256 | Finish transcription and final integrity report |
 | Rename archive files by date/time | Done only where evidence supports the date; unknown dates remain explicit | Optional user review for the 35 unknown dates |
@@ -42,6 +42,12 @@ remain useful. Pending and rejected records never become facts; pending coverage
 - suggest standup only from cadence, title, calendar/app signals, and reviewed history;
 - allow one-click correction because filename/time is not ground truth;
 - attach the meeting to a series before generation so carry-forward items are available.
+
+The first suggestion slice is deliberately assistive rather than automatic. A strong title,
+reviewed standups in the same series, or multiple status-round language categories can trigger a
+Standup V2 prompt. Time and duration alone are insufficient, and explicit planning, one-to-one,
+retrospective, or interview titles suppress the prompt. The user must still choose the template;
+no transcript leaves the device and no model is called for this decision.
 
 ## During the standup
 
