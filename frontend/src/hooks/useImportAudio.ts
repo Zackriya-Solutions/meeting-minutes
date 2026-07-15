@@ -25,6 +25,11 @@ export interface ImportResult {
   title: string;
   segments_count: number;
   duration_seconds: number;
+  processable_segments: number;
+  transcribed_segments: number;
+  empty_segments: number;
+  transcription_coverage: number | null;
+  average_confidence: number | null;
 }
 
 export interface ImportError {

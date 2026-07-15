@@ -126,6 +126,11 @@ pub struct ImportResult {
     pub title: String,
     pub segments_count: usize,
     pub duration_seconds: f64,
+    pub processable_segments: usize,
+    pub transcribed_segments: usize,
+    pub empty_segments: usize,
+    pub transcription_coverage: Option<f64>,
+    pub average_confidence: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -496,7 +501,12 @@ pub async fn start_import<R: Runtime>(
                     "meeting_id": res.meeting_id,
                     "title": res.title,
                     "segments_count": res.segments_count,
-                    "duration_seconds": res.duration_seconds
+                    "duration_seconds": res.duration_seconds,
+                    "processable_segments": res.processable_segments,
+                    "transcribed_segments": res.transcribed_segments,
+                    "empty_segments": res.empty_segments,
+                    "transcription_coverage": res.transcription_coverage,
+                    "average_confidence": res.average_confidence
                 }),
             );
         }
@@ -968,6 +978,7 @@ async fn run_import<R: Runtime>(
     // Process each speech segment
     let mut all_transcripts: Vec<(String, f64, f64)> = Vec::new();
     let mut total_confidence = 0.0f32;
+    let mut measured_confidence_count = 0usize;
 
     for (i, segment) in processable_segments.iter().enumerate() {
         if IMPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -1008,7 +1019,7 @@ async fn run_import<R: Runtime>(
                 .transcribe(segment.samples.clone(), language.clone())
                 .await
             {
-                Ok(r) => (r.text, 0.9f32),
+                Ok(r) => (r.text, None),
                 Err(e) => {
                     return Err(anyhow!(
                         "SaluteSpeech transcription failed on segment {}: {}",
@@ -1019,7 +1030,7 @@ async fn run_import<R: Runtime>(
             }
         } else if use_gigaam {
             match crate::gigaam_engine::transcribe(segment.samples.clone()).await {
-                Some(Ok(text)) => (text, 0.9f32),
+                Some(Ok(text)) => (text, None),
                 Some(Err(e)) => {
                     return Err(anyhow!(
                         "GigaAM transcription failed on segment {}: {}",
@@ -1035,24 +1046,25 @@ async fn run_import<R: Runtime>(
                 .transcribe_audio(segment.samples.clone())
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
-            (text, 0.9f32)
+            (text, None)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine
                 .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
                 .await
                 .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
-            (text, conf)
+            (text, Some(conf))
         };
 
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             debug!(
-                "Segment {}/{}: {:.1}s, conf={:.2}, text='{}'",
+                "Segment {}/{}: {:.1}s, conf={}, text='{}'",
                 i + 1,
                 processable_count,
                 segment_duration_sec,
-                conf,
+                conf.map(|value| format!("{value:.2}"))
+                    .unwrap_or_else(|| "unavailable".to_string()),
                 if trimmed.len() > 80 {
                     let mut end = 80;
                     while !trimmed.is_char_boundary(end) {
@@ -1064,7 +1076,10 @@ async fn run_import<R: Runtime>(
                 }
             );
             all_transcripts.push((text, segment.start_timestamp_ms, segment.end_timestamp_ms));
-            total_confidence += conf;
+            if let Some(confidence) = conf {
+                total_confidence += confidence;
+                measured_confidence_count += 1;
+            }
         } else {
             debug!(
                 "Segment {}/{}: {:.1}s — empty transcription",
@@ -1076,16 +1091,28 @@ async fn run_import<R: Runtime>(
     }
 
     let transcribed_count = all_transcripts.len();
-    let avg_confidence = if transcribed_count > 0 {
-        total_confidence / transcribed_count as f32
+    let avg_confidence = if measured_confidence_count > 0 {
+        Some(total_confidence / measured_confidence_count as f32)
     } else {
-        0.0
+        None
+    };
+    let empty_segments = processable_count.saturating_sub(transcribed_count);
+    let transcription_coverage = if processable_count > 0 {
+        Some(transcribed_count as f64 / processable_count as f64)
+    } else {
+        None
     };
 
-    info!(
-        "Transcription complete: {} segments transcribed out of {}, avg confidence: {:.2}",
-        transcribed_count, processable_count, avg_confidence
-    );
+    match avg_confidence {
+        Some(confidence) => info!(
+            "Transcription complete: {} segments transcribed out of {}, measured avg confidence: {:.2}",
+            transcribed_count, processable_count, confidence
+        ),
+        None => info!(
+            "Transcription complete: {} segments transcribed out of {}, provider confidence unavailable",
+            transcribed_count, processable_count
+        ),
+    }
 
     // Check for cancellation
     if IMPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -1130,6 +1157,9 @@ async fn run_import<R: Runtime>(
             .and_then(|value| value.to_str())
             .unwrap_or("audio"),
         &source_sha256,
+        processable_count,
+        transcribed_count,
+        avg_confidence,
     ) {
         warn!("Failed to write metadata.json: {}", e);
     }
@@ -1141,6 +1171,11 @@ async fn run_import<R: Runtime>(
         title,
         segments_count: segments.len(),
         duration_seconds,
+        processable_segments: processable_count,
+        transcribed_segments: transcribed_count,
+        empty_segments,
+        transcription_coverage,
+        average_confidence: avg_confidence,
     })
 }
 
@@ -1360,13 +1395,16 @@ fn write_import_metadata(
     source: &str,
     source_filename: &str,
     source_sha256: &str,
+    processable_segments: usize,
+    transcribed_segments: usize,
+    average_confidence: Option<f32>,
 ) -> Result<()> {
     let metadata_path = folder.join("metadata.json");
     let temp_path = folder.join(".metadata.json.tmp");
     let now = chrono::Utc::now().to_rfc3339();
 
     let json = serde_json::json!({
-        "version": "1.0",
+        "version": "1.1",
         "meeting_id": meeting_id,
         "meeting_name": title,
         "created_at": now,
@@ -1377,7 +1415,23 @@ fn write_import_metadata(
         "status": "completed",
         "source": source,
         "source_filename": source_filename,
-        "source_sha256": source_sha256
+        "source_sha256": source_sha256,
+        "transcription_quality": {
+            "processable_segments": processable_segments,
+            "transcribed_segments": transcribed_segments,
+            "empty_segments": processable_segments.saturating_sub(transcribed_segments),
+            "coverage_ratio": if processable_segments > 0 {
+                Some(transcribed_segments as f64 / processable_segments as f64)
+            } else {
+                None
+            },
+            "average_confidence": average_confidence,
+            "confidence_source": if average_confidence.is_some() {
+                "model"
+            } else {
+                "unavailable"
+            }
+        }
     });
 
     let json_string = serde_json::to_string_pretty(&json)?;
@@ -1876,6 +1930,9 @@ mod tests {
             "import",
             "source.mp4",
             "abc123",
+            10,
+            8,
+            Some(0.75),
         );
         assert!(result.is_ok(), "write_import_metadata failed: {:?}", result);
 
@@ -1884,7 +1941,7 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["version"], "1.0");
+        assert_eq!(parsed["version"], "1.1");
         assert_eq!(parsed["meeting_id"], "meeting-123");
         assert_eq!(parsed["meeting_name"], "Test Meeting");
         assert_eq!(parsed["duration_seconds"], 1800.0);
@@ -1893,6 +1950,44 @@ mod tests {
         assert_eq!(parsed["source"], "import");
         assert_eq!(parsed["source_filename"], "source.mp4");
         assert_eq!(parsed["source_sha256"], "abc123");
+        assert_eq!(parsed["transcription_quality"]["processable_segments"], 10);
+        assert_eq!(parsed["transcription_quality"]["transcribed_segments"], 8);
+        assert_eq!(parsed["transcription_quality"]["empty_segments"], 2);
+        assert_eq!(parsed["transcription_quality"]["coverage_ratio"], 0.8);
+        assert_eq!(parsed["transcription_quality"]["average_confidence"], 0.75);
+        assert_eq!(
+            parsed["transcription_quality"]["confidence_source"],
+            "model"
+        );
+    }
+
+    #[test]
+    fn test_write_import_metadata_does_not_invent_quality() {
+        let dir = tempfile::tempdir().unwrap();
+
+        write_import_metadata(
+            dir.path(),
+            "meeting-empty",
+            "No speech",
+            12.0,
+            "audio.mp3",
+            "import",
+            "source.mp3",
+            "def456",
+            0,
+            0,
+            None,
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("metadata.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(parsed["transcription_quality"]["coverage_ratio"].is_null());
+        assert!(parsed["transcription_quality"]["average_confidence"].is_null());
+        assert_eq!(
+            parsed["transcription_quality"]["confidence_source"],
+            "unavailable"
+        );
     }
 
     #[test]
