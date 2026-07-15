@@ -402,7 +402,6 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
-    if !summary::corpus_runner::corpus_mode_requested()
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             log_info!(
