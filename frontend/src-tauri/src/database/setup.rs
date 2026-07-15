@@ -9,13 +9,14 @@ use crate::state::AppState;
 pub async fn initialize_database_on_startup(
     app: &AppHandle,
     start_background_jobs: bool,
+    defer_first_launch_setup: bool,
 ) -> Result<(), String> {
     // Check if this is the first launch (no database exists yet)
     let is_first_launch = DatabaseManager::is_first_launch(app)
         .await
         .map_err(|e| format!("Failed to check first launch status: {}", e))?;
 
-    if is_first_launch {
+    if is_first_launch && defer_first_launch_setup {
         info!("First launch detected - will notify window when ready");
 
         // Delay event emission to ensure window is ready and React listeners are registered

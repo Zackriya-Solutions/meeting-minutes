@@ -9,6 +9,7 @@ use crate::database::repositories::{
 };
 use crate::state::AppState;
 use crate::summary::service::SummaryService;
+use crate::summary::standup::StandupReport;
 use futures_util::FutureExt;
 use serde::Serialize;
 use serde_json::Value;
@@ -136,6 +137,39 @@ fn has_standup_v2(result: Option<&str>) -> bool {
         .and_then(|value| value.as_str().map(str::to_string))
         .as_deref()
         == Some("standup_v2")
+}
+
+fn standup_result_record_count(result: Option<&str>) -> Result<i64, String> {
+    let value: Value = serde_json::from_str(
+        result.ok_or_else(|| "Completed Standup V2 result is missing".to_string())?,
+    )
+    .map_err(|error| format!("Completed Standup V2 result is invalid: {error}"))?;
+    let report: StandupReport = serde_json::from_value(
+        value
+            .get("standup_v2")
+            .cloned()
+            .ok_or_else(|| "Completed result has no Standup V2 payload".to_string())?,
+    )
+    .map_err(|error| format!("Completed Standup V2 payload is invalid: {error}"))?;
+    if report.schema_version != "standup_v2" {
+        return Err(format!(
+            "Unsupported Standup V2 schema version: {}",
+            report.schema_version
+        ));
+    }
+    let participant_records = report
+        .participant_updates
+        .iter()
+        .map(|update| update.completed_or_recent.len() + update.next.len() + update.blockers.len())
+        .sum::<usize>();
+    let count = report.overview.len()
+        + participant_records
+        + report.decisions.len()
+        + report.action_items.len()
+        + report.risks_and_blockers.len()
+        + report.deep_dives.len()
+        + report.unattributed_facts.len();
+    i64::try_from(count).map_err(|_| "Standup V2 record count overflowed".to_string())
 }
 
 fn bounded_error(value: Option<String>) -> Option<String> {
@@ -303,21 +337,12 @@ async fn process_meeting<R: Runtime>(
             .as_ref()
             .is_some_and(|row| row.status == "completed" && has_standup_v2(row.result.as_deref()))
     {
-        let extracted_record_count: i64 =
-            match sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
-                .bind(meeting_id)
-                .fetch_one(pool)
-                .await
-            {
-                Ok(count) => count,
-                Err(error) => {
-                    return failed_item(
-                        meeting_id,
-                        title,
-                        format!("Could not count stored Standup V2 records: {error}"),
-                    )
-                }
-            };
+        let extracted_record_count = match standup_result_record_count(
+            existing.as_ref().and_then(|row| row.result.as_deref()),
+        ) {
+            Ok(count) => count,
+            Err(error) => return failed_item(meeting_id, title, error),
+        };
         return StandupCorpusRunItem {
             meeting_id: meeting_id.to_string(),
             title,
@@ -373,22 +398,15 @@ async fn process_meeting<R: Runtime>(
         }
         Err(error) => return failed_item(meeting_id, title, error),
     };
-    let extracted_record_count: i64 =
-        match sqlx::query_scalar("SELECT COUNT(*) FROM standup_records WHERE meeting_id = ?")
-            .bind(meeting_id)
-            .fetch_one(pool)
-            .await
-        {
-            Ok(count) => count,
-            Err(error) => {
-                return failed_item(
-                    meeting_id,
-                    title,
-                    format!("Could not count generated Standup V2 records: {error}"),
-                )
-            }
-        };
     let completed = outcome.status == "completed" && has_standup_v2(outcome.result.as_deref());
+    let extracted_record_count = if completed {
+        match standup_result_record_count(outcome.result.as_deref()) {
+            Ok(count) => count,
+            Err(error) => return failed_item(meeting_id, title, error),
+        }
+    } else {
+        0
+    };
     StandupCorpusRunItem {
         meeting_id: meeting_id.to_string(),
         title,
@@ -658,6 +676,29 @@ mod tests {
         )));
         assert!(!has_standup_v2(Some(r#"{"summary":"legacy"}"#)));
         assert!(!has_standup_v2(Some("invalid")));
+    }
+
+    #[test]
+    fn counts_only_records_from_the_current_structured_result() {
+        let result = r#"{
+          "standup_v2": {
+            "schema_version": "standup_v2",
+            "overview": [{"text":"overview","evidence":[]}],
+            "participant_updates": [{
+              "participant": null,
+              "completed_or_recent": [{"text":"done","evidence":[]}],
+              "next": [{"text":"next","evidence":[]}],
+              "blockers": []
+            }],
+            "decisions": [{"decision":"decision","rationale":null,"evidence":[]}],
+            "action_items": [{"task":"action","owner":null,"due_date":null,"evidence":[]}],
+            "risks_and_blockers": [],
+            "deep_dives": [],
+            "unattributed_facts": []
+          }
+        }"#;
+        assert_eq!(standup_result_record_count(Some(result)).unwrap(), 5);
+        assert!(standup_result_record_count(Some(r#"{"standup_v2":{}}"#)).is_err());
     }
 
     #[test]

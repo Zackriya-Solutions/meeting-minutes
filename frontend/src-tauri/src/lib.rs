@@ -520,6 +520,7 @@ pub fn run() {
                 database::setup::initialize_database_on_startup(
                     &_app.handle(),
                     !corpus_mode,
+                    !corpus_mode,
                 )
                 .await
             })
@@ -610,7 +611,9 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+                if window.label() == "main"
+                    && !summary::corpus_runner::corpus_mode_requested()
+                {
                     api.prevent_close();
                     if let Err(e) = window.hide() {
                         log::error!("Failed to hide main window on close request: {}", e);
