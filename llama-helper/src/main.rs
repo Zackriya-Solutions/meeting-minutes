@@ -594,6 +594,17 @@ impl ModelState {
             // selected by the backend and skip every CPU sampler in the chain,
             // including the JSON grammar. Accept exactly once after selecting.
             let mut candidates = ctx.token_data_array_ith(batch.n_tokens() - 1);
+            if constrained_json {
+                // llama.cpp's grammar sampler does not necessarily suppress
+                // special EOG tokens. An early EOG would leave a syntactically
+                // incomplete object, so keep generation inside the grammar
+                // until the tracker observes the closed root value.
+                for candidate in &mut candidates.data {
+                    if model.is_eog_token(candidate.id()) {
+                        candidate.set_logit(f32::NEG_INFINITY);
+                    }
+                }
+            }
             sampler.as_ref().apply(&mut candidates);
             let token = candidates
                 .selected_token()
