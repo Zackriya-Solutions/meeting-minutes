@@ -611,10 +611,10 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
-               AND COALESCE(source.occurred_at, source.created_at) < \
-                   COALESCE(current.occurred_at, current.created_at) \
+               AND julianday(COALESCE(source.occurred_at, source.created_at)) < \
+                   julianday(COALESCE(current.occurred_at, current.created_at)) \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
-             ORDER BY COALESCE(source.occurred_at, source.created_at) DESC, ai.id DESC LIMIT 50",
+             ORDER BY julianday(COALESCE(source.occurred_at, source.created_at)) DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -649,7 +649,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
         "WITH eligible AS ( \
              SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
                     source.id AS source_id, source.title AS source_title, \
-                    COALESCE(source.occurred_at, source.created_at) AS source_time \
+                    julianday(COALESCE(source.occurred_at, source.created_at)) AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -657,8 +657,8 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
-               AND COALESCE(source.occurred_at, source.created_at) < \
-                   COALESCE(current.occurred_at, current.created_at) \
+               AND julianday(COALESCE(source.occurred_at, source.created_at)) < \
+                   julianday(COALESCE(current.occurred_at, current.created_at)) \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
@@ -765,15 +765,45 @@ fn digest_item(row: &DigestRecordRow, payload: &Value) -> Option<SeriesDigestIte
 }
 
 fn markdown_evidence(item: &SeriesDigestItem) -> String {
+    let meeting_title = escape_digest_markdown(&item.source_meeting_title);
     let Some(start_ms) = item.source_start_ms else {
-        return format!("— {}", item.source_meeting_title);
+        return format!("— {meeting_title}");
     };
     let seconds = start_ms.max(0) / 1_000;
     let label = format_timestamp(seconds as f64);
-    format!(
-        "— [{label}](/meeting-details?id={}&t={seconds}) · {}",
-        item.source_meeting_id, item.source_meeting_title
-    )
+    let meeting_id =
+        url::form_urlencoded::byte_serialize(item.source_meeting_id.as_bytes()).collect::<String>();
+    format!("— [{label}](/meeting-details?id={meeting_id}&t={seconds}) · {meeting_title}")
+}
+
+fn escape_digest_markdown(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut escaped = String::with_capacity(collapsed.len());
+    for character in collapsed.chars() {
+        if matches!(
+            character,
+            '\\' | '`'
+                | '*'
+                | '_'
+                | '{'
+                | '}'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '<'
+                | '>'
+                | '#'
+                | '+'
+                | '-'
+                | '!'
+                | '|'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }
 
 fn is_missing(value: Option<&String>) -> bool {
@@ -957,7 +987,7 @@ fn render_digest_section(
         let participant = item
             .participant
             .as_deref()
-            .map(|value| format!("**{value}:** "))
+            .map(|value| format!("**{}:** ", escape_digest_markdown(value)))
             .unwrap_or_default();
         let owner = item
             .owner
@@ -968,7 +998,7 @@ fn render_digest_section(
                 } else {
                     "owner"
                 };
-                format!(" · {label}: {value}")
+                format!(" · {label}: {}", escape_digest_markdown(value))
             })
             .unwrap_or_default();
         let due = item
@@ -976,12 +1006,12 @@ fn render_digest_section(
             .as_deref()
             .map(|value| {
                 let label = if russian { "срок" } else { "due" };
-                format!(" · {label}: {value}")
+                format!(" · {label}: {}", escape_digest_markdown(value))
             })
             .unwrap_or_default();
         markdown.push_str(&format!(
             "- {category}{participant}{}{}{} {}\n",
-            item.text,
+            escape_digest_markdown(&item.text),
             owner,
             due,
             markdown_evidence(item)
@@ -1025,7 +1055,10 @@ fn render_series_digest_markdown(
                 "Parking lot",
             )
         };
-    let mut markdown = format!("# {title}: {}\n\n", digest.series_name);
+    let mut markdown = format!(
+        "# {title}: {}\n\n",
+        escape_digest_markdown(&digest.series_name)
+    );
     let (meetings_label, accepted_label, pending_label) = if russian {
         (
             "Встречи",
@@ -1091,16 +1124,22 @@ pub async fn get_series_digest(
         .iter()
         .filter_map(|(_, value)| parse_digest_datetime(value))
         .max();
-    let cutoff = window_days
-        .zip(anchor)
-        .map(|(days, anchor)| anchor - chrono::Duration::days(i64::from(days)));
+    let cutoff = match window_days {
+        Some(days) => Some(
+            anchor.ok_or_else(|| {
+                "Cannot apply a digest window because the series has no valid meeting dates"
+                    .to_string()
+            })? - chrono::Duration::days(i64::from(days)),
+        ),
+        None => None,
+    };
     let included_meetings: HashMap<String, String> = meetings
         .into_iter()
         .filter(|(_, occurred_at)| {
             cutoff.map_or(true, |cutoff| {
                 parse_digest_datetime(occurred_at)
                     .map(|value| value >= cutoff)
-                    .unwrap_or(true)
+                    .unwrap_or(false)
             })
         })
         .collect();
@@ -1663,5 +1702,59 @@ mod tests {
             Some("блокер")
         );
         assert_eq!(digest_category_label(None, true), None);
+    }
+
+    #[test]
+    fn digest_markdown_escapes_user_controlled_text() {
+        let item = SeriesDigestItem {
+            record_id: 1,
+            kind: "overview".into(),
+            text: "[fake](https://example.test)\n# heading".into(),
+            participant: Some("**Anna**".into()),
+            category: None,
+            owner: Some("[owner](https://example.test)".into()),
+            due_date: Some("tomorrow | now".into()),
+            action_status: None,
+            parking_lot: false,
+            source_meeting_id: "meeting id&unsafe".into(),
+            source_meeting_title: "[meeting](https://example.test)".into(),
+            source_occurred_at: "2026-07-15T10:00:00Z".into(),
+            source_start_ms: Some(1_000),
+        };
+        let mut digest = StandupSeriesDigest {
+            series_name: "[series](https://example.test)".into(),
+            highlights: vec![item],
+            ..StandupSeriesDigest::default()
+        };
+        digest.markdown = render_series_digest_markdown(&digest, Some("en"));
+
+        assert!(!digest.markdown.contains("[fake](https://example.test)"));
+        assert!(!digest.markdown.contains("\n# heading"));
+        assert!(!digest.markdown.contains("[meeting](https://example.test)"));
+        assert!(digest.markdown.contains("meeting+id%26unsafe"));
+    }
+
+    #[tokio::test]
+    async fn windowed_digest_rejects_series_without_valid_dates() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO meetings(id, title, created_at) VALUES('bad', 'Bad', 'not-a-date')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO collections VALUES(1, 'Series', 'series')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO meeting_collections VALUES('bad', 1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let error = get_series_digest(&pool, 1, Some(14), Some("en"))
+            .await
+            .unwrap_err();
+        assert!(error.contains("no valid meeting dates"));
     }
 }
