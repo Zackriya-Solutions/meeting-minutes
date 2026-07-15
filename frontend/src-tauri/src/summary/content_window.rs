@@ -40,10 +40,18 @@ fn analyze_segments(mut segments: Vec<TimedSegment>) -> MeetingContentWindowSugg
         return MeetingContentWindowSuggestion::default();
     }
 
-    let split_at = segments
-        .windows(2)
-        .position(|pair| pair[1].start_ms.saturating_sub(pair[0].end_ms) >= LONG_GAP_MS);
-    let Some(split_at) = split_at.map(|index| index + 1) else {
+    // Transcript rows may overlap. Compare each next start against the running
+    // maximum end so a short nested row cannot manufacture a long silent gap.
+    let mut running_end_ms = segments[0].end_ms;
+    let mut split_at = None;
+    for (index, segment) in segments.iter().enumerate().skip(1) {
+        if segment.start_ms.saturating_sub(running_end_ms) >= LONG_GAP_MS {
+            split_at = Some(index);
+            break;
+        }
+        running_end_ms = running_end_ms.max(segment.end_ms);
+    }
+    let Some(split_at) = split_at else {
         return MeetingContentWindowSuggestion::default();
     };
     let (primary, trailing) = segments.split_at(split_at);
@@ -70,7 +78,7 @@ fn analyze_segments(mut segments: Vec<TimedSegment>) -> MeetingContentWindowSugg
     }
 
     let primary_start_ms = primary.first().map(|segment| segment.start_ms);
-    let primary_end_ms = primary.last().map(|segment| segment.end_ms);
+    let primary_end_ms = primary.iter().map(|segment| segment.end_ms).max();
     let gap_ms = match (primary_end_ms, trailing.first()) {
         (Some(end), Some(first)) => Some(first.start_ms.saturating_sub(end)),
         _ => None,
@@ -231,5 +239,20 @@ mod tests {
             .map(|index| segment(index, index + 1, 100))
             .collect::<Vec<_>>();
         assert!(!analyze_segments(segments).suggested);
+    }
+
+    #[test]
+    fn overlapping_segments_use_the_latest_running_end() {
+        let segments = vec![
+            segment(0, 15, 500),
+            segment(1, 2, 100),
+            segment(2, 3, 100),
+            segment(3, 4, 100),
+            segment(5, 6, 100),
+            segment(16, 17, 20),
+        ];
+
+        let result = analyze_segments(segments);
+        assert!(!result.suggested);
     }
 }
