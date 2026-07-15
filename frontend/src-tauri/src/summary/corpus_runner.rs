@@ -9,10 +9,12 @@ use crate::database::repositories::{
 };
 use crate::state::AppState;
 use crate::summary::service::SummaryService;
+use futures_util::FutureExt;
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Runtime};
@@ -397,7 +399,7 @@ async fn run_standup_corpus_inner<R: Runtime>(
     }
 
     for (index, meeting_id) in meeting_ids.iter().enumerate() {
-        let item = process_meeting(
+        let item = match AssertUnwindSafe(process_meeting(
             &app,
             &pool,
             meeting_id,
@@ -407,8 +409,17 @@ async fn run_standup_corpus_inner<R: Runtime>(
             overwrite,
             index + 1,
             meeting_ids.len(),
-        )
-        .await;
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(item) => item,
+            Err(_) => failed_item(
+                meeting_id,
+                String::new(),
+                "Standup pipeline panicked; inspect the local application log",
+            ),
+        };
         let _ = app.emit(
             "standup-corpus-run-progress",
             StandupCorpusRunProgress {

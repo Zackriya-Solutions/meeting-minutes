@@ -22,8 +22,9 @@ and bounded provider errors. It deliberately contains neither transcripts nor ge
 Keep it under `evals/private/` anyway because titles may contain personal data.
 
 The report starts with `state: running` before the first meeting and is replaced atomically after
-every result. A database, model, or provider failure is recorded against that meeting and does not
-abort the rest of the corpus. The final checkpoint has `state: completed` and a non-null
+every result. A database, model, provider failure, or unexpected per-meeting panic is recorded
+against that meeting and does not abort the rest of the corpus. Panic details stay in the local
+application log rather than the report. The final checkpoint has `state: completed` and a non-null
 `completed_at`. Restarting without overwrite skips completed schema-versioned Standup V2 results
 and reports their stored record counts.
 
