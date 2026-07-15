@@ -77,21 +77,31 @@ pub async fn create_standup_private_note(
     state: tauri::State<'_, AppState>,
     input: CreateStandupPrivateNoteInput,
 ) -> Result<StandupPrivateNote, String> {
+    create_note(state.db_manager.pool(), input).await
+}
+
+async fn create_note(
+    pool: &SqlitePool,
+    input: CreateStandupPrivateNoteInput,
+) -> Result<StandupPrivateNote, String> {
     let meeting_id = input.meeting_id.trim();
     if meeting_id.is_empty() {
         return Err("Meeting id is required".to_string());
     }
     let (kind, text) = normalize_note(input.kind, input.text)?;
     sqlx::query_as::<_, StandupPrivateNote>(
-        "INSERT INTO standup_private_notes(meeting_id, kind, text) VALUES(?, ?, ?) \
+        "INSERT INTO standup_private_notes(meeting_id, kind, text) \
+         SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM meetings WHERE id = ?) \
          RETURNING id, meeting_id, kind, text, status, created_at, updated_at",
     )
     .bind(meeting_id)
     .bind(kind)
     .bind(text)
-    .fetch_one(state.db_manager.pool())
+    .bind(meeting_id)
+    .fetch_optional(pool)
     .await
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| "Meeting was not found".to_string())
 }
 
 #[tauri::command]
@@ -179,5 +189,26 @@ mod tests {
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].text, "only for me");
         assert!(notes.iter().all(|note| note.text != "old topic"));
+    }
+
+    #[tokio::test]
+    async fn private_note_creation_requires_an_existing_meeting() {
+        let pool = pool().await;
+        let input = |meeting_id: &str| CreateStandupPrivateNoteInput {
+            meeting_id: meeting_id.to_string(),
+            kind: "private_note".to_string(),
+            text: "safe local note".to_string(),
+        };
+
+        assert!(create_note(&pool, input("m1")).await.is_ok());
+        assert_eq!(
+            create_note(&pool, input("missing")).await.unwrap_err(),
+            "Meeting was not found"
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM standup_private_notes")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }
