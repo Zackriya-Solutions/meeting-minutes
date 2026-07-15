@@ -207,6 +207,7 @@ pub struct StandupDeepDive {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StandupReport {
+    #[serde(default)]
     pub schema_version: String,
     #[serde(default)]
     pub overview: Vec<EvidencedText>,
@@ -267,6 +268,7 @@ pub struct StandupGenerationRequest<'a> {
 }
 
 const DEFAULT_STANDUP_EXTRACTION_MAX_TOKENS: u32 = 4_096;
+const MIN_STANDUP_EXTRACTION_INPUT_TOKENS: usize = 1_024;
 const MAX_STANDUP_EXTRACTION_INPUT_TOKENS: usize = 3_000;
 
 fn resolve_standup_extraction_max_tokens(requested: Option<u32>) -> Option<u32> {
@@ -277,8 +279,13 @@ fn resolve_standup_extraction_max_tokens(requested: Option<u32>) -> Option<u32> 
     )
 }
 
-fn resolve_standup_extraction_input_tokens(requested: usize) -> usize {
-    requested.min(MAX_STANDUP_EXTRACTION_INPUT_TOKENS).max(1)
+fn resolve_standup_extraction_input_tokens(requested: usize) -> Result<usize, String> {
+    if requested < MIN_STANDUP_EXTRACTION_INPUT_TOKENS {
+        return Err(format!(
+            "Standup V2 requires at least {MIN_STANDUP_EXTRACTION_INPUT_TOKENS} input tokens; model exposes {requested}"
+        ));
+    }
+    Ok(requested.min(MAX_STANDUP_EXTRACTION_INPUT_TOKENS))
 }
 
 pub fn parse_standup_extraction(raw: &str) -> Result<StandupReport, String> {
@@ -1364,6 +1371,33 @@ fn extraction_retry_user_prompt(chunk: &str, output_language: &str, custom_promp
     )
 }
 
+/// Static extraction contract included in summary cache/evaluation identity.
+///
+/// The transcript, custom prompt, and detected output language are tracked separately. Sentinels
+/// make changes to the surrounding user-prompt shape visible without putting meeting content into
+/// the fingerprint material. Keeping this next to the prompt builders prevents a Standup prompt or
+/// JSON-schema change from being reported under the previous template version.
+pub(crate) fn extraction_contract_fingerprint_material() -> String {
+    const TRANSCRIPT_SENTINEL: &str = "<TRANSCRIPT>";
+    const LANGUAGE_SENTINEL: &str = "<OUTPUT_LANGUAGE>";
+    const CUSTOM_PROMPT_SENTINEL: &str = "<CUSTOM_PROMPT>";
+
+    format!(
+        "schema_version={STANDUP_SCHEMA_VERSION}\n{STANDUP_JSON_SCHEMA}\n---SYSTEM---\n{}\n---USER---\n{}\n---RETRY---\n{}",
+        extraction_system_prompt(),
+        extraction_user_prompt(
+            TRANSCRIPT_SENTINEL,
+            LANGUAGE_SENTINEL,
+            CUSTOM_PROMPT_SENTINEL,
+        ),
+        extraction_retry_user_prompt(
+            TRANSCRIPT_SENTINEL,
+            LANGUAGE_SENTINEL,
+            CUSTOM_PROMPT_SENTINEL,
+        ),
+    )
+}
+
 pub async fn generate_standup_report(
     request: StandupGenerationRequest<'_>,
 ) -> Result<GeneratedStandup, String> {
@@ -1376,7 +1410,7 @@ pub async fn generate_standup_report(
 
     let token_count = rough_token_count(request.transcript);
     let extraction_token_threshold =
-        resolve_standup_extraction_input_tokens(request.token_threshold);
+        resolve_standup_extraction_input_tokens(request.token_threshold)?;
     let chunks = if token_count < extraction_token_threshold {
         vec![request.transcript.to_string()]
     } else {
@@ -1472,7 +1506,21 @@ pub async fn generate_standup_report(
         .await;
         let mut parsed = match chunk_result {
             Ok(parsed) => parsed,
-            Err(error) => return Err(error),
+            Err(error) => {
+                if request
+                    .cancellation_token
+                    .is_some_and(CancellationToken::is_cancelled)
+                {
+                    return Err("Summary generation was cancelled".to_string());
+                }
+                log::warn!(
+                    "Standup V2 skipped failed transcript chunk {}/{}: {}",
+                    index + 1,
+                    chunks.len(),
+                    error
+                );
+                continue;
+            }
         };
         let evidence_filter = filter_unsupported_records(&mut parsed, chunk);
         if evidence_filter.dropped_references > 0 {
@@ -1484,13 +1532,15 @@ pub async fn generate_standup_report(
                 evidence_filter.dropped_references
             );
         }
-        validate_evidence_against_transcript_chunk(&parsed, chunk).map_err(|error| {
-            format!(
-                "Standup V2 extraction chunk {}/{} had unsupported evidence: {error}",
+        if let Err(error) = validate_evidence_against_transcript_chunk(&parsed, chunk) {
+            log::warn!(
+                "Standup V2 skipped transcript chunk {}/{} with unsupported evidence: {}",
                 index + 1,
-                chunks.len()
-            )
-        })?;
+                chunks.len(),
+                error
+            );
+            continue;
+        }
         extracted.push(parsed);
     }
 
@@ -1538,8 +1588,18 @@ mod tests {
             resolve_standup_extraction_max_tokens(Some(16_000)),
             Some(4_096)
         );
-        assert_eq!(resolve_standup_extraction_input_tokens(32_468), 3_000);
-        assert_eq!(resolve_standup_extraction_input_tokens(1_748), 1_748);
+        assert_eq!(resolve_standup_extraction_input_tokens(32_468), Ok(3_000));
+        assert_eq!(resolve_standup_extraction_input_tokens(1_748), Ok(1_748));
+        assert!(resolve_standup_extraction_input_tokens(800).is_err());
+    }
+
+    #[test]
+    fn missing_schema_version_is_rejected_by_validation() {
+        let error = parse_standup_extraction(
+            r#"{"action_items":[],"decisions":[],"risks_and_blockers":[],"participant_updates":[],"deep_dives":[],"unattributed_facts":[],"overview":[]}"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("unsupported standup schema version"));
     }
 
     #[test]
