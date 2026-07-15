@@ -200,6 +200,9 @@ pub async fn generate_summary_with_builtin_json_schema(
             user_prompt,
             cancellation_token,
             builtin_json_schema,
+            max_tokens,
+            temperature,
+            top_p,
         )
         .await
         .map_err(|e| e.to_string());
