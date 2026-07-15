@@ -113,6 +113,19 @@ identity = generation_identity(
 assert identity == ("deepseek", "deepseek-chat", "abc:3")
 assert "secret" not in repr(identity)
 
+legacy_identity = generation_identity(
+    {
+        "english_cache": {
+            "source": {
+                "model_provider": "builtin-ai",
+                "model_name": "qwen3.5:4b",
+                "template_fingerprint": "legacy:1",
+            }
+        }
+    }
+)
+assert legacy_identity == ("builtin-ai", "qwen3.5:4b", "legacy:1")
+
 with tempfile.TemporaryDirectory() as folder:
     Path(folder, "metadata.json").write_text(
         json.dumps(

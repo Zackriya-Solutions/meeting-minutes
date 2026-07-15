@@ -122,6 +122,8 @@ def flatten_standup(report: dict[str, Any]) -> list[dict[str, Any]]:
 def generation_identity(result: dict[str, Any]) -> tuple[str, str, str]:
     """Read non-secret run identity from the persisted summary cache source."""
     source = ((result.get("summary_generation") or {}).get("source") or {})
+    if not source:
+        source = ((result.get("english_cache") or {}).get("source") or {})
     return (
         str(source.get("model_provider") or "unknown"),
         str(source.get("model_name") or "unknown"),
