@@ -4,7 +4,7 @@
 //! module instead asks every transcript chunk for validated JSON facts, merges only
 //! strongly matching records, and renders Markdown without another LLM call.
 
-use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::llm_client::{generate_summary_with_builtin_json_schema, LLMProvider};
 use crate::summary::processor::{chunk_text, rough_token_count};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,92 @@ use tokio_util::sync::CancellationToken;
 pub const STANDUP_SCHEMA_VERSION: &str = "standup_v2";
 const MAX_COLLECTION_ITEMS: usize = 500;
 const MAX_TEXT_CHARS: usize = 4_000;
+const STANDUP_JSON_SCHEMA: &str = r##"{
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": "standup_v2"},
+    "overview": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/evidenced_text"}},
+    "participant_updates": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/participant_update"}},
+    "decisions": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/decision"}},
+    "action_items": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/action"}},
+    "risks_and_blockers": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/risk"}},
+    "deep_dives": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/deep_dive"}},
+    "unattributed_facts": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/evidenced_text"}}
+  },
+  "required": ["schema_version", "overview", "participant_updates", "decisions", "action_items", "risks_and_blockers", "deep_dives", "unattributed_facts"],
+  "additionalProperties": false,
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "properties": {"timestamp": {"type": "string"}, "quote": {"type": "string"}},
+      "required": ["timestamp", "quote"],
+      "additionalProperties": false
+    },
+    "evidenced_text": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string"},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["text", "evidence"],
+      "additionalProperties": false
+    },
+    "participant_update": {
+      "type": "object",
+      "properties": {
+        "participant": {"type": ["string", "null"]},
+        "completed_or_recent": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
+        "next": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}},
+        "blockers": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidenced_text"}}
+      },
+      "required": ["participant", "completed_or_recent", "next", "blockers"],
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "decision": {"type": "string"},
+        "rationale": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["decision", "rationale", "evidence"],
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "task": {"type": "string"},
+        "owner": {"type": ["string", "null"]},
+        "due_date": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["task", "owner", "due_date", "evidence"],
+      "additionalProperties": false
+    },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "blocker_or_risk": {"type": "string"},
+        "impact": {"type": ["string", "null"]},
+        "owner": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["blocker_or_risk", "impact", "owner", "evidence"],
+      "additionalProperties": false
+    },
+    "deep_dive": {
+      "type": "object",
+      "properties": {
+        "topic": {"type": "string"},
+        "outcome": {"type": ["string", "null"]},
+        "parking_lot": {"type": "boolean"},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "required": ["topic", "outcome", "parking_lot", "evidence"],
+      "additionalProperties": false
+    }
+  }
+}"##;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvidenceRef {
@@ -1067,7 +1153,7 @@ pub async fn generate_standup_report(
         {
             return Err("Summary generation was cancelled".to_string());
         }
-        let raw = generate_summary(
+        let raw = generate_summary_with_builtin_json_schema(
             request.client,
             request.provider,
             request.model_name,
@@ -1082,6 +1168,7 @@ pub async fn generate_standup_report(
             request.top_p,
             request.app_data_dir,
             request.cancellation_token,
+            Some(STANDUP_JSON_SCHEMA),
         )
         .await
         .map_err(|error| {
@@ -1331,5 +1418,13 @@ mod tests {
         assert!(prompt.contains("Return the JSON on one line"));
         assert!(extraction_system_prompt().contains("below 60 records"));
         assert!(extraction_system_prompt().contains("one most-specific section"));
+
+        let schema: serde_json::Value = serde_json::from_str(STANDUP_JSON_SCHEMA).unwrap();
+        assert_eq!(
+            schema["properties"]["schema_version"]["const"],
+            STANDUP_SCHEMA_VERSION
+        );
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["$defs"]["evidence"]["required"][1], "quote");
     }
 }
