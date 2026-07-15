@@ -239,9 +239,9 @@ export default function Home() {
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
   const transcriptionProviderLabel = transcriptModelConfig.provider === 'salutespeech'
-    ? 'SaluteSpeech · cloud'
+    ? t('SaluteSpeech · Sber cloud')
     : transcriptModelConfig.provider === 'gigaam'
-      ? 'GigaAM · local'
+      ? t('GigaAM v3 · on-device')
       : `${transcriptModelConfig.provider} · ${transcriptModelConfig.model}`;
 
   return (

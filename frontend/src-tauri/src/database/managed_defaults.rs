@@ -48,34 +48,44 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
     }
 
     let mut report = MigrationReport::default();
+    let local_only = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM app_settings_kv WHERE key = 'privacy.local_only' LIMIT 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .map(|value| value == "true" || value == "1")
+    .unwrap_or(false);
 
-    if let Some(row) = sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
-        .fetch_optional(&mut *tx)
-        .await?
-    {
-        let provider: String = row.try_get("provider")?;
-        let model: String = row.try_get("model")?;
-        if is_legacy_transcription(&provider, &model) {
-            sqlx::query("UPDATE transcript_settings SET provider = 'salutespeech', model = ? WHERE id = '1'")
-                .bind(SALUTESPEECH_MODEL)
-                .execute(&mut *tx)
-                .await?;
-            report.transcription_changed = true;
+    if !local_only {
+        if let Some(row) =
+            sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+                .fetch_optional(&mut *tx)
+                .await?
+        {
+            let provider: String = row.try_get("provider")?;
+            let model: String = row.try_get("model")?;
+            if is_legacy_transcription(&provider, &model) {
+                sqlx::query("UPDATE transcript_settings SET provider = 'salutespeech', model = ? WHERE id = '1'")
+                    .bind(SALUTESPEECH_MODEL)
+                    .execute(&mut *tx)
+                    .await?;
+                report.transcription_changed = true;
+            }
         }
-    }
 
-    if let Some(row) = sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
-        .fetch_optional(&mut *tx)
-        .await?
-    {
-        let provider: String = row.try_get("provider")?;
-        let model: String = row.try_get("model")?;
-        if is_legacy_summary(&provider, &model) {
-            sqlx::query("UPDATE settings SET provider = 'deepseek', model = ? WHERE id = '1'")
-                .bind(DEEPSEEK_MODEL)
-                .execute(&mut *tx)
-                .await?;
-            report.summary_changed = true;
+        if let Some(row) = sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
+            .fetch_optional(&mut *tx)
+            .await?
+        {
+            let provider: String = row.try_get("provider")?;
+            let model: String = row.try_get("model")?;
+            if is_legacy_summary(&provider, &model) {
+                sqlx::query("UPDATE settings SET provider = 'deepseek', model = ? WHERE id = '1'")
+                    .bind(DEEPSEEK_MODEL)
+                    .execute(&mut *tx)
+                    .await?;
+                report.summary_changed = true;
+            }
         }
     }
 
@@ -175,6 +185,33 @@ mod tests {
         assert_eq!(
             values(&pool, "transcript_settings").await,
             ("gigaam".into(), "gigaam-v3-e2e-ctc".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn preserves_local_defaults_when_local_only_is_enabled() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO app_settings_kv(key,value) VALUES('privacy.local_only','true')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings VALUES('1','builtin-ai','qwen3.5:4b','large-v3')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(migrate(&pool).await.unwrap(), MigrationReport::default());
+        assert_eq!(
+            values(&pool, "transcript_settings").await,
+            ("gigaam".into(), "gigaam-v3-e2e-ctc".into())
+        );
+        assert_eq!(
+            values(&pool, "settings").await,
+            ("builtin-ai".into(), "qwen3.5:4b".into())
         );
     }
 }
