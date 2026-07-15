@@ -539,6 +539,53 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
+            // Explicit local corpus automation. It is inert unless meeting IDs are supplied;
+            // ordinary users never trigger evaluation work at startup.
+            if let Ok(raw_ids) = std::env::var("MEETILY_STANDUP_CORPUS_IDS") {
+                let meeting_ids = raw_ids
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if !meeting_ids.is_empty() {
+                    let provider = std::env::var("MEETILY_STANDUP_CORPUS_PROVIDER")
+                        .unwrap_or_else(|_| "builtin-ai".to_string());
+                    let model = std::env::var("MEETILY_STANDUP_CORPUS_MODEL")
+                        .unwrap_or_else(|_| "qwen3.5:4b".to_string());
+                    let summary_language =
+                        std::env::var("MEETILY_STANDUP_CORPUS_LANGUAGE").ok();
+                    let overwrite = std::env::var("MEETILY_STANDUP_CORPUS_OVERWRITE")
+                        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+                    let report_path = std::env::var_os("MEETILY_STANDUP_CORPUS_REPORT")
+                        .map(std::path::PathBuf::from);
+                    let app_handle = _app.handle().clone();
+                    let pool = _app.state::<state::AppState>().db_manager.pool().clone();
+                    tauri::async_runtime::spawn(async move {
+                        match summary::corpus_runner::run_standup_corpus(
+                            app_handle,
+                            pool,
+                            meeting_ids,
+                            provider,
+                            model,
+                            summary_language,
+                            overwrite,
+                            report_path,
+                        )
+                        .await
+                        {
+                            Ok(report) => log::info!(
+                                "Standup corpus run complete: {} completed, {} skipped, {} failed",
+                                report.completed,
+                                report.skipped,
+                                report.failed
+                            ),
+                            Err(error) => log::error!("Standup corpus run failed: {error}"),
+                        }
+                    });
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -731,6 +778,7 @@ pub fn run() {
             summary::standup_workflow::set_standup_action_status,
             summary::standup_workflow::get_standup_prebrief,
             summary::standup_workflow::get_standup_series_digest,
+            summary::corpus_runner::start_standup_corpus_run,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
