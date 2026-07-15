@@ -989,5 +989,15 @@ export const RU: Record<string, string> = {
   "SaluteSpeech speaker detection is unavailable right now. Try again shortly or switch to Local in Settings → Transcription.": "Облачное определение спикеров SaluteSpeech сейчас недоступно. Повторите попытку позже или переключитесь на локальный режим в «Настройки → Расшифровка».",
   "Higher quality and more thorough. Recommended.": "Выше качество и детальность. Рекомендуется.",
   "Faster and lighter, with more concise summaries.": "Быстрее и легче, суммаризация короче.",
-  "Runs in the cloud through the Memento gateway. No API key required.": "Работает в облаке через шлюз Memento. Ключ API не требуется."
+  "Runs in the cloud through the Memento gateway. No API key required.": "Работает в облаке через шлюз Memento. Ключ API не требуется.",
+  "Possible trailing recording fragments": "Возможные фрагменты после окончания встречи",
+  "A long quiet gap separates the main meeting from a few later transcript fragments.": "Основную встречу от нескольких поздних реплик отделяет долгая пауза.",
+  "Suggested summary window": "Предлагаемый интервал для саммари",
+  "later fragments": "поздних фрагментов",
+  "The transcript and audio are never deleted. This choice only changes future summary input.": "Расшифровка и аудио не удаляются. Выбор влияет только на входные данные для будущих саммари.",
+  "Use primary window": "Использовать основную встречу",
+  "Use full transcript": "Использовать всю расшифровку",
+  "Primary meeting window selected": "Для саммари выбрана основная часть встречи",
+  "Full transcript selected": "Для саммари выбрана полная расшифровка",
+  "Failed to save meeting content window": "Не удалось сохранить интервал встречи"
 };
