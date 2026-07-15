@@ -69,7 +69,11 @@
   "transcript": {
     "title": "文字起こし設定",
     "model_label": "文字起こしモデル",
-    "select_provider": "プロバイダーを選択"
+    "select_provider": "プロバイダーを選択",
+    "recommend_label": "おすすめモデル",
+    "recommend_suggested": "おすすめ",
+    "recommend_apply": "適用",
+    "recommend_applied": "適用済み"
   },
   "summary": {
     "language": {

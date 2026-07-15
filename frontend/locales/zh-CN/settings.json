@@ -69,7 +69,11 @@
   "transcript": {
     "title": "转写设置",
     "model_label": "转写模型",
-    "select_provider": "选择提供方"
+    "select_provider": "选择提供方",
+    "recommend_label": "推荐模型",
+    "recommend_suggested": "推荐",
+    "recommend_apply": "应用",
+    "recommend_applied": "已应用"
   },
   "summary": {
     "language": {

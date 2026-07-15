@@ -69,7 +69,11 @@
   "transcript": {
     "title": "轉寫設定",
     "model_label": "轉寫模型",
-    "select_provider": "選擇提供方"
+    "select_provider": "選擇提供方",
+    "recommend_label": "推薦模型",
+    "recommend_suggested": "推薦",
+    "recommend_apply": "套用",
+    "recommend_applied": "已套用"
   },
   "summary": {
     "language": {
@@ -257,8 +261,7 @@
   },
   "notes": {
     "not_found": "找不到筆記"
-  }
-,
+  },
   "recovery": {
     "dialog_title": "中斷的會議轉錄",
     "dialog_description_one": "我們發現了一個中斷的會議。錄音在轉錄完成前停止了。",

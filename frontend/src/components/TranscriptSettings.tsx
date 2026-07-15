@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
+import { Eye, EyeOff, Lock, Unlock, Wand2 } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 
@@ -40,6 +40,36 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
+
+    // PR-45b: hardware-aware Whisper recommendation
+    // Calls the backend `get_whisper_recommended_model` Tauri command which
+    // uses HardwareProfile::detect() (CPU cores + RAM) to pick the best model
+    // tier. Default recommendation leans toward Chinese-meeting accuracy
+    // (PR-45a finding: large-v3-turbo is within 0.4% CER of large-v3 at half
+    // the size and 2x the speed).
+    const [recommendStatus, setRecommendStatus] = useState<'idle' | 'loading' | 'ready' | 'applied' | 'error'>('idle');
+    const [recommendModel, setRecommendModel] = useState<string | null>(null);
+    const handleRecommend = async () => {
+        setRecommendStatus('loading');
+        try {
+            const model = await invoke<string>('get_whisper_recommended_model');
+            setRecommendModel(model);
+            setRecommendStatus('ready');
+        } catch (err) {
+            console.error('Error fetching recommended model:', err);
+            setRecommendStatus('error');
+        }
+    };
+    const handleApplyRecommended = () => {
+        if (!recommendModel) return;
+        setTranscriptModelConfig({
+            ...transcriptModelConfig,
+            provider: 'localWhisper',
+            model: recommendModel,
+        });
+        setRecommendStatus('applied');
+        setTimeout(() => setRecommendStatus('idle'), 2000);
+    };
 
     const fetchApiKey = async (provider: string) => {
         try {
@@ -161,6 +191,43 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleWhisperModelSelect}
                                 autoSave={true}
                             />
+                        </div>
+                    )}
+
+                    {uiProvider === 'localWhisper' && (
+                        <div className="mt-3 mx-1 space-y-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleRecommend}
+                                    disabled={recommendStatus === 'loading'}
+                                >
+                                    <Wand2 className="h-4 w-4 mr-1" />
+                                    {t('transcript.recommend_label')}
+                                </Button>
+                                {recommendStatus === 'ready' && recommendModel && (
+                                    <span className="text-xs text-gray-600">
+                                        {t('transcript.recommend_suggested')}: <strong>{recommendModel}</strong>
+                                    </span>
+                                )}
+                                {recommendStatus === 'applied' && (
+                                    <span className="text-xs text-green-600">✓ {t('transcript.recommend_applied')}</span>
+                                )}
+                                {recommendStatus === 'error' && (
+                                    <span className="text-xs text-red-600">!</span>
+                                )}
+                            </div>
+                            {recommendStatus === 'ready' && recommendModel && (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={handleApplyRecommended}
+                                >
+                                    {t('transcript.recommend_apply')}
+                                </Button>
+                            )}
                         </div>
                     )}
 

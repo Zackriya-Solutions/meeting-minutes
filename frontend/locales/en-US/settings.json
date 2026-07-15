@@ -69,7 +69,11 @@
   "transcript": {
     "title": "Transcript Settings",
     "model_label": "Transcript Model",
-    "select_provider": "Select provider"
+    "select_provider": "Select provider",
+    "recommend_label": "Recommend model",
+    "recommend_suggested": "Suggested",
+    "recommend_apply": "Apply",
+    "recommend_applied": "Applied"
   },
   "summary": {
     "language": {
@@ -257,8 +261,7 @@
   },
   "notes": {
     "not_found": "Note not found"
-  }
-,
+  },
   "recovery": {
     "dialog_title": "Interrupted Meeting Transcripts",
     "dialog_description_one": "We found an interrupted meeting. The recording stopped before the transcript was completed.",

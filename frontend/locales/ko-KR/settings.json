@@ -69,7 +69,11 @@
   "transcript": {
     "title": "전사 설정",
     "model_label": "전사 모델",
-    "select_provider": "공급자 선택"
+    "select_provider": "공급자 선택",
+    "recommend_label": "추천 모델",
+    "recommend_suggested": "추천",
+    "recommend_apply": "적용",
+    "recommend_applied": "적용됨"
   },
   "summary": {
     "language": {
