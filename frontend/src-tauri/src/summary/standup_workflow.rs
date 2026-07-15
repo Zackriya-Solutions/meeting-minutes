@@ -550,10 +550,16 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
-               AND julianday(COALESCE(source.occurred_at, source.created_at)) < \
-                   julianday(COALESCE(current.occurred_at, current.created_at)) \
+               AND CASE WHEN source.occurred_at IS NOT NULL \
+                        THEN julianday(source.occurred_at, 'utc') \
+                        ELSE julianday(source.created_at) END < \
+                   CASE WHEN current.occurred_at IS NOT NULL \
+                        THEN julianday(current.occurred_at, 'utc') \
+                        ELSE julianday(current.created_at) END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
-             ORDER BY julianday(COALESCE(source.occurred_at, source.created_at)) DESC, ai.id DESC LIMIT 50",
+             ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
+                           THEN julianday(source.occurred_at, 'utc') \
+                           ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -588,7 +594,9 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
         "WITH eligible AS ( \
              SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
                     source.id AS source_id, source.title AS source_title, \
-                    julianday(COALESCE(source.occurred_at, source.created_at)) AS source_time \
+                    CASE WHEN source.occurred_at IS NOT NULL \
+                         THEN julianday(source.occurred_at, 'utc') \
+                         ELSE julianday(source.created_at) END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -596,8 +604,12 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN collections c ON c.id = source_mc.collection_id AND c.kind = 'series' \
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
-               AND julianday(COALESCE(source.occurred_at, source.created_at)) < \
-                   julianday(COALESCE(current.occurred_at, current.created_at)) \
+               AND CASE WHEN source.occurred_at IS NOT NULL \
+                        THEN julianday(source.occurred_at, 'utc') \
+                        ELSE julianday(source.created_at) END < \
+                   CASE WHEN current.occurred_at IS NOT NULL \
+                        THEN julianday(current.occurred_at, 'utc') \
+                        ELSE julianday(current.created_at) END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
