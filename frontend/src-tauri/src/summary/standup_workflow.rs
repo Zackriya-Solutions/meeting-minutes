@@ -795,7 +795,10 @@ fn escape_digest_markdown(value: &str) -> String {
         // Values are collapsed to one line and rendered after our own list marker, so
         // block-prefix characters such as '-', '+', '#', and '!' are harmless here.
         // Escape only inline syntax that can still alter or inject rendered Markdown.
-        if matches!(character, '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '>' | '|') {
+        if matches!(
+            character,
+            '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '>' | '|'
+        ) {
             escaped.push('\\');
         }
         escaped.push(character);
@@ -946,7 +949,7 @@ fn render_insight_section(markdown: &mut String, insights: &[StandupSeriesInsigh
         markdown.push_str(&format!(
             "- **{}:** {} {evidence}{source_count}\n",
             insight_label(&insight.kind, russian),
-            insight.text
+            escape_digest_markdown(&insight.text)
         ));
     }
     markdown.push('\n');
@@ -1740,6 +1743,12 @@ mod tests {
         let mut digest = StandupSeriesDigest {
             series_name: "[series](https://example.test)".into(),
             highlights: vec![item],
+            insights: vec![StandupSeriesInsight {
+                kind: "unresolved_parking_lot".into(),
+                priority: "medium".into(),
+                text: "[insight](https://example.test)\n# injected".into(),
+                sources: Vec::new(),
+            }],
             ..StandupSeriesDigest::default()
         };
         digest.markdown = render_series_digest_markdown(&digest, Some("en"));
@@ -1747,6 +1756,8 @@ mod tests {
         assert!(!digest.markdown.contains("[fake](https://example.test)"));
         assert!(!digest.markdown.contains("\n# heading"));
         assert!(!digest.markdown.contains("[meeting](https://example.test)"));
+        assert!(!digest.markdown.contains("[insight](https://example.test)"));
+        assert!(!digest.markdown.contains("\n# injected"));
         assert!(digest.markdown.contains("meeting+id%26unsafe"));
         assert!(digest.markdown.contains("2026-07-15"));
         assert!(!digest.markdown.contains("2026\\-07\\-15"));
