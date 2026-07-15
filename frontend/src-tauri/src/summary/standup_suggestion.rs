@@ -15,7 +15,9 @@ struct SuggestionSignals {
     standup_title: bool,
     other_meeting_title: bool,
     reviewed_series_history: bool,
+    transcript_available: bool,
     status_categories: usize,
+    status_round_handoff: bool,
     standup_time: bool,
     standup_duration: bool,
 }
@@ -85,6 +87,23 @@ fn transcript_status_categories(transcript: &str) -> usize {
     .count()
 }
 
+fn transcript_has_status_round_handoff(transcript: &str) -> bool {
+    let transcript = transcript.to_lowercase();
+    contains_any(
+        &transcript,
+        &[
+            "идём дальше",
+            "идем дальше",
+            "поехали дальше",
+            "давай с тебя",
+            "рассказывай дальше",
+            "следующий участник",
+            "next up",
+            "over to you",
+        ],
+    )
+}
+
 fn suggest_from_signals(signals: SuggestionSignals) -> TemplateSuggestion {
     let mut score = 0;
     let mut reasons = Vec::new();
@@ -96,9 +115,13 @@ fn suggest_from_signals(signals: SuggestionSignals) -> TemplateSuggestion {
         score += 4;
         reasons.push("reviewed_series_history".to_string());
     }
-    if signals.status_categories >= 2 {
+    if signals.status_categories > 0 {
         score += signals.status_categories as i32;
         reasons.push("status_round_language".to_string());
+    }
+    if signals.status_round_handoff {
+        score += 3;
+        reasons.push("status_round_handoff".to_string());
     }
     if signals.standup_time {
         score += 1;
@@ -113,7 +136,12 @@ fn suggest_from_signals(signals: SuggestionSignals) -> TemplateSuggestion {
         reasons.push("other_meeting_title".to_string());
     }
 
-    let is_standup = !signals.other_meeting_title && score >= 4;
+    let transcript_supports_standup = signals.status_categories > 0 && signals.status_round_handoff;
+    let pre_meeting_supports_standup =
+        !signals.transcript_available && (signals.standup_title || signals.reviewed_series_history);
+    let is_standup = !signals.other_meeting_title
+        && score >= 4
+        && (transcript_supports_standup || pre_meeting_supports_standup);
     TemplateSuggestion {
         template_id: if is_standup {
             STANDUP_TEMPLATE
@@ -177,6 +205,7 @@ async fn suggestion_for_meeting(
     .await
     .map_err(|error| error.to_string())?;
 
+    let transcript = transcript.join("\n");
     Ok(suggest_from_signals(SuggestionSignals {
         standup_title: contains_any(
             &title,
@@ -196,7 +225,9 @@ async fn suggestion_for_meeting(
             ],
         ),
         reviewed_series_history,
-        status_categories: transcript_status_categories(&transcript.join("\n")),
+        transcript_available: !transcript.trim().is_empty(),
+        status_categories: transcript_status_categories(&transcript),
+        status_round_handoff: transcript_has_status_round_handoff(&transcript),
         standup_time: time_is_standup_like(&occurred_at) || title_time_is_standup_like(&title),
         standup_duration: duration.is_some_and(|seconds| (300.0..=2_700.0).contains(&seconds)),
     }))
@@ -219,7 +250,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strong_title_suggests_standup_without_automatic_selection() {
+    fn strong_title_suggests_standup_before_transcript_without_automatic_selection() {
         let suggestion = suggest_from_signals(SuggestionSignals {
             standup_title: true,
             ..Default::default()
@@ -227,6 +258,18 @@ mod tests {
         assert_eq!(suggestion.template_id, STANDUP_TEMPLATE);
         assert_eq!(suggestion.confidence, "high");
         assert!(suggestion.reasons.contains(&"standup_title".to_string()));
+    }
+
+    #[test]
+    fn misleading_title_without_status_round_stays_standard() {
+        let suggestion = suggest_from_signals(SuggestionSignals {
+            standup_title: true,
+            transcript_available: true,
+            status_categories: 2,
+            ..Default::default()
+        });
+        assert_eq!(suggestion.template_id, STANDARD_TEMPLATE);
+        assert_eq!(suggestion.confidence, "low");
     }
 
     #[test]
@@ -260,6 +303,12 @@ mod tests {
             transcript_status_categories("Вчера завершил. Сегодня буду дальше. Блокеров нет."),
             3
         );
+        assert!(transcript_has_status_round_handoff(
+            "Спасибо, идём дальше. Макс, давай с тебя."
+        ));
+        assert!(!transcript_has_status_round_handoff(
+            "Обсудили обратную связь и атмосферу в команде."
+        ));
         assert!(time_is_standup_like("2026-07-15T11:05:00"));
         assert!(!time_is_standup_like("2026-07-15T17:35:00"));
         assert!(!time_is_standup_like("2026-07-15T12:30:00"));
@@ -288,7 +337,7 @@ mod tests {
             "INSERT INTO meetings VALUES \
              ('current', 'Team sync', '2026-07-15T11:00:00', NULL), \
              ('previous', 'Earlier', '2026-07-14T11:00:00', NULL); \
-             INSERT INTO transcripts VALUES ('current', 'Короткое обновление', 900); \
+             INSERT INTO transcripts VALUES ('current', 'Сегодня закончил задачу. Идём дальше.', 900); \
              INSERT INTO collections VALUES (1, 'series'); \
              INSERT INTO meeting_collections VALUES ('current', 1), ('previous', 1); \
              INSERT INTO standup_records VALUES ('previous', 'accepted')",

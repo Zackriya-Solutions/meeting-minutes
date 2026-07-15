@@ -15,6 +15,7 @@ const suggestionReasonKeys: Record<string, string> = {
   standup_title: 'standup-like title',
   reviewed_series_history: 'reviewed standups in this series',
   status_round_language: 'status-round language',
+  status_round_handoff: 'participant hand-offs',
   standup_time_window: 'usual standup time',
   standup_duration: 'standup-like duration',
 };

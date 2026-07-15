@@ -44,10 +44,12 @@ remain useful. Pending and rejected records never become facts; pending coverage
 - attach the meeting to a series before generation so carry-forward items are available.
 
 The first suggestion slice is deliberately assistive rather than automatic. A strong title,
-reviewed standups in the same series, or multiple status-round language categories can trigger a
-Standup V2 prompt. Time and duration alone are insufficient, and explicit planning, one-to-one,
-retrospective, or interview titles suppress the prompt. The user must still choose the template;
-no transcript leaves the device and no model is called for this decision.
+reviewed standups in the same series, or status-round language can contribute to a Standup V2
+prompt. Once a transcript exists, a round hand-off plus status language is required; this protects
+against real recordings whose filename says `standup` but whose content is team feedback. Time and
+duration alone are insufficient, and explicit planning, one-to-one, retrospective, or interview
+titles suppress the prompt. The user must still choose the template; no transcript leaves the
+device and no model is called for this decision.
 
 ## During the standup
 
@@ -102,6 +104,23 @@ intentional: a private thought must not silently become a claim that somebody sa
 - summarize project movement over a week or sprint with citations;
 - support “what changed since I was away?” and handoff views;
 - surface terminology/custom-vocabulary candidates from repeated ASR corrections.
+
+## Proactive knowledge layer
+
+The reviewed `proactive-harness` recording adds a longer-term product direction beyond summaries:
+
+- cluster the same issue across meetings and show what changed, with citations;
+- build reviewable project, decision, action, person, and glossary pages from accepted facts;
+- suggest when an unfamiliar term may need an explanation; any external lookup is opt-in and must
+  not send transcript context by default;
+- maintain a local insight inbox for likely follow-ups, contradictions, missing owners, and aging
+  decisions instead of interrupting the user;
+- require confirmation before reminders, messages, tickets, web lookups, or any other external
+  action, and keep a visible audit trail of the supporting meetings.
+
+The current series digest, embeddings/RAG, accepted-record workflow, and safe identity candidates
+are the foundation. The next implementation slice should rank insight candidates from accepted
+records only, never from private notes, rejected claims, sentiment, or employee-performance scores.
 
 The first implemented digest includes 7/14/30-day and all-history windows, accepted highlights,
 participant updates, open/completed actions, decisions, risks, and deep dives. Every row links to

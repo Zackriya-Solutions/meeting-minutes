@@ -464,6 +464,7 @@ export const RU: Record<string, string> = {
   "standup-like title": "название похоже на стендап",
   "reviewed standups in this series": "в этой серии уже подтверждались стендапы",
   "status-round language": "есть признаки статусного круга",
+  "participant hand-offs": "есть переходы между участниками",
   "usual standup time": "обычное время стендапа",
   "standup-like duration": "длительность похожа на стендап",
   "Template": "Шаблон",
