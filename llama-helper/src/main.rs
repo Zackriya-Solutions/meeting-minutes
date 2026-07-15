@@ -66,6 +66,12 @@ fn constrained_json_root_completed(output: &str, constrained: bool) -> bool {
     constrained && serde_json::from_str::<serde_json::Value>(output).is_ok()
 }
 
+fn guard_completed_json_grammar(grammar: String) -> String {
+    // Keep one required token on the native grammar stack after the JSON root.
+    // We stop as soon as the root parses, so this newline is never emitted.
+    format!("constrained-root ::= root \"\\n\"\n{grammar}")
+}
+
 impl SamplingConfig {
     fn from_request(
         temperature: Option<f32>,
@@ -419,10 +425,12 @@ impl ModelState {
         let constrained_json = json_schema.is_some();
         let mut samplers = Vec::new();
         if let Some(schema) = json_schema.as_deref() {
-            let grammar = llama_cpp_2::json_schema_to_grammar(schema)
-                .context("Failed to convert JSON schema to grammar")?;
+            let grammar = guard_completed_json_grammar(
+                llama_cpp_2::json_schema_to_grammar(schema)
+                    .context("Failed to convert JSON schema to grammar")?,
+            );
             samplers.push(
-                LlamaSampler::grammar(model, &grammar, "root")
+                LlamaSampler::grammar(model, &grammar, "constrained-root")
                     .context("Failed to initialize JSON grammar sampler")?,
             );
         }
@@ -463,8 +471,9 @@ impl ModelState {
                 break;
             }
 
+            // llama-cpp-2's `sample` is sample-and-accept. Calling `accept` again
+            // double-advances grammar and repetition samplers.
             let token = sampler.as_mut().sample(&ctx, batch.n_tokens() - 1);
-            sampler.as_mut().accept(token);
 
             if model.is_eog_token(token) {
                 eprintln!(
@@ -776,8 +785,27 @@ mod tests {
             panic!("expected generate request");
         };
         let schema = json_schema.expect("schema should be present");
-        let grammar = llama_cpp_2::json_schema_to_grammar(&schema).unwrap();
+        let grammar =
+            guard_completed_json_grammar(llama_cpp_2::json_schema_to_grammar(&schema).unwrap());
+        assert!(grammar.starts_with("constrained-root ::= root \"\\n\"\n"));
         assert!(grammar.contains("root ::="));
+    }
+
+    #[test]
+    fn standup_schema_converts_to_a_nonempty_root_grammar() {
+        let source = include_str!("../../frontend/src-tauri/src/summary/standup.rs");
+        let schema = source
+            .split_once("const STANDUP_JSON_SCHEMA: &str = r##\"")
+            .and_then(|(_, remainder)| remainder.split_once("\"##;"))
+            .map(|(schema, _)| schema)
+            .expect("standup JSON schema constant should be extractable");
+        let grammar = llama_cpp_2::json_schema_to_grammar(schema).unwrap();
+        let root = grammar
+            .lines()
+            .find(|line| line.starts_with("root ::="))
+            .expect("converted grammar should define root");
+        eprintln!("{root}");
+        assert_ne!(root.trim(), "root ::= \"\"");
     }
 
     #[test]
