@@ -274,9 +274,6 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
         }
         if let Some(capture) = DIRECT_ADDRESS.captures(&segment.text) {
             let candidate_text = display_name(&capture[1]);
-            if validate_candidate(&candidate_text).is_err() {
-                continue;
-            }
             let Some(addressing_speaker_id) = segment.speaker_id else {
                 // Without an attributed addressing turn, a later speaker is not
                 // reliable evidence of who the name referred to.
@@ -547,14 +544,16 @@ pub async fn review_candidate(
     let normalized_name =
         normalized_name.ok_or_else(|| "Candidate name was removed".to_string())?;
     validate_candidate(&candidate_text).map_err(|reason| format!("Unsafe candidate: {reason}"))?;
-    let speaker_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM speakers WHERE id=?)")
+    let speaker_belongs_to_meeting: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM transcripts WHERE meeting_id=? AND speaker_id=?)",
+    )
+            .bind(&meeting_id)
             .bind(speaker_id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|error| error.to_string())?;
-    if speaker_exists == 0 {
-        return Err("Speaker not found".to_string());
+    if speaker_belongs_to_meeting == 0 {
+        return Err("Speaker does not belong to this meeting".to_string());
     }
     sqlx::query(
         "INSERT INTO speaker_aliases(speaker_id, alias, normalized_alias, source_candidate_id) \
@@ -668,7 +667,9 @@ mod tests {
             segment("Второй ответ", Some(8), 4_000),
         ];
 
-        assert!(extract_candidates(&rows).is_empty());
+        assert!(extract_candidates(&rows)
+            .iter()
+            .all(|candidate| validate_candidate(&candidate.text).is_err()));
     }
 
     #[test]
@@ -708,6 +709,9 @@ mod tests {
             ("4", "Иван, продолжай", 7, 10.0),
             ("5", "Второй ответ", 8, 11.0),
             ("6", "Меня зовут мудак", 7, 15.0),
+            ("6b", "Слушаю", 9, 16.0),
+            ("6c", "Дебил, расскажи", 7, 20.0),
+            ("6d", "Отвечаю", 8, 21.0),
         ] {
             sqlx::query("INSERT INTO transcripts VALUES(?, 'm1', ?, ?, ?)")
                 .bind(id)
@@ -841,5 +845,81 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(raw_rejections, 0);
+
+        let salt: String = sqlx::query_scalar(
+            "SELECT value FROM app_settings_kv \
+             WHERE key='speaker_alias.rejection_salt.secret'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let direct_address_rejections: i64 = sqlx::query_scalar(
+            "SELECT occurrence_count FROM rejected_speaker_name_fingerprints \
+             WHERE candidate_hash=? AND reason='abusive_or_profane'",
+        )
+        .bind(candidate_hash(&salt, "дебил"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(direct_address_rejections, 3);
+    }
+
+    #[tokio::test]
+    async fn review_rejects_speaker_from_another_meeting() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE transcripts(id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, speaker_id INTEGER, audio_start_time REAL)",
+            "CREATE TABLE speakers(id INTEGER PRIMARY KEY, display_name TEXT, is_confirmed INTEGER)",
+            "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT, proposed_speaker_id INTEGER, proposed_speaker_key INTEGER NOT NULL, candidate_text TEXT, normalized_name TEXT, candidate_hash TEXT, evidence_kind TEXT, evidence_quote TEXT, evidence_start_ms INTEGER, confidence REAL, occurrence_count INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE speaker_aliases(id INTEGER PRIMARY KEY, speaker_id INTEGER, alias TEXT, normalized_alias TEXT, source_candidate_id INTEGER, is_confirmed INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(speaker_id,normalized_alias))",
+            "CREATE TABLE rejected_speaker_name_candidate_instances(meeting_id TEXT, candidate_hash TEXT, proposed_speaker_key INTEGER, evidence_kind TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO speakers VALUES(7,'Speaker 7',0),(8,'Speaker 8',0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO transcripts VALUES('t1','m1','Меня зовут Анна',7,0),('t2','m2','Ответ',8,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO speaker_name_candidates \
+             (id,meeting_id,proposed_speaker_id,proposed_speaker_key,candidate_text,normalized_name,candidate_hash,evidence_kind) \
+             VALUES(1,'m1',7,7,'Анна','анна','hash','self_introduction')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let error = review_candidate(
+            &pool,
+            ReviewSpeakerNameCandidateInput {
+                candidate_id: 1,
+                status: "accepted".into(),
+                speaker_id: Some(8),
+                set_as_display_name: true,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "Speaker does not belong to this meeting");
+        let untouched: (String, i64) =
+            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id=8")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(untouched, ("Speaker 8".into(), 0));
+        let aliases: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM speaker_aliases")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(aliases, 0);
     }
 }
