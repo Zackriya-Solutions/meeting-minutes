@@ -590,12 +590,12 @@ impl ModelState {
                 break;
             }
 
-            // Apply the CPU sampler chain to the raw logits explicitly. With GPU
-            // backend sampling enabled, llama_sampler_sample() may return a token
-            // selected by the backend and skip every CPU sampler in the chain,
-            // including the JSON grammar. Accept exactly once after selecting.
-            let mut candidates = ctx.token_data_array_ith(batch.n_tokens() - 1);
-            if constrained_json {
+            let token = if constrained_json {
+                // Apply the CPU sampler chain to the raw logits explicitly only
+                // for schema-constrained generation. With GPU backend sampling
+                // enabled, llama_sampler_sample() may skip the JSON grammar. Keep
+                // ordinary summaries on llama.cpp's standard sampling path.
+                let mut candidates = ctx.token_data_array_ith(batch.n_tokens() - 1);
                 // llama.cpp's grammar sampler does not necessarily suppress
                 // special EOG tokens. An early EOG would leave a syntactically
                 // incomplete object, so keep generation inside the grammar
@@ -605,12 +605,15 @@ impl ModelState {
                         candidate.set_logit(f32::NEG_INFINITY);
                     }
                 }
-            }
-            sampler.as_ref().apply(&mut candidates);
-            let token = candidates
-                .selected_token()
-                .context("Sampler chain did not select a token")?;
-            sampler.as_mut().accept(token);
+                sampler.as_ref().apply(&mut candidates);
+                let token = candidates
+                    .selected_token()
+                    .context("Sampler chain did not select a token")?;
+                sampler.as_mut().accept(token);
+                token
+            } else {
+                sampler.as_mut().sample(&ctx, batch.n_tokens() - 1)
+            };
 
             if model.is_eog_token(token) {
                 eprintln!(
