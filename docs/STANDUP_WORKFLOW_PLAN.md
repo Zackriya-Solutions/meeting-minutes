@@ -121,9 +121,12 @@ forced Standup template produced 32 false-positive records, including 22 actions
 F1 fell to `0.289`, unsupported decisions/actions rose to `80.7%`, and p95 reached 609 seconds.
 
 Therefore the next optimization target is precision, especially action/decision gating and
-meeting-type suppression. Do not trade this for higher recall, auto-select Standup from a filename,
-or weaken the release thresholds. Template suggestions remain confirm-before-generate until the
-held-out false-positive rate is measured and acceptable.
+meeting-type suppression. The deterministic suggestion logic in PR #33 selected the intended
+template for all six progress samples, including the misleading-title contrast, because a real
+status-round hand-off is required. That small result validates the safety shape, not the release
+false-positive rate. Do not trade it for higher recall, auto-select Standup from a filename, or
+weaken the release thresholds. Suggestions remain confirm-before-generate until a larger held-out
+set is measured and acceptable.
 
 ## Speaker-name and alias safety
 
@@ -140,8 +143,8 @@ held-out false-positive rate is measured and acceptable.
 
 1. Bring the existing PR stack through review without merging it implicitly; land summary reliability,
    batch import, Standup V2, review/series, and corpus evaluation in dependency order.
-2. Add a conservative meeting-type gate and a precision-first Standup extraction iteration; rerun
-   the same six-meeting set before expanding features.
+2. Validate the conservative meeting-type suggestion on the expanded corpus, add a precision-first
+   Standup extraction iteration, and rerun the same six-meeting set before expanding features.
 3. Expand to 12–15 independently annotated meetings without series leakage. At least two more
    complete pure-status recordings must come from a new corpus rather than relabelling deep dives.
 4. Ship the already-implemented review, carry-forward, pre-brief, live, digest, proactive-insight,
