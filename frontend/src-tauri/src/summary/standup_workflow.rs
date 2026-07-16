@@ -1115,9 +1115,12 @@ pub async fn get_series_digest(
     }
 
     let meetings: Vec<(String, String)> = sqlx::query_as(
-        "SELECT m.id, COALESCE(m.occurred_at, m.created_at) \
+        "SELECT m.id, CASE WHEN m.occurred_at IS NOT NULL THEN m.occurred_at \
+                           ELSE strftime('%Y-%m-%dT%H:%M:%S', m.created_at, 'localtime') END \
          FROM meetings m JOIN meeting_collections mc ON mc.meeting_id = m.id \
-         WHERE mc.collection_id = ? ORDER BY COALESCE(m.occurred_at, m.created_at), m.id",
+         WHERE mc.collection_id = ? \
+         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
+                       ELSE julianday(m.created_at, 'localtime') END, m.id",
     )
     .bind(collection_id)
     .fetch_all(pool)
@@ -1160,7 +1163,9 @@ pub async fn get_series_digest(
 
     let rows: Vec<DigestRecordRow> = sqlx::query_as(
         "SELECT sr.id, m.id AS meeting_id, m.title AS meeting_title, \
-                COALESCE(m.occurred_at, m.created_at) AS occurred_at, sr.kind, \
+                CASE WHEN m.occurred_at IS NOT NULL THEN m.occurred_at \
+                     ELSE strftime('%Y-%m-%dT%H:%M:%S', m.created_at, 'localtime') END AS occurred_at, \
+                sr.kind, \
                 COALESCE(sr.reviewed_payload, sr.payload) AS payload, sr.review_status, \
                 ai.status AS action_status \
          FROM standup_records sr \
@@ -1168,7 +1173,8 @@ pub async fn get_series_digest(
          JOIN meeting_collections mc ON mc.meeting_id = m.id \
          LEFT JOIN action_items ai ON ai.standup_record_id = sr.id \
          WHERE mc.collection_id = ? \
-         ORDER BY COALESCE(m.occurred_at, m.created_at) DESC, sr.id DESC",
+         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
+                       ELSE julianday(m.created_at, 'localtime') END DESC, sr.id DESC",
     )
     .bind(collection_id)
     .fetch_all(pool)
@@ -1664,7 +1670,7 @@ mod tests {
                 "2026-07-15T09:00:00Z",
                 Some("2026-07-15T09:00:00Z"),
             ),
-            ("pending", "Standup pending", "2026-07-15 10:00:00", None),
+            ("pending", "Standup pending", "2026-07-15 23:00:00", None),
         ] {
             sqlx::query(
                 "INSERT INTO meetings(id, title, created_at, occurred_at) VALUES(?, ?, ?, ?)",
@@ -1730,9 +1736,17 @@ mod tests {
         let digest = get_series_digest(&pool, 1, Some(14), Some("ru-RU"))
             .await
             .unwrap();
+        let fallback_local: String = sqlx::query_scalar(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%S', created_at, 'localtime') \
+             FROM meetings WHERE id = 'pending'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let fallback_local = format!("{fallback_local}Z");
         assert_eq!(digest.meeting_count, 2);
         assert_eq!(digest.period_start.as_deref(), Some("2026-07-15T09:00:00Z"));
-        assert_eq!(digest.period_end.as_deref(), Some("2026-07-15T10:00:00Z"));
+        assert_eq!(digest.period_end.as_deref(), Some(fallback_local.as_str()));
         assert_eq!(digest.meetings_with_accepted_records, 1);
         assert_eq!(digest.pending_review_count, 3);
         assert!(digest.open_actions.is_empty());
@@ -1748,9 +1762,9 @@ mod tests {
             .markdown
             .contains("/meeting-details?id=accepted&t=62"));
         assert!(digest.markdown.contains("- Встречи: 2"));
-        assert!(digest
-            .markdown
-            .contains("Окно: последние 14 дн. (2026-07-15T09:00:00Z — 2026-07-15T10:00:00Z)"));
+        assert!(digest.markdown.contains(&format!(
+            "Окно: последние 14 дн. (2026-07-15T09:00:00Z — {fallback_local})"
+        )));
         assert!(digest.markdown.contains("Ожидают проверки: 3"));
         assert!(!digest.markdown.contains("Pending review:"));
         assert!(!digest.markdown.contains("Standup old"));
