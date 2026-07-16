@@ -185,9 +185,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # License validation RSA public key (embedded at build time)
           MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
           # Memento managed gateway registration proof (embedded at build time).
@@ -197,7 +194,13 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
-          args: --target aarch64-apple-darwin ${{ steps.build-profile.outputs.args }}
+          # An unsigned test build must not attempt to sign updater artifacts.
+          # Empty TAURI_SIGNING_* values make an otherwise valid DMG build fail
+          # after bundling, before the artifact can be uploaded.
+          args: >-
+            --target aarch64-apple-darwin
+            ${{ steps.build-profile.outputs.args }}
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Verify build artifacts
         run: |
