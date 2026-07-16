@@ -16,6 +16,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from apply_standup_gold import atomic_private_write
+
 
 MEETING_TYPES = (
     "pure_status",
@@ -342,15 +344,7 @@ def main() -> None:
         "recording_scope_options": list(RECORDING_SCOPES),
         "standup": samples,
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = args.output.with_suffix(f"{args.output.suffix}.tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.chmod(0o600)
-    temporary.replace(args.output)
-    args.output.chmod(0o600)
+    atomic_private_write(args.output, payload)
     assigned = sum(row["series_id"] != "UNASSIGNED" for row in samples)
     generated = sum(row["success"] for row in samples)
     print(f"Exported {len(samples)} candidates to {args.output}")

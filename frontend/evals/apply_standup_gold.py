@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -139,13 +140,23 @@ def apply_gold(dataset: dict[str, Any], gold: dict[str, Any]) -> tuple[dict[str,
 
 def atomic_private_write(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(f"{path.suffix}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
     )
-    os.chmod(temporary, 0o600)
-    temporary.replace(path)
+    temporary = Path(temporary_name)
+    try:
+        # mkstemp creates the file as 0600, so private content is never
+        # exposed through a wider umask-default mode before the rename.
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(path)
+        os.chmod(path, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def ensure_output_available(path: Path, overwrite: bool) -> None:
