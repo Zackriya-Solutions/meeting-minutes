@@ -15,8 +15,10 @@ import type { VmAccent, VmMeeting, VmModel, VmScreen, VmTheme } from './types';
 import {
   fetchMeetings,
   fetchModels,
+  hasTranscriptConfig,
   onModelDownloadComplete,
   onModelDownloadProgress,
+  selectWhisperModel,
 } from './tauriBridge';
 import { OnboardingScreen } from './OnboardingScreen';
 import { HomeScreen } from './HomeScreen';
@@ -88,6 +90,19 @@ export default function MobileApp() {
     reloadModels();
   }, [reloadMeetings, reloadModels]);
 
+  // Self-heal installs that already have a downloaded Whisper model but no
+  // saved transcript config (e.g. from before this fix shipped) — otherwise
+  // recording fails with a Parakeet-related error since that's the backend's
+  // fallback engine when no config row exists.
+  useEffect(() => {
+    if (models.length === 0) return;
+    const downloaded = models.find((m) => m.status === 'downloaded');
+    if (!downloaded) return;
+    hasTranscriptConfig().then((has) => {
+      if (!has) selectWhisperModel(downloaded.name);
+    });
+  }, [models]);
+
   // Global model-download progress stream keeps every screen in sync
   useEffect(() => {
     let unProgress: (() => void) | undefined;
@@ -105,6 +120,14 @@ export default function MobileApp() {
           m.name === name ? { ...m, status: 'downloaded', progress: 100 } : m
         )
       );
+      // The Rust recording pipeline defaults to the Parakeet engine (which
+      // isn't set up on Android) until a local transcript config exists.
+      // Auto-select the first downloaded Whisper model so recording works
+      // without an extra "choose your engine" step; don't clobber a config
+      // the user already picked.
+      hasTranscriptConfig().then((has) => {
+        if (!has) selectWhisperModel(name);
+      });
     }).then((u) => (unComplete = u));
     return () => {
       unProgress?.();

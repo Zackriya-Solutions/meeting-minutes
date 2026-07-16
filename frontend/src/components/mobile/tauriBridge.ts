@@ -172,6 +172,38 @@ export async function downloadModel(modelName: string): Promise<void> {
   await invoke('whisper_download_model', { modelName });
 }
 
+/**
+ * Mark `modelName` as the active local transcription model.
+ *
+ * The Rust recording pipeline reads the saved transcript config to decide
+ * which engine to use (Whisper vs Parakeet) and defaults to Parakeet when no
+ * config row exists yet (see audio/transcription/engine.rs). Parakeet is not
+ * set up on Android, so every Whisper download here must be paired with this
+ * call or `start_recording` fails with "No Parakeet models are available."
+ */
+export async function selectWhisperModel(modelName: string): Promise<void> {
+  try {
+    await invoke('api_save_transcript_config', {
+      provider: 'localWhisper',
+      model: modelName,
+      apiKey: null,
+    });
+  } catch (e) {
+    console.warn('[vm] api_save_transcript_config failed', e);
+  }
+}
+
+export async function hasTranscriptConfig(): Promise<boolean> {
+  try {
+    const config = await invoke<{ provider?: string; model?: string } | null>(
+      'api_get_transcript_config'
+    );
+    return !!(config?.provider && config?.model);
+  } catch {
+    return false;
+  }
+}
+
 export async function deleteModel(modelName: string): Promise<void> {
   await invoke('whisper_delete_corrupted_model', { modelName });
 }
