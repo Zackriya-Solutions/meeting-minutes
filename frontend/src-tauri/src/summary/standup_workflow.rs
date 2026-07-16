@@ -670,6 +670,21 @@ pub async fn get_standup_prebrief(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_record_keys_include_owner_identity() {
+        let anna = json!({
+            "task": "Обновить документацию",
+            "owner": "Анна",
+            "evidence": [{"timestamp": "[10:00]"}]
+        });
+        let boris = json!({
+            "task": "Обновить документацию",
+            "owner": "Борис",
+            "evidence": [{"timestamp": "[10:00]"}]
+        });
+        assert_ne!(record_key("action", &anna), record_key("action", &boris));
+    }
     use crate::summary::standup::{
         EvidenceRef, StandupAction, StandupDecision, StandupReport, StandupRisk,
     };
