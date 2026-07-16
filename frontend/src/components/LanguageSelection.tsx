@@ -118,7 +118,8 @@ interface LanguageSelectionProps {
   selectedLanguage: string;
   onLanguageChange: (language: string) => void;
   disabled?: boolean;
-  provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  provider?: 'localWhisper' | 'parakeet' | 'qwen3Asr' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  model?: string;
 }
 
 export function LanguageSelection({

@@ -8,7 +8,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'qwen3Asr';
   name: string;
   displayName: string;
   size_mb: number;
@@ -77,6 +77,21 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    try {
+      const qwenModels = await invoke<RawModelInfo[]>('qwen_asr_get_available_models');
+      const availableQwen = qwenModels
+        .filter((m) => m.status === 'Available')
+        .map((m) => ({
+          provider: 'qwen3Asr' as const,
+          name: m.name,
+          displayName: 'Qwen3-ASR: 0.6B Int8',
+          size_mb: m.size_mb,
+        }));
+      allModels.push(...availableQwen);
+    } catch (err) {
+      console.error('Failed to fetch Qwen3-ASR models:', err);
+    }
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -88,7 +103,8 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'qwen3Asr' && m.provider === 'qwen3Asr' && m.name === configuredModel)
     );
 
     // Only set default model if user hasn't manually selected one

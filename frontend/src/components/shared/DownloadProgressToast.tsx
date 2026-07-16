@@ -300,6 +300,65 @@ export function useDownloadProgressToast() {
     };
   }, [updateDownload, cleanupDownload]);
 
+  // Listen to Qwen3-ASR download events so progress survives closing Settings.
+  useEffect(() => {
+    const unlistenProgress = listen<{
+      modelName: string;
+      progress: number;
+      downloaded_mb: number;
+      total_mb: number;
+      speed_mbps: number;
+    }>('qwen-asr-model-download-progress', ({ payload }) => {
+      updateDownload(payload.modelName, {
+        modelName: payload.modelName,
+        displayName: 'Qwen3-ASR 0.6B Int8',
+        progress: payload.progress,
+        downloadedMb: payload.downloaded_mb,
+        totalMb: payload.total_mb,
+        speedMbps: payload.speed_mbps,
+        unitLabel: 'MiB',
+        status: payload.progress >= 100 ? 'completed' : 'downloading',
+      });
+    });
+
+    const unlistenComplete = listen<{ modelName: string }>(
+      'qwen-asr-model-download-complete',
+      ({ payload }) => {
+        updateDownload(payload.modelName, {
+          modelName: payload.modelName,
+          displayName: 'Qwen3-ASR 0.6B Int8',
+          progress: 100,
+          downloadedMb: 941.4,
+          totalMb: 941.4,
+          speedMbps: 0,
+          unitLabel: 'MiB',
+          status: 'completed',
+        });
+        cleanupDownload(payload.modelName, 4000);
+      }
+    );
+
+    const unlistenError = listen<{ modelName: string; error: string }>(
+      'qwen-asr-model-download-error',
+      ({ payload }) => {
+        const cancelled = payload.error.toLowerCase().includes('cancelled');
+        updateDownload(payload.modelName, {
+          modelName: payload.modelName,
+          displayName: 'Qwen3-ASR 0.6B Int8',
+          status: cancelled ? 'cancelled' : 'error',
+          error: cancelled ? undefined : categorizeError(payload.error),
+        });
+        cleanupDownload(payload.modelName, cancelled ? 6000 : 11000);
+      }
+    );
+
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenComplete.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, [updateDownload, cleanupDownload]);
+
   // Listen to Built-in AI summary model download events
   useEffect(() => {
     const unlisten = listen<{

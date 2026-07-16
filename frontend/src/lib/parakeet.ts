@@ -37,6 +37,13 @@ export interface ModelDisplayInfo {
   tier: 'fastest' | 'balanced' | 'precise';
 }
 
+export interface TranscriptionLanguageCapability {
+  allowsLanguageSelection: boolean;
+  displayName: string;
+  description: string;
+  analyticsLanguage: string;
+}
+
 export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'parakeet-tdt-0.6b-v3-int8': {
     friendlyName: 'Lightning',
@@ -107,6 +114,46 @@ export function getModelDisplayInfo(modelName: string): ModelDisplayInfo | null 
   return MODEL_DISPLAY_CONFIG[modelName] || null;
 }
 
+export function getModelDownloadProgress(status: ModelStatus): number | null {
+  if (typeof status !== 'object' || !('Downloading' in status)) return null;
+  return typeof status.Downloading === 'number'
+    ? status.Downloading
+    : status.Downloading.progress;
+}
+
+export function getParakeetModelSizeMb(modelName: string): number {
+  return PARAKEET_MODEL_CONFIGS[modelName]?.size_mb ?? 0;
+}
+
+export function getTranscriptionLanguageCapability(
+  provider?: string,
+  modelName?: string
+): TranscriptionLanguageCapability {
+  if (provider === 'qwen3Asr') {
+    return {
+      allowsLanguageSelection: false,
+      displayName: 'Automatic multilingual detection',
+      description: 'Qwen3-ASR detects the spoken language automatically, including Chinese dialects and mixed-language speech.',
+      analyticsLanguage: 'auto-multilingual',
+    };
+  }
+
+  if (provider !== 'parakeet') {
+    return {
+      allowsLanguageSelection: true,
+      displayName: '',
+      description: '',
+      analyticsLanguage: 'selected',
+    };
+  }
+
+  return {
+    allowsLanguageSelection: false,
+    displayName: 'English',
+    description: 'This Parakeet model transcribes English. Language selection and translation are not available.',
+    analyticsLanguage: 'en',
+  };
+}
 export function getStatusColor(status: ModelStatus): string {
   if (status === 'Available') return 'green';
   if (status === 'Missing') return 'gray';
