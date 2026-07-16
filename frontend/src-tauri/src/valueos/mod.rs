@@ -251,7 +251,9 @@ pub async fn valueos_login() -> Result<(), ValueOsErr> {
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
     let mut sender = Some(tx);
     let port = tauri_plugin_oauth::start_with_config(
-        tauri_plugin_oauth::OauthConfig { ports: Some(cfg_ports()), response: None },
+        // Only pin the ports; let all other fields (redirect_uri, response, …) default —
+        // resilient to this plugin version's exact OauthConfig shape.
+        tauri_plugin_oauth::OauthConfig { ports: Some(cfg_ports()), ..Default::default() },
         move |url| {
             if let Some(tx) = sender.take() {
                 let _ = tx.send(url);
@@ -377,7 +379,12 @@ pub async fn valueos_generate_digest(
     let header = title.map(|t| format!("Recap — {t}")).unwrap_or_else(|| "Meeting recap".into());
     let out = format!("{header}\n\nOverview: a {words}-word conversation.\n\nKey points:\n{lead}");
     let max = max_chars.unwrap_or(4000);
-    Ok(if out.len() > max { format!("{}…", &out[..max.saturating_sub(1)]) } else { out })
+    // char-safe truncation (never split a UTF-8 boundary)
+    Ok(if out.chars().count() > max {
+        format!("{}…", out.chars().take(max.saturating_sub(1)).collect::<String>())
+    } else {
+        out
+    })
 }
 
 #[tauri::command]
