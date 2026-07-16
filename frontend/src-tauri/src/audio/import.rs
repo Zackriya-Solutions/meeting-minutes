@@ -350,6 +350,26 @@ fn collect_imported_hashes(recordings_folder: &Path) -> HashSet<String> {
     hashes
 }
 
+fn deferred_audio_file_info(path: &Path) -> AudioFileInfo {
+    AudioFileInfo {
+        path: path.to_string_lossy().to_string(),
+        filename: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("audio")
+            .to_string(),
+        duration_seconds: 0.0,
+        size_bytes: std::fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0),
+        format: path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase(),
+    }
+}
+
 /// Check if import is currently in progress
 pub fn is_import_in_progress() -> bool {
     IMPORT_IN_PROGRESS.load(Ordering::SeqCst)
@@ -1310,10 +1330,7 @@ async fn create_meeting_with_transcripts(
     Ok(())
 }
 
-async fn delete_newly_imported_meeting(
-    pool: &sqlx::SqlitePool,
-    meeting_id: &str,
-) -> Result<()> {
+async fn delete_newly_imported_meeting(pool: &sqlx::SqlitePool, meeting_id: &str) -> Result<()> {
     let mut tx = pool
         .begin()
         .await
@@ -1585,10 +1602,23 @@ pub async fn select_and_validate_audio_folder_command<R: Runtime>(
     };
     let folder = PathBuf::from(folder_path.to_string());
     let files = tokio::task::spawn_blocking(move || -> Result<Vec<AudioFileInfo>> {
-        collect_audio_files(&folder)?
+        Ok(collect_audio_files(&folder)?
             .iter()
-            .map(|path| validate_audio_file(path))
-            .collect()
+            .map(|path| match validate_audio_file(path) {
+                Ok(info) => info,
+                Err(error) => {
+                    // Keep the item in the batch. The importer will report this file
+                    // as an individual failure instead of aborting folder selection
+                    // and hiding all otherwise-valid recordings.
+                    warn!(
+                        "Deferring failed folder validation for {}: {}",
+                        path.display(),
+                        error
+                    );
+                    deferred_audio_file_info(path)
+                }
+            })
+            .collect())
     })
     .await
     .map_err(|error| format!("Folder validation task failed: {}", error))?
@@ -1887,6 +1917,21 @@ mod tests {
             assert!(info.duration_seconds > 0.0);
             assert!(info.size_bytes > 0);
         }
+    }
+
+    #[test]
+    fn deferred_audio_info_keeps_invalid_file_in_batch_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.mp3");
+        std::fs::write(&path, b"bad").unwrap();
+
+        let info = deferred_audio_file_info(&path);
+
+        assert_eq!(info.path, path.to_string_lossy());
+        assert_eq!(info.filename, "broken.mp3");
+        assert_eq!(info.duration_seconds, 0.0);
+        assert_eq!(info.size_bytes, 3);
+        assert_eq!(info.format, "mp3");
     }
 
     #[test]
