@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from '@/components/memento/LucideCompat';
+import { Copy, Loader2, Pause, Play, RefreshCw } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { DetectSpeakersButton } from './DetectSpeakersButton';
@@ -16,7 +16,10 @@ import { useT } from '@/lib/i18n';
 interface TranscriptButtonGroupProps {
   transcriptCount: number;
   onCopyTranscript: () => void;
-  onOpenMeetingFolder: () => Promise<void>;
+  onToggleRecordingAudio: () => void;
+  recordingAudioAvailable: boolean;
+  isRecordingAudioPlaying: boolean;
+  isRecordingAudioLoading: boolean;
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
@@ -28,7 +31,10 @@ interface TranscriptButtonGroupProps {
 export function TranscriptButtonGroup({
   transcriptCount,
   onCopyTranscript,
-  onOpenMeetingFolder,
+  onToggleRecordingAudio,
+  recordingAudioAvailable,
+  isRecordingAudioPlaying,
+  isRecordingAudioLoading,
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
@@ -67,12 +73,17 @@ export function TranscriptButtonGroup({
           variant="outline"
           className="xl:px-4"
           onClick={() => {
-            Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
-            onOpenMeetingFolder();
+            Analytics.trackButtonClick('toggle_recording_playback', 'meeting_details');
+            onToggleRecordingAudio();
           }}
-          title={t('Open Recording Folder')}
+          disabled={!recordingAudioAvailable || isRecordingAudioLoading}
+          title={isRecordingAudioPlaying ? t('Pause meeting audio') : t('Play meeting audio')}
         >
-          <FolderOpen className="xl:mr-2" size={18} />
+          {isRecordingAudioLoading
+            ? <Loader2 className="animate-spin xl:mr-2" size={18} />
+            : isRecordingAudioPlaying
+              ? <Pause className="xl:mr-2" size={18} />
+              : <Play className="xl:mr-2" size={18} />}
           <span className="hidden lg:inline">{t('Recording')}</span>
         </Button>
 

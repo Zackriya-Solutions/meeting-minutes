@@ -232,14 +232,6 @@ fn get_transcription_status() -> TranscriptionStatus {
 }
 
 #[tauri::command]
-fn read_audio_file(file_path: String) -> Result<Vec<u8>, String> {
-    match std::fs::read(&file_path) {
-        Ok(data) => Ok(data),
-        Err(e) => Err(format!("Failed to read audio file: {}", e)),
-    }
-}
-
-#[tauri::command]
 async fn save_transcript(file_path: String, content: String) -> Result<(), String> {
     log_info!("Saving transcript to: {}", file_path);
 
@@ -716,7 +708,8 @@ pub fn run() {
             is_recording,
             get_transcription_status,
             meeting_detection::get_auto_meeting_detection_status,
-            read_audio_file,
+            audio::export::get_meeting_audio_path,
+            audio::export::export_meeting_audio_mp3,
             save_transcript,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,

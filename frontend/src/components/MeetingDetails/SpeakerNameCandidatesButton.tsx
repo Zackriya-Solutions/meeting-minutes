@@ -32,6 +32,7 @@ const EVIDENCE_LABELS: Record<string, string> = {
   self_introduction: 'Self introduction',
   explicit_introduction: 'Explicit introduction',
   direct_address: 'Direct address',
+  direct_address_unassigned: 'Name mentioned in an address',
 };
 
 export function SpeakerNameCandidatesButton({

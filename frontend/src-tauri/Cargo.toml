@@ -14,6 +14,13 @@ rust-version = "1.77"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Keep the package name stable for Cargo/workspace compatibility, but expose a
+# Memento-named executable so macOS crash reports and process lists no longer
+# show the retired Meetily brand.
+[[bin]]
+name = "memento"
+path = "src/main.rs"
+
 
 # Hardware acceleration features for whisper-rs
 # Cross-platform GPU acceleration with smart defaults

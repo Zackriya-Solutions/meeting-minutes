@@ -45,6 +45,11 @@ export interface VirtualizedTranscriptViewProps {
     speakersById?: Map<number, string> | null;
     /** When provided, diarized speaker labels become clickable to rename them. */
     onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+
+    /** Play the saved recording from a transcript-relative timestamp. */
+    onPlayTimestamp?: (seconds: number) => void;
+    /** Current saved-audio playback position, used to highlight the active segment. */
+    playbackTime?: number | null;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -59,6 +64,20 @@ function formatRecordingTime(seconds: number | undefined): string {
     const secs = totalSeconds % 60;
 
     return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
+}
+
+function isPlaybackSegmentActive(
+    segment: TranscriptSegmentData,
+    playbackTime: number | null
+): boolean {
+    if (playbackTime == null) return false;
+    const start = segment.timestamp ?? 0;
+    // Older imports can lack an end timestamp. Keep a short visual window in
+    // that case instead of leaving every later segment highlighted.
+    const end = segment.endTime != null && segment.endTime > start
+        ? segment.endTime
+        : start + 8;
+    return playbackTime >= start && playbackTime < end;
 }
 
 // Helper function to remove filler words and repetitions
@@ -87,6 +106,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerId = null,
     speakerRenamable = false,
     onSpeakerClick,
+    onPlayTimestamp,
+    playbackActive = false,
 }: {
     id: string;
     timestamp: number;
@@ -99,6 +120,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerId?: number | null;
     speakerRenamable?: boolean;
     onSpeakerClick?: (speakerId: number) => void;
+    onPlayTimestamp?: (timestamp: number) => void;
+    playbackActive?: boolean;
 }) {
     const t = useT();
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
@@ -106,7 +129,13 @@ const TranscriptSegment = memo(function TranscriptSegment({
     return (
         <div
             id={`segment-${id}`}
-            className={`mb-3 rounded-lg transition-colors duration-500 ${highlight ? 'bg-[var(--gold-soft)] ring-2 ring-[var(--gold-ring)] -mx-2 px-2 py-1' : ''}`}
+            className={`mb-3 rounded-lg border-l-2 transition-colors duration-300 ${
+                highlight
+                    ? 'border-[var(--gold)] bg-[var(--gold-soft)] ring-2 ring-[var(--gold-ring)] -mx-2 px-2 py-1'
+                    : playbackActive
+                      ? 'border-[var(--gold)] bg-[var(--gold-soft)] -mx-2 px-2 py-1'
+                      : 'border-transparent'
+            }`}
         >
             <div className="flex items-start gap-2">
                 <div className="flex flex-col items-start flex-shrink-0 min-w-[50px] mt-1">
@@ -128,11 +157,18 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     )}
                     <Tooltip>
                         <TooltipTrigger>
-                            <span className="text-xs text-[var(--fg3)]">
+                            <button
+                                type="button"
+                                onClick={() => onPlayTimestamp?.(timestamp)}
+                                disabled={!onPlayTimestamp}
+                                aria-label={onPlayTimestamp ? t('Play audio from this moment') : undefined}
+                                className={`text-xs ${onPlayTimestamp ? 'cursor-pointer text-[var(--fg3)] underline-offset-2 hover:text-[var(--gold)] hover:underline' : 'text-[var(--fg3)]'}`}
+                            >
                                 {formatRecordingTime(timestamp)}
-                            </span>
+                            </button>
                         </TooltipTrigger>
                         <TooltipContent>
+                            {onPlayTimestamp && <span>{t('Play audio from this moment')}</span>}
                             {confidence !== undefined && showConfidence && (
                                 <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
                             )}
@@ -170,6 +206,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     scrollToTimestamp = null,
     speakersById = null,
     onRenameSpeaker,
+    onPlayTimestamp,
+    playbackTime = null,
 }) => {
     const t = useT();
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
@@ -403,6 +441,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                             !!speakersById?.has(segment.speaker_id)
                                         }
                                         onSpeakerClick={handleSpeakerClick}
+                                        onPlayTimestamp={onPlayTimestamp}
+                                        playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
                                     />
                                 </div>
                             );
@@ -468,6 +508,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                             !!speakersById?.has(segment.speaker_id)
                                         }
                                         onSpeakerClick={handleSpeakerClick}
+                                        onPlayTimestamp={onPlayTimestamp}
+                                        playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
                                     />
                                 </motion.div>
                             );

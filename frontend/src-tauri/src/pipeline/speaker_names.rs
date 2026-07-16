@@ -20,7 +20,8 @@ static EXPLICIT_INTRO: Lazy<Regex> = Lazy::new(|| {
     .expect("valid introduction regex")
 });
 static DIRECT_ADDRESS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?iu)^\s*([\p{L}][\p{L}'’\-]{1,31})\s*[,!]").expect("valid direct-address regex")
+    Regex::new(r"(?iu)^\s*(?:(?:так|ну|слушай|смотри)\s*,\s*)?([\p{L}][\p{L}'’\-]{1,31})\s*[,!]")
+        .expect("valid direct-address regex")
 });
 
 const BLOCKED_EXACT: &[&str] = &[
@@ -311,23 +312,20 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                 confidence: 0.75,
             });
         }
-        if let Some(capture) = DIRECT_ADDRESS.captures(&segment.text) {
+        for capture in DIRECT_ADDRESS.captures_iter(&segment.text) {
             if !has_name_like_capitalization(&capture[1]) {
                 continue;
             }
             let candidate_text = display_name(&capture[1]);
-            let Some(addressing_speaker_id) = segment.speaker_id else {
-                // Without an attributed addressing turn, a later speaker is not
-                // reliable evidence of who the name referred to.
-                continue;
-            };
-            let next = segments.iter().skip(index + 1).find(|next| {
-                next.speaker_id.is_some()
-                    && next.speaker_id != Some(addressing_speaker_id)
-                    && match (segment.start_ms, next.start_ms) {
-                        (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
-                        _ => false,
-                    }
+            let next = segment.speaker_id.and_then(|addressing_speaker_id| {
+                segments.iter().skip(index + 1).find(|next| {
+                    next.speaker_id.is_some()
+                        && next.speaker_id != Some(addressing_speaker_id)
+                        && match (segment.start_ms, next.start_ms) {
+                            (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
+                            _ => false,
+                        }
+                })
             });
             if let Some(next) = next {
                 extracted.push(ExtractedCandidate {
@@ -337,6 +335,17 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                     evidence_quote: segment.text.clone(),
                     start_ms: segment.start_ms,
                     confidence: 0.60,
+                });
+            } else {
+                // The name itself is useful evidence even when diarization cannot
+                // safely determine who was addressed. Keep speaker selection manual.
+                extracted.push(ExtractedCandidate {
+                    text: candidate_text,
+                    speaker_id: None,
+                    evidence_kind: "direct_address_unassigned",
+                    evidence_quote: segment.text.clone(),
+                    start_ms: segment.start_ms,
+                    confidence: 0.45,
                 });
             }
         }
@@ -512,9 +521,6 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
         .map_err(|error| error.to_string())?;
     let mut inserted = 0;
     for ((normalized, speaker_id, evidence_kind), (candidate, occurrence_count)) in grouped {
-        if evidence_kind == "direct_address" && occurrence_count < 2 {
-            continue;
-        }
         let hash = candidate_hash(&salt, &normalized);
         let speaker_key = candidate.speaker_id.unwrap_or(-1);
         let result = sqlx::query(
@@ -571,7 +577,6 @@ async fn list_candidates(
         "SELECT id, meeting_id, proposed_speaker_id, candidate_text, evidence_kind, \
                 evidence_quote, evidence_start_ms, confidence, occurrence_count, status \
          FROM speaker_name_candidates WHERE meeting_id=? AND status='pending' \
-           AND (evidence_kind!='direct_address' OR occurrence_count>=2) \
          ORDER BY confidence DESC, occurrence_count DESC, id",
     )
     .bind(meeting_id)
@@ -775,9 +780,29 @@ mod tests {
             segment("Сборка готова", Some(8), 7_000),
         ];
 
-        assert!(extract_candidates(&rows)
+        let extracted = extract_candidates(&rows);
+        assert!(extracted
             .iter()
             .all(|item| item.evidence_kind != "direct_address"));
+        assert!(extracted.iter().any(|item| {
+            item.text == "Иван"
+                && item.speaker_id.is_none()
+                && item.evidence_kind == "direct_address_unassigned"
+        }));
+    }
+
+    #[test]
+    fn extraction_accepts_russian_discourse_marker_before_address() {
+        let rows = vec![
+            segment("Так, Андрей, может быть, он должен?", Some(7), 5_000),
+            segment("Да, я посмотрю", Some(8), 7_000),
+        ];
+
+        assert!(extract_candidates(&rows).iter().any(|item| {
+            item.text == "Андрей"
+                && item.speaker_id == Some(8)
+                && item.evidence_kind == "direct_address"
+        }));
     }
 
     #[test]
@@ -1016,7 +1041,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rescan_removes_direct_address_after_evidence_drops_below_threshold() {
+    async fn rescan_updates_single_direct_address_candidate() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -1067,7 +1092,13 @@ mod tests {
             .unwrap();
         scan_candidates(&pool, "m1").await.unwrap();
 
-        assert!(list_candidates(&pool, "m1").await.unwrap().is_empty());
+        let remaining = list_candidates(&pool, "m1").await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].occurrence_count, 1);
+        assert_eq!(
+            remaining[0].evidence_quote.as_deref(),
+            Some("Иван, новый вопрос")
+        );
         let pending_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) \
              FROM speaker_name_candidates WHERE meeting_id='m1' AND status='pending'",
@@ -1075,7 +1106,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(pending_count, 0);
+        assert_eq!(pending_count, 1);
     }
 
     #[tokio::test]

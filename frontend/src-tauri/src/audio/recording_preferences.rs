@@ -43,36 +43,57 @@ impl Default for RecordingPreferences {
 pub fn get_default_recordings_folder() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        // Windows: %USERPROFILE%\Music\meetily-recordings
-        if let Some(music_dir) = dirs::audio_dir() {
-            music_dir.join("meetily-recordings")
+        let parent = if let Some(music_dir) = dirs::audio_dir() {
+            music_dir
         } else {
-            // Fallback to Documents if Music folder is not available
-            dirs::document_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("meetily-recordings")
-        }
+            dirs::document_dir().unwrap_or_else(|| PathBuf::from("."))
+        };
+        return branded_recordings_folder(parent);
     }
 
     #[cfg(target_os = "macos")]
     {
-        // macOS: ~/Movies/meetily-recordings
-        if let Some(movies_dir) = dirs::video_dir() {
-            movies_dir.join("meetily-recordings")
+        let parent = if let Some(movies_dir) = dirs::video_dir() {
+            movies_dir
         } else {
-            // Fallback to Documents if Movies folder is not available
-            dirs::document_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("meetily-recordings")
-        }
+            dirs::document_dir().unwrap_or_else(|| PathBuf::from("."))
+        };
+        return branded_recordings_folder(parent);
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        // Linux/Others: ~/Documents/meetily-recordings
-        dirs::document_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("meetily-recordings")
+        branded_recordings_folder(dirs::document_dir().unwrap_or_else(|| PathBuf::from(".")))
+    }
+}
+
+fn branded_recordings_folder(parent: PathBuf) -> PathBuf {
+    let legacy = parent.join("meetily-recordings");
+    // Existing installations keep using their original folder, so recordings,
+    // hashes and user bookmarks do not silently split across two locations.
+    if legacy.exists() {
+        legacy
+    } else {
+        parent.join("memento-recordings")
+    }
+}
+
+#[cfg(test)]
+mod recording_folder_tests {
+    use super::branded_recordings_folder;
+
+    #[test]
+    fn new_install_uses_memento_folder_but_existing_legacy_folder_is_preserved() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            branded_recordings_folder(root.path().to_path_buf()),
+            root.path().join("memento-recordings")
+        );
+        std::fs::create_dir(root.path().join("meetily-recordings")).unwrap();
+        assert_eq!(
+            branded_recordings_folder(root.path().to_path_buf()),
+            root.path().join("meetily-recordings")
+        );
     }
 }
 
@@ -384,4 +405,3 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
         }])
     }
 }
-

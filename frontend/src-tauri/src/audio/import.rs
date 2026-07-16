@@ -4,7 +4,7 @@ use crate::api::TranscriptSegment;
 use crate::audio::decoder::{
     decode_audio_file, decode_audio_file_to_whisper, decode_audio_file_with_progress,
 };
-use crate::audio::vad::get_speech_chunks_with_progress;
+use crate::audio::vad::{get_speech_chunks_with_progress, ContinuousVadProcessor, SpeechSegment};
 use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
@@ -19,6 +19,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -28,6 +29,7 @@ use uuid::Uuid;
 use super::audio_processing::create_meeting_folder;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
 use super::constants::AUDIO_EXTENSIONS;
+use super::ffmpeg::find_ffmpeg_path;
 use super::recording_preferences::get_default_recordings_folder;
 
 /// Global flag to track if import is in progress
@@ -101,6 +103,126 @@ const VAD_REDEMPTION_TIME_MS: u32 = 2000;
 
 /// Maximum file size: 20GB (prevents OOM and excessive processing time)
 const MAX_FILE_SIZE_BYTES: u64 = 20 * 1024 * 1024 * 1024; // 20GB
+
+/// Decode to 16 kHz mono and feed VAD incrementally.
+///
+/// This is the safe path for large recordings: at no point do we retain the
+/// complete decoded PCM stream. The old `Command::output` path could keep
+/// several complete copies (bytes, f32 samples, VAD input and cloned speech
+/// segments), turning a 1 GB compressed source into tens of GB of RAM.
+fn stream_decode_speech_segments<F>(
+    path: &Path,
+    redemption_time_ms: u32,
+    expected_duration_seconds: Option<f64>,
+    mut progress: F,
+) -> Result<(Vec<SpeechSegment>, f64)>
+where
+    F: FnMut(u32, usize) -> bool,
+{
+    let ffmpeg = find_ffmpeg_path().ok_or_else(|| anyhow!("FFmpeg is not available"))?;
+    let mut child = Command::new(ffmpeg)
+        .args(["-nostdin", "-v", "error"])
+        .arg("-i")
+        .arg(path)
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| anyhow!("Failed to start FFmpeg streaming decode: {error}"))?;
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("FFmpeg stdout is unavailable"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("FFmpeg stderr is unavailable"))?;
+    let stderr_reader = std::thread::spawn(move || {
+        let mut details = String::new();
+        let _ = stderr.read_to_string(&mut details);
+        details
+    });
+
+    let mut processor = ContinuousVadProcessor::new(16_000, redemption_time_ms)?;
+    let mut segments = Vec::new();
+    // 10 seconds of mono f32 at 16 kHz: small enough for stable memory, large
+    // enough to avoid excessive process/VAD overhead.
+    let mut bytes = vec![0_u8; 16_000 * 4 * 10];
+    let mut carry = Vec::<u8>::with_capacity(3);
+    let mut processed_samples = 0_u64;
+    let expected_samples = expected_duration_seconds
+        .filter(|duration| duration.is_finite() && *duration > 0.0)
+        .map(|duration| (duration * 16_000.0) as u64);
+    let mut last_progress = 0_u32;
+
+    loop {
+        let read = stdout
+            .read(&mut bytes)
+            .map_err(|error| anyhow!("Failed to read decoded audio stream: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        carry.extend_from_slice(&bytes[..read]);
+        let aligned = carry.len() - (carry.len() % 4);
+        let mut samples = Vec::with_capacity(aligned / 4);
+        for chunk in carry[..aligned].chunks_exact(4) {
+            let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            samples.push(if sample.is_finite() {
+                sample.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            });
+        }
+        let remaining = carry.split_off(aligned);
+        carry = remaining;
+        processed_samples += samples.len() as u64;
+        segments.extend(processor.process_audio(&samples)?);
+
+        if let Some(total) = expected_samples {
+            let next = ((processed_samples.saturating_mul(100) / total.max(1)).min(99)) as u32;
+            if next >= last_progress + 2 {
+                if !progress(next, segments.len()) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stderr_reader.join();
+                    return Err(anyhow!("Import cancelled"));
+                }
+                last_progress = next;
+            }
+        } else if !progress(0, segments.len()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err(anyhow!("Import cancelled"));
+        }
+    }
+
+    if !carry.is_empty() {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = stderr_reader.join();
+        return Err(anyhow!("FFmpeg returned an incomplete f32 sample"));
+    }
+    segments.extend(processor.flush()?);
+    let status = child
+        .wait()
+        .map_err(|error| anyhow!("Failed to wait for FFmpeg: {error}"))?;
+    let details = stderr_reader.join().unwrap_or_default();
+    if !status.success() {
+        return Err(anyhow!(
+            "FFmpeg streaming decode failed: {}",
+            details.trim()
+        ));
+    }
+    if processed_samples == 0 {
+        return Err(anyhow!("FFmpeg decoded no audio samples"));
+    }
+    let duration_seconds = processed_samples as f64 / 16_000.0;
+    let _ = progress(100, segments.len());
+    Ok((segments, duration_seconds))
+}
 
 /// Information about a selected audio file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -813,94 +935,30 @@ async fn run_import<R: Runtime>(
     }
 
     emit_progress(&app, "decoding", 15, "Decoding audio file...");
-
-    // Prefer the bundled FFmpeg path: it decodes and resamples in one pass and
-    // is dramatically faster for corpus-sized imports. Keep the existing Rust
-    // decoder as a compatibility fallback for formats FFmpeg cannot read.
-    let path_for_fast_decode = dest_path.clone();
-    let fast_decode =
-        tokio::task::spawn_blocking(move || decode_audio_file_to_whisper(&path_for_fast_decode))
-            .await
-            .map_err(|e| anyhow!("Fast decode task join error: {}", e))?;
-
-    let (audio_samples, duration_seconds) = match fast_decode {
-        Ok(decoded) => {
-            info!(
-                "Decoded directly to 16kHz mono with FFmpeg: {:.2}s",
-                decoded.duration_seconds
-            );
-            emit_progress(&app, "resampling", 25, "Converted audio to 16kHz mono");
-            (decoded.samples, decoded.duration_seconds)
-        }
-        Err(error) => {
-            warn!(
-                "Direct FFmpeg decode failed ({}); falling back to the Rust decoder",
-                error
-            );
-            let app_for_decode = app.clone();
-            let decode_progress = Box::new(move |progress: u32, msg: &str| {
-                let overall_progress = 15 + ((progress as f32 * 0.05) as u32);
-                emit_progress(&app_for_decode, "decoding", overall_progress, msg);
-            });
-            let path_for_decode = dest_path.clone();
-            let decoded = tokio::task::spawn_blocking(move || {
-                decode_audio_file_with_progress(&path_for_decode, Some(decode_progress))
-            })
-            .await
-            .map_err(|e| anyhow!("Decode task join error: {}", e))??;
-            let duration_seconds = decoded.duration_seconds;
-
-            info!(
-                "Decoded audio: {:.2}s, {}Hz, {} channels",
-                duration_seconds, decoded.sample_rate, decoded.channels
-            );
-            emit_progress(&app, "resampling", 20, "Converting audio format...");
-
-            let app_for_resample = app.clone();
-            let resample_progress = Box::new(move |progress: u32, msg: &str| {
-                let overall_progress = 20 + ((progress as f32 * 0.05) as u32);
-                emit_progress(&app_for_resample, "resampling", overall_progress, msg);
-            });
-            let audio_samples = tokio::task::spawn_blocking(move || {
-                decoded.to_whisper_format_with_progress(Some(resample_progress))
-            })
-            .await
-            .map_err(|e| anyhow!("Resample task join error: {}", e))?;
-            (audio_samples, duration_seconds)
-        }
-    };
-
-    if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-        return Err(anyhow!("Import cancelled"));
-    }
-    info!(
-        "Converted to 16kHz mono format: {} samples",
-        audio_samples.len()
+    emit_progress(
+        &app,
+        "vad",
+        20,
+        "Streaming audio through speech detection...",
     );
 
-    emit_progress(&app, "vad", 25, "Detecting speech segments...");
-
-    // Check for cancellation
-    if IMPORT_CANCELLED.load(Ordering::SeqCst) {
-        return Err(anyhow!("Import cancelled"));
-    }
-
-    // Use VAD to find speech segments
-    let app_for_vad = app.clone();
-
-    let speech_segments = tokio::task::spawn_blocking(move || {
-        get_speech_chunks_with_progress(
-            &audio_samples,
+    let expected_duration = extract_duration_from_metadata(&dest_path).ok();
+    let path_for_stream = dest_path.clone();
+    let app_for_stream = app.clone();
+    let streamed = tokio::task::spawn_blocking(move || {
+        stream_decode_speech_segments(
+            &path_for_stream,
             VAD_REDEMPTION_TIME_MS,
-            |vad_progress, segments_found| {
-                let overall_progress = 25 + (vad_progress as f32 * 0.05) as u32;
+            expected_duration,
+            |stream_progress, segments_found| {
+                let overall = 15 + ((stream_progress as f32 * 0.15) as u32);
                 emit_progress(
-                    &app_for_vad,
+                    &app_for_stream,
                     "vad",
-                    overall_progress,
+                    overall,
                     &format!(
-                        "Detecting speech segments... {}% ({} found)",
-                        vad_progress, segments_found
+                        "Streaming audio... {}% ({} speech segments)",
+                        stream_progress, segments_found
                     ),
                 );
                 !IMPORT_CANCELLED.load(Ordering::SeqCst)
@@ -908,8 +966,65 @@ async fn run_import<R: Runtime>(
         )
     })
     .await
-    .map_err(|e| anyhow!("VAD task panicked: {}", e))?
-    .map_err(|e| anyhow!("VAD processing failed: {}", e))?;
+    .map_err(|error| anyhow!("Streaming decode task panicked: {error}"))?;
+
+    let (speech_segments, duration_seconds) = match streamed {
+        Ok(result) => result,
+        Err(stream_error) => {
+            let source_size = std::fs::metadata(&dest_path)
+                .map(|metadata| metadata.len())
+                .unwrap_or_default();
+            const SAFE_FULL_DECODE_LIMIT: u64 = 512 * 1024 * 1024;
+            if source_size > SAFE_FULL_DECODE_LIMIT {
+                return Err(anyhow!(
+                    "Large recording could not be processed in memory-safe streaming mode: {stream_error}"
+                ));
+            }
+
+            warn!(
+                "Streaming decode failed ({}); using compatibility decoder for small file",
+                stream_error
+            );
+            let path_for_decode = dest_path.clone();
+            let decoded = tokio::task::spawn_blocking(move || {
+                decode_audio_file_to_whisper(&path_for_decode).or_else(|_| {
+                    let decoded = decode_audio_file_with_progress(&path_for_decode, None)?;
+                    let duration_seconds = decoded.duration_seconds;
+                    Ok::<crate::audio::decoder::WhisperAudio, anyhow::Error>(
+                        crate::audio::decoder::WhisperAudio {
+                            samples: decoded.to_whisper_format(),
+                            duration_seconds,
+                        },
+                    )
+                })
+            })
+            .await
+            .map_err(|error| anyhow!("Compatibility decode task panicked: {error}"))??;
+            let duration = decoded.duration_seconds;
+            let app_for_vad = app.clone();
+            let segments = tokio::task::spawn_blocking(move || {
+                get_speech_chunks_with_progress(
+                    &decoded.samples,
+                    VAD_REDEMPTION_TIME_MS,
+                    |vad_progress, segments_found| {
+                        emit_progress(
+                            &app_for_vad,
+                            "vad",
+                            20 + ((vad_progress as f32 * 0.10) as u32),
+                            &format!(
+                                "Detecting speech segments... {}% ({} found)",
+                                vad_progress, segments_found
+                            ),
+                        );
+                        !IMPORT_CANCELLED.load(Ordering::SeqCst)
+                    },
+                )
+            })
+            .await
+            .map_err(|error| anyhow!("VAD task panicked: {error}"))??;
+            (segments, duration)
+        }
+    };
 
     let total_segments = speech_segments.len();
     info!(
@@ -1019,7 +1134,7 @@ async fn run_import<R: Runtime>(
     const MAX_SEGMENT_SAMPLES: usize = 25 * 16000; // 25 seconds at 16kHz
 
     let mut processable_segments: Vec<crate::audio::vad::SpeechSegment> = Vec::new();
-    for segment in &speech_segments {
+    for segment in speech_segments {
         if segment.samples.len() > MAX_SEGMENT_SAMPLES {
             debug!(
                 "Splitting large segment ({:.0}ms, {} samples) at silence boundaries",
@@ -1027,11 +1142,11 @@ async fn run_import<R: Runtime>(
                 segment.samples.len()
             );
 
-            let sub_segments = split_segment_at_silence(segment, MAX_SEGMENT_SAMPLES);
+            let sub_segments = split_segment_at_silence(&segment, MAX_SEGMENT_SAMPLES);
             debug!("Split into {} sub-segments", sub_segments.len());
             processable_segments.extend(sub_segments);
         } else {
-            processable_segments.push(segment.clone());
+            processable_segments.push(segment);
         }
     }
 
@@ -1790,6 +1905,37 @@ mod tests {
         assert!(AUDIO_EXTENSIONS.contains(&"wav"));
         assert!(AUDIO_EXTENSIONS.contains(&"mp3"));
         assert!(!AUDIO_EXTENSIONS.contains(&"txt"));
+    }
+
+    #[test]
+    fn streaming_decode_keeps_pcm_out_of_the_result() {
+        if find_ffmpeg_path().is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("two-seconds.wav");
+        let pcm_bytes = 32_000_u32 * 2;
+        let mut contents = Vec::with_capacity(44 + pcm_bytes as usize);
+        contents.extend_from_slice(b"RIFF");
+        contents.extend_from_slice(&(36 + pcm_bytes).to_le_bytes());
+        contents.extend_from_slice(b"WAVEfmt ");
+        contents.extend_from_slice(&16_u32.to_le_bytes());
+        contents.extend_from_slice(&1_u16.to_le_bytes());
+        contents.extend_from_slice(&1_u16.to_le_bytes());
+        contents.extend_from_slice(&16_000_u32.to_le_bytes());
+        contents.extend_from_slice(&32_000_u32.to_le_bytes());
+        contents.extend_from_slice(&2_u16.to_le_bytes());
+        contents.extend_from_slice(&16_u16.to_le_bytes());
+        contents.extend_from_slice(b"data");
+        contents.extend_from_slice(&pcm_bytes.to_le_bytes());
+        contents.resize(44 + pcm_bytes as usize, 0);
+        std::fs::write(&wav, contents).unwrap();
+
+        let (segments, duration) =
+            stream_decode_speech_segments(&wav, VAD_REDEMPTION_TIME_MS, Some(2.0), |_, _| true)
+                .unwrap();
+        assert!(segments.is_empty());
+        assert!((duration - 2.0).abs() < 0.02);
     }
 
     #[test]

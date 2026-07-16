@@ -334,9 +334,10 @@ export function useSummaryGeneration({
               duration: 4000,
             });
 
-            if (meetingName && onMeetingUpdated) {
-              await onMeetingUpdated();
-            }
+            // Refresh persisted meeting data even when the model did not return a
+            // new title. This makes a summary generated while the user is on
+            // another screen visible immediately when they return.
+            if (onMeetingUpdated) await onMeetingUpdated();
 
             await Analytics.trackSummaryGenerationCompleted(
               modelConfig.provider,
@@ -414,9 +415,7 @@ export function useSummaryGeneration({
             true
           );
 
-          if (meetingName && onMeetingUpdated) {
-            await onMeetingUpdated();
-          }
+          if (onMeetingUpdated) await onMeetingUpdated();
         }
       });
     } catch (error) {

@@ -6,7 +6,11 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { Icon } from '@/components/memento/Icon';
 import { useT } from '@/lib/i18n';
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
+import { useAudioPlayer } from '@/hooks/useAudioPlayer';
+import { MeetingAudioPlayer } from './MeetingAudioPlayer';
 
 function formatClock(totalSeconds: number): string {
   const mins = Math.floor(totalSeconds / 60);
@@ -78,6 +82,51 @@ export function TranscriptPanel({
   onSpeakersDetected,
 }: TranscriptPanelProps) {
   const t = useT();
+  const [audioPath, setAudioPath] = useState<string | null>(null);
+  const [audioUnavailable, setAudioUnavailable] = useState(false);
+  const [isExportingMp3, setIsExportingMp3] = useState(false);
+  const audio = useAudioPlayer(audioPath);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAudioPath(null);
+    setAudioUnavailable(false);
+    if (!meetingId || !meetingFolderPath) return;
+
+    invoke<string>('get_meeting_audio_path', { meetingId })
+      .then((path) => {
+        if (!cancelled) setAudioPath(convertFileSrc(path));
+      })
+      .catch((error) => {
+        console.warn('Saved meeting has no playable audio:', error);
+        if (!cancelled) setAudioUnavailable(true);
+      });
+    return () => { cancelled = true; };
+  }, [meetingId, meetingFolderPath]);
+
+  const handleExportMp3 = useCallback(async () => {
+    if (!meetingId || isExportingMp3) return;
+    setIsExportingMp3(true);
+    try {
+      const exportedPath = await invoke<string | null>('export_meeting_audio_mp3', { meetingId });
+      if (exportedPath) toast.success(t('MP3 export completed'));
+    } catch (error) {
+      console.error('Failed to export meeting audio as MP3:', error);
+      toast.error(`${t('Failed to export MP3')}: ${String(error)}`);
+    } finally {
+      setIsExportingMp3(false);
+    }
+  }, [isExportingMp3, meetingId, t]);
+
+  const handlePlayTimestamp = useCallback((seconds: number) => {
+    if (!audioPath) return;
+    void audio.playFrom(seconds);
+  }, [audio, audioPath]);
+
+  const handleMarkedMoment = useCallback((seconds: number) => {
+    onSeekToMoment?.(seconds);
+    handlePlayTimestamp(seconds);
+  }, [handlePlayTimestamp, onSeekToMoment]);
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -104,13 +153,36 @@ export function TranscriptPanel({
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
-          onOpenMeetingFolder={onOpenMeetingFolder}
+          onToggleRecordingAudio={() => {
+            if (audio.isPlaying) audio.pause();
+            else void audio.play();
+          }}
+          recordingAudioAvailable={!!audioPath && !audioUnavailable}
+          isRecordingAudioPlaying={audio.isPlaying}
+          isRecordingAudioLoading={audio.isLoading}
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
           onSpeakersDetected={onSpeakersDetected}
         />
       </div>
+
+      {meetingId && meetingFolderPath && (
+        <MeetingAudioPlayer
+          available={!!audioPath && !audioUnavailable}
+          isPlaying={audio.isPlaying}
+          isLoading={audio.isLoading}
+          isExporting={isExportingMp3}
+          currentTime={audio.currentTime}
+          duration={audio.duration}
+          error={audio.error}
+          onPlay={() => { void audio.play(); }}
+          onPause={audio.pause}
+          onSeek={(seconds) => { void audio.seek(seconds); }}
+          onExportMp3={() => { void handleExportMp3(); }}
+          onOpenFolder={() => { void onOpenMeetingFolder(); }}
+        />
+      )}
 
       {/* Marked moments — click to jump the transcript to that point */}
       {markedMoments.length > 0 && (
@@ -120,7 +192,7 @@ export function TranscriptPanel({
             <button
               key={seconds}
               type="button"
-              onClick={() => onSeekToMoment?.(seconds)}
+              onClick={() => handleMarkedMoment(seconds)}
               title={t('Open this moment in the transcript')}
               className="mm-numeric inline-flex items-center gap-1 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-2 py-0.5 text-xs text-[var(--gold)] transition-colors hover:bg-[var(--gold-soft-strong)]"
             >
@@ -150,6 +222,8 @@ export function TranscriptPanel({
           scrollToTimestamp={scrollToTimestamp}
           speakersById={speakersById}
           onRenameSpeaker={onRenameSpeaker}
+          onPlayTimestamp={handlePlayTimestamp}
+          playbackTime={audioPath && (audio.isPlaying || audio.currentTime > 0) ? audio.currentTime : null}
         />
       </div>
 
