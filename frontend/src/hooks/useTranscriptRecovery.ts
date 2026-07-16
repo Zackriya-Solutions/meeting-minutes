@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
+import { clearStandupLiveState, migrateStandupLiveState } from '@/lib/standupLiveState';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 
@@ -186,6 +187,11 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
 
       const savedMeetingId = saveResponse.meeting_id;
 
+      // A transcription failure keeps the temporary IndexedDB meeting
+      // recoverable. Move its facilitation state only after recovery has
+      // created the durable meeting, mirroring the ordinary save path.
+      migrateStandupLiveState(meetingId, savedMeetingId);
+
       try {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
       } catch (error) {
@@ -231,6 +237,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
   const deleteRecoverableMeeting = useCallback(async (meetingId: string): Promise<void> => {
     try {
       await indexedDBService.deleteMeeting(meetingId);
+      clearStandupLiveState(meetingId);
       setRecoverableMeetings(prev => prev.filter(m => m.meetingId !== meetingId));
     } catch (error) {
       console.error('Failed to delete meeting:', error);

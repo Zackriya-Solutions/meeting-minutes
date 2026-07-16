@@ -11,7 +11,7 @@ import { storageService } from '@/services/storageService';
 import { recordingService } from '@/services/recordingService';
 import { transcriptService } from '@/services/transcriptService';
 import { migrateMarkedMoments } from '@/lib/markedMoments';
-import { clearStandupLiveState, migrateStandupLiveState } from '@/lib/standupLiveState';
+import { migrateStandupLiveState } from '@/lib/standupLiveState';
 import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
@@ -143,7 +143,6 @@ export function useRecordingStop(
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
     const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
-    let nativeRecordingStopped = false;
 
     try {
       console.log('Post-stop processing (new implementation)...', {
@@ -161,7 +160,6 @@ export function useRecordingStop(
         const dataDir = await appDataDir();
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         await recordingService.stopRecording(`${dataDir}/recording-${timestamp}.wav`);
-        nativeRecordingStopped = true;
         console.log('Native stop_recording completed');
       } catch (stopError) {
         console.error('Failed to stop native recording:', stopError);
@@ -471,13 +469,6 @@ export function useRecordingStop(
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
     } finally {
-      // Explicit discard is the only path that should destroy the temporary
-      // facilitation state. A timeout or failed database save remains
-      // recoverable under tempMeetingId, while a successful save has already
-      // migrated and removed the temporary key.
-      if (nativeRecordingStopped && !isCallApi) {
-        clearStandupLiveState(tempMeetingId);
-      }
       // Always reset the guard flag when done
       stopInProgressRef.current = false;
     }
