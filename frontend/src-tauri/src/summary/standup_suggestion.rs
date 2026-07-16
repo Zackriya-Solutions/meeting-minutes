@@ -233,7 +233,19 @@ async fn suggestion_for_meeting(
     Ok(suggest_from_signals(SuggestionSignals {
         standup_title: contains_any(
             &title,
-            &["standup", "стендап", "daily", "дейли", "ministandup"],
+            &[
+                "standup",
+                "стендап",
+                "daily standup",
+                "daily_standup",
+                "daily scrum",
+                "daily_scrum",
+                "daily sync",
+                "daily_sync",
+                "daily sync-up",
+                "дейли",
+                "ministandup",
+            ],
         ),
         other_meeting_title: contains_any(
             &title,
