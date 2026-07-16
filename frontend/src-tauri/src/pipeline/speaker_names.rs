@@ -130,6 +130,10 @@ const BLOCKED_STEMS: &[&str] = &[
     "сука",
     "пизд",
     "хуй",
+    "хуя",
+    "хую",
+    "хуем",
+    "хуём",
     "хуе",
     "хуё",
     "говн",
@@ -731,6 +735,10 @@ mod tests {
         assert_eq!(validate_candidate("Хер"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("му-дак"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("ху-й"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("хуя"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("хую"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("хуем"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("хуём"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("м'удак"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Иван123"), Err("invalid_shape"));
         assert_eq!(validate_candidate("Ааааа"), Err("implausible_shape"));
