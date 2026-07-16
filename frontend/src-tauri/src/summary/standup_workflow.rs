@@ -117,13 +117,14 @@ fn record_key(kind: &str, payload: &Value) -> String {
         .get("owner")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    format!(
-        "{kind}|{}|{}|{}|{}",
+    json!([
+        kind,
         normalized_identity(participant),
         category,
         normalized_identity(owner),
         normalized_identity(identity)
-    )
+    ])
+    .to_string()
 }
 
 fn flatten_report(report: &StandupReport) -> Result<Vec<(String, Value)>, serde_json::Error> {
@@ -672,6 +673,24 @@ mod tests {
             "evidence": [{"timestamp": "[10:00]"}]
         });
         assert_ne!(record_key("action", &anna), record_key("action", &boris));
+    }
+
+    #[test]
+    fn record_keys_cannot_collide_through_field_delimiters() {
+        let first = json!({
+            "participant": "a|b",
+            "category": "c",
+            "text": "d",
+        });
+        let second = json!({
+            "participant": "a",
+            "category": "b|c",
+            "text": "d",
+        });
+        assert_ne!(
+            record_key("participant_update", &first),
+            record_key("participant_update", &second)
+        );
     }
 
     #[test]
