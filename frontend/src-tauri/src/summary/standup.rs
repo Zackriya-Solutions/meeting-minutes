@@ -878,11 +878,22 @@ fn merge_text_items(target: &mut Vec<EvidencedText>, incoming: Vec<EvidencedText
     }
 }
 
+fn evidence_refs_same_line(left: &EvidenceRef, right: &EvidenceRef) -> bool {
+    if left.timestamp.trim() != right.timestamp.trim() {
+        return false;
+    }
+
+    match (left.quote.as_deref(), right.quote.as_deref()) {
+        (Some(left_quote), Some(right_quote)) => same_fact(left_quote, right_quote),
+        _ => false,
+    }
+}
+
 fn evidence_overlaps(left: &[EvidenceRef], right: &[EvidenceRef]) -> bool {
     left.iter().any(|left_ref| {
         right
             .iter()
-            .any(|right_ref| left_ref.timestamp.trim() == right_ref.timestamp.trim())
+            .any(|right_ref| evidence_refs_same_line(left_ref, right_ref))
     })
 }
 
@@ -913,7 +924,7 @@ fn participant_updates_are_same_speaker(
             existing_evidence.iter().any(|left| {
                 incoming_evidence
                     .iter()
-                    .any(|right| left.timestamp.trim() == right.timestamp.trim())
+                    .any(|right| evidence_refs_same_line(left, right))
             })
         }
         _ => false,
@@ -941,9 +952,11 @@ pub fn merge_standup_reports(reports: impl IntoIterator<Item = StandupReport>) -
         merge_text_items(&mut merged.unattributed_facts, report.unattributed_facts);
 
         for update in report.participant_updates {
-            if let Some(existing) = merged.participant_updates.iter_mut().find(|existing| {
-                participant_updates_are_same_speaker(existing, &update)
-            }) {
+            if let Some(existing) = merged
+                .participant_updates
+                .iter_mut()
+                .find(|existing| participant_updates_are_same_speaker(existing, &update))
+            {
                 merge_text_items(
                     &mut existing.completed_or_recent,
                     update.completed_or_recent,
@@ -1595,9 +1608,13 @@ mod tests {
     use super::*;
 
     fn evidence(timestamp: &str) -> Vec<EvidenceRef> {
+        evidence_with_quote(timestamp, "подтверждение")
+    }
+
+    fn evidence_with_quote(timestamp: &str, quote: &str) -> Vec<EvidenceRef> {
         vec![EvidenceRef {
             timestamp: timestamp.to_string(),
-            quote: Some("подтверждение".to_string()),
+            quote: Some(quote.to_string()),
         }]
     }
 
@@ -1912,6 +1929,29 @@ mod tests {
     }
 
     #[test]
+    fn merge_keeps_same_text_actions_separate_for_different_lines_in_same_second() {
+        let mut first = StandupReport::default();
+        first.action_items.push(StandupAction {
+            task: "Обновить документацию".to_string(),
+            owner: None,
+            due_date: None,
+            evidence: evidence_with_quote("[10:00]", "Я обновлю документацию API"),
+        });
+        let mut second = StandupReport::default();
+        second.action_items.push(StandupAction {
+            task: "Обновить документацию".to_string(),
+            owner: Some("Анна".to_string()),
+            due_date: Some("пятница".to_string()),
+            evidence: evidence_with_quote("[10:00]", "Я обновлю документацию релиза"),
+        });
+
+        let merged = merge_standup_reports([first, second]);
+        assert_eq!(merged.action_items.len(), 2);
+        assert!(merged.action_items[0].owner.is_none());
+        assert_eq!(merged.action_items[1].owner.as_deref(), Some("Анна"));
+    }
+
+    #[test]
     fn merge_keeps_unidentified_speakers_separate_without_shared_evidence() {
         let mut first = StandupReport::default();
         first.participant_updates.push(ParticipantUpdate {
@@ -1924,6 +1964,33 @@ mod tests {
         second.participant_updates.push(ParticipantUpdate {
             participant: None,
             completed_or_recent: vec![item("Второй статус", "[11:00]")],
+            next: Vec::new(),
+            blockers: Vec::new(),
+        });
+
+        let merged = merge_standup_reports([first, second]);
+        assert_eq!(merged.participant_updates.len(), 2);
+    }
+
+    #[test]
+    fn merge_keeps_unidentified_speakers_separate_for_different_lines_in_same_second() {
+        let mut first = StandupReport::default();
+        first.participant_updates.push(ParticipantUpdate {
+            participant: None,
+            completed_or_recent: vec![EvidencedText {
+                text: "Первый статус".to_string(),
+                evidence: evidence_with_quote("[10:00]", "Я закончил экран настроек"),
+            }],
+            next: Vec::new(),
+            blockers: Vec::new(),
+        });
+        let mut second = StandupReport::default();
+        second.participant_updates.push(ParticipantUpdate {
+            participant: None,
+            completed_or_recent: vec![EvidencedText {
+                text: "Второй статус".to_string(),
+                evidence: evidence_with_quote("[10:00]", "Я исправил импорт записей"),
+            }],
             next: Vec::new(),
             blockers: Vec::new(),
         });
