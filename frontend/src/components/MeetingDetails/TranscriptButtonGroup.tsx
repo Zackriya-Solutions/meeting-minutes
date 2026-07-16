@@ -7,6 +7,7 @@ import { Copy, FolderOpen, RefreshCw } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { DetectSpeakersButton } from './DetectSpeakersButton';
+import { SpeakerNameCandidatesButton } from './SpeakerNameCandidatesButton';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useT } from '@/lib/i18n';
 
@@ -91,6 +92,7 @@ export function TranscriptButtonGroup({
         )}
 
         <DetectSpeakersButton meetingId={meetingId} onDetected={onSpeakersDetected} />
+        <SpeakerNameCandidatesButton meetingId={meetingId} onApplied={onSpeakersDetected} />
       </ButtonGroup>
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
