@@ -1202,6 +1202,7 @@ pub async fn get_series_digest(
         if row.review_status != "accepted" {
             continue;
         }
+        accepted_meetings.insert(row.meeting_id.clone());
         let payload: Value = serde_json::from_str(&row.payload)
             .map_err(|error| format!("Stored standup record is invalid: {error}"))?;
         let Some(item) = digest_item(&row, &payload) else {
@@ -1211,7 +1212,6 @@ pub async fn get_series_digest(
             digest.cancelled_actions.push(item);
             continue;
         }
-        accepted_meetings.insert(row.meeting_id);
         match row.kind.as_str() {
             "overview" | "unattributed_fact" => digest.highlights.push(item),
             "participant_update" => digest.updates.push(item),
