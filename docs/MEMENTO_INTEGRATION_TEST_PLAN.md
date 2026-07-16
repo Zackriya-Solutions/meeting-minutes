@@ -1,8 +1,52 @@
 # План пользовательского тестирования Memento
 
 Ветка: `feat/memento-standup-integration`  
-База: актуальный `main` после PR #17  
+База: актуальный `main`, включая ранее влитые PR #13, #15 и #17  
 Цель: проверить одним прогоном уже влитые функции и весь открытый стендап-стек, не смешивая ошибки сборки, распознавания, суммаризации и продуктового UX.
+
+## Единая ветка для тестирования
+
+Для пользовательского и командного тестирования используйте только:
+
+- ветку `feat/memento-standup-integration`;
+- draft PR #37;
+- зафиксированный commit из шаблона обратной связи.
+
+Отдельные feature PR образуют stacked-историю разработки и нужны для точечного
+review. Их не нужно последовательно переключать, собирать или устанавливать.
+
+Для нового клона:
+
+```bash
+git clone git@github.com:andyzt/meet_at_giga.git
+cd meet_at_giga
+git fetch origin
+git switch --track origin/feat/memento-standup-integration
+cd frontend
+pnpm install
+pnpm run tauri:dev
+```
+
+Для существующего клона:
+
+```bash
+git fetch origin
+git switch feat/memento-standup-integration
+git pull --ff-only
+cd frontend
+pnpm install
+pnpm run tauri:dev
+```
+
+Не удаляйте пользовательские данные и не используйте `git reset --hard` для
+обновления тестовой копии. Если рабочее дерево изменено, сохраните изменения или
+создайте отдельный чистый клон.
+
+Эта ветка является тестовой, а не production-релизом. Управляемые DeepSeek и
+SaluteSpeech используют `gw.multitool.works` с резервом
+`gw2.multitool.works`; облачные сценарии проверяются только после явного
+согласия пользователя. Локальные режимы можно тестировать без отправки
+транскриптов во внешний сервис.
 
 ## Что вошло в сборку
 
