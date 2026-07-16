@@ -320,7 +320,12 @@ impl SummaryService {
         } else if provider == LLMProvider::DeepSeek {
             match crate::llm::providers::resolve_deepseek_transport(&pool).await {
                 Some(transport) => {
-                    effective_model_name = transport.model;
+                    // The summary picker is the source of truth for this request.
+                    // Transport-level configuration supplies only a fallback for
+                    // older/empty settings rows.
+                    if effective_model_name.trim().is_empty() {
+                        effective_model_name = transport.model;
+                    }
                     info!(
                         "Using DeepSeek transport at {} with model {}",
                         transport.base_url, effective_model_name
