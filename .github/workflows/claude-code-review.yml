@@ -40,6 +40,10 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL \
+            --retry 5 \
+            --retry-delay 2 \
+            --retry-max-time 60 \
+            --retry-all-errors \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$API_URL/repos/$GH_REPO/pulls/$PR_NUMBER" > "$GITHUB_WORKSPACE/.pr-meta.json"
