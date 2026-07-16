@@ -52,7 +52,11 @@ const BLOCKED_EXACT: &[&str] = &[
     "привет",
     "спасибо",
     "слушай",
+    "слушайте",
     "смотри",
+    "смотрите",
+    "подожди",
+    "подождите",
     "давай",
     "будет",
     "может",
@@ -79,6 +83,11 @@ const BLOCKED_EXACT: &[&str] = &[
     "угу",
     "сегодня",
     "завтра",
+    "все",
+    "всё",
+    "результат",
+    "результаты",
+    "новость",
     "hello",
     "team",
     "guys",
@@ -219,6 +228,13 @@ fn display_name(value: &str) -> String {
     output
 }
 
+fn has_name_like_capitalization(value: &str) -> bool {
+    value
+        .chars()
+        .find(|character| character.is_alphabetic())
+        .is_some_and(char::is_uppercase)
+}
+
 fn validate_candidate(value: &str) -> Result<String, &'static str> {
     let trimmed = value.trim();
     let normalized = normalize_name(trimmed);
@@ -262,6 +278,9 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
     let mut extracted = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
         for capture in SELF_INTRO.captures_iter(&segment.text) {
+            if !has_name_like_capitalization(&capture[1]) {
+                continue;
+            }
             extracted.push(ExtractedCandidate {
                 text: display_name(&capture[1]),
                 speaker_id: segment.speaker_id,
@@ -272,6 +291,9 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             });
         }
         for capture in EXPLICIT_INTRO.captures_iter(&segment.text) {
+            if !has_name_like_capitalization(&capture[1]) {
+                continue;
+            }
             extracted.push(ExtractedCandidate {
                 text: display_name(&capture[1]),
                 speaker_id: None,
@@ -282,6 +304,9 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             });
         }
         if let Some(capture) = DIRECT_ADDRESS.captures(&segment.text) {
+            if !has_name_like_capitalization(&capture[1]) {
+                continue;
+            }
             let candidate_text = display_name(&capture[1]);
             let Some(addressing_speaker_id) = segment.speaker_id else {
                 // Without an attributed addressing turn, a later speaker is not
@@ -311,28 +336,53 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
     extracted
 }
 
-async fn rejection_salt(pool: &SqlitePool) -> Result<String, sqlx::Error> {
-    if let Some(value) = sqlx::query_scalar::<_, String>(
+#[cfg(not(test))]
+const REJECTION_SALT_SERVICE: &str = "meetily.speaker-names";
+#[cfg(not(test))]
+const REJECTION_SALT_ACCOUNT: &str = "rejection-salt-v1";
+
+#[cfg(not(test))]
+async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
+    let entry = keyring::Entry::new(REJECTION_SALT_SERVICE, REJECTION_SALT_ACCOUNT)
+        .map_err(|error| format!("credential vault unavailable: {error}"))?;
+    if let Ok(value) = entry.get_password() {
+        if !value.is_empty() {
+            // Remove the legacy database copy after a successful vault read. This
+            // keeps future database backups from containing both salt and hashes.
+            sqlx::query(
+                "DELETE FROM app_settings_kv \
+                 WHERE key='speaker_alias.rejection_salt.secret'",
+            )
+            .execute(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+            return Ok(value);
+        }
+    }
+
+    let legacy = sqlx::query_scalar::<_, String>(
         "SELECT value FROM app_settings_kv WHERE key='speaker_alias.rejection_salt.secret'",
     )
     .fetch_optional(pool)
-    .await?
-    {
-        return Ok(value);
-    }
-    let salt = uuid::Uuid::new_v4().to_string();
+    .await
+    .map_err(|error| error.to_string())?;
+    let salt = legacy.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    entry
+        .set_password(&salt)
+        .map_err(|error| format!("cannot save speaker-name rejection salt: {error}"))?;
     sqlx::query(
-        "INSERT OR IGNORE INTO app_settings_kv(key, value, updated_at) \
-         VALUES('speaker_alias.rejection_salt.secret', ?, datetime('now'))",
+        "DELETE FROM app_settings_kv \
+         WHERE key='speaker_alias.rejection_salt.secret'",
     )
-    .bind(&salt)
     .execute(pool)
-    .await?;
-    Ok(sqlx::query_scalar(
-        "SELECT value FROM app_settings_kv WHERE key='speaker_alias.rejection_salt.secret'",
-    )
-    .fetch_one(pool)
-    .await?)
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(salt)
+}
+
+#[cfg(test)]
+async fn rejection_salt(_pool: &SqlitePool) -> Result<String, String> {
+    Ok("speaker-name-test-salt".to_string())
 }
 
 fn candidate_hash(salt: &str, normalized: &str) -> String {
@@ -414,8 +464,8 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
                     candidate.start_ms,
                     candidate.evidence_kind,
                 )
-                    .await
-                    .map_err(|error| error.to_string())?;
+                .await
+                .map_err(|error| error.to_string())?;
                 continue;
             }
         };
@@ -454,6 +504,9 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
         .map_err(|error| error.to_string())?;
     let mut inserted = 0;
     for ((normalized, speaker_id, evidence_kind), (candidate, occurrence_count)) in grouped {
+        if evidence_kind == "direct_address" && occurrence_count < 2 {
+            continue;
+        }
         let hash = candidate_hash(&salt, &normalized);
         let speaker_key = candidate.speaker_id.unwrap_or(-1);
         let result = sqlx::query(
@@ -728,6 +781,22 @@ mod tests {
     }
 
     #[test]
+    fn extraction_rejects_lowercase_trigger_completions_that_are_not_names() {
+        let rows = vec![
+            segment("С нами сегодня всё в порядке", Some(7), 0),
+            segment("Представлю вам результаты", Some(7), 1_000),
+            segment("Слушайте, у меня новость", Some(7), 2_000),
+            segment("Первый ответ", Some(8), 3_000),
+            segment("Слушайте, продолжим", Some(7), 4_000),
+            segment("Второй ответ", Some(8), 5_000),
+        ];
+
+        assert!(extract_candidates(&rows)
+            .iter()
+            .all(|candidate| validate_candidate(&candidate.text).is_err()));
+    }
+
+    #[test]
     fn salted_hash_is_stable_per_install_and_changes_with_salt() {
         assert_eq!(candidate_hash("a", "анна"), candidate_hash("a", "анна"));
         assert_ne!(candidate_hash("a", "анна"), candidate_hash("b", "анна"));
@@ -901,14 +970,15 @@ mod tests {
         .unwrap();
         assert_eq!(raw_rejections, 0);
 
-        let salt: String = sqlx::query_scalar(
-            "SELECT value FROM app_settings_kv \
+        let stored_salt_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM app_settings_kv \
              WHERE key='speaker_alias.rejection_salt.secret'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        let rejected_hash = candidate_hash(&salt, "дебил");
+        assert_eq!(stored_salt_count, 0);
+        let rejected_hash = candidate_hash("speaker-name-test-salt", "дебил");
         let direct_address_rejections: i64 = sqlx::query_scalar(
             "SELECT occurrence_count FROM rejected_speaker_name_fingerprints \
              WHERE candidate_hash=? AND reason='abusive_or_profane'",
@@ -931,7 +1001,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rescan_replaces_pending_evidence_and_recomputes_occurrences() {
+    async fn rescan_removes_direct_address_after_evidence_drops_below_threshold() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -983,17 +1053,14 @@ mod tests {
         scan_candidates(&pool, "m1").await.unwrap();
 
         assert!(list_candidates(&pool, "m1").await.unwrap().is_empty());
-        let refreshed: (Option<String>, Option<i64>, i64) = sqlx::query_as(
-            "SELECT evidence_quote, evidence_start_ms, occurrence_count \
+        let pending_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) \
              FROM speaker_name_candidates WHERE meeting_id='m1' AND status='pending'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(
-            refreshed,
-            (Some("Иван, новый вопрос".into()), Some(5_000), 1)
-        );
+        assert_eq!(pending_count, 0);
     }
 
     #[tokio::test]
