@@ -3,7 +3,6 @@
 use crate::state::AppState;
 use crate::summary::standup::{parse_timestamp_seconds, StandupReport};
 use crate::utils::format_timestamp;
-use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
@@ -607,14 +606,14 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
-                        THEN julianday(source.occurred_at, 'utc') \
+                        THEN julianday(source.occurred_at) \
                         ELSE julianday(source.created_at) END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
-                        THEN julianday(current.occurred_at, 'utc') \
+                        THEN julianday(current.occurred_at) \
                         ELSE julianday(current.created_at) END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
              ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
-                           THEN julianday(source.occurred_at, 'utc') \
+                           THEN julianday(source.occurred_at) \
                            ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
@@ -651,7 +650,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
                     source.id AS source_id, source.title AS source_title, \
                     CASE WHEN source.occurred_at IS NOT NULL \
-                         THEN julianday(source.occurred_at, 'utc') \
+                         THEN julianday(source.occurred_at) \
                          ELSE julianday(source.created_at) END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
@@ -661,10 +660,10 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
-                        THEN julianday(source.occurred_at, 'utc') \
+                        THEN julianday(source.occurred_at) \
                         ELSE julianday(source.created_at) END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
-                        THEN julianday(current.occurred_at, 'utc') \
+                        THEN julianday(current.occurred_at) \
                         ELSE julianday(current.created_at) END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
@@ -724,10 +723,13 @@ fn parse_digest_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     }
     for format in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"] {
         if let Ok(value) = chrono::NaiveDateTime::parse_from_str(value, format) {
-            return chrono::Local
-                .from_local_datetime(&value)
-                .single()
-                .map(|value| value.with_timezone(&chrono::Utc));
+            // Legacy timestamps without an explicit offset are stored alongside
+            // SQLite UTC `created_at` values. Interpret them deterministically as
+            // UTC instead of shifting them according to the machine running Memento.
+            return Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                value,
+                chrono::Utc,
+            ));
         }
     }
     None
@@ -1121,7 +1123,7 @@ pub async fn get_series_digest(
                            ELSE strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) END \
          FROM meetings m JOIN meeting_collections mc ON mc.meeting_id = m.id \
          WHERE mc.collection_id = ? \
-         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at, 'utc') \
+         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
                        ELSE julianday(m.created_at) END, m.id",
     )
     .bind(collection_id)
@@ -1176,7 +1178,7 @@ pub async fn get_series_digest(
          JOIN meeting_collections mc ON mc.meeting_id = m.id \
          LEFT JOIN action_items ai ON ai.standup_record_id = sr.id \
          WHERE mc.collection_id = ? \
-         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at, 'utc') \
+         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
                        ELSE julianday(m.created_at) END DESC, sr.id DESC",
     )
     .bind(collection_id)
@@ -1888,6 +1890,93 @@ mod tests {
         assert_eq!(digest.period_start, None);
         assert_eq!(digest.period_end, None);
         assert!(digest.highlights.is_empty());
+    }
+
+    #[test]
+    fn timezone_unknown_digest_dates_are_treated_as_utc() {
+        let parsed = parse_digest_datetime("2026-07-15 10:00:00").unwrap();
+        assert_eq!(
+            parsed.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            "2026-07-15T10:00:00Z"
+        );
+    }
+
+    #[tokio::test]
+    async fn mixed_occurrence_and_created_at_dates_keep_chronological_order() {
+        let pool = test_pool().await;
+        for (id, title, created_at, occurred_at) in [
+            (
+                "fallback",
+                "Fallback timestamp",
+                "2026-07-15 09:30:00",
+                None,
+            ),
+            (
+                "zoned",
+                "Explicit UTC timestamp",
+                "2026-07-15T08:00:00Z",
+                Some("2026-07-15T10:00:00Z"),
+            ),
+            (
+                "timezone-unknown",
+                "Timezone-unknown timestamp",
+                "2026-07-15T08:30:00Z",
+                Some("2026-07-15 10:30:00"),
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO meetings(id, title, created_at, occurred_at) VALUES(?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(title)
+            .bind(created_at)
+            .bind(occurred_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("INSERT INTO collections VALUES(1, 'Series', 'series')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for meeting_id in ["fallback", "zoned", "timezone-unknown"] {
+            sqlx::query("INSERT INTO meeting_collections VALUES(?, 1)")
+                .bind(meeting_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let mut source_report = report();
+            source_report.decisions[0].decision = meeting_id.to_string();
+            sync_standup_records(&pool, meeting_id, &source_report)
+                .await
+                .unwrap();
+            for record in list_records(&pool, meeting_id).await.unwrap() {
+                if record.kind == "decision" {
+                    review_record(
+                        &pool,
+                        ReviewStandupRecordInput {
+                            record_id: record.id,
+                            status: "accepted".into(),
+                            edited_text: None,
+                            owner: None,
+                            due_date: None,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                }
+            }
+        }
+
+        let digest = get_series_digest(&pool, 1, None, Some("en")).await.unwrap();
+        assert_eq!(
+            digest
+                .decisions
+                .iter()
+                .map(|item| item.source_meeting_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["timezone-unknown", "zoned", "fallback"]
+        );
     }
 
     #[tokio::test]
