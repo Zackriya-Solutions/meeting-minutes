@@ -353,13 +353,14 @@ export function StandupWorkflowPanel({
           {liveState.markers.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {liveState.markers.map((marker) => (
-                <a
+                <button
+                  type="button"
                   key={marker.id}
-                  href={`/meeting-details?id=${encodeURIComponent(meetingId)}&t=${marker.seconds}`}
+                  onClick={() => router.push(sourceHref(meetingId, marker.seconds * 1000))}
                   className="rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs text-[var(--gold)] hover:underline"
                 >
                   {marker.kind === 'parking_lot' ? t('Parking lot') : t('Question')} · {Math.floor(marker.seconds / 60)}:{String(marker.seconds % 60).padStart(2, '0')}
-                </a>
+                </button>
               ))}
             </div>
           )}
