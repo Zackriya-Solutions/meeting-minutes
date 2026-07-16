@@ -14,10 +14,6 @@ const PENDING_SUMMARY: &str = "pending_confirmation:summary";
 const PENDING_BOTH: &str = "pending_confirmation:transcription,summary";
 const DEEPSEEK_MODEL: &str = crate::llm::providers::deepseek::DEFAULT_MODEL;
 const SALUTESPEECH_MODEL: &str = "salutespeech-stream-v2";
-const LOCAL_TRANSCRIPTION_PROVIDER: &str = "gigaam";
-const LOCAL_TRANSCRIPTION_MODEL: &str = "gigaam-v3-e2e-ctc";
-const LOCAL_SUMMARY_PROVIDER: &str = "builtin-ai";
-const LOCAL_SUMMARY_MODEL: &str = "qwen3.5:4b";
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
 pub struct MigrationReport {
@@ -103,72 +99,7 @@ async fn managed_targets_available(
     )
 }
 
-/// Repair the exact provider values written by an earlier accepted migration
-/// when the current binary has no possible managed credentials. This is narrow
-/// by design: explicit user-selected providers and managed-capable builds are
-/// never changed.
-pub async fn repair_unavailable_managed_defaults(
-    pool: &SqlitePool,
-) -> Result<MigrationReport, sqlx::Error> {
-    let marker =
-        sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ? LIMIT 1")
-            .bind(MARKER)
-            .fetch_optional(pool)
-            .await?;
-    if marker.as_deref() != Some("applied") {
-        return Ok(MigrationReport::default());
-    }
-
-    let (transcription_capable, summary_capable) = managed_capabilities(pool).await;
-    if transcription_capable && summary_capable {
-        return Ok(MigrationReport::default());
-    }
-
-    let mut tx = pool.begin().await?;
-    let mut report = MigrationReport::default();
-    if !transcription_capable {
-        let updated = sqlx::query(
-            "UPDATE transcript_settings SET provider=?, model=? \
-             WHERE id='1' AND provider='salutespeech' AND model=?",
-        )
-        .bind(LOCAL_TRANSCRIPTION_PROVIDER)
-        .bind(LOCAL_TRANSCRIPTION_MODEL)
-        .bind(SALUTESPEECH_MODEL)
-        .execute(&mut *tx)
-        .await?;
-        report.transcription_changed = updated.rows_affected() > 0;
-    }
-    if !summary_capable {
-        let updated = sqlx::query(
-            "UPDATE settings SET provider=?, model=? \
-             WHERE id='1' AND provider='deepseek' AND model=?",
-        )
-        .bind(LOCAL_SUMMARY_PROVIDER)
-        .bind(LOCAL_SUMMARY_MODEL)
-        .bind(DEEPSEEK_MODEL)
-        .execute(&mut *tx)
-        .await?;
-        report.summary_changed = updated.rows_affected() > 0;
-    }
-    if report.transcription_changed || report.summary_changed {
-        sqlx::query(
-            "UPDATE app_settings_kv SET value='reverted_unavailable', \
-             updated_at=datetime('now') WHERE key=? AND value='applied'",
-        )
-        .bind(MARKER)
-        .execute(&mut *tx)
-        .await?;
-    }
-    tx.commit().await?;
-    Ok(report)
-}
-
 pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> {
-    let repair = repair_unavailable_managed_defaults(pool).await?;
-    if repair.transcription_changed || repair.summary_changed {
-        return Ok(repair);
-    }
-
     let (transcription_capable, summary_capable) = managed_capabilities(pool).await;
     let mut tx = pool.begin().await?;
     let marker =
@@ -626,19 +557,16 @@ mod tests {
         assert!(!report.pending_confirmation);
         assert_eq!(
             values(&pool, "transcript_settings").await,
-            (
-                LOCAL_TRANSCRIPTION_PROVIDER.into(),
-                LOCAL_TRANSCRIPTION_MODEL.into()
-            )
+            ("gigaam".into(), "gigaam-v3-e2e-ctc".into())
         );
         assert_eq!(
             values(&pool, "settings").await,
-            (LOCAL_SUMMARY_PROVIDER.into(), LOCAL_SUMMARY_MODEL.into())
+            ("builtin-ai".into(), "qwen3.5:4b".into())
         );
     }
 
     #[tokio::test]
-    async fn repairs_managed_defaults_applied_by_an_unavailable_test_build() {
+    async fn unavailable_build_preserves_already_selected_managed_providers() {
         let pool = pool().await;
         sqlx::query("INSERT INTO app_settings_kv(key,value) VALUES(?, 'applied')")
             .bind(MARKER)
@@ -657,24 +585,22 @@ mod tests {
             .unwrap();
 
         let report = migrate(&pool).await.unwrap();
-        assert!(report.transcription_changed);
-        assert!(report.summary_changed);
+        assert!(report.already_applied);
+        assert!(!report.transcription_changed);
+        assert!(!report.summary_changed);
         assert_eq!(
             values(&pool, "transcript_settings").await,
-            (
-                LOCAL_TRANSCRIPTION_PROVIDER.into(),
-                LOCAL_TRANSCRIPTION_MODEL.into()
-            )
+            ("salutespeech".into(), SALUTESPEECH_MODEL.into())
         );
         assert_eq!(
             values(&pool, "settings").await,
-            (LOCAL_SUMMARY_PROVIDER.into(), LOCAL_SUMMARY_MODEL.into())
+            ("deepseek".into(), DEEPSEEK_MODEL.into())
         );
         let marker: String = sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
             .bind(MARKER)
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(marker, "reverted_unavailable");
+        assert_eq!(marker, "applied");
     }
 }
