@@ -30,7 +30,7 @@ export function StopScreen({ onContinue }: { onContinue: () => void }) {
           Start capturing (coming soon)
         </button>
       </div>
-      <footer style={styles.footer}>Value Accelerator</footer>
+      <footer style={styles.footer}>Value Accelerator GmbH</footer>
     </div>
   );
 }

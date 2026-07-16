@@ -32,7 +32,7 @@ export function LandingScreen({ onProceed }: { onProceed: () => void }) {
           Get started
         </button>
       </div>
-      <footer style={styles.footer}>Value Accelerator</footer>
+      <footer style={styles.footer}>Value Accelerator GmbH</footer>
     </div>
   );
 }

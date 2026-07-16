@@ -1,90 +1,51 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { VA_BLUE } from '../../assets/VaLogo';
 // VALUEOS: REUSE upstream's model-download capability as-is (no copy). `useOnboarding`
-// is an exported hook whose provider (OnboardingProvider) wraps every route, so we call
-// it directly. It performs the real Tauri downloads (parakeet + summary model); we only
-// wrap it in our branded UI. See valueos/FEATURE-branded-shell.md.
+// is an exported hook whose provider wraps every route, so we call it directly. It runs
+// the real Tauri downloads; we only show a branded, detail-free loading screen over it.
 import { useOnboarding } from '@/contexts/OnboardingContext';
 
-// VALUEOS: Screen B — ValueOS-branded model download (reuses upstream download).
+// VALUEOS: Screen B — branded setup/loading. Blue full screen, a spinner, and generic
+// copy only. We deliberately do NOT surface per-model names, sources, or progress
+// breakdowns (nothing that reveals the underlying engine).
 export function ModelDownloadScreen({ onComplete }: { onComplete: () => void }) {
   const {
     startBackgroundDownloads,
-    retryParakeetDownload,
     recommendedSummaryModel,
-    parakeetProgress,
     parakeetDownloaded,
-    summaryModelProgress,
     summaryModelDownloaded,
   } = useOnboarding();
 
-  const [started, setStarted] = useState(false);
   const complete = parakeetDownloaded && summaryModelDownloaded;
+  const startedRef = useRef(false);
 
-  // Advance to the stop page once the reused download reports both models ready.
+  // Auto-start the reused download once (as soon as the recommended model is known).
   useEffect(() => {
-    if (complete) onComplete();
-  }, [complete, onComplete]);
-
-  const handleStart = async () => {
-    setStarted(true);
-    await startBackgroundDownloads({
+    if (complete || startedRef.current || !recommendedSummaryModel) return;
+    startedRef.current = true;
+    void startBackgroundDownloads({
       includeParakeet: true,
       includeSummary: true,
       summaryModel: recommendedSummaryModel,
     });
-  };
+  }, [complete, recommendedSummaryModel, startBackgroundDownloads]);
+
+  // Advance to the stop page once the reused download reports everything ready.
+  useEffect(() => {
+    if (complete) onComplete();
+  }, [complete, onComplete]);
 
   return (
     <div data-testid="valueos-download" style={styles.root}>
-      <div style={styles.card}>
+      <style>{`@keyframes valueos-spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={styles.center}>
+        <div data-testid="valueos-spinner" style={styles.spinner} aria-hidden="true" />
         <h1 style={styles.title}>Setting up ValueOS Agent</h1>
-        <p style={styles.subtitle}>
-          Download the on-device models that power local transcription and summaries.
-          Everything runs on your machine.
+        <p data-testid="valueos-download-status" style={styles.status}>
+          Downloading models…
         </p>
-
-        {!started && !complete && (
-          <button
-            type="button"
-            data-testid="valueos-download-start"
-            style={styles.button}
-            onClick={handleStart}
-          >
-            Download models
-          </button>
-        )}
-
-        {started && !complete && (
-          <div data-testid="valueos-download-progress" style={{ width: '100%' }}>
-            <ProgressRow label="Transcription model" percent={parakeetProgress} />
-            <ProgressRow label="Summary model" percent={summaryModelProgress} />
-            <button
-              type="button"
-              data-testid="valueos-download-retry"
-              style={styles.retry}
-              onClick={() => retryParakeetDownload()}
-            >
-              Retry
-            </button>
-          </div>
-        )}
       </div>
-    </div>
-  );
-}
-
-function ProgressRow({ label, percent }: { label: string; percent: number }) {
-  const pct = Math.max(0, Math.min(100, Math.round(percent)));
-  return (
-    <div style={{ margin: '16px 0', textAlign: 'left' }}>
-      <div style={styles.progressLabel}>
-        <span>{label}</span>
-        <span>{pct}%</span>
-      </div>
-      <div style={styles.track}>
-        <div style={{ ...styles.fill, width: `${pct}%` }} />
-      </div>
+      <footer style={styles.footer}>Value Accelerator GmbH</footer>
     </div>
   );
 }
@@ -94,44 +55,25 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'fixed',
     inset: 0,
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#f4f6fc',
-    color: '#0b1533',
+    background: `linear-gradient(160deg, ${VA_BLUE} 0%, #001f7a 100%)`,
+    color: '#ffffff',
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     padding: 24,
-  },
-  card: {
-    maxWidth: 480,
-    width: '100%',
-    background: '#ffffff',
-    borderRadius: 16,
-    padding: 40,
-    boxShadow: '0 12px 40px rgba(0,32,122,0.12)',
     textAlign: 'center',
   },
-  title: { fontSize: 28, fontWeight: 800, margin: '0 0 8px' },
-  subtitle: { fontSize: 15, lineHeight: 1.5, opacity: 0.8, margin: '0 0 28px' },
-  button: {
-    background: VA_BLUE,
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: 10,
-    padding: '14px 32px',
-    fontSize: 16,
-    fontWeight: 700,
-    cursor: 'pointer',
+  center: { display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  spinner: {
+    width: 56,
+    height: 56,
+    borderRadius: '50%',
+    border: '4px solid rgba(255,255,255,0.25)',
+    borderTopColor: '#ffffff',
+    animation: 'valueos-spin 0.9s linear infinite',
   },
-  retry: {
-    background: 'transparent',
-    color: VA_BLUE,
-    border: 'none',
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: 'pointer',
-    marginTop: 8,
-  },
-  progressLabel: { display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 },
-  track: { height: 8, borderRadius: 4, background: '#e2e8f5', overflow: 'hidden' },
-  fill: { height: '100%', background: VA_BLUE, transition: 'width 0.3s ease' },
+  title: { fontSize: 28, fontWeight: 800, margin: '28px 0 8px' },
+  status: { fontSize: 16, opacity: 0.85, margin: 0 },
+  footer: { position: 'absolute', bottom: 20, fontSize: 12, opacity: 0.7, letterSpacing: 1 },
 };

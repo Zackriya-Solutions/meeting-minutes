@@ -60,6 +60,7 @@ describe('ValueOS branded shell', () => {
     expect(screen.getByTestId('valueos-landing')).toBeInTheDocument();
     expect(screen.getByText('ValueOS Agent')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /value accelerator/i })).toBeInTheDocument();
+    expect(screen.getByText('Value Accelerator GmbH')).toBeInTheDocument();
     expect(screen.getByTestId('valueos-proceed')).toBeInTheDocument();
   });
 
@@ -70,11 +71,10 @@ describe('ValueOS branded shell', () => {
     expect(screen.queryByTestId('valueos-landing')).not.toBeInTheDocument();
   });
 
-  it('B: the download control triggers the reused upstream capability with the right args', () => {
+  it('B: entering the download screen auto-triggers the reused capability with the right args', async () => {
     render(<ValueOsShell />);
     fireEvent.click(screen.getByTestId('valueos-proceed'));
-    fireEvent.click(screen.getByTestId('valueos-download-start'));
-    expect(h.startBackgroundDownloads).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(h.startBackgroundDownloads).toHaveBeenCalledTimes(1));
     expect(h.startBackgroundDownloads).toHaveBeenCalledWith({
       includeParakeet: true,
       includeSummary: true,
@@ -82,10 +82,19 @@ describe('ValueOS branded shell', () => {
     });
   });
 
+  it('B: shows a generic loading state and never leaks engine/model details', () => {
+    render(<ValueOsShell />);
+    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    expect(screen.getByTestId('valueos-spinner')).toBeInTheDocument();
+    expect(screen.getByTestId('valueos-download-status')).toHaveTextContent(/downloading models/i);
+    // No details that would reveal the underlying engine.
+    expect(screen.queryByText(/parakeet|meetily|whisper|transcription model|summary model/i)).toBeNull();
+  });
+
   it('B→C: completing the download advances to the stop page and ends the flow', async () => {
     const { rerender } = render(<ValueOsShell />);
     fireEvent.click(screen.getByTestId('valueos-proceed'));
-    fireEvent.click(screen.getByTestId('valueos-download-start'));
+    await waitFor(() => expect(h.startBackgroundDownloads).toHaveBeenCalled());
 
     // Simulate the reused download reporting both models ready.
     h.state.parakeetDownloaded = true;
