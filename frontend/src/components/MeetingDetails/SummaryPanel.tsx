@@ -318,7 +318,14 @@ export function SummaryPanel({
       {transcripts.length > 0 && !isSummaryLoading && (
         <MeetingContentWindowNotice meetingId={meeting.id} />
       )}
-      <StandupWorkflowPanel meetingId={meeting.id} summaryStatus={summaryStatus} />
+      <StandupWorkflowPanel
+        meetingId={meeting.id}
+        summaryStatus={summaryStatus}
+        standupSelected={
+          availableTemplates.find((template) => template.id === selectedTemplate)?.name
+          === 'Daily Standup'
+        }
+      />
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">
