@@ -116,7 +116,8 @@ struct DigestRecordRow {
     id: i64,
     meeting_id: String,
     meeting_title: String,
-    occurred_at: String,
+    occurred_at: Option<String>,
+    created_at: String,
     kind: String,
     payload: String,
     review_status: String,
@@ -598,14 +599,14 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
                         THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at) END < \
+                        ELSE julianday(source.created_at, 'localtime') END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
                         THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at) END \
+                        ELSE julianday(current.created_at, 'localtime') END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
              ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
                            THEN julianday(source.occurred_at) \
-                           ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
+                           ELSE julianday(source.created_at, 'localtime') END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -642,7 +643,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
                     source.id AS source_id, source.title AS source_title, \
                     CASE WHEN source.occurred_at IS NOT NULL \
                          THEN julianday(source.occurred_at) \
-                         ELSE julianday(source.created_at) END AS source_time \
+                         ELSE julianday(source.created_at, 'localtime') END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -652,10 +653,10 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
                         THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at) END < \
+                        ELSE julianday(source.created_at, 'localtime') END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
                         THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at) END \
+                        ELSE julianday(current.created_at, 'localtime') END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
@@ -726,6 +727,13 @@ fn parse_digest_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     None
 }
 
+fn digest_meeting_datetime(occurred_at: Option<&str>, created_at: &str) -> String {
+    let value = occurred_at.unwrap_or(created_at);
+    parse_digest_datetime(value)
+        .map(|parsed| parsed.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_else(|| value.to_string())
+}
+
 fn digest_source_start_ms(payload: &Value) -> Option<i64> {
     payload_start_ms(payload)
 }
@@ -759,7 +767,7 @@ fn digest_item(row: &DigestRecordRow, payload: &Value) -> Option<SeriesDigestIte
             .unwrap_or(false),
         source_meeting_id: row.meeting_id.clone(),
         source_meeting_title: row.meeting_title.clone(),
-        source_occurred_at: row.occurred_at.clone(),
+        source_occurred_at: digest_meeting_datetime(row.occurred_at.as_deref(), &row.created_at),
         source_start_ms: digest_source_start_ms(payload),
     })
 }
@@ -958,18 +966,24 @@ pub async fn get_series_digest(
         return Err("Digest is available only for a series collection".to_string());
     }
 
-    let meetings: Vec<(String, String)> = sqlx::query_as(
-        "SELECT m.id, CASE WHEN m.occurred_at IS NOT NULL THEN m.occurred_at \
-                           ELSE strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) END \
+    let meeting_rows: Vec<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT m.id, m.occurred_at, m.created_at \
          FROM meetings m JOIN meeting_collections mc ON mc.meeting_id = m.id \
-         WHERE mc.collection_id = ? \
-         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
-                       ELSE julianday(m.created_at) END, m.id",
+         WHERE mc.collection_id = ?",
     )
     .bind(collection_id)
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
+    let meetings = meeting_rows
+        .into_iter()
+        .map(|(id, occurred_at, created_at)| {
+            (
+                id,
+                digest_meeting_datetime(occurred_at.as_deref(), &created_at),
+            )
+        })
+        .collect::<Vec<_>>();
 
     let anchor = meetings
         .iter()
@@ -1006,10 +1020,9 @@ pub async fn get_series_digest(
         .max()
         .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
 
-    let rows: Vec<DigestRecordRow> = sqlx::query_as(
+    let mut rows: Vec<DigestRecordRow> = sqlx::query_as(
         "SELECT sr.id, m.id AS meeting_id, m.title AS meeting_title, \
-                CASE WHEN m.occurred_at IS NOT NULL THEN m.occurred_at \
-                     ELSE strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) END AS occurred_at, \
+                m.occurred_at, m.created_at, \
                 sr.kind, \
                 COALESCE(sr.reviewed_payload, sr.payload) AS payload, sr.review_status, \
                 ai.status AS action_status \
@@ -1017,14 +1030,25 @@ pub async fn get_series_digest(
          JOIN meetings m ON m.id = sr.meeting_id \
          JOIN meeting_collections mc ON mc.meeting_id = m.id \
          LEFT JOIN action_items ai ON ai.standup_record_id = sr.id \
-         WHERE mc.collection_id = ? \
-         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
-                       ELSE julianday(m.created_at) END DESC, sr.id DESC",
+         WHERE mc.collection_id = ?",
     )
     .bind(collection_id)
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
+    rows.sort_by(|left, right| {
+        let left_time = parse_digest_datetime(&digest_meeting_datetime(
+            left.occurred_at.as_deref(),
+            &left.created_at,
+        ));
+        let right_time = parse_digest_datetime(&digest_meeting_datetime(
+            right.occurred_at.as_deref(),
+            &right.created_at,
+        ));
+        right_time
+            .cmp(&left_time)
+            .then_with(|| right.id.cmp(&left.id))
+    });
 
     let mut digest = StandupSeriesDigest {
         collection_id,
