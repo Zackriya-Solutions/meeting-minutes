@@ -104,6 +104,7 @@ function digestSourceHref(item: SeriesDigestItem): string {
 }
 
 function DigestSection({ title, items }: { title: string; items: SeriesDigestItem[] }) {
+  const router = useRouter();
   const t = useT();
   if (items.length === 0) return null;
   return (
@@ -111,10 +112,11 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
       <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">{title}</h4>
       <div className="mt-3 grid gap-2">
         {items.map((item) => (
-          <a
+          <button
+            type="button"
             key={item.record_id}
-            href={digestSourceHref(item)}
-            className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
+            onClick={() => router.push(digestSourceHref(item))}
+            className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
           >
             {item.category ? (
               <span className="mb-1 inline-flex rounded-full bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[.08em] text-[var(--gold)]">
@@ -132,7 +134,7 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
             <span className="mt-1 block text-xs text-[var(--fg3)]">
               {[item.owner, item.due_date, item.source_meeting_title].filter(Boolean).join(' · ')}
             </span>
-          </a>
+          </button>
         ))}
       </div>
     </section>
@@ -305,14 +307,14 @@ export default function CollectionsPage() {
   }, [selectedId, t]);
 
   useEffect(() => {
-    if (!selected || selected.kind !== 'series') {
+    if (selectedId == null || selected?.kind !== 'series') {
       setSeriesDigest(null);
       return;
     }
     let cancelled = false;
     setLoadingDigest(true);
     invoke<StandupSeriesDigest>('get_standup_series_digest', {
-      collectionId: selected.id,
+      collectionId: selectedId,
       windowDays: digestWindowDays,
       outputLanguage: typeof navigator === 'undefined' ? 'en' : navigator.language,
     })
@@ -331,7 +333,7 @@ export default function CollectionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selected, digestWindowDays, t]);
+  }, [selectedId, selected?.kind, digestWindowDays, t]);
 
   const copySeriesDigest = async () => {
     if (!seriesDigest?.markdown) return;
