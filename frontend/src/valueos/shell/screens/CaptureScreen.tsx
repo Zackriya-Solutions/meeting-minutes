@@ -5,6 +5,7 @@ import { useValueOs } from '../../context/ValueOsProvider';
 import { useRecordingController } from '@/valueos/capture/useRecordingController';
 import type { EntitledTenant } from '../../auth/authService';
 import type { ActivityType, Lead, Opportunity } from '../../api/types';
+import { ValueOsApiError } from '../../api/types';
 import type { CaptureResult } from '../flowTypes';
 import * as ui from './ui';
 
@@ -20,9 +21,11 @@ interface TargetItem {
 export function CaptureScreen({
   entitledTenants,
   onFinish,
+  onLostAccess,
 }: {
   entitledTenants: EntitledTenant[];
   onFinish: (r: CaptureResult) => void;
+  onLostAccess: () => void;
 }) {
   const { client } = useValueOs();
   const rec = useRecordingController();
@@ -50,7 +53,15 @@ export function CaptureScreen({
         if (!cancelled)
           setTargets(res.items.map((t: Lead | Opportunity) => ({ id: t.id, label: t.label })));
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (cancelled) return;
+        // §2.7: a 403 feat_agent means this workspace just lost the add-on → re-run the
+        // gate (drops it from the picker / blocks if none remain) rather than show a
+        // dead-end error while the tenant stays selectable.
+        if (e instanceof ValueOsApiError && e.isNotEntitled) {
+          onLostAccess();
+          return;
+        }
+        setError((e as Error).message);
       }
     })();
     return () => {

@@ -196,6 +196,38 @@ describe('ValueOS full flow', () => {
     expect(screen.getByTestId('valueos-home-list')).toHaveTextContent('Ada Lovelace');
   });
 
+  it('re-gates mid-session when the selected workspace loses access during capture (§2.7)', async () => {
+    const { services, client } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToHome();
+    await homeToCapture();
+    // Admin disables the add-on after login; selecting the tenant triggers a lead search
+    // that 403s (feat_agent) → the shell re-runs the gate → agent-tenants now empty → block.
+    client.setEntitlement('tenant-acme', 'expired');
+    fireEvent.change(screen.getByTestId('valueos-capture-tenant'), { target: { value: 'tenant-acme' } });
+    fireEvent.click(screen.getByTestId('valueos-capture-type-lead'));
+    await screen.findByTestId('valueos-blocked');
+  });
+
+  it('finalize handles a workspace that lost access during the meeting (re-gates)', async () => {
+    const { services, client } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToHome();
+    await homeToCapture();
+    await selectLeadTarget();
+    fireEvent.click(screen.getByTestId('valueos-capture-start'));
+    await screen.findByTestId('valueos-capture-recording');
+    client.setEntitlement('tenant-acme', 'expired'); // lost during the meeting
+    fireEvent.click(screen.getByTestId('valueos-capture-stop'));
+    await screen.findByTestId('valueos-finalize');
+    // upload 403 feat_agent → de-entitled state with a continue-to-re-gate control
+    const cont = await screen.findByTestId('valueos-finalize-deentitled');
+    fireEvent.click(cont);
+    await screen.findByTestId('valueos-blocked'); // re-gate finds no entitled workspace
+  });
+
   it('after config, home shows the transcript list + a New control', async () => {
     const { services } = makeServices('active');
     render(<ValueOsShell services={services} />);

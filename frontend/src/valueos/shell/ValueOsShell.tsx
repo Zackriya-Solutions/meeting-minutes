@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ValueOsProvider, type ValueOsServices } from '../context/ValueOsProvider';
+import { ValueOsProvider, useValueOs, type ValueOsServices } from '../context/ValueOsProvider';
 import { LandingScreen } from './screens/LandingScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { EntitlementBlockedScreen, VALUEOS_PURCHASE_URL } from './screens/EntitlementBlockedScreen';
@@ -30,6 +30,7 @@ export function ValueOsShell({ services }: { services?: ValueOsServices }) {
 }
 
 function Flow() {
+  const { auth } = useValueOs();
   const [screen, setScreen] = useState<Screen>('landing');
   const [entitled, setEntitled] = useState<EntitledTenant[]>([]);
   const [blockedReason, setBlockedReason] = useState<'no-membership' | 'no-addon'>('no-addon');
@@ -38,6 +39,26 @@ function Flow() {
   const contactSales = () => {
     // Opens the system browser via the existing (already-registered) command.
     void invoke('open_external_url', { url: VALUEOS_PURCHASE_URL }).catch(() => {});
+  };
+
+  // §2.7: a workspace lost the agent add-on mid-session → re-run the gate
+  // (GET /me/agent-tenants). The refreshed list drops the de-entitled tenant; if none
+  // remain, hard-block. This is the authoritative re-check, not a client guess.
+  const reGate = () => {
+    void (async () => {
+      try {
+        const summary = await auth.loadEntitlementSummary();
+        if (summary.anyEntitled) {
+          setEntitled(summary.entitled);
+          setScreen('home');
+        } else {
+          setBlockedReason(summary.totalMemberships === 0 ? 'no-membership' : 'no-addon');
+          setScreen('blocked');
+        }
+      } catch {
+        setScreen('login'); // gate re-check failed (e.g. 401) → re-auth
+      }
+    })();
   };
 
   const handleLogin = (summary: EntitlementSummary) => {
@@ -82,6 +103,7 @@ function Flow() {
             setCapture(r);
             setScreen('finalize');
           }}
+          onLostAccess={reGate}
         />
       )}
 
@@ -93,6 +115,10 @@ function Flow() {
             setScreen('home'); // back to the transcripts list
           }}
           onReauth={() => setScreen('login')}
+          onLostAccess={() => {
+            setCapture(null);
+            reGate();
+          }}
         />
       )}
     </div>

@@ -340,8 +340,12 @@ pub async fn valueos_login() -> Result<(), ValueOsErr> {
     open_browser(&authorize_url);
 
     // Wait up to 5 minutes for the browser redirect.
-    let url = tokio::time::timeout(std::time::Duration::from_secs(300), rx)
-        .await
+    let redirect = tokio::time::timeout(std::time::Duration::from_secs(300), rx).await;
+    // Release the loopback listener so its port is free for a later login THIS session
+    // (otherwise repeated logout→login cycles would exhaust the pinned ports). Safe on all
+    // outcomes — success, timeout, or a dropped channel.
+    let _ = tauri_plugin_oauth::cancel(port);
+    let url = redirect
         .map_err(|_| ValueOsErr::new(408, "Login timed out"))?
         .map_err(|_| ValueOsErr::transport("Login cancelled"))?;
 

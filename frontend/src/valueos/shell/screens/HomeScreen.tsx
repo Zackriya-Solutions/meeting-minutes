@@ -47,8 +47,20 @@ export function HomeScreen({ onNew }: { onNew: () => void }) {
                     {new Date(r.createdAt).toLocaleString()} · {r.activityType}
                   </span>
                 </div>
-                <span style={r.uploadStatus === 'uploaded' ? badgeUp : badgePending}>
-                  {r.uploadStatus === 'uploaded' ? 'Uploaded' : 'Pending upload'}
+                <span
+                  style={
+                    r.uploadStatus === 'uploaded'
+                      ? badgeUp
+                      : r.uploadStatus === 'failed'
+                        ? badgeFailed
+                        : badgePending
+                  }
+                >
+                  {r.uploadStatus === 'uploaded'
+                    ? 'Uploaded'
+                    : r.uploadStatus === 'failed'
+                      ? 'Not uploaded'
+                      : 'Pending upload'}
                 </span>
               </li>
             ))}
@@ -72,3 +84,4 @@ const item: CSSProperties = {
 };
 const badgeUp: CSSProperties = { fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: '#fff', color: '#0030BC' };
 const badgePending: CSSProperties = { fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.4)' };
+const badgeFailed: CSSProperties = { fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'rgba(255,215,215,0.15)', color: '#ffd7d7', border: '1px solid rgba(255,215,215,0.5)' };

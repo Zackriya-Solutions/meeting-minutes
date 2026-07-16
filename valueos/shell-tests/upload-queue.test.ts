@@ -50,4 +50,29 @@ describe('PendingUploadQueue (never lose data)', () => {
     expect(out.uploaded).toEqual([]);
     expect(await q.count()).toBe(2); // nothing lost
   });
+
+  it('quarantines a 403 feat_agent (de-entitled) and reports the tenant to re-gate', async () => {
+    const client = new MockValueOsClient(defaultMockSeed());
+    const store = new InMemoryPendingUploadStore();
+    const q = new PendingUploadQueue(client, store);
+    await q.enqueue(makeItem('k1'));
+    client.setEntitlement('tenant-acme', 'expired'); // add-on lost mid-session
+    const out = await q.flush();
+    expect(out.deEntitled).toEqual(['tenant-acme']);
+    expect(out.failed.map((f) => f.id)).toEqual(['k1']);
+    expect(out.retained).toEqual([]);
+    expect(await q.count()).toBe(0); // quarantined — NOT a poison pill retried forever
+  });
+
+  it('fails terminally (no endless retry) on a 404, instead of retaining', async () => {
+    const client = new MockValueOsClient(defaultMockSeed());
+    const store = new InMemoryPendingUploadStore();
+    const q = new PendingUploadQueue(client, store);
+    await q.enqueue({ ...makeItem('k1'), targetId: 'does-not-exist' });
+    const out = await q.flush();
+    expect(out.failed.map((f) => f.id)).toEqual(['k1']);
+    expect(out.failed[0].status).toBe(404);
+    expect(out.retained).toEqual([]);
+    expect(await q.count()).toBe(0); // terminal → dropped from the retry loop
+  });
 });

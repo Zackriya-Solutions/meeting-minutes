@@ -11,7 +11,7 @@ export interface TranscriptRecord {
   targetId: string;
   createdAt: number;
   path: string; // local transcript file path
-  uploadStatus: 'uploaded' | 'pending';
+  uploadStatus: 'uploaded' | 'pending' | 'failed';
 }
 
 export interface TranscriptHistory {

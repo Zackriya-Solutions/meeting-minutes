@@ -5,8 +5,9 @@ import * as ui from './ui';
 
 // VALUEOS: finalize — store the transcript locally, generate the high-level digest, and
 // upload BOTH (transcript + digest) to the pre-selected target with a client idempotency
-// key, via the resilient pending-upload queue. 401 → re-auth; network/503 → kept for retry.
-type Status = 'working' | 'done' | 'pending' | 'reauth' | 'error';
+// key, via the resilient pending-upload queue. 401 → re-auth; network/503 → kept for retry;
+// 403 feat_agent → the workspace lost access, re-gate (§2.7); terminal (404/413/422) → failed.
+type Status = 'working' | 'done' | 'pending' | 'reauth' | 'deEntitled' | 'error';
 
 function sanitize(s: string): string {
   return s.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'meeting';
@@ -19,10 +20,12 @@ export function FinalizeScreen({
   capture,
   onDone,
   onReauth,
+  onLostAccess,
 }: {
   capture: CaptureResult;
   onDone: () => void;
   onReauth: () => void;
+  onLostAccess: () => void;
 }) {
   const { digest, config, uploadQueue, history } = useValueOs();
   const [status, setStatus] = useState<Status>('working');
@@ -55,8 +58,11 @@ export function FinalizeScreen({
         },
       });
       const outcome = await uploadQueue.flush();
-      const uploaded = !outcome.needsReauth && outcome.retained.length === 0;
-      // Record in the local transcript history (shown on the home screen).
+      const uploaded = outcome.uploaded.includes(key);
+      const failed = outcome.failed.find((f) => f.id === key);
+      const lostAccess = outcome.deEntitled.includes(capture.tenantId);
+      // Record in the local transcript history (shown on the home screen). The transcript
+      // file is on disk regardless, so nothing is lost even on a terminal failure.
       await history.add({
         id: key,
         targetLabel: capture.targetLabel,
@@ -65,10 +71,14 @@ export function FinalizeScreen({
         targetId: capture.targetId,
         createdAt: Date.now(),
         path,
-        uploadStatus: uploaded ? 'uploaded' : 'pending',
+        uploadStatus: uploaded ? 'uploaded' : failed || lostAccess ? 'failed' : 'pending',
       });
       if (outcome.needsReauth) setStatus('reauth');
-      else if (outcome.retained.length > 0) {
+      else if (lostAccess) setStatus('deEntitled');
+      else if (failed) {
+        setStatus('error');
+        setDetail(`Upload failed: ${failed.message}`);
+      } else if (outcome.retained.includes(key)) {
         setStatus('pending');
         setDetail('Saved locally — will retry the upload.');
       } else setStatus('done');
@@ -95,7 +105,9 @@ export function FinalizeScreen({
           ? 'Saved — upload pending'
           : status === 'reauth'
             ? 'Please sign in again'
-            : 'Something went wrong';
+            : status === 'deEntitled'
+              ? 'Workspace access changed'
+              : 'Something went wrong';
 
   return (
     <div data-testid="valueos-finalize" style={ui.page}>
@@ -106,6 +118,8 @@ export function FinalizeScreen({
           {status === 'done' && `Transcript and recap attached to ${capture.targetLabel}.`}
           {status === 'pending' && (detail || 'Your transcript is safe locally and will upload when possible.')}
           {status === 'reauth' && 'Your session expired. Sign in again to finish the upload — your transcript is saved.'}
+          {status === 'deEntitled' &&
+            'This workspace no longer has ValueOS Agent access, so the upload was stopped. Your transcript is saved locally.'}
           {status === 'error' && detail}
         </p>
         {status === 'done' && (
@@ -121,6 +135,15 @@ export function FinalizeScreen({
         {status === 'reauth' && (
           <button data-testid="valueos-finalize-reauth" style={ui.primaryBtn} onClick={onReauth}>
             Sign in
+          </button>
+        )}
+        {status === 'deEntitled' && (
+          <button
+            data-testid="valueos-finalize-deentitled"
+            style={ui.primaryBtn}
+            onClick={onLostAccess}
+          >
+            Continue
           </button>
         )}
         {status === 'error' && (
