@@ -95,10 +95,10 @@ export function ManagedDefaultsMigrationDialog() {
         onInteractOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>{t('Choose how Memento processes meetings')}</DialogTitle>
+          <DialogTitle>{t('Update processing settings from a previous version')}</DialogTitle>
           <DialogDescription className="space-y-3 text-left">
             <span className="block">
-              {t('Your meetings are currently processed locally. You can keep this private setup or connect managed cloud services. Nothing changes until you confirm.')}
+              {t('Memento found local processing settings created by a previous version. You can keep them or migrate to the managed cloud services now used by default. Nothing changes until you confirm.')}
             </span>
             {pending?.transcription && (
               <span className="block font-medium text-[var(--fg1)]">
@@ -111,7 +111,7 @@ export function ManagedDefaultsMigrationDialog() {
               </span>
             )}
             <span className="block">
-              {t('Cloud services are enabled only after Memento verifies that they are available. You can change this choice later in Settings.')}
+              {t('This migration prompt is shown only for an existing installation with legacy local defaults. New installations use managed cloud services automatically. You can change providers later in Settings.')}
             </span>
           </DialogDescription>
         </DialogHeader>

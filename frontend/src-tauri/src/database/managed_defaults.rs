@@ -366,6 +366,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fresh_database_never_prompts_for_legacy_migration() {
+        let pool = pool().await;
+        enable_managed_providers(&pool).await;
+
+        let report = migrate(&pool).await.unwrap();
+        assert_eq!(
+            report,
+            MigrationReport {
+                already_applied: false,
+                pending_confirmation: false,
+                transcription_changed: false,
+                summary_changed: false,
+            }
+        );
+
+        let marker: String =
+            sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
+                .bind(MARKER)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(marker, "applied");
+    }
+
+    #[tokio::test]
     async fn migrates_only_known_legacy_defaults_after_confirmation() {
         let pool = pool().await;
         enable_managed_providers(&pool).await;
