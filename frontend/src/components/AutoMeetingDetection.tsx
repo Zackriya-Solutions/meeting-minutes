@@ -29,6 +29,12 @@ export function AutoMeetingDetection() {
   const t = useT();
 
   useEffect(() => {
+    if (recordingState.isRecording) {
+      toast.dismiss(TOAST_ID);
+    }
+  }, [recordingState.isRecording]);
+
+  useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
