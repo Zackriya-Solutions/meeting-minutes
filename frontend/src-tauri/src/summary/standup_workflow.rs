@@ -912,8 +912,20 @@ fn render_series_digest_markdown(
             "Pending review",
         )
     };
+    let window = match digest.window_days {
+        Some(days) => match (&digest.period_start, &digest.period_end) {
+            (Some(start), Some(end)) if russian => {
+                format!("Окно: последние {days} дн. ({start} — {end})")
+            }
+            (Some(start), Some(end)) => format!("Window: last {days} days ({start} – {end})"),
+            _ if russian => format!("Окно: последние {days} дн."),
+            _ => format!("Window: last {days} days"),
+        },
+        None if russian => "Окно: вся история".to_string(),
+        None => "Window: all history".to_string(),
+    };
     markdown.push_str(&format!(
-        "## {coverage}\n\n- {meetings_label}: {}\n- {accepted_label}: {}\n- {pending_label}: {}\n\n",
+        "## {coverage}\n\n- {window}\n- {meetings_label}: {}\n- {accepted_label}: {}\n- {pending_label}: {}\n\n",
         digest.meeting_count,
         digest.meetings_with_accepted_records,
         digest.pending_review_count
@@ -1407,6 +1419,9 @@ mod tests {
             .markdown
             .contains("/meeting-details?id=accepted&t=62"));
         assert!(digest.markdown.contains("- Встречи: 2"));
+        assert!(digest
+            .markdown
+            .contains("Окно: последние 14 дн. (2026-07-15T09:00:00Z — 2026-07-15T10:00:00Z)"));
         assert!(digest.markdown.contains("Ожидают проверки: 3"));
         assert!(!digest.markdown.contains("Pending review:"));
         assert!(!digest.markdown.contains("Standup old"));
@@ -1460,6 +1475,7 @@ mod tests {
         assert!(digest.markdown.contains("meeting+id%26unsafe"));
         assert!(digest.markdown.contains("2026-07-15"));
         assert!(!digest.markdown.contains("2026\\-07\\-15"));
+        assert!(digest.markdown.contains("Window: all history"));
     }
 
     #[tokio::test]
