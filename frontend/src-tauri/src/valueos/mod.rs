@@ -80,6 +80,22 @@ fn enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
+// Extract a human-readable detail from an OAuth2/Cognito error body, which is JSON like
+// {"error":"invalid_grant","error_description":"…"}. Falls back to a trimmed snippet.
+fn oauth_error_detail(body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        let e = v.get("error").and_then(|x| x.as_str());
+        let d = v.get("error_description").and_then(|x| x.as_str());
+        match (e, d) {
+            (Some(e), Some(d)) => return format!(": {e} — {d}"),
+            (Some(e), None) => return format!(": {e}"),
+            _ => {}
+        }
+    }
+    let t = body.trim();
+    if t.is_empty() { String::new() } else { format!(": {}", t.chars().take(200).collect::<String>()) }
+}
+
 // ---- keychain ---------------------------------------------------------------------------
 fn keychain_entry() -> Result<keyring::Entry, ValueOsErr> {
     keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
@@ -129,7 +145,9 @@ async fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(ValueOsErr::new(401, "Token exchange failed"));
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ValueOsErr::new(401, format!("Token exchange failed ({status}){}", oauth_error_detail(&body))));
     }
     let tr: TokenResponse = resp.json().await.map_err(|e| ValueOsErr::transport(e.to_string()))?;
     Ok(StoredTokens {
@@ -158,7 +176,9 @@ async fn refresh(tokens: &StoredTokens) -> Result<StoredTokens, ValueOsErr> {
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(ValueOsErr::new(401, "Token refresh failed"));
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ValueOsErr::new(401, format!("Token refresh failed ({status}){}", oauth_error_detail(&body))));
     }
     let tr: TokenResponse = resp.json().await.map_err(|e| ValueOsErr::transport(e.to_string()))?;
     let updated = StoredTokens {
@@ -297,12 +317,27 @@ pub async fn valueos_login() -> Result<(), ValueOsErr> {
     let parsed = url::Url::parse(&url).map_err(|e| ValueOsErr::transport(e.to_string()))?;
     let mut code: Option<String> = None;
     let mut got_state: Option<String> = None;
+    let mut oauth_error: Option<String> = None;
+    let mut oauth_error_desc: Option<String> = None;
     for (k, v) in parsed.query_pairs() {
         match k.as_ref() {
             "code" => code = Some(v.into_owned()),
             "state" => got_state = Some(v.into_owned()),
+            "error" => oauth_error = Some(v.into_owned()),
+            "error_description" => oauth_error_desc = Some(v.into_owned()),
             _ => {}
         }
+    }
+    // If the IdP redirected back with an error (access_denied, invalid_scope, …), report it
+    // verbatim rather than a generic "no code".
+    if let Some(err) = oauth_error {
+        let desc = oauth_error_desc.unwrap_or_default();
+        let msg = if desc.is_empty() {
+            format!("Sign-in failed: {err}")
+        } else {
+            format!("Sign-in failed: {err} — {desc}")
+        };
+        return Err(ValueOsErr::new(401, msg));
     }
     if got_state.as_deref() != Some(state.as_str()) {
         return Err(ValueOsErr::new(401, "State mismatch"));
