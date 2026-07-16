@@ -1,11 +1,12 @@
-//! DeepSeek provider (OpenAI-compatible). Protocol per GigaTool's provider config:
+//! DeepSeek provider (OpenAI-compatible) through the operator-approved managed
+//! Memento gateway. Upstream protocol:
 //! base `https://api.deepseek.com/v1`, `POST /chat/completions`, Bearer auth,
 //! models `deepseek-v4-pro` / `deepseek-v4-flash` (the legacy `deepseek-chat` /
 //! `deepseek-reasoner` aliases retire 2026-07-24). Non-streaming (summary/extract/RAG).
 
 use serde_json::json;
 
-pub const DEFAULT_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
+pub const DEFAULT_BASE_URL: &str = crate::gateway_identity::PRIMARY_DEEPSEEK_BASE_URL;
 pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
 
 /// A configured DeepSeek client. Cheap to construct per call.
@@ -94,7 +95,10 @@ mod tests {
     }
 
     #[test]
-    fn default_gateway_uses_multitool_domain() {
-        assert_eq!(DEFAULT_BASE_URL, "https://gw.multitool.works/deepseek/v1");
+    fn default_gateway_uses_the_central_managed_endpoint() {
+        assert_eq!(
+            DEFAULT_BASE_URL,
+            crate::gateway_identity::PRIMARY_DEEPSEEK_BASE_URL
+        );
     }
 }
