@@ -159,6 +159,7 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
 }
 
 function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
+  const router = useRouter();
   const t = useT();
   if (insights.length === 0) return null;
   const labels: Record<string, string> = {
@@ -210,13 +211,14 @@ function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
             </>
           );
           return source ? (
-            <a
+            <button
+              type="button"
               key={`${insight.kind}-${source.record_id}-${index}`}
-              href={digestSourceHref(source)}
-              className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 hover:ring-1 hover:ring-[var(--gold-border)]"
+              onClick={() => router.push(digestSourceHref(source))}
+              className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left hover:ring-1 hover:ring-[var(--gold-border)]"
             >
               {content}
-            </a>
+            </button>
           ) : (
             <div key={`${insight.kind}-${index}`} className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5">
               {content}
