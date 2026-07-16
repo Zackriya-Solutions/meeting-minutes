@@ -9,7 +9,9 @@ use sqlx::{Row, SqlitePool};
 use crate::state::AppState;
 
 const MARKER: &str = "migration.managed_pilot_defaults.v1";
-const PENDING_CONFIRMATION: &str = "pending_confirmation";
+const PENDING_TRANSCRIPTION: &str = "pending_confirmation:transcription";
+const PENDING_SUMMARY: &str = "pending_confirmation:summary";
+const PENDING_BOTH: &str = "pending_confirmation:transcription,summary";
 const DEEPSEEK_MODEL: &str = crate::llm::providers::deepseek::DEFAULT_MODEL;
 const SALUTESPEECH_MODEL: &str = "salutespeech-stream-v2";
 
@@ -35,6 +37,15 @@ fn is_legacy_summary(provider: &str, model: &str) -> bool {
     )
 }
 
+fn pending_candidates(marker: &str) -> Option<(bool, bool)> {
+    match marker {
+        PENDING_TRANSCRIPTION => Some((true, false)),
+        PENDING_SUMMARY => Some((false, true)),
+        PENDING_BOTH => Some((true, true)),
+        _ => None,
+    }
+}
+
 pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> {
     let mut tx = pool.begin().await?;
     let marker =
@@ -44,10 +55,11 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
             .await?;
 
     if let Some(marker) = marker {
+        let pending = pending_candidates(&marker);
         tx.commit().await?;
         return Ok(MigrationReport {
-            already_applied: marker != PENDING_CONFIRMATION,
-            pending_confirmation: marker == PENDING_CONFIRMATION,
+            already_applied: pending.is_none(),
+            pending_confirmation: pending.is_some(),
             ..MigrationReport::default()
         });
     }
@@ -95,10 +107,11 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
     // Updating the app must never switch local processing to cloud processing.
     // Stage the exact-default migration until the renderer obtains consent.
     report.pending_confirmation = transcription_candidate || summary_candidate;
-    let marker_value = if report.pending_confirmation {
-        PENDING_CONFIRMATION
-    } else {
-        "applied"
+    let marker_value = match (transcription_candidate, summary_candidate) {
+        (true, true) => PENDING_BOTH,
+        (true, false) => PENDING_TRANSCRIPTION,
+        (false, true) => PENDING_SUMMARY,
+        (false, false) => "applied",
     };
 
     sqlx::query(
@@ -121,7 +134,7 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
             .bind(MARKER)
             .fetch_optional(&mut *tx)
             .await?;
-    if marker.as_deref() != Some(PENDING_CONFIRMATION) {
+    if marker.as_deref().and_then(pending_candidates).is_none() {
         tx.commit().await?;
         return Ok(MigrationReport {
             already_applied: true,
@@ -376,5 +389,34 @@ mod tests {
             ("builtin-ai".into(), "qwen3.5:4b".into())
         );
         assert!(migrate(&pool).await.unwrap().already_applied);
+    }
+
+    #[tokio::test]
+    async fn confirmation_describes_and_changes_only_the_matching_default() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings VALUES('1','openrouter','custom-model','large-v3')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(migrate(&pool).await.unwrap().pending_confirmation);
+        let marker: String = sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
+            .bind(MARKER)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(marker, PENDING_TRANSCRIPTION);
+
+        let report = resolve(&pool, true).await.unwrap();
+        assert!(report.transcription_changed);
+        assert!(!report.summary_changed);
+        assert_eq!(
+            values(&pool, "settings").await,
+            ("openrouter".into(), "custom-model".into())
+        );
     }
 }

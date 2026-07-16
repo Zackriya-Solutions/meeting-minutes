@@ -300,7 +300,7 @@ export default function Home() {
               style={{ left: sidebarCollapsed ? '4rem' : `${sidebarWidth}px` }}
             >
               <span
-                className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--fg2)] shadow-sm"
+                className="pointer-events-auto rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--fg2)] shadow-sm"
                 title={`${t('Transcription engine')}: ${transcriptModelConfig.model}`}
               >
                 {transcriptionProviderLabel}

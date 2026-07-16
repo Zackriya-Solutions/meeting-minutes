@@ -20,9 +20,25 @@ interface MigrationReport {
   summary_changed: boolean;
 }
 
+interface PendingMigration {
+  transcription: boolean;
+  summary: boolean;
+}
+
+function pendingMigration(marker: string | undefined): PendingMigration | null {
+  if (!marker?.startsWith('pending_confirmation:')) return null;
+  const candidates = new Set(marker.slice('pending_confirmation:'.length).split(','));
+  const pending = {
+    transcription: candidates.has('transcription'),
+    summary: candidates.has('summary'),
+  };
+  return pending.transcription || pending.summary ? pending : null;
+}
+
 export function ManagedDefaultsMigrationDialog() {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState<PendingMigration | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +46,10 @@ export function ManagedDefaultsMigrationDialog() {
     let active = true;
     invoke<Record<string, string>>('get_app_settings')
       .then((settings) => {
-        if (active && settings[MIGRATION_KEY] === 'pending_confirmation') setOpen(true);
+        if (!active) return;
+        const migration = pendingMigration(settings[MIGRATION_KEY]);
+        setPending(migration);
+        setOpen(migration !== null);
       })
       .catch((reason) => {
         console.warn('Could not check managed provider migration state:', reason);
@@ -63,20 +82,30 @@ export function ManagedDefaultsMigrationDialog() {
           <DialogTitle>{t('Choose where meeting processing runs')}</DialogTitle>
           <DialogDescription className="space-y-3 text-left">
             <span className="block">
-              {t('Your current transcription and summary models run on this device. Memento can switch these historical defaults to managed cloud providers, but only with your confirmation.')}
+              {t('Memento found historical local provider defaults that can be replaced with managed cloud providers. Nothing changes until you confirm.')}
             </span>
-            <span className="block font-medium text-[var(--fg1)]">
-              {t('If you choose managed providers, meeting audio is sent to SaluteSpeech for transcription and transcript text is sent to DeepSeek for summaries. You can change this later in Settings.')}
+            {pending?.transcription && (
+              <span className="block font-medium text-[var(--fg1)]">
+                {t('Transcription: GigaAM or Parakeet will change to SaluteSpeech. Meeting audio will be sent to Sber for transcription.')}
+              </span>
+            )}
+            {pending?.summary && (
+              <span className="block font-medium text-[var(--fg1)]">
+                {t('Summaries: the local model will change to DeepSeek. Transcript text will be sent to the managed summary service.')}
+              </span>
+            )}
+            <span className="block">
+              {t('Providers that do not match these historical defaults stay unchanged. You can change this choice later in Settings.')}
             </span>
           </DialogDescription>
         </DialogHeader>
         {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" disabled={saving} onClick={() => void resolve(false)}>
-            {t('Keep processing on this device')}
+            {t('Keep current providers')}
           </Button>
           <Button type="button" disabled={saving} onClick={() => void resolve(true)}>
-            {saving ? t('Saving…') : t('Use managed cloud providers')}
+            {saving ? t('Saving…') : t('Apply managed provider changes')}
           </Button>
         </DialogFooter>
       </DialogContent>
