@@ -65,6 +65,19 @@ export async function fetchMeetingDetail(meetingId: string): Promise<MeetingDeta
 // ── Recording ────────────────────────────────────────────────────────────
 
 export async function startRecording(): Promise<void> {
+  // Guarantee a localWhisper transcript config exists before the backend
+  // ever sees the start command. The Rust recording pipeline defaults to
+  // the (Android-unsupported) Parakeet engine when no config row exists —
+  // a background self-heal alone races with the user tapping Record right
+  // after a download finishes, so check synchronously here too.
+  if (!(await hasTranscriptConfig())) {
+    const models = await fetchModels();
+    const downloaded = models.find((m) => m.status === 'downloaded');
+    if (downloaded) {
+      await selectWhisperModel(downloaded.name);
+    }
+  }
+
   // No devices passed: the Rust core picks the default microphone.
   await invoke('start_recording');
 }
@@ -236,9 +249,48 @@ export async function hasDownloadedModel(): Promise<boolean> {
 
 // ── Permissions ──────────────────────────────────────────────────────────
 
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(onTimeout), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(onTimeout);
+      }
+    );
+  });
+}
+
 export async function requestMicPermission(): Promise<boolean> {
+  // getUserMedia is what actually drives Android WebView's native
+  // permission dialog (WebChromeClient.onPermissionRequest); it also
+  // resolves/rejects reliably, unlike the cpal-based Tauri command below,
+  // which can hang indefinitely if the native audio HAL is waiting on a
+  // permission grant that never completes. Try it first, with a hard
+  // timeout either way so the caller's UI never gets stuck on "Requesting…".
+  if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+    try {
+      const stream = await withTimeout(
+        navigator.mediaDevices.getUserMedia({ audio: true }),
+        8000,
+        null as unknown as MediaStream
+      );
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        return true;
+      }
+    } catch (e) {
+      console.warn('[vm] getUserMedia denied', e);
+      return false;
+    }
+  }
+
   try {
-    return await invoke<boolean>('trigger_microphone_permission');
+    return await withTimeout(invoke<boolean>('trigger_microphone_permission'), 6000, false);
   } catch (e) {
     console.warn('[vm] trigger_microphone_permission failed', e);
     return false;
