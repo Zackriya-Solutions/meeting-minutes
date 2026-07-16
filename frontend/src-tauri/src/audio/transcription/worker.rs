@@ -6,6 +6,7 @@ use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -16,6 +17,9 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
+
+static AZURE_REALTIME_DIARIZER: Lazy<tokio::sync::RwLock<Option<crate::audio::diarization::AzureRealtimeDiarizationClient>>> =
+    Lazy::new(|| tokio::sync::RwLock::new(None));
 
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
@@ -32,6 +36,7 @@ pub struct TranscriptUpdate {
     pub chunk_start_time: f64, // Legacy field, kept for compatibility
     pub is_partial: bool,
     pub confidence: f32,
+    pub speaker: Option<String>,
     // NEW: Recording-relative timestamps for playback sync
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
@@ -142,6 +147,16 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                            let diarization_sample_rate = 16_000_u32;
+                            let diarization_audio = if chunk.sample_rate != diarization_sample_rate {
+                                crate::audio::audio_processing::resample_audio(
+                                    &chunk.data,
+                                    chunk.sample_rate,
+                                    diarization_sample_rate,
+                                )
+                            } else {
+                                chunk.data.clone()
+                            };
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -205,6 +220,15 @@ pub fn start_transcription_task<R: Runtime>(
 
                                         // Emit transcript update with NEW recording-relative timestamps
 
+                                        let live_speaker = resolve_live_speaker(
+                                            &app_clone,
+                                            diarization_sample_rate,
+                                            &diarization_audio,
+                                            &transcript,
+                                            audio_start_time,
+                                            audio_end_time,
+                                        )
+                                        .await;
                                         let update = TranscriptUpdate {
                                             text: transcript,
                                             timestamp: format_current_timestamp(), // Wall-clock for reference
@@ -213,6 +237,7 @@ pub fn start_transcription_task<R: Runtime>(
                                             chunk_start_time: chunk_timestamp, // Legacy compatibility
                                             is_partial,
                                             confidence: confidence_opt.unwrap_or(0.85), // Default for providers without confidence
+                                            speaker: live_speaker,
                                             // NEW: Recording-relative timestamps for sync
                                             audio_start_time,
                                             audio_end_time,
@@ -573,6 +598,40 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
 }
 
 /// Format current timestamp (wall-clock time)
+async fn resolve_live_speaker<R: Runtime>(
+    app: &AppHandle<R>,
+    sample_rate: u32,
+    audio: &[f32],
+    text: &str,
+    start_sec: f64,
+    end_sec: f64,
+) -> Option<String> {
+    let config = match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        Ok(Some(config)) => config,
+        _ => return None,
+    };
+
+    if !config.diarization_enabled || config.diarization_provider != "azure" {
+        let mut guard = AZURE_REALTIME_DIARIZER.write().await;
+        *guard = None;
+        return None;
+    }
+
+    let key = config.azure_speech_key?;
+    let region = config.azure_speech_region?;
+
+    let client = {
+        let mut guard = AZURE_REALTIME_DIARIZER.write().await;
+        if guard.is_none() {
+            *guard = crate::audio::diarization::AzureRealtimeDiarizationClient::new(key, region);
+        }
+        guard.clone()
+    }?;
+
+    client.push_audio_chunk(sample_rate, audio).await;
+    client.speaker_for_window(start_sec, end_sec, text).await
+}
+
 fn format_current_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

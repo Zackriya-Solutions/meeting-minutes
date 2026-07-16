@@ -89,6 +89,7 @@ impl MeetingsRepository {
                     id: t.id,
                     text: t.transcript,
                     timestamp: t.timestamp,
+                    speaker: t.speaker,
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,

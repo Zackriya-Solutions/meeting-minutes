@@ -630,7 +630,15 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "saving", 85, "Creating meeting...");
 
     // Create transcript segments
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
+
+    if let Ok(Some(config)) = crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        crate::audio::diarization::maybe_apply_local_diarization(
+            config.diarization_enabled,
+            &config.diarization_provider,
+            &mut segments,
+        );
+    }
 
     // Save to database
     let app_state = app
@@ -719,13 +727,14 @@ async fn create_meeting_with_transcripts(
     // Insert transcripts
     for segment in segments {
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, speaker, audio_start_time, audio_end_time, duration)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&segment.id)
         .bind(&meeting_id)
         .bind(&segment.text)
         .bind(&segment.timestamp)
+        .bind(&segment.speaker)
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)

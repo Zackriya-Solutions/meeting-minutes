@@ -419,7 +419,15 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
 
     // Create transcript segments with proper timestamps from VAD
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
+
+    if let Ok(Some(config)) = crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        crate::audio::diarization::maybe_apply_local_diarization(
+            config.diarization_enabled,
+            &config.diarization_provider,
+            &mut segments,
+        );
+    }
 
     // Save to database
     let app_state = app
@@ -441,13 +449,14 @@ async fn run_retranscription<R: Runtime>(
 
     for segment in &segments {
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, speaker, audio_start_time, audio_end_time, duration)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&segment.id)
         .bind(&meeting_id)
         .bind(&segment.text)
         .bind(&segment.timestamp)
+        .bind(&segment.speaker)
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)

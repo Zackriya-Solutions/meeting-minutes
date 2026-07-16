@@ -215,7 +215,11 @@ const Sidebar: React.FC = () => {
       const payload = {
         provider: configToSave.provider,
         model: configToSave.model,
-        apiKey: configToSave.apiKey ?? null
+        apiKey: configToSave.apiKey ?? null,
+        diarizationEnabled: configToSave.diarizationEnabled ?? false,
+        diarizationProvider: configToSave.diarizationProvider ?? 'local',
+        azureSpeechKey: configToSave.azureSpeechKey ?? null,
+        azureSpeechRegion: configToSave.azureSpeechRegion ?? null,
       };
       console.log('Saving transcript config with payload:', payload);
 
@@ -223,6 +227,10 @@ const Sidebar: React.FC = () => {
         provider: payload.provider,
         model: payload.model,
         apiKey: payload.apiKey,
+        diarizationEnabled: payload.diarizationEnabled,
+        diarizationProvider: payload.diarizationProvider,
+        azureSpeechKey: payload.azureSpeechKey,
+        azureSpeechRegion: payload.azureSpeechRegion,
       });
 
 

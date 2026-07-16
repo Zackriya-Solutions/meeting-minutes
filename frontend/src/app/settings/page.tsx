@@ -41,7 +41,11 @@ export default function SettingsPage() {
           setTranscriptModelConfig({
             provider: config.provider || 'localWhisper',
             model: config.model || 'large-v3',
-            apiKey: config.apiKey || null
+            apiKey: config.apiKey || null,
+            diarizationEnabled: config.diarizationEnabled || false,
+            diarizationProvider: config.diarizationProvider || 'local',
+            azureSpeechKey: config.azureSpeechKey || null,
+            azureSpeechRegion: config.azureSpeechRegion || null,
           });
         }
       } catch (error) {

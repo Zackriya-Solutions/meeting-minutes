@@ -101,6 +101,14 @@ pub struct TranscriptConfig {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "diarizationEnabled")]
+    pub diarization_enabled: bool,
+    #[serde(rename = "diarizationProvider")]
+    pub diarization_provider: String,
+    #[serde(rename = "azureSpeechKey")]
+    pub azure_speech_key: Option<String>,
+    #[serde(rename = "azureSpeechRegion")]
+    pub azure_speech_region: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -109,6 +117,14 @@ pub struct SaveTranscriptConfigRequest {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "diarizationEnabled")]
+    pub diarization_enabled: Option<bool>,
+    #[serde(rename = "diarizationProvider")]
+    pub diarization_provider: Option<String>,
+    #[serde(rename = "azureSpeechKey")]
+    pub azure_speech_key: Option<String>,
+    #[serde(rename = "azureSpeechRegion")]
+    pub azure_speech_region: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,6 +146,8 @@ pub struct MeetingTranscript {
     pub id: String,
     pub text: String,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
     // Recording-relative timestamps for audio-transcript synchronization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_start_time: Option<f64>,
@@ -181,6 +199,8 @@ pub struct TranscriptSegment {
     pub id: String,
     pub text: String,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
     // NEW: Recording-relative timestamps for playback synchronization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_start_time: Option<f64>,
@@ -619,6 +639,12 @@ pub async fn api_get_transcript_config<R: Runtime>(
                         provider: config.provider,
                         model: config.model,
                         api_key,
+                        diarization_enabled: config.diarization_enabled.unwrap_or(0) != 0,
+                        diarization_provider: config
+                            .diarization_provider
+                            .unwrap_or_else(|| "local".to_string()),
+                        azure_speech_key: config.azure_speech_key,
+                        azure_speech_region: config.azure_speech_region,
                     }))
                 }
                 Err(e) => {
@@ -637,6 +663,10 @@ pub async fn api_get_transcript_config<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                diarization_enabled: false,
+                diarization_provider: "local".to_string(),
+                azure_speech_key: None,
+                azure_speech_region: None,
             }))
         }
         Err(e) => {
@@ -653,6 +683,10 @@ pub async fn api_save_transcript_config<R: Runtime>(
     provider: String,
     model: String,
     api_key: Option<String>,
+    diarization_enabled: Option<bool>,
+    diarization_provider: Option<String>,
+    azure_speech_key: Option<String>,
+    azure_speech_region: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -661,7 +695,20 @@ pub async fn api_save_transcript_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    if let Err(e) = SettingsRepository::save_transcript_config(pool, &provider, &model).await {
+    let diarization_enabled_value = diarization_enabled.unwrap_or(false);
+    let diarization_provider_value = diarization_provider.unwrap_or_else(|| "local".to_string());
+
+    if let Err(e) = SettingsRepository::save_transcript_config(
+        pool,
+        &provider,
+        &model,
+        diarization_enabled_value,
+        &diarization_provider_value,
+        azure_speech_key.as_deref(),
+        azure_speech_region.as_deref(),
+    )
+    .await
+    {
         log_error!("Failed to save transcript config: {}", e);
         return Err(e.to_string());
     }
@@ -875,6 +922,7 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
                     id: t.id,
                     text: t.transcript,
                     timestamp: t.timestamp,
+                    speaker: t.speaker,
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,

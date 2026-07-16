@@ -8,6 +8,7 @@ export interface Transcript {
   id: string;
   text: string;
   timestamp: string; // Wall-clock time (e.g., "14:30:05")
+  speaker?: string;
   sequence_id?: number;
   chunk_start_time?: number; // Legacy field
   is_partial?: boolean;
@@ -26,6 +27,7 @@ export interface TranscriptUpdate {
   chunk_start_time: number; // Legacy field
   is_partial: boolean;
   confidence: number;
+  speaker?: string;
   // NEW: Recording-relative timestamps for playback sync
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
@@ -107,4 +109,5 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  speaker?: string;
 }

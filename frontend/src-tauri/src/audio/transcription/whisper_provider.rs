@@ -33,6 +33,7 @@ impl TranscriptionProvider for WhisperProvider {
                 text: text.trim().to_string(),
                 confidence: Some(confidence),
                 is_partial,
+                speaker: None,
             }),
             Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
         }

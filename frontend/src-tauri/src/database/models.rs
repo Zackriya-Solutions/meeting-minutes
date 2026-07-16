@@ -31,6 +31,7 @@ pub struct Transcript {
     pub summary: Option<String>,
     pub action_items: Option<String>,
     pub key_points: Option<String>,
+    pub speaker: Option<String>,
     // Recording-relative timestamps for audio-transcript synchronization
     pub audio_start_time: Option<f64>,
     pub audio_end_time: Option<f64>,
@@ -127,4 +128,16 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "openaiApiKey")]
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
+    #[sqlx(rename = "diarizationEnabled")]
+    #[serde(rename = "diarizationEnabled")]
+    pub diarization_enabled: Option<i64>,
+    #[sqlx(rename = "diarizationProvider")]
+    #[serde(rename = "diarizationProvider")]
+    pub diarization_provider: Option<String>,
+    #[sqlx(rename = "azureSpeechKey")]
+    #[serde(rename = "azureSpeechKey")]
+    pub azure_speech_key: Option<String>,
+    #[sqlx(rename = "azureSpeechRegion")]
+    #[serde(rename = "azureSpeechRegion")]
+    pub azure_speech_region: Option<String>,
 }

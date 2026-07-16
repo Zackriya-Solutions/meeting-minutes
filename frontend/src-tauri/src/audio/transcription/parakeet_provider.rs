@@ -38,6 +38,7 @@ impl TranscriptionProvider for ParakeetProvider {
                 text: text.trim().to_string(),
                 confidence: None, // Parakeet doesn't provide confidence scores
                 is_partial: false, // Parakeet doesn't provide partial results
+                speaker: None,
             }),
             Err(e) => Err(TranscriptionError::EngineFailed(e.to_string())),
         }

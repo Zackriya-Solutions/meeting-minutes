@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
+import { Switch } from './ui/switch';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 
@@ -13,6 +14,10 @@ export interface TranscriptModelProps {
     provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
+    diarizationEnabled?: boolean;
+    diarizationProvider?: 'local' | 'azure';
+    azureSpeechKey?: string | null;
+    azureSpeechRegion?: string | null;
 }
 
 export interface TranscriptSettingsProps {
@@ -27,17 +32,41 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
+    const [diarizationEnabled, setDiarizationEnabled] = useState<boolean>(transcriptModelConfig.diarizationEnabled ?? false);
+    const [diarizationProvider, setDiarizationProvider] = useState<'local' | 'azure'>(transcriptModelConfig.diarizationProvider ?? 'local');
+    const [azureSpeechKey, setAzureSpeechKey] = useState<string>(transcriptModelConfig.azureSpeechKey || '');
+    const [azureSpeechRegion, setAzureSpeechRegion] = useState<string>(transcriptModelConfig.azureSpeechRegion || '');
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
         setUiProvider(transcriptModelConfig.provider);
-    }, [transcriptModelConfig.provider]);
+        setDiarizationEnabled(transcriptModelConfig.diarizationEnabled ?? false);
+        setDiarizationProvider(transcriptModelConfig.diarizationProvider ?? 'local');
+        setAzureSpeechKey(transcriptModelConfig.azureSpeechKey || '');
+        setAzureSpeechRegion(transcriptModelConfig.azureSpeechRegion || '');
+    }, [
+        transcriptModelConfig.provider,
+        transcriptModelConfig.diarizationEnabled,
+        transcriptModelConfig.diarizationProvider,
+        transcriptModelConfig.azureSpeechKey,
+        transcriptModelConfig.azureSpeechRegion,
+    ]);
 
     useEffect(() => {
         if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
+
+    useEffect(() => {
+        setTranscriptModelConfig({
+            ...transcriptModelConfig,
+            diarizationEnabled,
+            diarizationProvider,
+            azureSpeechKey,
+            azureSpeechRegion,
+        });
+    }, [diarizationEnabled, diarizationProvider, azureSpeechKey, azureSpeechRegion]);
 
     const fetchApiKey = async (provider: string) => {
         try {
@@ -219,6 +248,54 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             </div>
                         </div>
                     )}
+
+                    <div className="border border-gray-200 rounded-md p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <Label className="text-sm font-medium text-gray-700">Speaker Diarization</Label>
+                            <Switch checked={diarizationEnabled} onCheckedChange={setDiarizationEnabled} />
+                        </div>
+
+                        {diarizationEnabled && (
+                            <>
+                                <div>
+                                    <Label className="block text-sm font-medium text-gray-700 mb-1">Diarization Provider</Label>
+                                    <Select value={diarizationProvider} onValueChange={(value) => setDiarizationProvider(value as 'local' | 'azure')}>
+                                        <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
+                                            <SelectValue placeholder="Select diarization provider" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="local">Local (post-recording)</SelectItem>
+                                            <SelectItem value="azure">Azure (real-time)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                {diarizationProvider === 'azure' && (
+                                    <>
+                                        <div>
+                                            <Label className="block text-sm font-medium text-gray-700 mb-1">Azure Speech Key</Label>
+                                            <Input
+                                                type="password"
+                                                className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
+                                                value={azureSpeechKey}
+                                                onChange={(e) => setAzureSpeechKey(e.target.value)}
+                                                placeholder="Enter Azure Speech key"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label className="block text-sm font-medium text-gray-700 mb-1">Azure Region</Label>
+                                            <Input
+                                                className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
+                                                value={azureSpeechRegion}
+                                                onChange={(e) => setAzureSpeechRegion(e.target.value)}
+                                                placeholder="e.g. eastus"
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
         </div >

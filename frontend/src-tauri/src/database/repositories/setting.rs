@@ -20,6 +20,14 @@ pub struct SaveTranscriptConfigRequest {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    #[serde(rename = "diarizationEnabled")]
+    pub diarization_enabled: Option<bool>,
+    #[serde(rename = "diarizationProvider")]
+    pub diarization_provider: Option<String>,
+    #[serde(rename = "azureSpeechKey")]
+    pub azure_speech_key: Option<String>,
+    #[serde(rename = "azureSpeechRegion")]
+    pub azure_speech_region: Option<String>,
 }
 
 pub struct SettingsRepository;
@@ -154,18 +162,38 @@ impl SettingsRepository {
         pool: &SqlitePool,
         provider: &str,
         model: &str,
+        diarization_enabled: bool,
+        diarization_provider: &str,
+        azure_speech_key: Option<&str>,
+        azure_speech_region: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO transcript_settings (id, provider, model)
-            VALUES ('1', $1, $2)
+            INSERT INTO transcript_settings (
+                id,
+                provider,
+                model,
+                diarizationEnabled,
+                diarizationProvider,
+                azureSpeechKey,
+                azureSpeechRegion
+            )
+            VALUES ('1', $1, $2, $3, $4, $5, $6)
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
-                model = excluded.model
+                model = excluded.model,
+                diarizationEnabled = excluded.diarizationEnabled,
+                diarizationProvider = excluded.diarizationProvider,
+                azureSpeechKey = excluded.azureSpeechKey,
+                azureSpeechRegion = excluded.azureSpeechRegion
             "#,
         )
         .bind(provider)
         .bind(model)
+        .bind(if diarization_enabled { 1_i64 } else { 0_i64 })
+        .bind(diarization_provider)
+        .bind(azure_speech_key)
+        .bind(azure_speech_region)
         .execute(pool)
         .await?;
 

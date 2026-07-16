@@ -68,5 +68,9 @@ CREATE TABLE IF NOT EXISTS transcript_settings (
     deepgramApiKey TEXT,
     elevenLabsApiKey TEXT,
     groqApiKey TEXT,
-    openaiApiKey TEXT
+    openaiApiKey TEXT,
+    diarizationEnabled INTEGER NOT NULL DEFAULT 0,
+    diarizationProvider TEXT NOT NULL DEFAULT 'local',
+    azureSpeechKey TEXT,
+    azureSpeechRegion TEXT
 );

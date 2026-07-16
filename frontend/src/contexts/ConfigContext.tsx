@@ -109,7 +109,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'parakeet',
     model: 'parakeet-tdt-0.6b-v3-int8',
-    apiKey: null
+    apiKey: null,
+    diarizationEnabled: false,
+    diarizationProvider: 'local',
+    azureSpeechKey: null,
+    azureSpeechRegion: null,
   });
 
   // Provider-specific API keys (loaded once at startup)
@@ -201,7 +205,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           setTranscriptModelConfig({
             provider: config.provider || 'parakeet',
             model: config.model || 'parakeet-tdt-0.6b-v3-int8',
-            apiKey: config.apiKey || null
+            apiKey: config.apiKey || null,
+            diarizationEnabled: config.diarizationEnabled || false,
+            diarizationProvider: config.diarizationProvider || 'local',
+            azureSpeechKey: config.azureSpeechKey || null,
+            azureSpeechRegion: config.azureSpeechRegion || null,
           });
         }
       } catch (error) {

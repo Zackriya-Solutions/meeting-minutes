@@ -209,6 +209,10 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         pool,
         "parakeet",
         crate::config::DEFAULT_PARAKEET_MODEL,
+        false,
+        "local",
+        None,
+        None,
     ).await {
         error!("Failed to set default transcription model config: {}", e);
     }
