@@ -32,8 +32,8 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
+>(({ className, children, hideClose = false, ...props }, ref) => {
   const t = useT()
   return (
   <DialogPortal>
@@ -47,10 +47,12 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="mm-icon-button absolute right-3 top-3 h-9 w-9 disabled:pointer-events-none">
-        <Icon name="close" size={17} />
-        <span className="sr-only">{t('Close')}</span>
-      </DialogPrimitive.Close>
+      {!hideClose && (
+        <DialogPrimitive.Close className="mm-icon-button absolute right-3 top-3 h-9 w-9 disabled:pointer-events-none">
+          <Icon name="close" size={17} />
+          <span className="sr-only">{t('Close')}</span>
+        </DialogPrimitive.Close>
+      )}
     </DialogPrimitive.Content>
   </DialogPortal>
   )

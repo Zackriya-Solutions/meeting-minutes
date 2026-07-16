@@ -583,6 +583,7 @@ pub fn run() {
             collections::commands::run_backfill,
             collections::commands::set_app_setting,
             collections::commands::get_app_settings,
+            database::managed_defaults::resolve_managed_defaults_migration,
             start_recording,
             stop_recording,
             is_recording,
