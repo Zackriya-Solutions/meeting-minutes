@@ -25,6 +25,7 @@ CONF="$FRONTEND/src-tauri/tauri.conf.json"
 BAK="$CONF.signbuild.bak"
 KC="${SIGNING_KEYCHAIN:-/tmp/meetily-sign.keychain-db}"
 KCPW="meetily-temp-kc-pw"
+DEVELOPER_ID_G2_CA="${SIGNING_INTERMEDIATE:-/tmp/apple-developer-id-g2.der}"
 
 skip_dmg_notarize=0
 [[ "${1:-}" == "--skip-dmg-notarize" ]] && skip_dmg_notarize=1
@@ -34,6 +35,13 @@ if [[ -f "$FRONTEND/.env.signing" ]]; then
   echo "==> Loading credentials from frontend/.env.signing"
   set -a; # shellcheck disable=SC1091
   source "$FRONTEND/.env.signing"; set +a
+fi
+
+# Keep the local certificate next to this script without baking an absolute
+# developer-machine path into the ignored credentials file.
+SIGNING_P12="${SIGNING_P12:-Certificates.p12}"
+if [[ "$SIGNING_P12" != /* ]]; then
+  SIGNING_P12="$FRONTEND/$SIGNING_P12"
 fi
 
 : "${APPLE_ID:?set APPLE_ID (Apple account email) in env or frontend/.env.signing}"
@@ -75,6 +83,7 @@ cleanup() {
   [[ -f "$BAK" ]] && mv -f "$BAK" "$CONF"
   security list-keychains -d user -s $ORIG_KEYCHAINS >/dev/null 2>&1 || true
   security delete-keychain "$KC" >/dev/null 2>&1 || true
+  rm -f "$DEVELOPER_ID_G2_CA"
   return $st
 }
 trap cleanup EXIT
@@ -85,12 +94,18 @@ security delete-keychain "$KC" 2>/dev/null || true
 security create-keychain -p "$KCPW" "$KC"
 security set-keychain-settings "$KC"                    # disable auto-lock timeout
 security unlock-keychain -p "$KCPW" "$KC"
+# New Developer ID certificates use the G2 intermediate. Some macOS installations
+# can fetch it for certificate verification but codesign will not fetch it while
+# resolving an identity in an isolated keychain, which results in
+# "unable to build chain ... errSecInternalComponent".
+curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$DEVELOPER_ID_G2_CA"
+security import "$DEVELOPER_ID_G2_CA" -k "$KC" -A >/dev/null
 security import "$SIGNING_P12" -k "$KC" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign -A
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
 security list-keychains -d user -s "$KC" $ORIG_KEYCHAINS   # prepend
-if ! security find-identity -v -p codesigning "$KC" | grep -q "$APPLE_SIGNING_IDENTITY"; then
+if ! security find-identity -v -p codesigning | grep -Fq "$APPLE_SIGNING_IDENTITY"; then
   echo "error: identity '$APPLE_SIGNING_IDENTITY' not found in the imported .p12" >&2
-  security find-identity -v -p codesigning "$KC" >&2
+  security find-identity -v -p codesigning >&2
   exit 1
 fi
 
@@ -112,7 +127,14 @@ PY
 # ---------- build (GPU auto-detected: coreml on Apple Silicon) ----------
 echo "==> tauri build (sign app + sidecars, notarize + staple .app)"
 date
-corepack pnpm run tauri:build
+if command -v corepack >/dev/null 2>&1; then
+  corepack pnpm run tauri:build
+elif command -v pnpm >/dev/null 2>&1; then
+  pnpm run tauri:build
+else
+  echo "error: neither corepack nor pnpm is available in PATH" >&2
+  exit 127
+fi
 status=$?
 if [[ $status -ne 0 ]]; then
   echo "==> tauri build failed (status $status)" >&2

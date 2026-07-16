@@ -48,7 +48,7 @@ export function SetupOverviewStep() {
   return (
     <OnboardingContainer
       title={t('Setup Overview')}
-      description={t('Meetily requires that you download the Transcription & Summarization AI models for the software to work.')}
+      description={t('Memento requires transcription and summarization services to process meetings.')}
       step={2}
       totalSteps={isMac ? 4 : 3}
     >

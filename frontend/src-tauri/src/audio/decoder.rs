@@ -39,6 +39,74 @@ pub struct DecodedAudio {
     pub duration_seconds: f64,
 }
 
+/// Audio already converted to the format expected by VAD/transcription.
+#[derive(Debug)]
+pub struct WhisperAudio {
+    pub samples: Vec<f32>,
+    pub duration_seconds: f64,
+}
+
+/// Decode directly to mono 16 kHz float samples through the bundled FFmpeg.
+///
+/// This avoids materializing the original multi-channel stream and then
+/// running the high-quality Rust sinc resampler. It is especially important
+/// for batch imports, where the debug sinc path can be slower than real time.
+/// The caller should fall back to [`decode_audio_file_with_progress`] when
+/// FFmpeg is unavailable or rejects a file.
+pub fn decode_audio_file_to_whisper(path: &Path) -> Result<WhisperAudio> {
+    const SAMPLE_RATE: f64 = 16_000.0;
+
+    let ffmpeg_path = find_ffmpeg_path()
+        .ok_or_else(|| anyhow!("FFmpeg is not available for direct audio decoding"))?;
+    let output = Command::new(ffmpeg_path)
+        .arg("-nostdin")
+        .arg("-v")
+        .arg("error")
+        .arg("-i")
+        .arg(path)
+        .arg("-vn")
+        .arg("-ac")
+        .arg("1")
+        .arg("-ar")
+        .arg("16000")
+        .arg("-f")
+        .arg("f32le")
+        .arg("pipe:1")
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| anyhow!("Failed to start FFmpeg: {}", error))?;
+
+    if !output.status.success() {
+        let details = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("FFmpeg direct decode failed: {}", details.trim()));
+    }
+    if output.stdout.len() % std::mem::size_of::<f32>() != 0 {
+        return Err(anyhow!(
+            "FFmpeg returned an incomplete f32 sample ({} bytes)",
+            output.stdout.len()
+        ));
+    }
+
+    let mut samples = Vec::with_capacity(output.stdout.len() / 4);
+    for bytes in output.stdout.chunks_exact(4) {
+        let sample = f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        samples.push(if sample.is_finite() {
+            sample.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        });
+    }
+    if samples.is_empty() {
+        return Err(anyhow!("FFmpeg decoded no audio samples"));
+    }
+
+    Ok(WhisperAudio {
+        duration_seconds: samples.len() as f64 / SAMPLE_RATE,
+        samples,
+    })
+}
+
 impl DecodedAudio {
     /// Convert decoded audio to Whisper-compatible 16kHz mono f32 format.
     ///
@@ -50,7 +118,10 @@ impl DecodedAudio {
     }
 
     /// Convert decoded audio to Whisper format with optional progress callback
-    pub fn to_whisper_format_with_progress(&self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
+    pub fn to_whisper_format_with_progress(
+        &self,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Vec<f32> {
         // Step 1: Convert to mono if needed
         let mono_samples = if self.channels > 1 {
             info!(
@@ -84,7 +155,12 @@ impl DecodedAudio {
                     self.sample_rate,
                     WHISPER_SAMPLE_RATE
                 );
-                chunked_resample_with_progress(&mono_samples, self.sample_rate, WHISPER_SAMPLE_RATE, progress_callback)
+                chunked_resample_with_progress(
+                    &mono_samples,
+                    self.sample_rate,
+                    WHISPER_SAMPLE_RATE,
+                    progress_callback,
+                )
             } else {
                 info!(
                     "Resampling {} samples from {}Hz to {}Hz",
@@ -322,10 +398,12 @@ fn convert_to_wav_with_ffmpeg(
     let mut command = Command::new(&ffmpeg_path);
     command
         .args([
-            "-i", input_str,
-            "-vn",                  // Strip video tracks
-            "-acodec", "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
-            "-y",                   // Overwrite without prompt
+            "-i",
+            input_str,
+            "-vn", // Strip video tracks
+            "-acodec",
+            "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
+            "-y",        // Overwrite without prompt
             output_str,
         ])
         .stdin(Stdio::null())
@@ -421,8 +499,13 @@ pub fn decode_audio_file_with_progress(
         };
 
     // Open the file (use decode_path which may be the temp WAV)
-    let file = std::fs::File::open(decode_path.as_ref())
-        .map_err(|e| anyhow!("Failed to open audio file '{}': {}", decode_path.display(), e))?;
+    let file = std::fs::File::open(decode_path.as_ref()).map_err(|e| {
+        anyhow!(
+            "Failed to open audio file '{}': {}",
+            decode_path.display(),
+            e
+        )
+    })?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -480,10 +563,12 @@ pub fn decode_audio_file_with_progress(
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     // Calculate expected samples for progress tracking
-    let expected_duration = track.codec_params.n_frames
+    let expected_duration = track
+        .codec_params
+        .n_frames
         .map(|frames| frames as f64 / sample_rate as f64);
-    let expected_samples = expected_duration
-        .map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
+    let expected_samples =
+        expected_duration.map(|dur| (dur * sample_rate as f64 * channels as f64) as usize);
 
     let mut last_progress = 0u32;
 
@@ -535,10 +620,14 @@ pub fn decode_audio_file_with_progress(
 
                 // Emit progress updates (every 10%)
                 if let (Some(callback), Some(expected)) = (&progress_callback, expected_samples) {
-                    let current_progress = ((all_samples.len() as f64 / expected as f64) * 100.0) as u32;
+                    let current_progress =
+                        ((all_samples.len() as f64 / expected as f64) * 100.0) as u32;
                     if current_progress >= last_progress + 10 && current_progress <= 100 {
                         last_progress = current_progress;
-                        callback(current_progress, &format!("Decoding audio: {}%", current_progress));
+                        callback(
+                            current_progress,
+                            &format!("Decoding audio: {}%", current_progress),
+                        );
                     }
                 }
             }
@@ -607,7 +696,7 @@ mod tests {
 
         let result = audio.to_whisper_format();
         assert_eq!(result.len(), 2); // Should be mono now
-        // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
+                                     // Average of (0.2, 0.4) = 0.3 and (0.6, 0.8) = 0.7
         assert!((result[0] - 0.3).abs() < 0.001);
         assert!((result[1] - 0.7).abs() < 0.001);
     }
@@ -628,8 +717,11 @@ mod tests {
         // Output length should be approximately input_len / 3 (16000/48000 ratio)
         // 4800 / 3 = 1600
         assert!(!result.is_empty(), "Result should not be empty");
-        assert!(result.len() > 1000 && result.len() < 2000,
-            "Expected ~1600 samples, got {}", result.len());
+        assert!(
+            result.len() > 1000 && result.len() < 2000,
+            "Expected ~1600 samples, got {}",
+            result.len()
+        );
     }
 
     #[test]
@@ -652,7 +744,7 @@ mod tests {
     #[test]
     fn test_chunked_resample_downsamples_correctly() {
         // 48kHz to 16kHz = 3x downsampling with a 2-second signal
-        let input: Vec<f32> = (0..96000).map(|i| (i as f32 / 96000.0)).collect();
+        let input: Vec<f32> = (0..96000).map(|i| i as f32 / 96000.0).collect();
         let result = chunked_resample_with_progress(&input, 48000, 16000, None);
 
         // Output should be approximately 1/3 the length

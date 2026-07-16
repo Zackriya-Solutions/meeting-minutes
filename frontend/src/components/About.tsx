@@ -56,7 +56,7 @@ export function About() {
                 <div className="mb-3">
                     <Image
                         src="/memento-app-icon.png"
-                        alt={t('Meetily Logo')}
+                        alt={t('Memento Logo')}
                         width={64}
                         height={64}
                         className="mx-auto"
@@ -97,7 +97,7 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[var(--fg1)]">{t('What makes Meetily different')}</h2>
+                <h2 className="text-base font-semibold text-[var(--fg1)]">{t('What makes Memento different')}</h2>
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
                         <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Privacy-first')}</h3>

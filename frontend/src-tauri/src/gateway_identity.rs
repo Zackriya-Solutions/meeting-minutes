@@ -4,8 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PRIMARY_GATEWAY: &str = "https://gw.gigatool.app";
-pub const FALLBACK_GATEWAY: &str = "https://gw2.gigatool.app";
+pub const PRIMARY_GATEWAY_HOST: &str = "gw.multitool.works";
+pub const FALLBACK_GATEWAY_HOST: &str = "gw2.multitool.works";
+pub const PRIMARY_GATEWAY: &str = "https://gw.multitool.works";
+pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
+pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 const SERVICE: &str = "meetily.gateway";
 
 fn registration_key() -> Result<String, String> {
@@ -16,6 +19,15 @@ fn registration_key() -> Result<String, String> {
         .or_else(|| std::env::var("MEMENTO_REGISTRATION_KEY").ok())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "MEMENTO_REGISTRATION_KEY is missing from this build".to_string())
+}
+
+/// Whether this binary can register with the managed Memento gateway.
+///
+/// This is a local capability check only: it does not access the network or the
+/// credential vault. Callers use it to avoid offering a cloud migration that
+/// can never succeed in a development or unsigned test build.
+pub fn managed_gateway_supported() -> bool {
+    registration_key().is_ok()
 }
 
 #[derive(Serialize)]
@@ -104,4 +116,34 @@ pub async fn install_token() -> Result<(String, String), String> {
         }
     }
     Err(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::Url;
+
+    fn assert_managed_https_url(value: &str, expected_host: &str) {
+        let url = Url::parse(value).expect("managed gateway URL must parse");
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some(expected_host));
+        assert!(url.username().is_empty());
+        assert!(url.password().is_none());
+        assert!(url.query().is_none());
+        assert!(url.fragment().is_none());
+    }
+
+    #[test]
+    fn managed_gateway_domains_are_exact_https_allowlist_entries() {
+        assert_managed_https_url(PRIMARY_GATEWAY, PRIMARY_GATEWAY_HOST);
+        assert_managed_https_url(FALLBACK_GATEWAY, FALLBACK_GATEWAY_HOST);
+        assert_ne!(PRIMARY_GATEWAY, FALLBACK_GATEWAY);
+    }
+
+    #[test]
+    fn deepseek_base_url_is_scoped_to_the_primary_gateway() {
+        assert_managed_https_url(PRIMARY_DEEPSEEK_BASE_URL, PRIMARY_GATEWAY_HOST);
+        let url = Url::parse(PRIMARY_DEEPSEEK_BASE_URL).unwrap();
+        assert_eq!(url.path(), "/deepseek/v1");
+    }
 }

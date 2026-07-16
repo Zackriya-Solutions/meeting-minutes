@@ -3,14 +3,19 @@
     "transcription": 10,
     "diarization": 10,
     "retrieval": 30,
-    "summary": 10
+    "summary": 10,
+    "standup": 12
   },
   "maximum": {
     "transcription.wer": 0.2,
     "diarization.der": 0.25,
     "retrieval.no_answer_false_positive_rate": 0.1,
     "summary.p95_latency_ms": 60000,
-    "summary.mean_unsupported_claim_rate": 0.05
+    "summary.mean_unsupported_claim_rate": 0.05,
+    "standup.protocol_error_count": 0,
+    "standup.invalid_evidence_rate": 0,
+    "standup.unsupported_decision_action_rate": 0.02,
+    "standup.duplicate_output_rate": 0.05
   },
   "minimum": {
     "retrieval.answerable_count": 20,
@@ -20,6 +25,18 @@
     "summary.success_rate": 0.95,
     "summary.quality_count": 10,
     "summary.mean_fact_coverage": 0.8,
-    "summary.mean_action_item_f1": 0.75
+    "summary.mean_action_item_f1": 0.75,
+    "standup.success_rate": 0.95,
+    "standup.quality_count": 12,
+    "standup.reviewed_standup_count": 12,
+    "standup.pure_status_count": 3,
+    "standup.status_plus_deep_dive_count": 3,
+    "standup.contrast_count": 2,
+    "standup.dev_count": 2,
+    "standup.test_count": 3,
+    "standup.provider_count": 1,
+    "standup.fact_coverage": 0.8,
+    "standup.action_f1": 0.75,
+    "standup.owner_precision_when_shown": 0.95
   }
 }

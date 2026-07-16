@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getConfiguredTranscriptionReadiness,
   isConfiguredTranscriptionModelReady,
   type InvokeFn,
 } from "../../src/lib/transcriptionReadiness";
@@ -79,6 +80,11 @@ describe("isConfiguredTranscriptionModelReady (provider-aware recording gate)", 
       salutespeech_is_configured: false,
     });
     expect(await isConfiguredTranscriptionModelReady(unavailable.invoke)).toBe(false);
+    expect(await getConfiguredTranscriptionReadiness(unavailable.invoke)).toEqual({
+      provider: "salutespeech",
+      ready: false,
+      requiresLocalModel: false,
+    });
   });
 
   test("cloud provider (openai): always ready, no local-model query", async () => {

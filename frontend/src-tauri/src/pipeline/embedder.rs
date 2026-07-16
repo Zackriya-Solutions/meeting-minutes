@@ -124,7 +124,11 @@ impl Embedder {
         }
         let session = build_session(&config.model_path())
             .with_context(|| format!("loading embedder from {}", config.model_path().display()))?;
-        Ok(Self { config, session, tokenizer })
+        Ok(Self {
+            config,
+            session,
+            tokenizer,
+        })
     }
 
     pub fn dim(&self) -> usize {
@@ -179,10 +183,28 @@ impl Embedder {
             TensorRef::from_array_view(ids.view()).map_err(|e| anyhow!("ort input_ids: {e}"))?;
         let mask_tensor = TensorRef::from_array_view(mask.view())
             .map_err(|e| anyhow!("ort attention_mask: {e}"))?;
-        let outputs = self
+        // Some multilingual-e5 ONNX exports retain BERT's token-type embedding input.
+        // A sentence is one segment, so its canonical token-type value is zero. Other
+        // exports omit the input; inspect the graph rather than passing an unknown name.
+        let needs_token_type_ids = self
             .session
-            .run(inputs!["input_ids" => ids_tensor, "attention_mask" => mask_tensor])
-            .map_err(|e| anyhow!("ort run: {e}"))?;
+            .inputs
+            .iter()
+            .any(|input| input.name == "token_type_ids");
+        let token_types = ndarray::Array2::<i64>::zeros((bsz, max_len));
+        let outputs = if needs_token_type_ids {
+            let token_types_tensor = TensorRef::from_array_view(token_types.view())
+                .map_err(|e| anyhow!("ort token_type_ids: {e}"))?;
+            self.session.run(inputs![
+                "input_ids" => ids_tensor,
+                "attention_mask" => mask_tensor,
+                "token_type_ids" => token_types_tensor,
+            ])
+        } else {
+            self.session
+                .run(inputs!["input_ids" => ids_tensor, "attention_mask" => mask_tensor])
+        }
+        .map_err(|e| anyhow!("ort run: {e}"))?;
 
         // last_hidden_state: [batch, seq, hidden]. Matches the parakeet extraction API
         // (ort rc): `.get(name).try_extract_array()` -> ArrayViewD<f32>.
@@ -232,7 +254,10 @@ impl HfTokenizer {
     pub fn from_file(path: &Path) -> Result<Self> {
         let inner = tokenizers::Tokenizer::from_file(path)
             .map_err(|e| anyhow!("failed to load tokenizer {}: {e}", path.display()))?;
-        Ok(Self { inner, max_len: 512 })
+        Ok(Self {
+            inner,
+            max_len: 512,
+        })
     }
 }
 
@@ -243,12 +268,16 @@ impl TextTokenizer for HfTokenizer {
             .encode(text, true)
             .map_err(|e| anyhow!("tokenize failed: {e}"))?;
         let mut input_ids: Vec<i64> = enc.get_ids().iter().map(|&i| i as i64).collect();
-        let mut attention_mask: Vec<i64> = enc.get_attention_mask().iter().map(|&m| m as i64).collect();
+        let mut attention_mask: Vec<i64> =
+            enc.get_attention_mask().iter().map(|&m| m as i64).collect();
         if input_ids.len() > self.max_len {
             input_ids.truncate(self.max_len);
             attention_mask.truncate(self.max_len);
         }
-        Ok(TokenizedInput { input_ids, attention_mask })
+        Ok(TokenizedInput {
+            input_ids,
+            attention_mask,
+        })
     }
 }
 
@@ -263,10 +292,14 @@ static EMBEDDER: Mutex<Option<Embedder>> = Mutex::new(None);
 /// `tokenizer.json`) into the global slot, replacing any previous model.
 pub fn load_global(model_dir: impl Into<PathBuf>) -> Result<()> {
     let config = EmbedderConfig::new(model_dir);
-    let tokenizer: Box<dyn TextTokenizer> = Box::new(HfTokenizer::from_file(&config.tokenizer_path())?);
+    let tokenizer: Box<dyn TextTokenizer> =
+        Box::new(HfTokenizer::from_file(&config.tokenizer_path())?);
     let embedder = Embedder::load(config, tokenizer)?;
     *EMBEDDER.lock().unwrap() = Some(embedder);
-    log::info!("embedding model loaded (dim={})", crate::vector::EMBEDDING_DIM);
+    log::info!(
+        "embedding model loaded (dim={})",
+        crate::vector::EMBEDDING_DIM
+    );
     Ok(())
 }
 
@@ -288,7 +321,9 @@ pub async fn embed_query(text: String) -> Option<Result<Vec<f32>, String>> {
     }
     tokio::task::spawn_blocking(move || {
         let mut guard = EMBEDDER.lock().unwrap();
-        guard.as_mut().map(|e| e.embed_query(&text).map_err(|e| e.to_string()))
+        guard
+            .as_mut()
+            .map(|e| e.embed_query(&text).map_err(|e| e.to_string()))
     })
     .await
     .ok()
@@ -303,7 +338,9 @@ pub async fn embed_passages(texts: Vec<String>) -> Option<Result<Vec<Vec<f32>>, 
     }
     tokio::task::spawn_blocking(move || {
         let mut guard = EMBEDDER.lock().unwrap();
-        guard.as_mut().map(|e| e.embed_passages(&texts).map_err(|e| e.to_string()))
+        guard
+            .as_mut()
+            .map(|e| e.embed_passages(&texts).map_err(|e| e.to_string()))
     })
     .await
     .ok()
@@ -343,5 +380,26 @@ mod tests {
         let mut v = vec![0.0, 0.0];
         l2_normalize(&mut v); // must not divide by zero
         assert_eq!(v, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    #[ignore = "requires MEETILY_TEST_EMBEDDING_MODEL_DIR with model.onnx and tokenizer.json"]
+    fn installed_embedding_model_runs_end_to_end() {
+        let model_dir = std::env::var("MEETILY_TEST_EMBEDDING_MODEL_DIR")
+            .expect("MEETILY_TEST_EMBEDDING_MODEL_DIR is required");
+        let config = EmbedderConfig::new(model_dir);
+        let tokenizer = Box::new(HfTokenizer::from_file(&config.tokenizer_path()).unwrap());
+        let mut embedder = Embedder::load(config, tokenizer).unwrap();
+        let embeddings = embedder
+            .embed_passages(&["проверка локальных эмбеддингов".to_string()])
+            .unwrap();
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0].len(), crate::vector::EMBEDDING_DIM);
+        let norm = embeddings[0]
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        assert!((norm - 1.0).abs() < 1e-4);
     }
 }

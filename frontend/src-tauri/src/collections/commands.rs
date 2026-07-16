@@ -4,7 +4,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::collections::{suggest_series, MeetingRef, MIN_SERIES_SIZE};
+use crate::collections::{
+    auto_assign_meeting, derive_series_match_rule, normalize_title, suggest_series, MeetingRef,
+    MIN_SERIES_SIZE,
+};
 use crate::database::repositories::setting::redact_secret;
 use crate::state::AppState;
 
@@ -14,6 +17,8 @@ pub struct CollectionRow {
     pub name: String,
     pub kind: String,
     pub meeting_count: i64,
+    pub auto_add: bool,
+    pub match_rule: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -21,6 +26,8 @@ pub struct CollectionMeetingRow {
     pub id: String,
     pub title: String,
     pub created_at: String,
+    pub occurred_at: Option<String>,
+    pub folder_path: Option<String>,
     pub in_collection: bool,
 }
 
@@ -95,6 +102,11 @@ pub async fn delete_collection(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM collection_auto_exclusions WHERE collection_id = ?")
+        .bind(collection_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     let result = sqlx::query("DELETE FROM collections WHERE id = ?")
         .bind(collection_id)
         .execute(&mut *tx)
@@ -127,11 +139,11 @@ pub async fn list_collections(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<CollectionRow>, String> {
     let pool = state.db_manager.pool();
-    let rows: Vec<(i64, String, String, i64)> = sqlx::query_as(
-        "SELECT c.id, c.name, c.kind, COUNT(mc.meeting_id) \
+    let rows: Vec<(i64, String, String, i64, i64, Option<String>)> = sqlx::query_as(
+        "SELECT c.id, c.name, c.kind, COUNT(mc.meeting_id), c.auto_add, c.match_rule \
          FROM collections c \
          LEFT JOIN meeting_collections mc ON mc.collection_id = c.id \
-         GROUP BY c.id, c.name, c.kind \
+         GROUP BY c.id, c.name, c.kind, c.auto_add, c.match_rule \
          ORDER BY lower(c.name), c.id",
     )
     .fetch_all(pool)
@@ -139,12 +151,16 @@ pub async fn list_collections(
     .map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, kind, meeting_count)| CollectionRow {
-            id,
-            name,
-            kind,
-            meeting_count,
-        })
+        .map(
+            |(id, name, kind, meeting_count, auto_add, match_rule)| CollectionRow {
+                id,
+                name,
+                kind,
+                meeting_count,
+                auto_add: auto_add != 0,
+                match_rule,
+            },
+        )
         .collect())
 }
 
@@ -162,8 +178,8 @@ pub async fn list_collection_candidates(
         return Err("Collection not found".into());
     }
 
-    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT m.id, m.title, m.created_at, \
+    let rows: Vec<(String, String, String, Option<String>, Option<String>, i64)> = sqlx::query_as(
+        "SELECT m.id, m.title, m.created_at, m.occurred_at, m.folder_path, \
          EXISTS(SELECT 1 FROM meeting_collections mc \
                 WHERE mc.meeting_id = m.id AND mc.collection_id = ?) \
          FROM meetings m ORDER BY m.created_at DESC, m.id",
@@ -176,11 +192,15 @@ pub async fn list_collection_candidates(
     Ok(rows
         .into_iter()
         .map(
-            |(id, title, created_at, in_collection)| CollectionMeetingRow {
-                id,
-                title,
-                created_at,
-                in_collection: in_collection != 0,
+            |(id, title, created_at, occurred_at, folder_path, in_collection)| {
+                CollectionMeetingRow {
+                    id,
+                    title,
+                    created_at,
+                    occurred_at,
+                    folder_path,
+                    in_collection: in_collection != 0,
+                }
             },
         )
         .collect())
@@ -215,6 +235,19 @@ pub async fn set_collection_meetings(
     if collection_exists == 0 {
         return Err("Collection not found".into());
     }
+    let collection_kind: String = sqlx::query_scalar("SELECT kind FROM collections WHERE id = ?")
+        .bind(collection_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    let previous_ids: HashSet<String> =
+        sqlx::query_scalar("SELECT meeting_id FROM meeting_collections WHERE collection_id = ?")
+            .bind(collection_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect();
 
     for meeting_id in &unique_ids {
         let meeting_exists: i64 =
@@ -235,11 +268,35 @@ pub async fn set_collection_meetings(
         .map_err(|e| e.to_string())?;
     for meeting_id in unique_ids {
         sqlx::query("INSERT INTO meeting_collections(meeting_id, collection_id) VALUES(?, ?)")
-            .bind(meeting_id)
+            .bind(&meeting_id)
             .bind(collection_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
+        if collection_kind == "series" {
+            sqlx::query(
+                "DELETE FROM collection_auto_exclusions
+                 WHERE collection_id = ? AND meeting_id = ?",
+            )
+            .bind(collection_id)
+            .bind(&meeting_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    if collection_kind == "series" {
+        for removed_id in previous_ids.difference(&seen) {
+            sqlx::query(
+                "INSERT OR IGNORE INTO collection_auto_exclusions(collection_id, meeting_id)
+                 VALUES(?, ?)",
+            )
+            .bind(collection_id)
+            .bind(removed_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
     }
     tx.commit().await.map_err(|e| e.to_string())
 }
@@ -304,23 +361,30 @@ pub async fn accept_series_suggestion(
         .begin()
         .await
         .map_err(|e| e.to_string())?;
+    let mut series_titles = Vec::with_capacity(unique_ids.len());
     for meeting_id in &unique_ids {
-        let exists: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)")
+        let title: Option<String> = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
             .bind(meeting_id)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
-        if exists == 0 {
+        let Some(title) = title else {
             return Err(format!("Meeting not found: {meeting_id}"));
-        }
+        };
+        series_titles.push(title);
     }
 
-    let collection_id: i64 =
-        sqlx::query_scalar("INSERT INTO collections(name, kind) VALUES(?, 'series') RETURNING id")
-            .bind(name)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+    let match_rule = derive_series_match_rule(series_titles.iter().map(String::as_str))
+        .unwrap_or_else(|| normalize_title(&name));
+    let collection_id: i64 = sqlx::query_scalar(
+        "INSERT INTO collections(name, kind, auto_add, match_rule)
+             VALUES(?, 'series', 1, ?) RETURNING id",
+    )
+    .bind(name)
+    .bind(match_rule)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
     for meeting_id in unique_ids {
         sqlx::query("INSERT INTO meeting_collections(meeting_id, collection_id) VALUES(?, ?)")
             .bind(meeting_id)
@@ -333,6 +397,146 @@ pub async fn accept_series_suggestion(
     Ok(collection_id)
 }
 
+#[derive(Debug, Serialize)]
+pub struct SeriesAutoAddResult {
+    pub enabled: bool,
+    pub match_rule: Option<String>,
+    pub added_count: usize,
+}
+
+#[tauri::command]
+pub async fn set_series_auto_add(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+    enabled: bool,
+) -> Result<SeriesAutoAddResult, String> {
+    let pool = state.db_manager.pool();
+    let collection: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT kind, match_rule FROM collections WHERE id = ?")
+            .bind(collection_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some((kind, stored_rule)) = collection else {
+        return Err("Collection not found".into());
+    };
+    if kind != "series" {
+        return Err("Auto-add is available only for recurring series".into());
+    }
+
+    let match_rule = if enabled && stored_rule.as_deref().unwrap_or("").trim().is_empty() {
+        let titles: Vec<String> = sqlx::query_scalar(
+            "SELECT m.title FROM meetings m
+             JOIN meeting_collections mc ON mc.meeting_id = m.id
+             WHERE mc.collection_id = ? ORDER BY m.created_at DESC",
+        )
+        .bind(collection_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        derive_series_match_rule(titles.iter().map(String::as_str))
+            .ok_or("Could not derive a stable matching rule from this series")?
+    } else {
+        stored_rule.unwrap_or_default()
+    };
+
+    sqlx::query("UPDATE collections SET auto_add = ?, match_rule = ? WHERE id = ?")
+        .bind(enabled as i64)
+        .bind((!match_rule.is_empty()).then_some(match_rule.clone()))
+        .bind(collection_id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut added_count = 0;
+    if enabled {
+        let meetings: Vec<(String, String)> = sqlx::query_as("SELECT id, title FROM meetings")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        for (meeting_id, title) in meetings {
+            let assigned = auto_assign_meeting(pool, &meeting_id, &title)
+                .await
+                .map_err(|e| e.to_string())?;
+            if assigned.contains(&collection_id) {
+                added_count += 1;
+            }
+        }
+    }
+
+    Ok(SeriesAutoAddResult {
+        enabled,
+        match_rule: (!match_rule.is_empty()).then_some(match_rule),
+        added_count,
+    })
+}
+
+#[tauri::command]
+pub async fn convert_collection_to_series(
+    state: tauri::State<'_, AppState>,
+    collection_id: i64,
+) -> Result<SeriesAutoAddResult, String> {
+    let pool = state.db_manager.pool();
+    let collection: Option<String> =
+        sqlx::query_scalar("SELECT kind FROM collections WHERE id = ?")
+            .bind(collection_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some(kind) = collection else {
+        return Err("Collection not found".into());
+    };
+    if kind == "series" {
+        return Err("Collection is already a recurring series".into());
+    }
+
+    let titles: Vec<String> = sqlx::query_scalar(
+        "SELECT m.title FROM meetings m
+         JOIN meeting_collections mc ON mc.meeting_id = m.id
+         WHERE mc.collection_id = ? ORDER BY m.created_at DESC",
+    )
+    .bind(collection_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if titles.len() < MIN_SERIES_SIZE {
+        return Err(format!(
+            "A recurring series requires at least {MIN_SERIES_SIZE} meetings"
+        ));
+    }
+    let match_rule = derive_series_match_rule(titles.iter().map(String::as_str))
+        .ok_or("Could not derive a stable matching rule from these meetings")?;
+
+    sqlx::query(
+        "UPDATE collections SET kind = 'series', auto_add = 1, match_rule = ? WHERE id = ?",
+    )
+    .bind(&match_rule)
+    .bind(collection_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let meetings: Vec<(String, String)> = sqlx::query_as("SELECT id, title FROM meetings")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut added_count = 0;
+    for (meeting_id, title) in meetings {
+        let assigned = auto_assign_meeting(pool, &meeting_id, &title)
+            .await
+            .map_err(|e| e.to_string())?;
+        if assigned.contains(&collection_id) {
+            added_count += 1;
+        }
+    }
+
+    Ok(SeriesAutoAddResult {
+        enabled: true,
+        match_rule: Some(match_rule),
+        added_count,
+    })
+}
+
 /// Propose series from the meeting archive (PLAN.md Phase 5 auto-series).
 #[tauri::command]
 pub async fn suggest_meeting_series(
@@ -342,7 +546,9 @@ pub async fn suggest_meeting_series(
     // Once a suggestion has been accepted, do not propose the same meetings
     // again on the next launch. Manual collections do not suppress discovery.
     let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT m.id, m.title, m.created_at FROM meetings m \
+        "SELECT m.id, m.title, \
+                COALESCE(m.occurred_at, datetime(m.created_at, 'localtime')) \
+         FROM meetings m \
          WHERE NOT EXISTS ( \
            SELECT 1 FROM meeting_collections mc \
            JOIN collections c ON c.id = mc.collection_id \

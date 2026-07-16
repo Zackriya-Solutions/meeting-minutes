@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from '@/components/memento/LucideCompat';
+import { Copy, Save, Loader2, MessageSquare } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 
@@ -13,6 +13,7 @@ interface SummaryUpdaterButtonGroupProps {
   onCopy: () => Promise<void>;
   onFind?: () => void;
   onOpenFolder: () => Promise<void>;
+  onDiscuss: () => void;
   hasSummary: boolean;
 }
 
@@ -23,6 +24,7 @@ export function SummaryUpdaterButtonGroup({
   onCopy,
   onFind,
   onOpenFolder,
+  onDiscuss,
   hasSummary
 }: SummaryUpdaterButtonGroupProps) {
   const t = useT();
@@ -33,12 +35,18 @@ export function SummaryUpdaterButtonGroup({
         variant="outline"
         size="sm"
         className={`${isDirty ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]' : ""}`}
-        title={isSaving ? t('Saving') : t('Save Changes')}
+        title={
+          isSaving
+            ? t('Saving')
+            : isDirty
+              ? t('Save Changes')
+              : t('The generated summary is saved automatically')
+        }
         onClick={() => {
           Analytics.trackButtonClick('save_changes', 'meeting_details');
           onSave();
         }}
-        disabled={isSaving}
+        disabled={isSaving || !isDirty}
       >
         {isSaving ? (
           <>
@@ -51,6 +59,17 @@ export function SummaryUpdaterButtonGroup({
             <span className="hidden lg:inline">{t('Save')}</span>
           </>
         )}
+      </Button>
+
+      <Button
+        variant="outline"
+        size="sm"
+        title={t('Discuss this meeting with AI')}
+        onClick={onDiscuss}
+        disabled={!hasSummary}
+      >
+        <MessageSquare />
+        <span className="hidden lg:inline">{t('Discuss')}</span>
       </Button>
 
       {/* Copy button */}

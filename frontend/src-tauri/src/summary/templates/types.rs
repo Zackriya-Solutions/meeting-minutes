@@ -30,6 +30,11 @@ pub struct Template {
     /// Brief description of the template's purpose
     pub description: String,
 
+    /// Optional specialized generation pipeline. Templates without this field
+    /// keep the generic Markdown generation behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<String>,
+
     /// List of sections in the template
     pub sections: Vec<TemplateSection>,
 }
@@ -47,6 +52,12 @@ impl Template {
 
         if self.sections.is_empty() {
             return Err("Template must have at least one section".to_string());
+        }
+
+        if let Some(pipeline) = self.pipeline.as_deref() {
+            if pipeline != "standup_v2" {
+                return Err(format!("Unsupported template pipeline '{pipeline}'"));
+            }
         }
 
         for (i, section) in self.sections.iter().enumerate() {
@@ -94,7 +105,9 @@ impl Template {
             ));
 
             // Add item format instructions if present
-            let item_format = section.item_format.as_ref()
+            let item_format = section
+                .item_format
+                .as_ref()
                 .or(section.example_item_format.as_ref());
 
             if let Some(format) = item_format {
@@ -118,15 +131,14 @@ mod tests {
         let template = Template {
             name: "Test Template".to_string(),
             description: "A test template".to_string(),
-            sections: vec![
-                TemplateSection {
-                    title: "Summary".to_string(),
-                    instruction: "Provide a summary".to_string(),
-                    format: "paragraph".to_string(),
-                    item_format: None,
-                    example_item_format: None,
-                },
-            ],
+            pipeline: None,
+            sections: vec![TemplateSection {
+                title: "Summary".to_string(),
+                instruction: "Provide a summary".to_string(),
+                format: "paragraph".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
         };
 
         assert!(template.validate().is_ok());
@@ -137,6 +149,7 @@ mod tests {
         let template = Template {
             name: "".to_string(),
             description: "A test template".to_string(),
+            pipeline: None,
             sections: vec![],
         };
 
@@ -148,17 +161,35 @@ mod tests {
         let template = Template {
             name: "Test".to_string(),
             description: "Test".to_string(),
-            sections: vec![
-                TemplateSection {
-                    title: "Test".to_string(),
-                    instruction: "Test".to_string(),
-                    format: "invalid".to_string(),
-                    item_format: None,
-                    example_item_format: None,
-                },
-            ],
+            pipeline: None,
+            sections: vec![TemplateSection {
+                title: "Test".to_string(),
+                instruction: "Test".to_string(),
+                format: "invalid".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
         };
 
         assert!(template.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_unknown_pipeline() {
+        let mut template = Template {
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            pipeline: Some("unsafe_freeform".to_string()),
+            sections: vec![TemplateSection {
+                title: "Summary".to_string(),
+                instruction: "Summarize".to_string(),
+                format: "paragraph".to_string(),
+                item_format: None,
+                example_item_format: None,
+            }],
+        };
+        assert!(template.validate().is_err());
+        template.pipeline = Some("standup_v2".to_string());
+        assert!(template.validate().is_ok());
     }
 }

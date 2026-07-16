@@ -11,6 +11,7 @@ import { storageService } from '@/services/storageService';
 import { recordingService } from '@/services/recordingService';
 import { transcriptService } from '@/services/transcriptService';
 import { migrateMarkedMoments } from '@/lib/markedMoments';
+import { migrateStandupLiveState } from '@/lib/standupLiveState';
 import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
@@ -141,6 +142,7 @@ export function useRecordingStop(
     setIsRecording(false);
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
+    const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
 
     try {
       console.log('Post-stop processing (new implementation)...', {
@@ -323,8 +325,8 @@ export function useRecordingStop(
           // Move marked moments from the temporary recording id onto the saved
           // meeting id so meeting-details can find them. Must run before
           // markMeetingAsSaved(), which clears the temporary id.
-          const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
           migrateMarkedMoments(tempMeetingId, meetingId);
+          migrateStandupLiveState(tempMeetingId, meetingId);
 
           // Persist the in-recording control pill's speaker-ID choices onto the
           // saved meeting row (drives the automatic diarize job and the manual

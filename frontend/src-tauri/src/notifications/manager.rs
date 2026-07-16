@@ -91,7 +91,8 @@ impl<R: Runtime> NotificationManager<R> {
         }
 
         // Log the notification attempt
-        log_info!("Showing notification: {} - {}", notification.title, notification.body);
+        // Notification bodies can contain meeting-derived context. Keep them out of logs.
+        log_info!("Showing notification: {}", notification.title);
 
         // Show the notification
         self.system_handler.show_notification(notification).await
@@ -170,6 +171,15 @@ impl<R: Runtime> NotificationManager<R> {
 
         let notification = Notification::meeting_reminder(minutes_until, meeting_title);
         self.show_notification(notification).await
+    }
+
+    /// Show a privacy-safe meeting detection prompt. App/process details are deliberately
+    /// omitted from the native notification and from persistent logs.
+    pub async fn show_meeting_detected(&self) -> Result<()> {
+        if !self.settings.read().await.auto_meeting_detection {
+            return Ok(());
+        }
+        self.show_notification(Notification::meeting_detected()).await
     }
 
     /// Show a system error notification
@@ -299,6 +309,7 @@ impl<R: Runtime> NotificationManager<R> {
             NotificationType::RecordingResumed => settings.notification_preferences.show_recording_resumed,
             NotificationType::TranscriptionComplete => settings.notification_preferences.show_transcription_complete,
             NotificationType::MeetingReminder(_) => settings.notification_preferences.show_meeting_reminders,
+            NotificationType::MeetingDetected => settings.auto_meeting_detection,
             NotificationType::SystemError(_) => settings.notification_preferences.show_system_errors,
             NotificationType::Test => true, // Always show test notifications
         }

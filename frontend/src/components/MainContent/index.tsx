@@ -9,13 +9,19 @@ interface MainContentProps {
 
 const MainContent: React.FC<MainContentProps> = ({ children }) => {
   const { isCollapsed, sidebarWidth, isSidebarResizing } = useSidebar();
+  const sidebarOffset = isCollapsed ? 64 : sidebarWidth;
 
   return (
     <main
-      className={`flex-1 ${isSidebarResizing ? '' : 'transition-all duration-300'}`}
-      style={{ marginLeft: isCollapsed ? '4rem' : sidebarWidth }}
+      className={`h-screen min-w-0 overflow-hidden ${
+        isSidebarResizing ? '' : 'transition-[margin-left,width] duration-300'
+      }`}
+      style={{
+        marginLeft: sidebarOffset,
+        width: `calc(100vw - ${sidebarOffset}px)`,
+      }}
     >
-      <div>
+      <div className="h-full min-w-0">
         {children}
       </div>
     </main>

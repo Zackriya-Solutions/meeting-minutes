@@ -7,10 +7,9 @@ import { useT } from '@/lib/i18n';
 interface AnalyticsDataModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirmDisable: () => void;
 }
 
-export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }: AnalyticsDataModalProps) {
+export default function AnalyticsDataModal({ isOpen, onClose }: AnalyticsDataModalProps) {
   const t = useT();
   if (!isOpen) return null;
 
@@ -42,6 +41,13 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
                 <p>{t('Analytics is off by default. If you enable it, we collect ')}<strong>{t('anonymous usage data only')}</strong>{t('. No meeting content, names, file paths, or personal information is ever collected.')}</p>
               </div>
             </div>
+          </div>
+
+          <div className="border border-[var(--border-subtle)] rounded-lg p-4">
+            <h4 className="font-semibold text-[var(--fg1)] mb-2">{t('Where analytics goes')}</h4>
+            <p className="text-sm text-[var(--fg2)]">
+              {t('When enabled, anonymous events are sent directly to the Memento PostHog project through the US PostHog ingestion endpoint (us.i.posthog.com). They are visible to the Memento project maintainers in PostHog, not inside the meeting UI. Turning analytics off stops the client immediately.')}
+            </p>
           </div>
 
           {/* Data Categories */}
@@ -141,18 +147,12 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-4 p-6 border-t border-[var(--border-subtle)] bg-[var(--bg-sheet)]">
+        <div className="flex items-center justify-end gap-4 p-6 border-t border-[var(--border-subtle)] bg-[var(--bg-sheet)]">
           <button
             onClick={onClose}
             className="px-4 py-2 text-[var(--fg2)] bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-sheet)] transition-colors"
           >
-            {t('Keep Analytics Enabled')}
-          </button>
-          <button
-            onClick={onConfirmDisable}
-            className="px-4 py-2 text-[var(--fg-inverse)] bg-[var(--danger)] rounded-md hover:opacity-90 transition-colors"
-          >
-            {t('Confirm: Disable Analytics')}
+            {t('Close')}
           </button>
         </div>
       </div>

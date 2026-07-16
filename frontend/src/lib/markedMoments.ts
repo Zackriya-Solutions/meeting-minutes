@@ -47,6 +47,16 @@ export function getMarkedMoments(meetingId: string | null | undefined): number[]
   return meetingId ? read(meetingId) : [];
 }
 
+/** Remove all locally stored marks for a deleted meeting. */
+export function clearMarkedMoments(meetingId: string | null | undefined): void {
+  if (typeof window === 'undefined' || !meetingId) return;
+  try {
+    window.localStorage.removeItem(keyFor(meetingId));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Add a mark at `seconds` elapsed and return the updated list. */
 export function addMarkedMoment(meetingId: string | null | undefined, seconds: number): number[] {
   if (!meetingId) return [];

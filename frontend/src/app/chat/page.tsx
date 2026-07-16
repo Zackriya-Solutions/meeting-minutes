@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
 import { useT } from '@/lib/i18n';
+import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 
 // Mirrors the Rust `Citation` (search::rag).
 interface Citation {
@@ -38,6 +39,11 @@ interface ChatMessage {
   error?: boolean;
 }
 
+interface RagSessionResponse {
+  session_id: number;
+  messages: ChatMessage[];
+}
+
 type ScopeKind = 'archive' | 'collection' | 'meeting';
 
 interface MeetingRef {
@@ -62,7 +68,10 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [scopeInitialized, setScopeInitialized] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>('archive');
   const [collectionId, setCollectionId] = useState<number | null>(null);
@@ -73,6 +82,7 @@ export default function ChatPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const draftBeforeHistory = useRef('');
 
   // Load scope options.
   useEffect(() => {
@@ -84,18 +94,76 @@ export default function ChatPage() {
       .catch(() => setCollections([]));
   }, []);
 
-  // Collection workspace deep-links here with the scope already selected.
+  // Collection and meeting workspaces deep-link here with the scope already selected.
   // Read the URL in an effect so the page remains compatible with static export.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('scope') !== 'collection') return;
-    const requestedCollectionId = Number(params.get('collectionId'));
-    if (!Number.isInteger(requestedCollectionId) || requestedCollectionId <= 0) return;
-    setScopeKind('collection');
-    setCollectionId(requestedCollectionId);
+    const scope = params.get('scope');
+    if (scope === 'collection') {
+      const requestedCollectionId = Number(params.get('collectionId'));
+      if (Number.isInteger(requestedCollectionId) && requestedCollectionId > 0) {
+        setScopeKind('collection');
+        setCollectionId(requestedCollectionId);
+      } else {
+        setScopeKind('archive');
+      }
+    } else if (scope === 'meeting') {
+      const requestedMeetingId = params.get('meetingId')?.trim();
+      if (requestedMeetingId) {
+        setScopeKind('meeting');
+        setMeetingId(requestedMeetingId);
+      } else {
+        setScopeKind('archive');
+      }
+    } else {
+      setScopeKind('archive');
+    }
     setSessionId(null);
     setMessages([]);
+    setScopeInitialized(true);
   }, []);
+
+  // Conversations are persisted by the Rust core. Restore the latest session for the
+  // selected archive/collection/meeting whenever this screen is mounted or scope changes.
+  useEffect(() => {
+    if (!scopeInitialized) return;
+    if (scopeKind === 'collection' && collectionId == null) {
+      setLoadingHistory(false);
+      return;
+    }
+    if (scopeKind === 'meeting' && !meetingId) {
+      setLoadingHistory(false);
+      return;
+    }
+
+    let active = true;
+    setLoadingHistory(true);
+    setMessages([]);
+    setSessionId(null);
+    setHistoryIndex(null);
+    invoke<RagSessionResponse | null>('rag_get_latest_session', {
+      input: {
+        scope: scopeKind,
+        collection_id: scopeKind === 'collection' ? collectionId : null,
+        meeting_id: scopeKind === 'meeting' ? meetingId : null,
+      },
+    })
+      .then((session) => {
+        if (!active || !session) return;
+        setSessionId(session.session_id);
+        setMessages(Array.isArray(session.messages) ? session.messages : []);
+      })
+      .catch((error) => {
+        console.error('Failed to restore chat session:', error);
+      })
+      .finally(() => {
+        if (active) setLoadingHistory(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [scopeInitialized, scopeKind, collectionId, meetingId]);
 
   // Auto-scroll to the latest message.
   useEffect(() => {
@@ -105,14 +173,20 @@ export default function ChatPage() {
   const startNewChat = useCallback(() => {
     setMessages([]);
     setSessionId(null);
+    setInput('');
+    setHistoryIndex(null);
+    draftBeforeHistory.current = '';
     inputRef.current?.focus();
   }, []);
 
-  // Changing scope starts a fresh session (chat history is per-scope).
+  // Changing scope restores the latest session for that scope.
   const changeScope = (kind: ScopeKind) => {
     setScopeKind(kind);
+    if (kind !== 'collection') setCollectionId(null);
+    if (kind !== 'meeting') setMeetingId(null);
     setSessionId(null);
     setMessages([]);
+    setHistoryIndex(null);
   };
 
   const openCitation = (c: Citation) => {
@@ -123,7 +197,7 @@ export default function ChatPage() {
   const send = useCallback(
     async (text: string) => {
       const query = text.trim();
-      if (!query || sending) return;
+      if (!query || sending || loadingHistory) return;
 
       if (scopeKind === 'collection' && collectionId == null) {
         setMessages((m) => [...m, { role: 'assistant', content: t('Select a collection to search.'), error: true }]);
@@ -135,6 +209,8 @@ export default function ChatPage() {
       }
 
       setInput('');
+      setHistoryIndex(null);
+      draftBeforeHistory.current = '';
       setMessages((m) => [...m, { role: 'user', content: query }]);
       setSending(true);
 
@@ -175,13 +251,52 @@ export default function ChatPage() {
         setSending(false);
       }
     },
-    [sending, scopeKind, collectionId, meetingId, sessionId],
+    [sending, loadingHistory, scopeKind, collectionId, meetingId, sessionId],
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       send(input);
+      return;
+    }
+
+    const queryHistory = messages
+      .filter((message) => message.role === 'user')
+      .map((message) => message.content);
+    if (
+      e.key === 'ArrowUp'
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && queryHistory.length > 0
+      && (historyIndex != null || input.length === 0 || e.currentTarget.selectionStart === 0)
+    ) {
+      e.preventDefault();
+      const nextIndex = historyIndex == null
+        ? queryHistory.length - 1
+        : Math.max(0, historyIndex - 1);
+      if (historyIndex == null) draftBeforeHistory.current = input;
+      setHistoryIndex(nextIndex);
+      setInput(queryHistory[nextIndex]);
+      return;
+    }
+    if (
+      e.key === 'ArrowDown'
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && historyIndex != null
+    ) {
+      e.preventDefault();
+      if (historyIndex < queryHistory.length - 1) {
+        const nextIndex = historyIndex + 1;
+        setHistoryIndex(nextIndex);
+        setInput(queryHistory[nextIndex]);
+      } else {
+        setHistoryIndex(null);
+        setInput(draftBeforeHistory.current);
+      }
     }
   };
 
@@ -245,6 +360,7 @@ export default function ChatPage() {
 
           <Button
             onClick={startNewChat}
+            disabled={loadingHistory}
             variant="secondary"
             size="sm"
             icon={<Icon name="plus" size={16} />}
@@ -256,7 +372,12 @@ export default function ChatPage() {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-6">
-        {messages.length === 0 ? (
+        {!loadingHistory && messages.length === 0 && <KnowledgeReadinessCard mode="chat" />}
+        {loadingHistory ? (
+          <div className="flex h-full items-center justify-center text-[var(--fg3)]">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : messages.length === 0 ? (
           <EmptyState onPick={(s) => send(s)} disabled={sending} />
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -274,7 +395,12 @@ export default function ChatPage() {
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            disabled={loadingHistory}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setHistoryIndex(null);
+              draftBeforeHistory.current = e.target.value;
+            }}
             onKeyDown={onKeyDown}
             rows={1}
             placeholder={t('Ask about your meetings…')}
@@ -282,10 +408,10 @@ export default function ChatPage() {
           />
           <button
             onClick={() => send(input)}
-            disabled={sending || !input.trim()}
+            disabled={loadingHistory || sending || !input.trim()}
             className={cn(
               'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
-              sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
+              loadingHistory || sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
             )}
             aria-label={t('Send')}
           >

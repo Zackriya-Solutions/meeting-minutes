@@ -88,6 +88,8 @@ fi
 echo "Stopping any running Meetily dev processes..."
 pkill -f "target/debug/meetily"       2>/dev/null || true
 pkill -f "target/release/meetily"     2>/dev/null || true
+pkill -f "target/debug/memento"       2>/dev/null || true
+pkill -f "target/release/memento"     2>/dev/null || true
 pkill -f "next dev -p 3118"           2>/dev/null || true
 pkill -f "tauri-auto.js"              2>/dev/null || true
 pkill -f "cargo run --features"       2>/dev/null || true

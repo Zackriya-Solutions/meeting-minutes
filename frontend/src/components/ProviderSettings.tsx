@@ -13,9 +13,9 @@ export function ProviderSettings() {
   const t = useT();
   return (
     <div className="mt-6 max-w-2xl rounded-[var(--radius-24)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
-      <h3 className="text-sm font-semibold text-[var(--fg1)]">DeepSeek · {t('managed')}</h3>
+      <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Managed cloud services')}</h3>
       <p className="mt-1 text-sm text-[var(--fg2)]">
-        {t('DeepSeek and SaluteSpeech are ready through the Memento gateway. No API keys are required. GigaChat is not enabled.')}
+        {t('DeepSeek is used for summaries and the knowledge base. SaluteSpeech is used for transcription and speaker detection. Access is provided through the Memento gateway; no API keys are required.')}
       </p>
     </div>
   );

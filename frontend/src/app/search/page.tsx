@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
 import { useT } from '@/lib/i18n';
+import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 
 // Mirrors the Rust `SearchHit` (search::hybrid).
 interface SearchHit {
@@ -59,6 +60,20 @@ export default function SearchPage() {
   const [collections, setCollections] = useState<CollectionRef[]>([]);
 
   const loadedCollections = useRef(false);
+
+  useEffect(() => {
+    const rawCollectionId = new URLSearchParams(window.location.search).get('collectionId');
+    const requestedCollectionId = rawCollectionId ? Number(rawCollectionId) : null;
+    if (!requestedCollectionId || !Number.isFinite(requestedCollectionId)) return;
+    setCollectionId(requestedCollectionId);
+    setShowFilters(true);
+    if (!loadedCollections.current) {
+      loadedCollections.current = true;
+      invoke<CollectionRef[]>('list_collections')
+        .then((items) => setCollections(Array.isArray(items) ? items : []))
+        .catch(() => setCollections([]));
+    }
+  }, []);
 
   const openFilters = () => {
     setShowFilters((v) => !v);
@@ -232,10 +247,21 @@ export default function SearchPage() {
             </span>
           </div>
         )}
+        {collectionId != null && !showFilters && (
+          <button
+            type="button"
+            onClick={() => setShowFilters(true)}
+            className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-3 py-1.5 text-xs text-[var(--gold)]"
+          >
+            <Icon name="folder" size={14} />
+            {collections.find((collection) => collection.id === collectionId)?.name ?? t('Selected collection')}
+          </button>
+        )}
       </div>
 
       {/* Results */}
       <div className="flex-1 overflow-y-auto py-6">
+        <KnowledgeReadinessCard mode="search" />
         {!searched ? (
           <EmptyPrompt />
         ) : searching && results.length === 0 ? (
