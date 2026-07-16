@@ -71,6 +71,26 @@ pub async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String
 }
 
 /// Start recording with default devices and optional meeting name
+/// Read the `vad.high_sensitivity` app setting and apply it before a recording starts.
+/// Enables a more sensitive speech-detection profile for Bluetooth / quiet microphones
+/// (e.g. AirPods used as a mic in HFP mode), which otherwise get whole phrases skipped.
+async fn apply_vad_sensitivity<R: Runtime>(app: &AppHandle<R>) {
+    let on = match app.try_state::<crate::state::AppState>() {
+        Some(state) => sqlx::query_scalar::<_, String>(
+            "SELECT value FROM app_settings_kv WHERE key = 'vad.high_sensitivity'",
+        )
+        .fetch_optional(state.db_manager.pool())
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false),
+        None => false,
+    };
+    super::vad::set_high_sensitivity(on);
+    info!("🎚️ VAD high-sensitivity (Bluetooth/quiet mic) mode: {}", on);
+}
+
 pub async fn start_recording_with_meeting_name<R: Runtime>(
     app: AppHandle<R>,
     meeting_name: Option<String>,
@@ -88,6 +108,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
+
+    // Apply the VAD sensitivity preference (Bluetooth/quiet-mic mode) before the audio
+    // pipeline — and its VAD session — is created.
+    apply_vad_sensitivity(&app).await;
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
@@ -334,6 +358,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     if current_recording_state {
         return Err("Recording already in progress".to_string());
     }
+
+    // Apply the VAD sensitivity preference (Bluetooth/quiet-mic mode) before the audio
+    // pipeline — and its VAD session — is created.
+    apply_vad_sensitivity(&app).await;
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
