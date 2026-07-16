@@ -126,6 +126,22 @@ export function useSummaryGeneration({
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
+  const restorePersistedSummary = useCallback(async (): Promise<boolean> => {
+    try {
+      const existingSummary = await invokeTauri('api_get_summary', {
+        meetingId: meeting.id,
+      }) as any;
+      if (!existingSummary?.data) return false;
+      setAiSummary(existingSummary.data);
+      setSummaryStatus('completed');
+      setSummaryError(null);
+      return true;
+    } catch (error) {
+      console.error('Failed to reload persisted summary:', error);
+      return false;
+    }
+  }, [meeting.id, setAiSummary]);
+
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
     switch (status) {
@@ -245,36 +261,23 @@ export function useSummaryGeneration({
           console.error('Backend returned error:', pollingResult.error);
           const errorMessage = pollingResult.error || (isRegeneration ? t('Summary regeneration failed') : t('Summary generation failed'));
 
-          // If this was a regeneration, try to restore previous summary from database
-          if (isRegeneration) {
-            try {
-              const existingSummary = await invokeTauri('api_get_summary', {
-                meetingId: meeting.id
-              }) as any;
-
-              if (existingSummary?.data) {
-                console.log('Restored previous summary after regeneration failure');
-                setAiSummary(existingSummary.data);
-                setSummaryStatus('completed');
-                setSummaryError(null);
-
-                // Show error toast with restoration message
-                toast.error(t('Failed to regenerate summary'), {
-                  description: `${errorMessage}. ${t('Your previous summary has been restored.')}`,
-                });
-
-                await Analytics.trackSummaryGenerationCompleted(
-                  modelConfig.provider,
-                  modelConfig.model,
-                  false,
-                  undefined,
-                  errorMessage
-                );
-                return;
-              }
-            } catch (error) {
-              console.error('Failed to reload summary after error:', error);
-            }
+          // A provider or polling error can arrive after the backend has already
+          // persisted a usable result. Always reload before replacing the content with
+          // an error state; this also restores the previous summary after regeneration.
+          if (await restorePersistedSummary()) {
+            toast.error(isRegeneration ? t('Failed to regenerate summary') : t('Summary status reported an error'), {
+              description: isRegeneration
+                ? `${errorMessage}. ${t('Your previous summary has been restored.')}`
+                : `${errorMessage}. ${t('The saved summary remains available.')}`,
+            });
+            await Analytics.trackSummaryGenerationCompleted(
+              modelConfig.provider,
+              modelConfig.model,
+              false,
+              undefined,
+              errorMessage
+            );
+            return;
           }
 
           // Continue with normal error handling if not regeneration or reload failed
@@ -419,12 +422,17 @@ export function useSummaryGeneration({
     } catch (error) {
       console.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setSummaryError(errorMessage);
-      setSummaryStatus('error');
+      const restored = await restorePersistedSummary();
+      if (!restored) {
+        setSummaryError(errorMessage);
+        setSummaryStatus('error');
+      }
       // Note: We don't clear the summary here because the backend has already restored from backup
 
       toast.error(isRegeneration ? t('Failed to regenerate summary') : t('Failed to generate summary'), {
-        description: errorMessage,
+        description: restored
+          ? `${errorMessage}. ${t('The saved summary remains available.')}`
+          : errorMessage,
       });
 
       await Analytics.trackSummaryGenerationCompleted(
@@ -444,6 +452,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    restorePersistedSummary,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation

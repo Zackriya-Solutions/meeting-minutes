@@ -72,13 +72,13 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch GigaAM status:', err);
     }
 
-    // SaluteSpeech (cloud) — offered when either a user Authorization Key or the
-    // managed Memento gateway is available. Checking app_settings_kv directly hid
-    // SaluteSpeech in managed builds because those builds intentionally do not persist
-    // a user key.
+    // SaluteSpeech (cloud) — offered when either a user Authorization Key exists or
+    // this binary supports the managed Memento gateway. This is intentionally a local
+    // capability check: a temporary gateway outage must not remove the option from the
+    // dialog; the operation itself performs the live readiness check.
     try {
-      const saluteSpeechReady = await invoke<boolean>('salutespeech_is_configured');
-      if (saluteSpeechReady) {
+      const saluteSpeechSelectable = await invoke<boolean>('salutespeech_can_be_selected');
+      if (saluteSpeechSelectable) {
         allModels.push({
           provider: 'salutespeech' as const,
           name: SALUTE_MODEL_NAME,

@@ -21,7 +21,11 @@ const DEFAULT_STATE: StandupLiveState = {
 };
 const TARGETS = [10, 15, 20, 30];
 const MAX_MARKERS = 100;
-const MARKER_DEDUPE_WINDOW_SECONDS = 3;
+// A live marker describes a discussion, not a single button press. A 3-second guard still
+// allowed the same transcript fragment to be parked repeatedly while somebody continued
+// speaking. Fifteen seconds blocks accidental duplicates without preventing a genuinely
+// new topic later in the standup.
+const MARKER_DEDUPE_WINDOW_SECONDS = 15;
 const keyFor = (meetingId: string) => `memento:standup-live:${meetingId}`;
 
 function normalize(raw: unknown): StandupLiveState {

@@ -37,6 +37,13 @@ export default function SettingsPage() {
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (requested && TABS.some((tab) => tab.value === requested)) {
+      setActiveTab(requested);
+    }
+  }, []);
+
   // Load saved transcript configuration on mount
   useEffect(() => {
     const loadTranscriptConfig = async () => {

@@ -136,6 +136,23 @@ pub async fn is_configured(pool: &SqlitePool) -> bool {
     resolve_config(pool).await.is_some()
 }
 
+/// Whether SaluteSpeech should be offered as a selectable cloud engine.
+///
+/// Unlike [`is_configured`], this is a capability check and does not register with or
+/// probe the gateway. A transient gateway outage must not make SaluteSpeech disappear
+/// from import/re-transcription model lists in a managed build; the actual operation
+/// still calls [`resolve_config`] and reports an actionable availability error.
+pub async fn can_be_selected(pool: &SqlitePool) -> bool {
+    match crate::llm::PrivacyConfig::load(pool).await {
+        Ok(privacy) if !privacy.local_only => {}
+        _ => return false,
+    }
+    kv(pool, "salutespeech.auth_key").await.is_some()
+        || env("SALUTESPEECH_AUTH_KEY").is_some()
+        || env("SBER_SALUTE_AUTH_KEY").is_some()
+        || crate::gateway_identity::managed_gateway_supported()
+}
+
 /// Tauri command mirroring [`is_configured`] for the frontend readiness gates
 /// (recording start, speaker detection). Returns true when SaluteSpeech is usable
 /// via either a user key or the managed gateway — so the UI no longer demands a
@@ -145,6 +162,13 @@ pub async fn salutespeech_is_configured(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<bool, String> {
     Ok(is_configured(state.db_manager.pool()).await)
+}
+
+#[tauri::command]
+pub async fn salutespeech_can_be_selected(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    Ok(can_be_selected(state.db_manager.pool()).await)
 }
 
 /// Map the app's language preference (`"ru"`, `"en"`, `"auto"`, `None`) to a

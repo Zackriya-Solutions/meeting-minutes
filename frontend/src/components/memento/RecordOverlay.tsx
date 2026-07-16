@@ -22,6 +22,12 @@ import {
   type StandupLiveMarkerKind,
   type StandupLiveState,
 } from '@/lib/standupLiveState';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface RecordOverlayProps {
   title?: string;
@@ -298,26 +304,42 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
               </button>
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<Icon name="pin" size={14} />}
-              onClick={() => addLiveMarker('parking_lot')}
-              title={t('Save this timestamp as a topic to discuss after the status round')}
-            >
-              {t('Park topic')}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<Icon name="alert" size={14} />}
-              onClick={() => addLiveMarker('question')}
-              title={t('Save this timestamp as an unresolved question')}
-            >
-              {t('Mark question')}
-            </Button>
-          </div>
+          <TooltipProvider delayDuration={250}>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Icon name="pin" size={14} />}
+                    onClick={() => addLiveMarker('parking_lot')}
+                    aria-label={t('Save this timestamp as a topic to discuss after the status round')}
+                  >
+                    {t('Park topic')}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-64 text-center">
+                  {t('Save this timestamp as a topic to discuss after the status round')}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Icon name="alert" size={14} />}
+                    onClick={() => addLiveMarker('question')}
+                    aria-label={t('Save this timestamp as an unresolved question')}
+                  >
+                    {t('Mark question')}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-64 text-center">
+                  {t('Save this timestamp as an unresolved question')}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
         </div>
       )}
       <div className="mm-record-actions">

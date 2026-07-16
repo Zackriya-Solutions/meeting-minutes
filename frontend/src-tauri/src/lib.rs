@@ -693,6 +693,7 @@ pub fn run() {
             gigaam_engine::commands::gigaam_select_variant,
             gigaam_engine::commands::gigaam_transcribe_audio,
             salutespeech::salutespeech_is_configured,
+            salutespeech::salutespeech_can_be_selected,
             collections::commands::create_collection,
             collections::commands::rename_collection,
             collections::commands::delete_collection,

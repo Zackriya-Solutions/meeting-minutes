@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
 import { useT } from '@/lib/i18n';
+import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 
 // Mirrors the Rust `Citation` (search::rag).
 interface Citation {
@@ -265,6 +266,7 @@ export default function ChatPage() {
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-6">
+        {messages.length === 0 && <KnowledgeReadinessCard mode="chat" />}
         {messages.length === 0 ? (
           <EmptyState onPick={(s) => send(s)} disabled={sending} />
         ) : (
