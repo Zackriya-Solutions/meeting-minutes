@@ -248,10 +248,14 @@ fn validate_candidate(value: &str) -> Result<String, &'static str> {
     {
         return Err("invalid_shape");
     }
-    if BLOCKED_ABUSIVE_EXACT.contains(&normalized.as_str())
+    let abuse_normalized = normalized
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .collect::<String>();
+    if BLOCKED_ABUSIVE_EXACT.contains(&abuse_normalized.as_str())
         || BLOCKED_STEMS
             .iter()
-            .any(|stem| normalized.starts_with(stem))
+            .any(|stem| abuse_normalized.starts_with(stem))
     {
         return Err("abusive_or_profane");
     }
@@ -725,6 +729,9 @@ mod tests {
         assert_eq!(validate_candidate("Говно"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Дерьмо"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Хер"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("му-дак"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("ху-й"), Err("abusive_or_profane"));
+        assert_eq!(validate_candidate("м'удак"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Иван123"), Err("invalid_shape"));
         assert_eq!(validate_candidate("Ааааа"), Err("implausible_shape"));
     }
