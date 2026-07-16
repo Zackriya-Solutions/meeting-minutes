@@ -206,12 +206,22 @@ export async function selectWhisperModel(modelName: string): Promise<void> {
   }
 }
 
+/**
+ * Whether a *working* (localWhisper) transcript config is saved.
+ *
+ * Fresh installs get a database-seeded default of provider "parakeet" (see
+ * database/commands.rs::initialize_fresh_database) — a real, non-empty
+ * config row that isn't usable on Android. Checking for "any config" isn't
+ * enough; it must specifically be "localWhisper" or start_recording fails
+ * with "No Parakeet models are available" even after a Whisper model is
+ * downloaded.
+ */
 export async function hasTranscriptConfig(): Promise<boolean> {
   try {
     const config = await invoke<{ provider?: string; model?: string } | null>(
       'api_get_transcript_config'
     );
-    return !!(config?.provider && config?.model);
+    return config?.provider === 'localWhisper' && !!config?.model;
   } catch {
     return false;
   }
