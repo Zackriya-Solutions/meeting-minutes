@@ -7,6 +7,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { MeetingContentWindowNotice } from './MeetingContentWindowNotice';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import { useEffect, useRef, useState, RefObject } from 'react';
@@ -312,6 +313,10 @@ export function SummaryPanel({
           </div>
         )}
       </div>
+
+      {transcripts.length > 0 && !isSummaryLoading && (
+        <MeetingContentWindowNotice meetingId={meeting.id} />
+      )}
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">

@@ -15,6 +15,46 @@ import {
   readPinnedSummaryLanguageDefault,
 } from '@/lib/summary-language-preferences';
 
+interface MeetingContentWindowSuggestion {
+  suggested: boolean;
+  selected: boolean;
+  primaryEndMs?: number | null;
+}
+
+async function applyMeetingContentWindow(
+  meetingId: string,
+  transcripts: Transcript[],
+): Promise<Transcript[]> {
+  try {
+    const suggestion = await invokeTauri<MeetingContentWindowSuggestion>(
+      'get_meeting_content_window_suggestion',
+      { meetingId },
+    );
+    const endMs = suggestion.primaryEndMs;
+    if (!suggestion.suggested || !suggestion.selected || endMs == null) {
+      return transcripts;
+    }
+    // The backend never selects a primary window when an untimed row exists. Keep this
+    // fail-closed guard as well so a stale preference cannot silently mix unknown-position
+    // transcript text into a supposedly confirmed time window.
+    if (transcripts.some((transcript) => transcript.audio_start_time == null)) {
+      return transcripts;
+    }
+    const filtered = transcripts.filter((transcript) => {
+      const startTime = transcript.audio_start_time;
+      return startTime != null && startTime * 1_000 <= endMs;
+    });
+    if (filtered.length === 0) return transcripts;
+    console.info(
+      `Using confirmed primary meeting window for summary: ${filtered.length}/${transcripts.length} segments`,
+    );
+    return filtered;
+  } catch (error) {
+    console.warn('Failed to apply meeting content window; using the full transcript:', error);
+    return transcripts;
+  }
+}
+
 async function resolveSummaryLanguage(
   meetingId: string,
   transcriptTexts: string[]
@@ -616,7 +656,8 @@ export function useSummaryGeneration({
       }
     }
 
-    const summaryPayload = buildSummaryTranscriptPayload(allTranscripts);
+    const summaryTranscripts = await applyMeetingContentWindow(meeting.id, allTranscripts);
+    const summaryPayload = buildSummaryTranscriptPayload(summaryTranscripts);
 
     await processSummary({
       ...summaryPayload,
@@ -634,8 +675,9 @@ export function useSummaryGeneration({
       return;
     }
 
+    const summaryTranscripts = await applyMeetingContentWindow(meeting.id, allTranscripts);
     await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
+      ...buildSummaryTranscriptPayload(summaryTranscripts),
       isRegeneration: true
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
