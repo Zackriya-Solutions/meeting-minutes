@@ -109,10 +109,44 @@ export async function startRecording(): Promise<void> {
     );
   }
 
-  await invoke('start_recording', {
-    mic_device_name: micDeviceName,
-    system_device_name: null,
+  // start_recording can genuinely take a while on first use (it loads the
+  // Whisper model into memory synchronously as part of validation), but it
+  // must not be allowed to hang forever — without a timeout, a stuck native
+  // call leaves the UI on "Starting…" with no error and no way out except
+  // force-closing the app. 45s comfortably covers even a slow first-time
+  // model load on modest hardware.
+  const START_RECORDING_TIMEOUT_MS = 45000;
+  let timedOut = false;
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      timedOut = true;
+      reject(
+        new Error(
+          'Timed out waiting for recording to start. This usually means the ' +
+            'microphone could not be opened (check app permissions in system ' +
+            'settings) or the speech model failed to load.'
+        )
+      );
+    }, START_RECORDING_TIMEOUT_MS);
   });
+
+  try {
+    await Promise.race([
+      invoke('start_recording', {
+        mic_device_name: micDeviceName,
+        system_device_name: null,
+      }),
+      timeout,
+    ]);
+  } catch (e) {
+    if (timedOut) {
+      // The native call may still complete after we give up waiting on it;
+      // proactively stop so the backend doesn't end up silently recording
+      // behind a UI that thinks it failed.
+      stopRecording().catch(() => {});
+    }
+    throw e;
+  }
 }
 
 export async function stopRecording(): Promise<void> {
