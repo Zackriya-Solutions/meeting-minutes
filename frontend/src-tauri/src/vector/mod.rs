@@ -48,7 +48,20 @@ pub fn register() {
 /// Returns `Ok(true)` when vector search is usable, `Ok(false)` when the extension
 /// is unavailable (logged, not fatal).
 pub async fn ensure_chunk_embeddings_table(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
-    ensure_chunk_embeddings_table_for_dim(pool, EMBEDDING_DIM).await
+    let selected: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key='embedding.model'")
+            .fetch_optional(pool)
+            .await?;
+    ensure_chunk_embeddings_table_for_dim(pool, embedding_dim_for_model_id(selected.as_deref()))
+        .await
+}
+
+fn embedding_dim_for_model_id(model: Option<&str>) -> usize {
+    if model.is_some_and(|value| value.eq_ignore_ascii_case("frida")) {
+        FRIDA_EMBEDDING_DIM
+    } else {
+        EMBEDDING_DIM
+    }
 }
 
 /// Ensure the vector index matches the active embedder dimension. Vectors are derived
@@ -185,6 +198,19 @@ pub async fn knn_filtered(
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn selected_model_controls_vector_dimension() {
+        assert_eq!(embedding_dim_for_model_id(None), EMBEDDING_DIM);
+        assert_eq!(
+            embedding_dim_for_model_id(Some("multilingual-e5-small")),
+            EMBEDDING_DIM
+        );
+        assert_eq!(
+            embedding_dim_for_model_id(Some("FRIDA")),
+            FRIDA_EMBEDDING_DIM
+        );
+    }
 
     /// Mirrors evals/phase0/sqlite_vec_smoke.py: exact match ranks first, then the
     /// near-duplicate, orthogonal vector last.

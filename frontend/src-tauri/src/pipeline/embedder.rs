@@ -348,13 +348,22 @@ pub fn load_global(model_dir: impl Into<PathBuf>) -> Result<()> {
     load_global_kind(model_dir, EmbedderKind::MultilingualE5Small)
 }
 
-pub fn load_global_kind(model_dir: impl Into<PathBuf>, kind: EmbedderKind) -> Result<()> {
+pub fn load_kind(model_dir: impl Into<PathBuf>, kind: EmbedderKind) -> Result<Embedder> {
     let config = EmbedderConfig::for_kind(model_dir, kind);
     let tokenizer: Box<dyn TextTokenizer> =
         Box::new(HfTokenizer::from_file(&config.tokenizer_path())?);
-    let embedder = Embedder::load(config, tokenizer)?;
+    Embedder::load(config, tokenizer)
+}
+
+pub fn install_global(embedder: Embedder) {
+    let kind = embedder.config.kind;
     *EMBEDDER.lock().unwrap() = Some(embedder);
     log::info!("embedding model {} loaded (dim={})", kind.id(), kind.dim());
+}
+
+pub fn load_global_kind(model_dir: impl Into<PathBuf>, kind: EmbedderKind) -> Result<()> {
+    let embedder = load_kind(model_dir, kind)?;
+    install_global(embedder);
     Ok(())
 }
 

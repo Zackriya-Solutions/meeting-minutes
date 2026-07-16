@@ -172,16 +172,17 @@ async fn activate_model<R: Runtime>(
         return Ok(false);
     }
 
-    crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
-        .await
-        .map_err(|e| e.to_string())?;
-    embedder::unload_global();
     let dir = model_dir(&base, kind);
-    tokio::task::spawn_blocking(move || embedder::load_global_kind(dir, kind))
+    let candidate = tokio::task::spawn_blocking(move || embedder::load_kind(dir, kind))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+
+    crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
+        .await
+        .map_err(|e| e.to_string())?;
     persist_selected_kind(pool, kind).await?;
+    embedder::install_global(candidate);
     Ok(true)
 }
 
