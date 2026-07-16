@@ -188,7 +188,7 @@ export function StandupWorkflowPanel({
           } : {}),
         },
       });
-      setEditingId(null);
+      setEditingId((current) => (current === record.id ? null : current));
       await refresh();
     } catch (error) {
       console.error('Failed to review standup record:', error);
