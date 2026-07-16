@@ -45,45 +45,61 @@ pub struct MeetingDetectedEvent {
 
 /// Owns the background task so it is started once and can be cancelled on app exit.
 pub struct AutoMeetingDetectionState {
+    runtime: Mutex<DetectionRuntime>,
+}
+
+struct DetectionRuntime {
     cancellation: CancellationToken,
-    task: Mutex<Option<JoinHandle<()>>>,
+    task: Option<JoinHandle<()>>,
 }
 
 impl Default for AutoMeetingDetectionState {
     fn default() -> Self {
         Self {
-            cancellation: CancellationToken::new(),
-            task: Mutex::new(None),
+            runtime: Mutex::new(DetectionRuntime {
+                cancellation: CancellationToken::new(),
+                task: None,
+            }),
         }
     }
 }
 
 impl AutoMeetingDetectionState {
+    fn cancellation_for_start(runtime: &mut DetectionRuntime) -> CancellationToken {
+        if runtime.cancellation.is_cancelled() {
+            runtime.cancellation = CancellationToken::new();
+        }
+        runtime.cancellation.clone()
+    }
+
     pub fn start(&self, app: AppHandle<Wry>) {
-        let Ok(mut task) = self.task.lock() else {
+        let Ok(mut runtime) = self.runtime.lock() else {
             return;
         };
-        if task.is_some() {
+        if runtime.task.is_some() {
             return;
         }
 
-        let cancellation = self.cancellation.clone();
-        *task = Some(tauri::async_runtime::spawn(async move {
+        let cancellation = Self::cancellation_for_start(&mut runtime);
+        runtime.task = Some(tauri::async_runtime::spawn(async move {
             run_detection_loop(app, cancellation).await;
         }));
     }
 
     pub fn stop(&self) {
-        self.cancellation.cancel();
-        if let Ok(mut task) = self.task.lock() {
-            if let Some(handle) = task.take() {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            runtime.cancellation.cancel();
+            if let Some(handle) = runtime.task.take() {
                 handle.abort();
             }
         }
     }
 
     fn is_running(&self) -> bool {
-        self.task.lock().map(|task| task.is_some()).unwrap_or(false)
+        self.runtime
+            .lock()
+            .map(|runtime| runtime.task.is_some())
+            .unwrap_or(false)
     }
 }
 
@@ -513,6 +529,20 @@ mod tests {
         assert!(!session.observe(true, false, true));
         assert!(!session.observe(true, false, true));
         assert!(session.observe(true, false, true));
+    }
+
+    #[test]
+    fn cancelled_runtime_gets_a_fresh_token_before_restart() {
+        let mut runtime = DetectionRuntime {
+            cancellation: CancellationToken::new(),
+            task: None,
+        };
+        runtime.cancellation.cancel();
+
+        let next = AutoMeetingDetectionState::cancellation_for_start(&mut runtime);
+
+        assert!(!next.is_cancelled());
+        assert!(!runtime.cancellation.is_cancelled());
     }
 
     #[test]
