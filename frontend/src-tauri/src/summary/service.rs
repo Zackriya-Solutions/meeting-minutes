@@ -576,6 +576,19 @@ impl SummaryService {
                             info!("Successfully updated meeting name for {}", meeting_id);
                         }
                     }
+                } else if template_id == "daily_standup" {
+                    if let Err(error) = crate::collections::auto_assign_unique_template_series(
+                        &pool,
+                        &meeting_id,
+                        "standup",
+                    )
+                    .await
+                    {
+                        error!(
+                            "Failed to apply recurring standup series after Standup V2 for {}: {}",
+                            meeting_id, error
+                        );
+                    }
                 }
 
                 let standup_report = structured_result.as_ref();

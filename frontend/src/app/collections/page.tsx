@@ -14,7 +14,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useT } from '@/lib/i18n';
+import { Switch } from '@/components/ui/switch';
+import { useLanguage, useT } from '@/lib/i18n';
+import { getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 import { cn } from '@/lib/utils';
 
 interface CollectionRow {
@@ -22,12 +24,16 @@ interface CollectionRow {
   name: string;
   kind: 'manual' | 'series';
   meeting_count: number;
+  auto_add: boolean;
+  match_rule?: string | null;
 }
 
 interface CollectionMeeting {
   id: string;
   title: string;
   created_at: string;
+  occurred_at?: string | null;
+  folder_path?: string | null;
   in_collection: boolean;
 }
 
@@ -83,12 +89,6 @@ interface StandupSeriesDigest {
 }
 
 type EditorMode = 'create' | 'rename';
-
-function formatMeetingDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
-  return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
-}
 
 function errorText(error: unknown, fallback: string): string {
   if (typeof error === 'string' && error.trim()) return error;
@@ -232,7 +232,7 @@ function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
 
 export default function CollectionsPage() {
   const router = useRouter();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [collections, setCollections] = useState<CollectionRow[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [meetings, setMeetings] = useState<CollectionMeeting[]>([]);
@@ -255,6 +255,12 @@ export default function CollectionsPage() {
   const [digestWindowDays, setDigestWindowDays] = useState<number | null>(14);
   const [seriesDigest, setSeriesDigest] = useState<StandupSeriesDigest | null>(null);
   const [loadingDigest, setLoadingDigest] = useState(false);
+  const [collectionSearch, setCollectionSearch] = useState('');
+  const [meetingSearch, setMeetingSearch] = useState('');
+  const [manageSearch, setManageSearch] = useState('');
+  const [savingAutoAdd, setSavingAutoAdd] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
+  const [converting, setConverting] = useState(false);
 
   const selected = useMemo(
     () => collections.find((collection) => collection.id === selectedId) ?? null,
@@ -264,6 +270,45 @@ export default function CollectionsPage() {
     () => meetings.filter((meeting) => meeting.in_collection),
     [meetings],
   );
+  const normalizeSearch = (value: string) =>
+    value.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US').trim();
+  const filteredCollections = useMemo(() => {
+    const query = normalizeSearch(collectionSearch);
+    if (!query) return collections;
+    return collections.filter((collection) =>
+      collection.name.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US').includes(query),
+    );
+  }, [collectionSearch, collections, lang]);
+  const filteredSelectedMeetings = useMemo(() => {
+    const query = normalizeSearch(meetingSearch);
+    if (!query) return selectedMeetings;
+    return selectedMeetings.filter((meeting) => {
+      const display = getMeetingDisplayInfo({
+        title: meeting.title,
+        createdAt: meeting.created_at,
+        occurredAt: meeting.occurred_at,
+        folderPath: meeting.folder_path,
+      }, lang);
+      return `${meeting.title} ${display.title} ${display.dateLabel}`
+        .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+        .includes(query);
+    });
+  }, [meetingSearch, selectedMeetings, lang]);
+  const filteredManageMeetings = useMemo(() => {
+    const query = normalizeSearch(manageSearch);
+    if (!query) return meetings;
+    return meetings.filter((meeting) => {
+      const display = getMeetingDisplayInfo({
+        title: meeting.title,
+        createdAt: meeting.created_at,
+        occurredAt: meeting.occurred_at,
+        folderPath: meeting.folder_path,
+      }, lang);
+      return `${meeting.title} ${display.title} ${display.dateLabel}`
+        .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+        .includes(query);
+    });
+  }, [manageSearch, meetings, lang]);
   const visibleSuggestions = suggestions.filter(
     (suggestion) => !dismissedSuggestions.has(suggestion.suggested_name),
   );
@@ -401,6 +446,7 @@ export default function CollectionsPage() {
 
   const openMembership = () => {
     setMembershipDraft(new Set(selectedMeetings.map((meeting) => meeting.id)));
+    setManageSearch('');
     setManageOpen(true);
   };
 
@@ -476,11 +522,71 @@ export default function CollectionsPage() {
       });
       setDismissedSuggestions((current) => new Set(current).add(suggestion.suggested_name));
       await loadCollections(id);
-      toast.success(t('Series created'));
+      toast.success(t('Series created'), {
+        description: t('Future meetings with a matching title will be added automatically.'),
+      });
     } catch (error) {
       toast.error(errorText(error, t('Failed to create series')));
     } finally {
       setAcceptingSuggestion(null);
+    }
+  };
+
+  const toggleAutoAdd = async (enabled: boolean) => {
+    if (!selected || selected.kind !== 'series' || savingAutoAdd) return;
+    setSavingAutoAdd(true);
+    try {
+      const result = await invoke<{
+        enabled: boolean;
+        match_rule?: string | null;
+        added_count: number;
+      }>('set_series_auto_add', {
+        collectionId: selected.id,
+        enabled,
+      });
+      await loadCollections(selected.id);
+      if (result.added_count > 0) {
+        const rows = await invoke<CollectionMeeting[]>('list_collection_candidates', {
+          collectionId: selected.id,
+        });
+        setMeetings(Array.isArray(rows) ? rows : []);
+      }
+      toast.success(enabled ? t('Automatic additions enabled') : t('Automatic additions disabled'), {
+        description: result.added_count > 0
+          ? `${t('Meetings added')}: ${result.added_count}`
+          : undefined,
+      });
+    } catch (error) {
+      toast.error(errorText(error, t('Failed to update automatic additions')));
+    } finally {
+      setSavingAutoAdd(false);
+    }
+  };
+
+  const convertToSeries = async () => {
+    if (!selected || selected.kind !== 'manual' || converting) return;
+    setConverting(true);
+    try {
+      const result = await invoke<{
+        enabled: boolean;
+        match_rule?: string | null;
+        added_count: number;
+      }>('convert_collection_to_series', { collectionId: selected.id });
+      setConvertOpen(false);
+      await loadCollections(selected.id);
+      if (result.added_count > 0) {
+        const rows = await invoke<CollectionMeeting[]>('list_collection_candidates', {
+          collectionId: selected.id,
+        });
+        setMeetings(Array.isArray(rows) ? rows : []);
+      }
+      toast.success(t('Collection converted to a recurring series'), {
+        description: `${t('Automatic rule')}: “${result.match_rule || selected.name}”`,
+      });
+    } catch (error) {
+      toast.error(errorText(error, t('Failed to convert collection to a series')));
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -493,7 +599,7 @@ export default function CollectionsPage() {
           </button>
           <div className="min-w-0">
             <h1 className="mm-page-title">{t('Collections')}</h1>
-            <p className="mt-1 text-sm text-[var(--fg3)]">{t('Organize related meetings and ask questions across them')}</p>
+            <p className="mt-1 text-sm text-[var(--fg3)]">{t('Group recurring or related meetings, search inside them, and ask questions using only their content.')}</p>
           </div>
         </div>
         <Button onClick={openCreate} icon={<Icon name="plus" size={17} />}>
@@ -506,6 +612,15 @@ export default function CollectionsPage() {
           <div className="px-2 pt-1 text-xs font-medium uppercase tracking-[.14em] text-[var(--fg3)]">
             {t('Your collections')}
           </div>
+          <label className="relative block">
+            <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
+            <input
+              value={collectionSearch}
+              onChange={(event) => setCollectionSearch(event.target.value)}
+              className="mm-field h-10 w-full pl-9 text-sm outline-none"
+              placeholder={t('Find a collection')}
+            />
+          </label>
           <div className="flex flex-col gap-1">
             {loading ? (
               <div className="px-3 py-6 text-sm text-[var(--fg3)]">{t('Loading…')}</div>
@@ -513,8 +628,10 @@ export default function CollectionsPage() {
               <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] px-4 py-5 text-sm leading-relaxed text-[var(--fg3)]">
                 {t('Create a collection to group meetings by project, client, or topic.')}
               </div>
+            ) : filteredCollections.length === 0 ? (
+              <div className="px-3 py-6 text-sm text-[var(--fg3)]">{t('No collections found')}</div>
             ) : (
-              collections.map((collection) => (
+              filteredCollections.map((collection) => (
                 <button
                   key={collection.id}
                   onClick={() => setSelectedId(collection.id)}
@@ -532,6 +649,7 @@ export default function CollectionsPage() {
                     <span className="block truncate text-sm font-medium">{collection.name}</span>
                     <span className="mt-0.5 block text-xs text-[var(--fg3)]">
                       {collection.meeting_count} {t('meetings')}
+                      {collection.kind === 'series' && collection.auto_add ? ` · ${t('auto')}` : ''}
                     </span>
                   </span>
                 </button>
@@ -545,6 +663,9 @@ export default function CollectionsPage() {
                 <Icon name="spark" size={15} />
                 {t('Suggested series')}
               </div>
+              <p className="mb-3 px-2 text-xs leading-relaxed text-[var(--fg3)]">
+                {t('Memento found recurring meetings. Nothing is created until you confirm.')}
+              </p>
               <div className="flex flex-col gap-2">
                 {visibleSuggestions.map((suggestion) => (
                   <div key={suggestion.suggested_name} className="rounded-2xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-3">
@@ -593,16 +714,37 @@ export default function CollectionsPage() {
                 <div className="min-w-0">
                   <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[.12em] text-[var(--fg3)]">
                     <Icon name={selected.kind === 'series' ? 'refresh' : 'folder'} size={14} />
-                    {selected.kind === 'series' ? t('Automatic series') : t('Manual collection')}
+                    {selected.kind === 'series' ? t('Recurring series') : t('Manual collection')}
                   </div>
                   <h2 className="truncate text-3xl font-semibold tracking-[-.04em]">{selected.name}</h2>
                   <p className="mt-2 text-sm text-[var(--fg3)]">
                     {selected.meeting_count} {t('meetings in this collection')}
                   </p>
+                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--fg2)]">
+                    {selected.kind === 'series'
+                      ? t('A recurring series combines repeated meetings and builds a cross-meeting digest. Automatic additions are controlled below.')
+                      : t('A manual collection contains only the meetings you select. Use it for a project, client, or topic, then search or ask questions within that scope.')}
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="secondary" onClick={openMembership} icon={<Icon name="plus" size={16} />}>
                     {t('Manage meetings')}
+                  </Button>
+                  {selected.kind === 'manual' && selected.meeting_count >= 3 && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setConvertOpen(true)}
+                      icon={<Icon name="refresh" size={16} />}
+                    >
+                      {t('Make recurring')}
+                    </Button>
+                  )}
+                  <Button
+                    variant="secondary"
+                    onClick={() => router.push(`/search?collectionId=${selected.id}`)}
+                    icon={<Icon name="search" size={16} />}
+                  >
+                    {t('Search collection content')}
                   </Button>
                   <Button
                     onClick={() => router.push(`/chat?scope=collection&collectionId=${selected.id}`)}
@@ -618,6 +760,30 @@ export default function CollectionsPage() {
                   </button>
                 </div>
               </div>
+
+              {selected.kind === 'series' && (
+                <div className="border-b border-[var(--border-subtle)] p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Add future matching meetings automatically')}</h3>
+                      <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--fg3)]">
+                        {selected.auto_add
+                          ? `${t('Enabled. Memento compares new or renamed meeting titles with this rule')}: “${selected.match_rule || selected.name}”.`
+                          : t('Disabled. This series will keep its current meetings until you add more manually.')}
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--fg3)]">
+                        {t('No collection is ever created automatically. Memento only suggests a series; you decide whether to create it.')}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={selected.auto_add}
+                      disabled={savingAutoAdd}
+                      onCheckedChange={toggleAutoAdd}
+                      aria-label={t('Add future matching meetings automatically')}
+                    />
+                  </div>
+                </div>
+              )}
 
               {selected.kind === 'series' && (
                 <div className="border-b border-[var(--border-subtle)] p-6">
@@ -713,11 +879,17 @@ export default function CollectionsPage() {
               )}
 
               <div className="p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-medium uppercase tracking-[.12em] text-[var(--fg3)]">{t('Meetings')}</h3>
-                  {selectedMeetings.length > 0 && (
-                    <span className="text-xs text-[var(--fg3)]">{t('Newest first')}</span>
-                  )}
+                  <label className="relative min-w-[240px] max-w-sm flex-1 sm:flex-none">
+                    <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
+                    <input
+                      value={meetingSearch}
+                      onChange={(event) => setMeetingSearch(event.target.value)}
+                      className="mm-field h-10 w-full pl-9 text-sm outline-none"
+                      placeholder={t('Find a meeting in this collection')}
+                    />
+                  </label>
                 </div>
                 {loadingMeetings ? (
                   <div className="py-12 text-center text-sm text-[var(--fg3)]">{t('Loading…')}</div>
@@ -727,9 +899,20 @@ export default function CollectionsPage() {
                     <span className="mt-4 text-base font-medium text-[var(--fg1)]">{t('Add meetings')}</span>
                     <span className="mt-1 max-w-sm text-sm text-[var(--fg3)]">{t('Choose recordings that belong to this project, client, or recurring series.')}</span>
                   </button>
+                ) : filteredSelectedMeetings.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[var(--border-strong)] px-4 py-10 text-center text-sm text-[var(--fg3)]">
+                    {t('No meetings found in this collection')}
+                  </div>
                 ) : (
                   <div className="grid gap-2">
-                    {selectedMeetings.map((meeting) => (
+                    {filteredSelectedMeetings.map((meeting) => {
+                      const display = getMeetingDisplayInfo({
+                        title: meeting.title,
+                        createdAt: meeting.created_at,
+                        occurredAt: meeting.occurred_at,
+                        folderPath: meeting.folder_path,
+                      }, lang);
+                      return (
                       <div key={meeting.id} className="group flex items-center gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3 hover:border-[var(--gold-border)]">
                         <button
                           onClick={() => router.push(`/meeting-details?id=${encodeURIComponent(meeting.id)}`)}
@@ -739,8 +922,8 @@ export default function CollectionsPage() {
                             <Icon name="transcript" size={18} />
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-[var(--fg1)]">{meeting.title || t('Untitled')}</span>
-                            <span className="mt-1 block text-xs text-[var(--fg3)]">{formatMeetingDate(meeting.created_at)}</span>
+                            <span className="block truncate text-sm font-medium text-[var(--fg1)]">{display.title}</span>
+                            <span className="mt-1 block text-xs text-[var(--fg3)]">{display.dateLabel}</span>
                           </span>
                           <Icon name="chevron-right" size={17} className="text-[var(--fg3)]" />
                         </button>
@@ -748,7 +931,8 @@ export default function CollectionsPage() {
                           <Icon name="close" size={15} />
                         </button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -789,10 +973,28 @@ export default function CollectionsPage() {
               {membershipDraft.size} {t('meetings selected')}
             </DialogDescription>
           </DialogHeader>
+          <label className="relative block">
+            <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
+            <input
+              value={manageSearch}
+              onChange={(event) => setManageSearch(event.target.value)}
+              className="mm-field h-10 w-full pl-9 text-sm outline-none"
+              placeholder={t('Find a meeting to add')}
+            />
+          </label>
           <div className="min-h-0 overflow-y-auto rounded-2xl border border-[var(--border-subtle)]">
             {meetings.length === 0 ? (
               <div className="p-8 text-center text-sm text-[var(--fg3)]">{t('There are no recorded meetings yet.')}</div>
-            ) : meetings.map((meeting) => (
+            ) : filteredManageMeetings.length === 0 ? (
+              <div className="p-8 text-center text-sm text-[var(--fg3)]">{t('No meetings found')}</div>
+            ) : filteredManageMeetings.map((meeting) => {
+              const display = getMeetingDisplayInfo({
+                title: meeting.title,
+                createdAt: meeting.created_at,
+                occurredAt: meeting.occurred_at,
+                folderPath: meeting.folder_path,
+              }, lang);
+              return (
               <label key={meeting.id} className="flex cursor-pointer items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3 last:border-b-0 hover:bg-[var(--bg-sheet)]">
                 <input
                   type="checkbox"
@@ -801,11 +1003,12 @@ export default function CollectionsPage() {
                   className="h-4 w-4 accent-[var(--gold)]"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-[var(--fg1)]">{meeting.title || t('Untitled')}</span>
-                  <span className="mt-0.5 block text-xs text-[var(--fg3)]">{formatMeetingDate(meeting.created_at)}</span>
+                  <span className="block truncate text-sm text-[var(--fg1)]">{display.title}</span>
+                  <span className="mt-0.5 block text-xs text-[var(--fg3)]">{display.dateLabel}</span>
                 </span>
               </label>
-            ))}
+              );
+            })}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setManageOpen(false)}>{t('Cancel')}</Button>
@@ -828,6 +1031,23 @@ export default function CollectionsPage() {
             <Button variant="ghost" onClick={() => setDeleteOpen(false)}>{t('Cancel')}</Button>
             <Button onClick={deleteSelected} disabled={deleting} className="bg-[var(--danger)] hover:bg-[var(--danger)]">
               {deleting ? t('Deleting…') : t('Delete collection')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={convertOpen} onOpenChange={setConvertOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('Make this a recurring series?')}</DialogTitle>
+            <DialogDescription>
+              {t('Memento will derive a matching rule from the meetings already selected, add matching archive meetings, and automatically add future matching meetings. You can turn automatic additions off later.')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConvertOpen(false)}>{t('Cancel')}</Button>
+            <Button onClick={convertToSeries} disabled={converting}>
+              {converting ? t('Converting…') : t('Make recurring')}
             </Button>
           </DialogFooter>
         </DialogContent>

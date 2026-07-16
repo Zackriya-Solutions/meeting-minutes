@@ -2,7 +2,7 @@ use crate::api::{TranscriptSearchResult, TranscriptSegment};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
 use std::collections::HashSet;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub struct TranscriptsRepository;
@@ -80,6 +80,14 @@ impl TranscriptsRepository {
 
         // Commit the transaction
         transaction.commit().await?;
+        if let Err(error) =
+            crate::collections::auto_assign_meeting(pool, &meeting_id, meeting_title).await
+        {
+            warn!(
+                "Could not apply automatic series rules to meeting {}: {}",
+                meeting_id, error
+            );
+        }
 
         Ok(meeting_id)
     }

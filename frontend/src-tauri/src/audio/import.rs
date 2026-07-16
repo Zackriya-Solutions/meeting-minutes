@@ -1325,6 +1325,12 @@ async fn create_meeting_with_transcripts(
     tx.commit()
         .await
         .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+    if let Err(error) = crate::collections::auto_assign_meeting(pool, meeting_id, title).await {
+        warn!(
+            "Could not apply automatic series rules to imported meeting {}: {}",
+            meeting_id, error
+        );
+    }
 
     info!(
         "Created meeting '{}' with {} transcripts",

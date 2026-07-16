@@ -2,7 +2,7 @@ use crate::api::{MeetingDetails, MeetingTranscript};
 use crate::database::models::{MeetingModel, Transcript};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqliteConnection, SqlitePool};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct MeetingsRepository;
 
@@ -244,6 +244,14 @@ impl MeetingsRepository {
             return Ok(false);
         }
         transaction.commit().await?;
+        if let Err(error) =
+            crate::collections::auto_assign_meeting(pool, meeting_id, new_title).await
+        {
+            warn!(
+                "Could not apply automatic series rules after renaming meeting {}: {}",
+                meeting_id, error
+            );
+        }
         Ok(true)
     }
 
@@ -277,6 +285,14 @@ impl MeetingsRepository {
             .await?;
 
         transaction.commit().await?;
+        if let Err(error) =
+            crate::collections::auto_assign_meeting(pool, meeting_id, new_title).await
+        {
+            warn!(
+                "Could not apply automatic series rules after generated title for {}: {}",
+                meeting_id, error
+            );
+        }
         Ok(true)
     }
 }
@@ -568,5 +584,4 @@ mod tests {
             assert_eq!(count, 0, "{table} still contains meeting-scoped data");
         }
     }
-
 }

@@ -704,6 +704,8 @@ pub fn run() {
             collections::commands::save_search,
             collections::commands::suggest_meeting_series,
             collections::commands::accept_series_suggestion,
+            collections::commands::set_series_auto_add,
+            collections::commands::convert_collection_to_series,
             collections::commands::run_backfill,
             collections::commands::set_app_setting,
             collections::commands::get_app_settings,
