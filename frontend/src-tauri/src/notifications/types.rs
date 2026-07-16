@@ -21,6 +21,7 @@ pub enum NotificationType {
     RecordingResumed,
     TranscriptionComplete,
     MeetingReminder(u64), // Duration in minutes
+    MeetingDetected,
     SystemError(String),
     Test, // For testing notifications
 }
@@ -174,6 +175,16 @@ impl Notification {
         Notification::new("Memento", body, NotificationType::MeetingReminder(minutes_until))
             .with_priority(NotificationPriority::High)
             .with_timeout(NotificationTimeout::Seconds(10))
+    }
+
+    pub fn meeting_detected() -> Self {
+        Notification::new(
+            "Memento",
+            "Похоже, началась встреча. Откройте Memento, чтобы начать запись.",
+            NotificationType::MeetingDetected,
+        )
+        .with_priority(NotificationPriority::High)
+        .with_timeout(NotificationTimeout::Seconds(15))
     }
 
     pub fn system_error(error: impl Into<String>) -> Self {

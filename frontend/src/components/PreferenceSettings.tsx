@@ -149,6 +149,21 @@ export function PreferenceSettings() {
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
 
+  const handleAutoMeetingDetectionChange = async (enabled: boolean) => {
+    if (!notificationSettings) return;
+    try {
+      await updateNotificationSettings({
+        ...notificationSettings,
+        auto_meeting_detection: enabled,
+      });
+      await Analytics.track('auto_meeting_detection_setting_changed', {
+        enabled: enabled.toString(),
+      });
+    } catch (error) {
+      console.error('Failed to update automatic meeting detection:', error);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Уведомления Section */}
@@ -159,6 +174,23 @@ export function PreferenceSettings() {
             <p className="text-sm text-[var(--fg2)]">{t('Enable or disable notifications of start and end of meeting')}</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+      </div>
+
+      {/* Automatic meeting detection stores only the preference; observed signals stay in memory. */}
+      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+        <div className="flex items-center justify-between gap-6">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Automatic meeting detection')}</h3>
+            <p className="text-sm text-[var(--fg2)]">
+              {t('Suggest recording when a supported meeting app or browser call becomes active. Detection signals stay in memory and recording never starts without your confirmation.')}
+            </p>
+          </div>
+          <Switch
+            checked={notificationSettings?.auto_meeting_detection ?? false}
+            disabled={!notificationSettings}
+            onCheckedChange={handleAutoMeetingDetectionChange}
+          />
         </div>
       </div>
 

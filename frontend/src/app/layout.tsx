@@ -32,7 +32,7 @@ import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigrationDialog'
-
+import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
 
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
@@ -219,6 +219,7 @@ export default function RootLayout({
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
                               <ManagedDefaultsMigrationDialog />
+                              <AutoMeetingDetection />
 
                               <div className="flex">
                                 <Sidebar />
