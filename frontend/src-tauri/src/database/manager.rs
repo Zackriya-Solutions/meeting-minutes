@@ -38,13 +38,16 @@ impl DatabaseManager {
 
         sqlx::migrate!("./migrations").run(&pool).await?;
 
-        let managed_defaults = super::managed_defaults::migrate(&pool).await?;
-        if managed_defaults.transcription_changed || managed_defaults.summary_changed {
-            log::info!(
-                "Managed defaults migration applied: transcription_changed={}, summary_changed={}",
-                managed_defaults.transcription_changed,
-                managed_defaults.summary_changed
-            );
+        match super::managed_defaults::migrate(&pool).await {
+            Ok(report) if report.pending_confirmation => {
+                log::info!("Managed defaults migration is awaiting explicit user confirmation");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                log::warn!(
+                    "Managed defaults migration check failed; keeping current providers: {error}"
+                );
+            }
         }
 
         // Create the vec0 embeddings table if the extension is available. Never

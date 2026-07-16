@@ -31,6 +31,7 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigrationDialog'
 
 
 // Module-level component — stable reference across RootLayout re-renders.
@@ -217,6 +218,7 @@ export default function RootLayout({
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
+                              <ManagedDefaultsMigrationDialog />
 
                               <div className="flex">
                                 <Sidebar />
