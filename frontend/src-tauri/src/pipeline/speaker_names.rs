@@ -343,7 +343,29 @@ fn candidate_hash(salt: &str, normalized: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-async fn store_rejection(pool: &SqlitePool, hash: &str, reason: &str) -> Result<(), sqlx::Error> {
+async fn store_rejection(
+    pool: &SqlitePool,
+    meeting_id: &str,
+    hash: &str,
+    reason: &str,
+    evidence_start_ms: Option<i64>,
+    evidence_kind: &str,
+) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let observation = sqlx::query(
+        "INSERT OR IGNORE INTO rejected_speaker_name_observations \
+         (meeting_id, candidate_hash, evidence_start_ms, evidence_kind) VALUES(?, ?, ?, ?)",
+    )
+    .bind(meeting_id)
+    .bind(hash)
+    .bind(evidence_start_ms.unwrap_or(-1))
+    .bind(evidence_kind)
+    .execute(&mut *transaction)
+    .await?;
+    if observation.rows_affected() == 0 {
+        transaction.commit().await?;
+        return Ok(());
+    }
     sqlx::query(
         "INSERT INTO rejected_speaker_name_fingerprints(candidate_hash, reason) VALUES(?, ?) \
          ON CONFLICT(candidate_hash) DO UPDATE SET occurrence_count=occurrence_count+1, \
@@ -351,8 +373,9 @@ async fn store_rejection(pool: &SqlitePool, hash: &str, reason: &str) -> Result<
     )
     .bind(hash)
     .bind(reason)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
+    transaction.commit().await?;
     Ok(())
 }
 
@@ -383,7 +406,14 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
             Ok(value) => value,
             Err(reason) => {
                 let hash = candidate_hash(&salt, &normalize_name(&candidate.text));
-                store_rejection(pool, &hash, reason)
+                store_rejection(
+                    pool,
+                    meeting_id,
+                    &hash,
+                    reason,
+                    candidate.start_ms,
+                    candidate.evidence_kind,
+                )
                     .await
                     .map_err(|error| error.to_string())?;
                 continue;
@@ -717,6 +747,7 @@ mod tests {
             "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT, proposed_speaker_id INTEGER, proposed_speaker_key INTEGER NOT NULL, candidate_text TEXT, normalized_name TEXT, candidate_hash TEXT, evidence_kind TEXT, evidence_quote TEXT, evidence_start_ms INTEGER, confidence REAL, occurrence_count INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
             "CREATE TABLE speaker_aliases(id INTEGER PRIMARY KEY, speaker_id INTEGER, alias TEXT, normalized_alias TEXT, source_candidate_id INTEGER, is_confirmed INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(speaker_id,normalized_alias))",
             "CREATE TABLE rejected_speaker_name_fingerprints(candidate_hash TEXT PRIMARY KEY, reason TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE rejected_speaker_name_observations(meeting_id TEXT, candidate_hash TEXT, evidence_start_ms INTEGER, evidence_kind TEXT, PRIMARY KEY(meeting_id,candidate_hash,evidence_start_ms,evidence_kind))",
             "CREATE TABLE rejected_speaker_name_candidate_instances(meeting_id TEXT, candidate_hash TEXT, proposed_speaker_key INTEGER, evidence_kind TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
@@ -877,15 +908,26 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let rejected_hash = candidate_hash(&salt, "дебил");
         let direct_address_rejections: i64 = sqlx::query_scalar(
             "SELECT occurrence_count FROM rejected_speaker_name_fingerprints \
              WHERE candidate_hash=? AND reason='abusive_or_profane'",
         )
-        .bind(candidate_hash(&salt, "дебил"))
+        .bind(&rejected_hash)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(direct_address_rejections, 3);
+        assert_eq!(direct_address_rejections, 1);
+        scan_candidates(&pool, "m1").await.unwrap();
+        let after_rescan: i64 = sqlx::query_scalar(
+            "SELECT occurrence_count FROM rejected_speaker_name_fingerprints \
+             WHERE candidate_hash=? AND reason='abusive_or_profane'",
+        )
+        .bind(&rejected_hash)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(after_rescan, direct_address_rejections);
     }
 
     #[tokio::test]
@@ -900,6 +942,7 @@ mod tests {
             "CREATE TABLE transcripts(id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, speaker_id INTEGER, audio_start_time REAL)",
             "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT, proposed_speaker_id INTEGER, proposed_speaker_key INTEGER NOT NULL, candidate_text TEXT, normalized_name TEXT, candidate_hash TEXT, evidence_kind TEXT, evidence_quote TEXT, evidence_start_ms INTEGER, confidence REAL, occurrence_count INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
             "CREATE TABLE rejected_speaker_name_fingerprints(candidate_hash TEXT PRIMARY KEY, reason TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE rejected_speaker_name_observations(meeting_id TEXT, candidate_hash TEXT, evidence_start_ms INTEGER, evidence_kind TEXT, PRIMARY KEY(meeting_id,candidate_hash,evidence_start_ms,evidence_kind))",
             "CREATE TABLE rejected_speaker_name_candidate_instances(meeting_id TEXT, candidate_hash TEXT, proposed_speaker_key INTEGER, evidence_kind TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();

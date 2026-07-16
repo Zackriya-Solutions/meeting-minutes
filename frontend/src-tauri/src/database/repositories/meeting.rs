@@ -338,6 +338,11 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    sqlx::query("DELETE FROM rejected_speaker_name_observations WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
     // Vector rows are not foreign-key linked to chunks. Remove them before the
     // source chunks so deleting a meeting cannot leave searchable transcript
     // content behind when foreign-key enforcement is disabled.
@@ -498,6 +503,7 @@ mod tests {
             "CREATE TABLE entity_mentions(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE rejected_speaker_name_candidate_instances(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE rejected_speaker_name_observations(meeting_id TEXT, candidate_hash TEXT, evidence_start_ms INTEGER, evidence_kind TEXT)",
             "CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
             "CREATE TABLE chunk_embeddings(chunk_id INTEGER PRIMARY KEY)",
             "CREATE TABLE jobs(id INTEGER PRIMARY KEY, meeting_id TEXT)",
@@ -521,6 +527,7 @@ mod tests {
             "INSERT INTO entity_mentions(meeting_id) VALUES('m1')",
             "INSERT INTO speaker_name_candidates(meeting_id) VALUES('m1')",
             "INSERT INTO rejected_speaker_name_candidate_instances(meeting_id) VALUES('m1')",
+            "INSERT INTO rejected_speaker_name_observations VALUES('m1', 'hash', 1000, 'direct_address')",
             "INSERT INTO chunks(id, meeting_id, text) VALUES(42, 'm1', 'private transcript')",
             "INSERT INTO chunk_embeddings(chunk_id) VALUES(42)",
             "INSERT INTO jobs(meeting_id) VALUES('m1')",
@@ -545,6 +552,7 @@ mod tests {
             "entity_mentions",
             "speaker_name_candidates",
             "rejected_speaker_name_candidate_instances",
+            "rejected_speaker_name_observations",
             "chunks",
             "chunk_embeddings",
             "jobs",

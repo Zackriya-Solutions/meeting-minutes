@@ -10,8 +10,9 @@ and separately opt in before changing that speaker's display name.
 
 - self-introduction (`Меня зовут …` / `My name is …`) may suggest the current diarized
   speaker with high confidence;
-- explicit introduction (`Это …`, `С нами …`) produces an unlinked candidate because the
-  introduced person may not be the speaker;
+- explicit introduction (`Это наш/наша/новый/новая коллега …`, `С нами …`) produces an
+  unlinked candidate because the introduced person may not be the speaker; bare `Это …`
+  is intentionally ignored as an unsafe discourse marker;
 - direct address is linked to the next responding speaker only when it occurs within 15
   seconds, and is hidden until the same name-to-speaker relation occurs at least twice in
   the meeting.
