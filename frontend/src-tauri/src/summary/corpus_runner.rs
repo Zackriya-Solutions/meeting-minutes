@@ -96,6 +96,7 @@ pub struct StandupCorpusRunReport {
     pub requested: usize,
     pub completed: usize,
     pub skipped: usize,
+    pub declined: usize,
     pub failed: usize,
     pub items: Vec<StandupCorpusRunItem>,
 }
@@ -119,6 +120,7 @@ struct CorpusRunProvenance {
     provider: String,
     model: String,
     template_fingerprint: String,
+    output_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,19 +159,26 @@ fn has_standup_v2(result: Option<&str>) -> bool {
 }
 
 fn result_matches_provenance(result: Option<&str>, expected: &CorpusRunProvenance) -> bool {
-    let Some(source) = result
+    let Some(generation) = result
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .and_then(|value| value.get("summary_generation").cloned())
-        .and_then(|value| value.get("source").cloned())
     else {
         return false;
     };
+    let Some(source) = generation.get("source") else {
+        return false;
+    };
 
-    source.get("model_provider").and_then(Value::as_str) == Some(expected.provider.as_str())
+    let transport_matches = source.get("model_provider").and_then(Value::as_str)
+        == Some(expected.provider.as_str())
         && source.get("model_name").and_then(Value::as_str) == Some(expected.model.as_str())
         && source.get("template_id").and_then(Value::as_str) == Some(TEMPLATE_ID)
         && source.get("template_fingerprint").and_then(Value::as_str)
-            == Some(expected.template_fingerprint.as_str())
+            == Some(expected.template_fingerprint.as_str());
+    let language_matches = expected.output_language.as_deref().map_or(true, |language| {
+        generation.get("output_language").and_then(Value::as_str) == Some(language)
+    });
+    transport_matches && language_matches
 }
 
 fn existing_summary_policy(
@@ -206,18 +215,7 @@ fn standup_result_record_count(result: Option<&str>) -> Result<i64, String> {
             report.schema_version
         ));
     }
-    let participant_records = report
-        .participant_updates
-        .iter()
-        .map(|update| update.completed_or_recent.len() + update.next.len() + update.blockers.len())
-        .sum::<usize>();
-    let count = report.overview.len()
-        + participant_records
-        + report.decisions.len()
-        + report.action_items.len()
-        + report.risks_and_blockers.len()
-        + report.deep_dives.len()
-        + report.unattributed_facts.len();
+    let count = crate::summary::standup::report_record_count(&report);
     i64::try_from(count).map_err(|_| "Standup V2 record count overflowed".to_string())
 }
 
@@ -290,13 +288,16 @@ fn report_error_category(value: Option<&str>) -> Option<String> {
     Some(category.to_string())
 }
 
-async fn meeting_input(pool: &SqlitePool, meeting_id: &str) -> Result<(String, String), String> {
+async fn meeting_input(
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<(String, String), (String, String)> {
     let title: Option<String> = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| error.to_string())?;
-    let title = title.ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
+        .map_err(|error| (String::new(), error.to_string()))?;
+    let title = title.ok_or_else(|| (String::new(), format!("Meeting not found: {meeting_id}")))?;
     let segments: Vec<(String, Option<f64>, String)> = sqlx::query_as(
         "SELECT transcript, audio_start_time, timestamp FROM transcripts \
          WHERE meeting_id = ? AND trim(transcript) != '' \
@@ -305,9 +306,9 @@ async fn meeting_input(pool: &SqlitePool, meeting_id: &str) -> Result<(String, S
     .bind(meeting_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| (title.clone(), error.to_string()))?;
     if segments.is_empty() {
-        return Err("Meeting has no non-empty transcript".to_string());
+        return Err((title, "Meeting has no non-empty transcript".to_string()));
     }
     let fallback = segments
         .into_iter()
@@ -390,6 +391,10 @@ fn build_report(
             .filter(|item| item.status == "completed")
             .count(),
         skipped: items.iter().filter(|item| item.status == "skipped").count(),
+        declined: items
+            .iter()
+            .filter(|item| item.status == "declined")
+            .count(),
         failed: items.iter().filter(|item| item.status == "failed").count(),
         items: items.to_vec(),
     }
@@ -416,6 +421,26 @@ fn failed_item(
     }
 }
 
+fn declined_item(
+    meeting_id: &str,
+    title: String,
+    provenance: &CorpusRunProvenance,
+    reason: &str,
+) -> StandupCorpusRunItem {
+    StandupCorpusRunItem {
+        meeting_id: meeting_id.to_string(),
+        title,
+        status: "declined".to_string(),
+        provider: provenance.provider.clone(),
+        model: provenance.model.clone(),
+        template_fingerprint: provenance.template_fingerprint.clone(),
+        processing_time_ms: 0,
+        chunk_count: 0,
+        extracted_record_count: 0,
+        error: report_error_category(Some(reason)),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn process_meeting<R: Runtime>(
     app: &AppHandle<R>,
@@ -429,7 +454,7 @@ async fn process_meeting<R: Runtime>(
 ) -> StandupCorpusRunItem {
     let (title, transcript) = match meeting_input(pool, meeting_id).await {
         Ok(value) => value,
-        Err(error) => return failed_item(meeting_id, String::new(), provenance, error),
+        Err((title, error)) => return failed_item(meeting_id, title, provenance, error),
     };
     let _ = app.emit(
         "standup-corpus-run-progress",
@@ -476,7 +501,7 @@ async fn process_meeting<R: Runtime>(
             };
         }
         ExistingSummaryPolicy::RequireExplicitOverwrite => {
-            return failed_item(
+            return declined_item(
                 meeting_id,
                 title,
                 provenance,
@@ -611,6 +636,10 @@ async fn run_standup_corpus_inner<R: Runtime>(
         provider: provider.clone(),
         model: model.clone(),
         template_fingerprint: crate::summary::service::template_cache_fingerprint(&template),
+        output_language: summary_language
+            .as_deref()
+            .and_then(crate::summary::processor::language_name_from_code)
+            .map(str::to_string),
     };
     let started_at = chrono::Utc::now().to_rfc3339();
     let mut items = Vec::with_capacity(meeting_ids.len());
@@ -803,6 +832,7 @@ mod tests {
             provider: "builtin-ai".into(),
             model: "qwen3.5:4b".into(),
             template_fingerprint: "prompt-v1".into(),
+            output_language: None,
         }
     }
 
@@ -847,7 +877,7 @@ mod tests {
     fn resume_requires_exact_generation_provenance() {
         let result = r#"{
           "standup_v2": {"schema_version":"standup_v2"},
-          "summary_generation": {"source": {
+          "summary_generation": {"output_language":"Russian","source": {
             "model_provider":"builtin-ai",
             "model_name":"qwen3.5:4b",
             "template_id":"daily_standup",
@@ -862,6 +892,11 @@ mod tests {
         assert!(!result_matches_provenance(Some(result), &changed));
         changed = expected.clone();
         changed.template_fingerprint = "prompt-v2".into();
+        assert!(!result_matches_provenance(Some(result), &changed));
+        changed = expected.clone();
+        changed.output_language = Some("Russian".into());
+        assert!(result_matches_provenance(Some(result), &changed));
+        changed.output_language = Some("English".into());
         assert!(!result_matches_provenance(Some(result), &changed));
         assert!(!result_matches_provenance(
             Some(r#"{"standup_v2":{"schema_version":"standup_v2"}}"#),

@@ -713,7 +713,7 @@ pub fn validate_evidence_against_transcript_chunk(
     })
 }
 
-fn report_record_count(report: &StandupReport) -> usize {
+pub(crate) fn report_record_count(report: &StandupReport) -> usize {
     report.overview.len()
         + report.decisions.len()
         + report.action_items.len()

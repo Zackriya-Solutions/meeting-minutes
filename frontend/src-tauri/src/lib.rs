@@ -591,9 +591,10 @@ pub fn run() {
                             .await
                             {
                                 Ok(report) => log::info!(
-                                    "Standup corpus run complete: {} completed, {} skipped, {} failed",
+                                    "Standup corpus run complete: {} completed, {} skipped, {} declined, {} failed",
                                     report.completed,
                                     report.skipped,
+                                    report.declined,
                                     report.failed
                                 ),
                                 Err(error) => log::error!("Standup corpus run failed: {error}"),
