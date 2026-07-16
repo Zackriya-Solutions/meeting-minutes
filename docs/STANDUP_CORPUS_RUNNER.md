@@ -3,7 +3,8 @@
 The runner executes the ordinary Standup V2 pipeline sequentially for an explicit set of local
 meeting IDs. It is intended for reproducible provider and prompt evaluation, not automatic data
 discovery. A completed Standup V2 result is skipped only when its provider, model, template ID,
-and template fingerprint match the requested run; otherwise it is regenerated.
+and template fingerprint match the requested run. Any other completed result is preserved and
+reported as `overwrite_required` until the operator explicitly enables overwrite.
 
 ```bash
 cd frontend
