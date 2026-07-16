@@ -172,6 +172,7 @@ async fn activate_model<R: Runtime>(
         return Ok(false);
     }
 
+    let previous_kind = selected_kind(pool).await;
     let dir = model_dir(&base, kind);
     let candidate = tokio::task::spawn_blocking(move || embedder::load_kind(dir, kind))
         .await
@@ -179,10 +180,16 @@ async fn activate_model<R: Runtime>(
         .map_err(|e| e.to_string())?;
 
     let _switch_guard = embedder::model_index_write_guard().await;
-    crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
-        .await
-        .map_err(|e| e.to_string())?;
     persist_selected_kind(pool, kind).await?;
+    if let Err(error) = crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim()).await
+    {
+        if let Err(rollback_error) = persist_selected_kind(pool, previous_kind).await {
+            return Err(format!(
+                "{error}; failed to restore embedding model selection: {rollback_error}"
+            ));
+        }
+        return Err(error.to_string());
+    }
     embedder::install_global(candidate);
     Ok(true)
 }
@@ -371,6 +378,22 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
         }
     };
     let Some(state) = app.try_state::<AppState>() else {
+        let kind = EmbedderKind::MultilingualE5Small;
+        if model_present(&base, kind) {
+            let dir = model_dir(&base, kind);
+            match tokio::task::spawn_blocking(move || embedder::load_kind(dir, kind)).await {
+                Ok(Ok(candidate)) => {
+                    let _switch_guard = embedder::model_index_write_guard().await;
+                    embedder::install_global(candidate);
+                }
+                Ok(Err(e)) => log::warn!("failed to load embedder before database setup: {e}"),
+                Err(e) => log::warn!("embedding startup task failed: {e}"),
+            }
+        } else {
+            log::info!(
+                "embedding model not present; search/RAG run FTS-only until it is downloaded"
+            );
+        }
         return;
     };
     let kind = selected_kind(state.db_manager.pool()).await;
