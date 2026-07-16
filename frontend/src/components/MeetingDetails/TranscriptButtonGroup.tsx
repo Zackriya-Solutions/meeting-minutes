@@ -8,6 +8,7 @@ import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { DetectSpeakersButton } from './DetectSpeakersButton';
 import { SpeakerNameCandidatesButton } from './SpeakerNameCandidatesButton';
+import { DeleteMeetingButton } from './DeleteMeetingButton';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useT } from '@/lib/i18n';
 
@@ -45,8 +46,8 @@ export function TranscriptButtonGroup({
   }, [onRefetchTranscripts]);
 
   return (
-    <div className="flex items-center justify-center w-full gap-2">
-      <ButtonGroup>
+    <div className="flex w-full items-center justify-start gap-2 overflow-x-auto xl:justify-center">
+      <ButtonGroup className="shrink-0">
         <Button
           variant="outline"
           size="sm"
@@ -93,6 +94,10 @@ export function TranscriptButtonGroup({
 
         <DetectSpeakersButton meetingId={meetingId} onDetected={onSpeakersDetected} />
         <SpeakerNameCandidatesButton meetingId={meetingId} onApplied={onSpeakersDetected} />
+        <DeleteMeetingButton
+          meetingId={meetingId}
+          meetingFolderPath={meetingFolderPath}
+        />
       </ButtonGroup>
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (

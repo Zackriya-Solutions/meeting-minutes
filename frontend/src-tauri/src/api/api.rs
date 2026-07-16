@@ -1,6 +1,7 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
@@ -763,21 +764,60 @@ pub async fn api_delete_meeting<R: Runtime>(
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
+    delete_recording_files: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_delete_meeting called for meeting_id(native): {}, auth_token: {}",
+        "api_delete_meeting called for meeting_id(native): {}, auth_token: {}, delete_recording_files: {}",
         meeting_id,
-        auth_token.is_some()
+        auth_token.is_some(),
+        delete_recording_files.unwrap_or(false)
     );
 
     let pool = state.db_manager.pool();
+    let folder_path = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to load meeting before deletion: {}", e))?
+        .and_then(|meeting| meeting.folder_path);
 
     match MeetingsRepository::delete_meeting(pool, &meeting_id).await {
         Ok(true) => {
             log_info!("Successfully deleted meeting {}", meeting_id);
+
+            let mut files_deleted = false;
+            let mut files_warning: Option<String> = None;
+            if delete_recording_files.unwrap_or(false) {
+                match folder_path {
+                    Some(folder_path) if !folder_path.trim().is_empty() => {
+                        match delete_recording_folder(Path::new(&folder_path)) {
+                            Ok(()) => {
+                                files_deleted = true;
+                                log_info!(
+                                    "Successfully deleted recording folder for meeting {}",
+                                    meeting_id
+                                );
+                            }
+                            Err(error) => {
+                                log_warn!(
+                                    "Meeting {} was deleted, but its recording folder was kept: {}",
+                                    meeting_id,
+                                    error
+                                );
+                                files_warning = Some(error);
+                            }
+                        }
+                    }
+                    _ => {
+                        files_warning =
+                            Some("This meeting has no recording folder to delete.".to_string());
+                    }
+                }
+            }
+
             Ok(serde_json::json!({
                 "status": "success",
-                "message": "Meeting deleted successfully"
+                "message": "Meeting deleted successfully",
+                "files_deleted": files_deleted,
+                "files_warning": files_warning,
             }))
         }
         Ok(false) => {
@@ -792,6 +832,46 @@ pub async fn api_delete_meeting<R: Runtime>(
             Err(format!("Failed to delete meeting: {}", e))
         }
     }
+}
+
+fn delete_recording_folder(folder_path: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(folder_path)
+        .map_err(|error| format!("Recording folder is unavailable: {}", error))?;
+    if metadata.file_type().is_symlink() {
+        return Err("Refusing to delete a recording folder reached through a symlink.".to_string());
+    }
+    if !metadata.is_dir() {
+        return Err("The saved recording path is not a folder.".to_string());
+    }
+
+    let canonical_folder = folder_path
+        .canonicalize()
+        .map_err(|error| format!("Could not verify the recording folder: {}", error))?;
+    let recordings_root = crate::audio::recording_preferences::get_default_recordings_folder();
+    let canonical_recordings_root = recordings_root.canonicalize().ok();
+
+    if canonical_folder.parent().is_none()
+        || dirs::home_dir().as_deref() == Some(canonical_folder.as_path())
+        || canonical_folder == recordings_root
+        || canonical_recordings_root.as_deref() == Some(canonical_folder.as_path())
+    {
+        return Err("Refusing to delete a protected directory.".to_string());
+    }
+
+    for marker in ["metadata.json", "transcripts.json"] {
+        let marker_path = canonical_folder.join(marker);
+        let marker_metadata = std::fs::symlink_metadata(&marker_path)
+            .map_err(|_| format!("Folder is missing the Memento marker file '{}'.", marker))?;
+        if marker_metadata.file_type().is_symlink() || !marker_metadata.is_file() {
+            return Err(format!(
+                "The Memento marker '{}' is not a regular file.",
+                marker
+            ));
+        }
+    }
+
+    std::fs::remove_dir_all(&canonical_folder)
+        .map_err(|error| format!("Could not delete the recording folder: {}", error))
 }
 
 #[tauri::command]
@@ -1416,5 +1496,57 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod delete_recording_folder_tests {
+    use super::delete_recording_folder;
+    use std::fs;
+
+    #[test]
+    fn deletes_a_verified_memento_recording_folder() {
+        let parent = tempfile::tempdir().unwrap();
+        let recording = parent.path().join("Meeting 2026-07-16");
+        fs::create_dir(&recording).unwrap();
+        fs::write(recording.join("metadata.json"), "{}").unwrap();
+        fs::write(recording.join("transcripts.json"), "[]").unwrap();
+        fs::write(recording.join("audio.mp4"), b"audio").unwrap();
+
+        delete_recording_folder(&recording).unwrap();
+
+        assert!(!recording.exists());
+    }
+
+    #[test]
+    fn refuses_a_folder_without_memento_marker_files() {
+        let parent = tempfile::tempdir().unwrap();
+        let unrelated = parent.path().join("unrelated");
+        fs::create_dir(&unrelated).unwrap();
+        fs::write(unrelated.join("audio.mp4"), b"audio").unwrap();
+
+        let error = delete_recording_folder(&unrelated).unwrap_err();
+
+        assert!(error.contains("metadata.json"));
+        assert!(unrelated.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_recording_folder_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let recording = parent.path().join("recording");
+        let linked_recording = parent.path().join("linked-recording");
+        fs::create_dir(&recording).unwrap();
+        fs::write(recording.join("metadata.json"), "{}").unwrap();
+        fs::write(recording.join("transcripts.json"), "[]").unwrap();
+        symlink(&recording, &linked_recording).unwrap();
+
+        let error = delete_recording_folder(&linked_recording).unwrap_err();
+
+        assert!(error.contains("symlink"));
+        assert!(recording.exists());
     }
 }

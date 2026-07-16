@@ -399,6 +399,7 @@ const Sidebar: React.FC = () => {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('api_delete_meeting', {
         meetingId: itemId,
+        deleteRecordingFiles: false,
       });
       console.log('Встреча удалена');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
@@ -409,7 +410,7 @@ const Sidebar: React.FC = () => {
 
       // Show success toast
       toast.success(t("Meeting deleted successfully"), {
-        description: t("All associated data has been removed")
+        description: t("The recording folder and audio files were kept on this Mac.")
       });
 
       // If deleting the active meeting, navigate to home
