@@ -3,6 +3,7 @@
 use crate::state::AppState;
 use crate::summary::standup::{parse_timestamp_seconds, StandupReport};
 use crate::utils::format_timestamp;
+use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
@@ -713,10 +714,10 @@ fn parse_digest_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     }
     for format in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"] {
         if let Ok(value) = chrono::NaiveDateTime::parse_from_str(value, format) {
-            return Some(chrono::DateTime::from_naive_utc_and_offset(
-                value,
-                chrono::Utc,
-            ));
+            return chrono::Local
+                .from_local_datetime(&value)
+                .single()
+                .map(|value| value.with_timezone(&chrono::Utc));
         }
     }
     None
@@ -956,11 +957,11 @@ pub async fn get_series_digest(
 
     let meetings: Vec<(String, String)> = sqlx::query_as(
         "SELECT m.id, CASE WHEN m.occurred_at IS NOT NULL THEN m.occurred_at \
-                           ELSE strftime('%Y-%m-%dT%H:%M:%S', m.created_at, 'localtime') END \
+                           ELSE strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) END \
          FROM meetings m JOIN meeting_collections mc ON mc.meeting_id = m.id \
          WHERE mc.collection_id = ? \
-         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
-                       ELSE julianday(m.created_at, 'localtime') END, m.id",
+         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at, 'utc') \
+                       ELSE julianday(m.created_at) END, m.id",
     )
     .bind(collection_id)
     .fetch_all(pool)
@@ -1004,7 +1005,7 @@ pub async fn get_series_digest(
     let rows: Vec<DigestRecordRow> = sqlx::query_as(
         "SELECT sr.id, m.id AS meeting_id, m.title AS meeting_title, \
                 CASE WHEN m.occurred_at IS NOT NULL THEN m.occurred_at \
-                     ELSE strftime('%Y-%m-%dT%H:%M:%S', m.created_at, 'localtime') END AS occurred_at, \
+                     ELSE strftime('%Y-%m-%dT%H:%M:%SZ', m.created_at) END AS occurred_at, \
                 sr.kind, \
                 COALESCE(sr.reviewed_payload, sr.payload) AS payload, sr.review_status, \
                 ai.status AS action_status \
@@ -1013,8 +1014,8 @@ pub async fn get_series_digest(
          JOIN meeting_collections mc ON mc.meeting_id = m.id \
          LEFT JOIN action_items ai ON ai.standup_record_id = sr.id \
          WHERE mc.collection_id = ? \
-         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at) \
-                       ELSE julianday(m.created_at, 'localtime') END DESC, sr.id DESC",
+         ORDER BY CASE WHEN m.occurred_at IS NOT NULL THEN julianday(m.occurred_at, 'utc') \
+                       ELSE julianday(m.created_at) END DESC, sr.id DESC",
     )
     .bind(collection_id)
     .fetch_all(pool)
@@ -1445,17 +1446,16 @@ mod tests {
         let digest = get_series_digest(&pool, 1, Some(14), Some("ru-RU"))
             .await
             .unwrap();
-        let fallback_local: String = sqlx::query_scalar(
-            "SELECT strftime('%Y-%m-%dT%H:%M:%S', created_at, 'localtime') \
+        let fallback_utc: String = sqlx::query_scalar(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', created_at) \
              FROM meetings WHERE id = 'pending'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        let fallback_local = format!("{fallback_local}Z");
         assert_eq!(digest.meeting_count, 2);
         assert_eq!(digest.period_start.as_deref(), Some("2026-07-15T09:00:00Z"));
-        assert_eq!(digest.period_end.as_deref(), Some(fallback_local.as_str()));
+        assert_eq!(digest.period_end.as_deref(), Some(fallback_utc.as_str()));
         assert_eq!(digest.meetings_with_accepted_records, 1);
         assert_eq!(digest.pending_review_count, 3);
         assert!(digest.open_actions.is_empty());
@@ -1469,7 +1469,7 @@ mod tests {
             .contains("/meeting-details?id=accepted&t=62"));
         assert!(digest.markdown.contains("- Встречи: 2"));
         assert!(digest.markdown.contains(&format!(
-            "Окно: последние 14 дн. (2026-07-15T09:00:00Z — {fallback_local})"
+            "Окно: последние 14 дн. (2026-07-15T09:00:00Z — {fallback_utc})"
         )));
         assert!(digest.markdown.contains("Ожидают проверки: 3"));
         assert!(!digest.markdown.contains("Pending review:"));
