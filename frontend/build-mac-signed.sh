@@ -50,6 +50,22 @@ export APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_SIGNING_IDENTITY
 # NOTE: do NOT export APPLE_CERTIFICATE — we manage the keychain below so the
 # imported key gets a codesign-usable partition list.
 
+# ---------- managed cloud AI (Memento gateway) ----------
+# MEMENTO_REGISTRATION_KEY is embedded into the binary at Rust compile time via
+# option_env!("MEMENTO_REGISTRATION_KEY") (see src-tauri/src/gateway_identity.rs), so the
+# shipped app reaches managed DeepSeek + SaluteSpeech with no per-user API key. It's a
+# gateway registration proof, not a provider master credential. Export it before the build
+# (from the environment or frontend/.env.signing). Not required to build — without it the
+# release simply omits managed AI and users configure their own keys.
+if [[ -n "${MEMENTO_REGISTRATION_KEY:-}" ]]; then
+  export MEMENTO_REGISTRATION_KEY
+  echo "==> MEMENTO_REGISTRATION_KEY present — embedding managed DeepSeek + SaluteSpeech."
+else
+  echo "WARNING: MEMENTO_REGISTRATION_KEY is not set — this signed build will NOT include" >&2
+  echo "         managed cloud AI (DeepSeek/SaluteSpeech unavailable to users). Set it in the" >&2
+  echo "         environment or frontend/.env.signing to embed it." >&2
+fi
+
 cd "$FRONTEND"
 
 ORIG_KEYCHAINS="$(security list-keychains -d user | sed -e 's/^[[:space:]]*//' -e 's/"//g')"

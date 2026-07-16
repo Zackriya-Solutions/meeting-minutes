@@ -5,7 +5,7 @@
 
 use serde_json::json;
 
-pub const DEFAULT_BASE_URL: &str = "https://gw.gigatool.app/deepseek/v1";
+pub const DEFAULT_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
 
 /// A configured DeepSeek client. Cheap to construct per call.
@@ -91,5 +91,10 @@ mod tests {
         });
         assert_eq!(extract_openai_content(&v).as_deref(), Some("привет"));
         assert!(extract_openai_content(&serde_json::json!({"choices": []})).is_none());
+    }
+
+    #[test]
+    fn default_gateway_uses_multitool_domain() {
+        assert_eq!(DEFAULT_BASE_URL, "https://gw.multitool.works/deepseek/v1");
     }
 }
