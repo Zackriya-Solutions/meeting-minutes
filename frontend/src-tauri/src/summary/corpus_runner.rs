@@ -175,9 +175,12 @@ fn result_matches_provenance(result: Option<&str>, expected: &CorpusRunProvenanc
         && source.get("template_id").and_then(Value::as_str) == Some(TEMPLATE_ID)
         && source.get("template_fingerprint").and_then(Value::as_str)
             == Some(expected.template_fingerprint.as_str());
-    let language_matches = expected.output_language.as_deref().map_or(true, |language| {
-        generation.get("output_language").and_then(Value::as_str) == Some(language)
-    });
+    let language_matches = expected
+        .output_language
+        .as_deref()
+        .map_or(true, |language| {
+            generation.get("output_language").and_then(Value::as_str) == Some(language)
+        });
     transport_matches && language_matches
 }
 
@@ -526,7 +529,18 @@ async fn process_meeting<R: Runtime>(
     )
     .await
     {
-        return failed_item(meeting_id, title, provenance, error);
+        let error_message = error.to_string();
+        if let Err(status_error) =
+            SummaryProcessesRepository::update_process_failed(pool, meeting_id, &error_message)
+                .await
+        {
+            log::error!(
+                "Failed to mark standup corpus transcript preparation {} as failed: {}",
+                meeting_id,
+                status_error
+            );
+        }
+        return failed_item(meeting_id, title, provenance, error_message);
     }
     SummaryService::process_transcript_background(
         app.clone(),
