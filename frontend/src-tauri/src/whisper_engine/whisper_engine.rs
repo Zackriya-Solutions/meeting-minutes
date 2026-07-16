@@ -306,14 +306,20 @@ impl WhisperEngine {
 
                 // PERFORMANCE: Suppress verbose C library logs during model loading
                 // This hides the excessive Metal/GGML initialization logs in release builds
-                let ctx = {
-                    // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
-
-                    // Load whisper context with hardware-optimized parameters
-                    WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
-                        .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?
-                    // Suppressor dropped here, stderr restored
-                };
+                //
+                // WhisperContext::new_with_params does synchronous, CPU-bound file I/O and
+                // GGML graph init that can take many seconds on slower hardware (e.g. a phone
+                // on first load). Run it on a blocking-pool thread instead of inline so it
+                // can't stall the async runtime the rest of the app (including this very
+                // command's timeout/cancellation path) depends on.
+                let model_path = model_info.path.clone();
+                let model_name_for_error = model_name.to_string();
+                let ctx = tokio::task::spawn_blocking(move || {
+                    WhisperContext::new_with_params(&model_path.to_string_lossy(), context_param)
+                })
+                .await
+                .map_err(|e| anyhow!("Model loading task panicked: {}", e))?
+                .map_err(|e| anyhow!("Failed to load model {}: {}", model_name_for_error, e))?;
 
                 // Update current context and model
                 *self.current_context.write().await = Some(ctx);
