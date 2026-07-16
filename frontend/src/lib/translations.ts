@@ -563,6 +563,8 @@ export const RU: Record<string, string> = {
   "Please wait for the transcription model to finish downloading before recording.": "Дождитесь окончания загрузки модели, затем начните запись.",
   "Transcription model not ready": "Модель расшифровки не готова",
   "Please download a transcription model before recording.": "Загрузите модель расшифровки в открывшемся окне, затем начните запись.",
+  "Managed transcription is unavailable": "Управляемая расшифровка недоступна",
+  "SaluteSpeech does not need a local model. Check internet access and the managed gateway, or switch to GigaAM in Settings → Transcription.": "Для SaluteSpeech не нужна локальная модель. Проверьте интернет и управляемый шлюз либо переключитесь на GigaAM в «Настройки → Расшифровка».",
   "Transcription model setup required": "Нужно настроить модель расшифровки",
   "Failed to start recording. Check console for details.": "Не удалось начать запись. Подробности в консоли.",
   "No meeting ID received from save operation": "Операция сохранения не вернула идентификатор встречи",
