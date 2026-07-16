@@ -142,17 +142,6 @@ fn normalized_identity(value: &str) -> String {
         .join(" ")
 }
 
-fn evidence_timestamps(payload: &Value) -> String {
-    payload
-        .get("evidence")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("timestamp").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 fn record_key(kind: &str, payload: &Value) -> String {
     let identity = match kind {
         "overview" | "participant_update" | "unattributed_fact" => payload
@@ -190,11 +179,10 @@ fn record_key(kind: &str, payload: &Value) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default();
     format!(
-        "{kind}|{}|{}|{}|{}|{}",
+        "{kind}|{}|{}|{}|{}",
         normalized_identity(participant),
         category,
         normalized_identity(owner),
-        evidence_timestamps(payload),
         normalized_identity(identity)
     )
 }
@@ -1273,6 +1261,24 @@ mod tests {
         });
         assert_ne!(record_key("action", &anna), record_key("action", &boris));
     }
+
+    #[test]
+    fn record_keys_ignore_evidence_timestamp_drift() {
+        let first = json!({
+            "task": "Обновить документацию",
+            "owner": "Анна",
+            "evidence": [{"timestamp": "[10:00]"}]
+        });
+        let regenerated = json!({
+            "task": "Обновить документацию",
+            "owner": "Анна",
+            "evidence": [{"timestamp": "[10:01]"}]
+        });
+        assert_eq!(
+            record_key("action", &first),
+            record_key("action", &regenerated)
+        );
+    }
     use crate::summary::standup::{
         EvidenceRef, StandupAction, StandupDecision, StandupDeepDive, StandupReport, StandupRisk,
     };
@@ -1554,9 +1560,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Regeneration replaces pending facts but preserves the reviewed action.
+        // Regeneration replaces pending facts but preserves the reviewed action even when
+        // the model anchors the same semantic fact one second later.
+        let mut regenerated = report();
+        regenerated.action_items[0].evidence[0].timestamp = "[01:03]".into();
         assert_eq!(
-            sync_standup_records(&pool, "m1", &report()).await.unwrap(),
+            sync_standup_records(&pool, "m1", &regenerated)
+                .await
+                .unwrap(),
             2
         );
         assert_eq!(list_records(&pool, "m1").await.unwrap().len(), 3);
