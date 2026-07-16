@@ -7,6 +7,7 @@ import { InMemoryTokenStore } from '@/valueos/auth/tokenStore';
 import { createMockConfigService } from '@/valueos/config/configService';
 import { MockDigestGenerator } from '@/valueos/digest/digest';
 import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
+import { InMemoryTranscriptHistory } from '@/valueos/history/transcriptHistory';
 import type { ValueOsServices } from '@/valueos/context/ValueOsProvider';
 import type { EntitlementState } from '@/valueos/api/types';
 
@@ -41,6 +42,7 @@ function makeServices(entitlement: EntitlementState = 'active') {
     config: createMockConfigService({ pickResult: '/tmp/tx', writable: true }),
     digest: new MockDigestGenerator(),
     uploadQueue: new PendingUploadQueue(client, new InMemoryPendingUploadStore()),
+    history: new InMemoryTranscriptHistory(),
   };
   return { services, client };
 }
@@ -51,10 +53,15 @@ async function loginToConfig() {
   await screen.findByTestId('valueos-config');
 }
 
-async function configToCapture() {
+async function configToHome() {
   fireEvent.click(screen.getByTestId('valueos-config-pick'));
   await screen.findByTestId('valueos-config-folder');
   fireEvent.click(screen.getByTestId('valueos-config-continue'));
+  await screen.findByTestId('valueos-home');
+}
+
+async function homeToCapture() {
+  fireEvent.click(screen.getByTestId('valueos-home-new'));
   await screen.findByTestId('valueos-capture');
 }
 
@@ -105,7 +112,8 @@ describe('ValueOS full flow', () => {
     const { services } = makeServices('active');
     render(<ValueOsShell services={services} />);
     await loginToConfig();
-    await configToCapture();
+    await configToHome();
+    await homeToCapture();
     const startBtn = () => screen.getByTestId('valueos-capture-start') as HTMLButtonElement;
     expect(startBtn().disabled).toBe(true); // nothing selected
     fireEvent.change(screen.getByTestId('valueos-capture-tenant'), { target: { value: 'tenant-acme' } });
@@ -122,7 +130,8 @@ describe('ValueOS full flow', () => {
     const uploadSpy = vi.spyOn(client, 'uploadTranscript');
     render(<ValueOsShell services={services} />);
     await loginToConfig();
-    await configToCapture();
+    await configToHome();
+    await homeToCapture();
     await selectLeadTarget();
 
     fireEvent.click(screen.getByTestId('valueos-capture-start'));
@@ -141,5 +150,19 @@ describe('ValueOS full flow', () => {
     expect(req.raw_content).toBe('We discussed pricing and agreed next steps.'); // transcript
     expect(req.digest.length).toBeGreaterThan(0); // digest — both artifacts uploaded
     expect(req.idempotency_key).toBeTruthy();
+
+    // Done → home → the captured transcript now appears in the local list.
+    fireEvent.click(screen.getByTestId('valueos-finalize-done'));
+    await screen.findByTestId('valueos-home');
+    expect(screen.getByTestId('valueos-home-list')).toHaveTextContent('Ada Lovelace');
+  });
+
+  it('after config, home shows the transcript list + a New control', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToHome();
+    expect(screen.getByTestId('valueos-home-new')).toBeInTheDocument();
+    expect(screen.getByTestId('valueos-home-empty')).toBeInTheDocument();
   });
 });

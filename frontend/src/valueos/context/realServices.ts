@@ -8,6 +8,7 @@ import { createTauriConfigService } from '../config/tauriConfigService';
 import { createTauriDigest } from '../digest/tauriDigest';
 import { PendingUploadQueue } from '../upload/pendingQueue';
 import { LocalStoragePendingUploadStore } from '../upload/localStorageQueueStore';
+import { LocalStorageTranscriptHistory } from '../history/transcriptHistory';
 
 export const valueosRealTransportEnabled: boolean =
   (process.env.NEXT_PUBLIC_VALUEOS_REAL ?? 'off') === 'on';
@@ -20,5 +21,6 @@ export function createRealServices(): ValueOsServices {
     config: createTauriConfigService(),
     digest: createTauriDigest(),
     uploadQueue: new PendingUploadQueue(client, new LocalStoragePendingUploadStore()),
+    history: new LocalStorageTranscriptHistory(),
   };
 }

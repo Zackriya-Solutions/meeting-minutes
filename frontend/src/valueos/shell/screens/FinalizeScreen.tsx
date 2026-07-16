@@ -24,7 +24,7 @@ export function FinalizeScreen({
   onDone: () => void;
   onReauth: () => void;
 }) {
-  const { digest, config, uploadQueue } = useValueOs();
+  const { digest, config, uploadQueue, history } = useValueOs();
   const [status, setStatus] = useState<Status>('working');
   const [detail, setDetail] = useState('');
   const idemRef = useRef<string>('');
@@ -55,6 +55,18 @@ export function FinalizeScreen({
         },
       });
       const outcome = await uploadQueue.flush();
+      const uploaded = !outcome.needsReauth && outcome.retained.length === 0;
+      // Record in the local transcript history (shown on the home screen).
+      await history.add({
+        id: key,
+        targetLabel: capture.targetLabel,
+        tenantId: capture.tenantId,
+        activityType: capture.activityType,
+        targetId: capture.targetId,
+        createdAt: Date.now(),
+        path,
+        uploadStatus: uploaded ? 'uploaded' : 'pending',
+      });
       if (outcome.needsReauth) setStatus('reauth');
       else if (outcome.retained.length > 0) {
         setStatus('pending');

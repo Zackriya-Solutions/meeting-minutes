@@ -8,6 +8,7 @@ import { LoginScreen } from './screens/LoginScreen';
 import { EntitlementBlockedScreen, VALUEOS_PURCHASE_URL } from './screens/EntitlementBlockedScreen';
 import { ModelDownloadScreen } from './screens/ModelDownloadScreen';
 import { ConfigScreen } from './screens/ConfigScreen';
+import { HomeScreen } from './screens/HomeScreen';
 import { CaptureScreen } from './screens/CaptureScreen';
 import { FinalizeScreen } from './screens/FinalizeScreen';
 import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
@@ -18,7 +19,7 @@ import type { CaptureResult } from './flowTypes';
 //   → capture (blocking tenant+type+target) → finalize (store + digest + upload)
 //   → back to capture for the next meeting.
 // All in our namespace; services injected via ValueOsProvider (mock today, real in Phase 3).
-type Screen = 'landing' | 'login' | 'blocked' | 'download' | 'config' | 'capture' | 'finalize';
+type Screen = 'landing' | 'login' | 'blocked' | 'download' | 'config' | 'home' | 'capture' | 'finalize';
 
 export function ValueOsShell({ services }: { services?: ValueOsServices }) {
   return (
@@ -53,6 +54,8 @@ function Flow() {
 
   return (
     <div data-testid="valueos-shell">
+      {/* VALUEOS: hide upstream download/status toasts (top-right) that leak model names */}
+      <style>{'[data-sonner-toaster]{display:none !important;}'}</style>
       {screen === 'landing' && <LandingScreen onProceed={() => setScreen('login')} />}
 
       {screen === 'login' && <LoginScreen onDone={handleLogin} />}
@@ -67,7 +70,9 @@ function Flow() {
 
       {screen === 'download' && <ModelDownloadScreen onComplete={() => setScreen('config')} />}
 
-      {screen === 'config' && <ConfigScreen onDone={() => setScreen('capture')} />}
+      {screen === 'config' && <ConfigScreen onDone={() => setScreen('home')} />}
+
+      {screen === 'home' && <HomeScreen onNew={() => setScreen('capture')} />}
 
       {screen === 'capture' && (
         <CaptureScreen
@@ -84,7 +89,7 @@ function Flow() {
           capture={capture}
           onDone={() => {
             setCapture(null);
-            setScreen('capture'); // capture another meeting
+            setScreen('home'); // back to the transcripts list
           }}
           onReauth={() => setScreen('login')}
         />
