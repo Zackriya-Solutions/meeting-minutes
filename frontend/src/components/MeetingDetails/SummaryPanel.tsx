@@ -317,10 +317,7 @@ export function SummaryPanel({
       <StandupWorkflowPanel
         meetingId={meeting.id}
         summaryStatus={summaryStatus}
-        standupSelected={
-          availableTemplates.find((template) => template.id === selectedTemplate)?.name
-          === 'Daily Standup'
-        }
+        standupSelected={selectedTemplate === 'daily_standup'}
       />
 
       {isSummaryLoading ? (
