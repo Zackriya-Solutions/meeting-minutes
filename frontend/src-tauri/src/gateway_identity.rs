@@ -4,8 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const PRIMARY_GATEWAY_HOST: &str = "gw.multitool.works";
+pub const FALLBACK_GATEWAY_HOST: &str = "gw2.multitool.works";
 pub const PRIMARY_GATEWAY: &str = "https://gw.multitool.works";
 pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
+pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 const SERVICE: &str = "meetily.gateway";
 
 fn registration_key() -> Result<String, String> {
@@ -118,11 +121,29 @@ pub async fn install_token() -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::Url;
+
+    fn assert_managed_https_url(value: &str, expected_host: &str) {
+        let url = Url::parse(value).expect("managed gateway URL must parse");
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some(expected_host));
+        assert!(url.username().is_empty());
+        assert!(url.password().is_none());
+        assert!(url.query().is_none());
+        assert!(url.fragment().is_none());
+    }
 
     #[test]
-    fn managed_gateway_domains_use_multitool_primary_and_fallback() {
-        assert_eq!(PRIMARY_GATEWAY, "https://gw.multitool.works");
-        assert_eq!(FALLBACK_GATEWAY, "https://gw2.multitool.works");
+    fn managed_gateway_domains_are_exact_https_allowlist_entries() {
+        assert_managed_https_url(PRIMARY_GATEWAY, PRIMARY_GATEWAY_HOST);
+        assert_managed_https_url(FALLBACK_GATEWAY, FALLBACK_GATEWAY_HOST);
         assert_ne!(PRIMARY_GATEWAY, FALLBACK_GATEWAY);
+    }
+
+    #[test]
+    fn deepseek_base_url_is_scoped_to_the_primary_gateway() {
+        assert_managed_https_url(PRIMARY_DEEPSEEK_BASE_URL, PRIMARY_GATEWAY_HOST);
+        let url = Url::parse(PRIMARY_DEEPSEEK_BASE_URL).unwrap();
+        assert_eq!(url.path(), "/deepseek/v1");
     }
 }
