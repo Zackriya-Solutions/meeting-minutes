@@ -342,6 +342,9 @@ fn classify_audio_process(bundle_id: &str, display_name: &str) -> Option<Meeting
 }
 
 fn is_browser_identity(value: &str) -> bool {
+    if matches!(value, "arc" | "opera") {
+        return true;
+    }
     const BROWSER_MARKERS: &[&str] = &[
         "com.google.chrome",
         "googlechrome",
@@ -441,6 +444,14 @@ mod tests {
         assert_eq!(
             classify_audio_process("salutejazz.jazz-app", "Jazz Helper"),
             Some(MeetingApp::SaluteJazz)
+        );
+        assert_eq!(
+            classify_audio_process("", "Arc"),
+            Some(MeetingApp::BrowserCall)
+        );
+        assert_eq!(
+            classify_audio_process("", "Opera"),
+            Some(MeetingApp::BrowserCall)
         );
         assert_eq!(
             classify_audio_process("com.microsoft.VSCode", "Code Helper"),

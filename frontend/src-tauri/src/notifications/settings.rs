@@ -69,7 +69,7 @@ pub struct NotificationPreferences {
 impl Default for NotificationSettings {
     fn default() -> Self {
         Self {
-            auto_meeting_detection: false,
+            auto_meeting_detection: true,
             recording_notifications: true,
             time_based_reminders: true,
             meeting_reminders: true,
@@ -309,5 +309,10 @@ mod tests {
 
         let settings: NotificationSettings = serde_json::from_value(legacy).unwrap();
         assert!(!settings.auto_meeting_detection);
+    }
+
+    #[test]
+    fn fresh_settings_enable_detection_by_default() {
+        assert!(NotificationSettings::default().auto_meeting_detection);
     }
 }
