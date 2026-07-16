@@ -173,7 +173,7 @@ export function EmbeddingModelSettings() {
                     key={model.id}
                     type="button"
                     disabled={selecting || downloading}
-                    onClick={() => selectModel(model.id)}
+                    onClick={() => model.present ? selectModel(model.id) : download(model.id)}
                     className={`rounded-xl border p-3 text-left transition-colors ${
                       selected
                         ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'

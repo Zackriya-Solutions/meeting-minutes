@@ -167,20 +167,21 @@ async fn activate_model<R: Runtime>(
     pool: &sqlx::SqlitePool,
     kind: EmbedderKind,
 ) -> Result<bool, String> {
-    persist_selected_kind(pool, kind).await?;
-    crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
-        .await
-        .map_err(|e| e.to_string())?;
-    embedder::unload_global();
     let base = embedding_model_dir(app)?;
     if !model_present(&base, kind) {
         return Ok(false);
     }
+
+    crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
+        .await
+        .map_err(|e| e.to_string())?;
+    embedder::unload_global();
     let dir = model_dir(&base, kind);
     tokio::task::spawn_blocking(move || embedder::load_global_kind(dir, kind))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+    persist_selected_kind(pool, kind).await?;
     Ok(true)
 }
 
