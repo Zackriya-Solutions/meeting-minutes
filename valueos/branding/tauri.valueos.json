@@ -2,6 +2,7 @@
   "$comment": "VALUEOS branding overlay — merged onto frontend/src-tauri/tauri.conf.json at BUILD TIME via `tauri build --config`. It renames the app to 'ValueOS Agent'. tauri.conf.json itself is never edited, so upstream merges stay conflict-free. Icons are applied separately by valueos/branding/apply-branding.sh. NOTE 1: app.windows is an ARRAY, and Tauri REPLACES arrays on merge (not element-wise) — so the full window object below mirrors upstream's values plus the new title. If upstream changes the window size/props, update this copy. NOTE 2: app.security is an OBJECT, so Tauri deep-merges it — the single dangerousDisableAssetCspModification key below is ADDED to upstream's security (csp/assetProtocol/capabilities are preserved). WHY: in a packaged (production) build Tauri injects a nonce/hash into the style-src CSP directive; per the CSP spec a nonce NULLIFIES 'unsafe-inline', which silently blocks every React inline style= attribute and renders our screens completely unstyled (dev builds don't inject the nonce, so it only breaks in the installer). Listing 'style-src' here tells Tauri to leave that directive as-authored ('self' 'unsafe-inline'), so inline styles apply. script-src is NOT listed, so script nonce-hardening is fully preserved. Verified by reproducing the exact unstyled render under a nonce'd style-src and confirming it renders correctly without the nonce.",
   "productName": "ValueOS Agent",
   "mainBinaryName": "valueos-agent",
+  "version": "0.0.1",
   "identifier": "com.valueos.io",
   "app": {
     "windows": [

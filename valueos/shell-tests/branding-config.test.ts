@@ -18,6 +18,7 @@ const brandingDir = path.resolve(repoRoot, 'valueos/branding');
 const overlaySrc = path.resolve(brandingDir, 'tauri.valueos.json');
 const generator = path.resolve(brandingDir, 'make-ci-config.js');
 const upstreamConf = path.resolve(repoRoot, 'frontend/src-tauri/tauri.conf.json');
+const buildWorkflow = path.resolve(repoRoot, '.github/workflows/valueos-build.yml');
 
 function readJson(p: string) {
   return JSON.parse(readFileSync(p, 'utf8'));
@@ -48,5 +49,15 @@ describe('branding overlay CSP fix', () => {
     expect(ci.bundle.createUpdaterArtifacts).toBe(false);
     // The top-level $comment is stripped so Tauri doesn't reject an unknown field.
     expect(ci.$comment).toBeUndefined();
+  });
+
+  it('the overlay pins the ValueOS Agent version to 0.0.1', () => {
+    expect(readJson(overlaySrc).version).toBe('0.0.1');
+  });
+
+  it('CI forces REAL transport (no accidental mock in packaged builds)', () => {
+    const wf = readFileSync(buildWorkflow, 'utf8');
+    // Inlined at build so the packaged app never falls back to the Acme/Ada mock seed.
+    expect(wf).toMatch(/NEXT_PUBLIC_VALUEOS_REAL\s*=\s*"?on"?/);
   });
 });

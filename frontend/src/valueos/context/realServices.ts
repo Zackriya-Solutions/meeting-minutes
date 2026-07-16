@@ -1,6 +1,8 @@
-// VALUEOS: wires the REAL (native-backed) services. Selected by ValueOsProvider when
-// NEXT_PUBLIC_VALUEOS_REAL=on. Default is OFF (mock) until the Phase-3 Rust module +
-// minimal upstream edits (Cargo.toml + lib.rs) ship and are verified by the build.
+// VALUEOS: wires the REAL (native-backed) services. This is the DEFAULT — packaged builds
+// set NEXT_PUBLIC_VALUEOS_REAL=on (CI) so Next inlines it to a literal `true`. Mock is
+// opt-in ONLY: set NEXT_PUBLIC_VALUEOS_REAL=off for browser/dev, or inject services in tests.
+// The packaged desktop app therefore always uses the native transport (real login, native
+// folder picker, real tenants/leads) — never the Acme/Ada-Lovelace mock seed.
 import type { ValueOsServices } from './ValueOsProvider';
 import { TauriValueOsClient } from '../api/tauriClient';
 import { createTauriAuthService } from '../auth/tauriAuthService';

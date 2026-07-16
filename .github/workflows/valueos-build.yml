@@ -187,7 +187,11 @@ jobs:
           # so a stale build is instantly obvious. Works on macOS + Windows (git bash).
           export NEXT_PUBLIC_VALUEOS_BUILD="${GITHUB_SHA:0:7}"
           export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "Stamping build: ${NEXT_PUBLIC_VALUEOS_BUILD} @ ${NEXT_PUBLIC_VALUEOS_BUILD_TIME}"
+          # VALUEOS: force REAL transport in packaged builds so Next inlines it to a literal
+          # (never a runtime process.env lookup that could fall back to mock). The mock path
+          # is dev/test-only (NEXT_PUBLIC_VALUEOS_REAL=off, or services injected in tests).
+          export NEXT_PUBLIC_VALUEOS_REAL="on"
+          echo "Stamping build: ${NEXT_PUBLIC_VALUEOS_BUILD} @ ${NEXT_PUBLIC_VALUEOS_BUILD_TIME} (real transport)"
           node ../valueos/branding/make-ci-config.js valueos-ci.config.json
           pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
 
