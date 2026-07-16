@@ -148,6 +148,14 @@ fn normalized_ids(meeting_ids: Vec<String>) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
+fn normalized_id_set(meeting_ids: impl IntoIterator<Item = String>) -> HashSet<String> {
+    meeting_ids
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
 fn has_standup_v2(result: Option<&str>) -> bool {
     result
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
@@ -291,16 +299,19 @@ fn report_error_category(value: Option<&str>) -> Option<String> {
     Some(category.to_string())
 }
 
-async fn meeting_input(
-    pool: &SqlitePool,
-    meeting_id: &str,
-) -> Result<(String, String), (String, String)> {
+async fn meeting_title(pool: &SqlitePool, meeting_id: &str) -> Result<String, String> {
     let title: Option<String> = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| (String::new(), error.to_string()))?;
-    let title = title.ok_or_else(|| (String::new(), format!("Meeting not found: {meeting_id}")))?;
+        .map_err(|error| error.to_string())?;
+    title.ok_or_else(|| format!("Meeting not found: {meeting_id}"))
+}
+
+async fn meeting_transcript(
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<String, String> {
     let segments: Vec<(String, Option<f64>, String)> = sqlx::query_as(
         "SELECT transcript, audio_start_time, timestamp FROM transcripts \
          WHERE meeting_id = ? AND trim(transcript) != '' \
@@ -309,9 +320,9 @@ async fn meeting_input(
     .bind(meeting_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| (title.clone(), error.to_string()))?;
+    .map_err(|error| error.to_string())?;
     if segments.is_empty() {
-        return Err((title, "Meeting has no non-empty transcript".to_string()));
+        return Err("Meeting has no non-empty transcript".to_string());
     }
     let fallback = segments
         .into_iter()
@@ -331,7 +342,7 @@ async fn meeting_input(
         pool, meeting_id, fallback,
     )
     .await;
-    Ok((title, transcript))
+    Ok(transcript)
 }
 
 async fn write_report(path: &Path, report: &StandupCorpusRunReport) -> Result<(), String> {
@@ -455,9 +466,9 @@ async fn process_meeting<R: Runtime>(
     current: usize,
     total: usize,
 ) -> StandupCorpusRunItem {
-    let (title, transcript) = match meeting_input(pool, meeting_id).await {
+    let title = match meeting_title(pool, meeting_id).await {
         Ok(value) => value,
-        Err((title, error)) => return failed_item(meeting_id, title, provenance, error),
+        Err(error) => return failed_item(meeting_id, String::new(), provenance, error),
     };
     let _ = app.emit(
         "standup-corpus-run-progress",
@@ -513,6 +524,11 @@ async fn process_meeting<R: Runtime>(
         }
         ExistingSummaryPolicy::Generate => {}
     }
+
+    let transcript = match meeting_transcript(pool, meeting_id).await {
+        Ok(value) => value,
+        Err(error) => return failed_item(meeting_id, title, provenance, error),
+    };
 
     if let Err(error) = SummaryProcessesRepository::create_or_reset_process(pool, meeting_id).await
     {
@@ -786,13 +802,12 @@ pub async fn start_standup_corpus_run<R: Runtime>(
         );
     }
     let meeting_ids = normalized_ids(meeting_ids)?;
-    let allowed_ids = normalized_ids(
+    let allowed_ids = normalized_id_set(
         std::env::var("MEETILY_STANDUP_CORPUS_IDS")
             .unwrap_or_default()
             .split(',')
-            .map(str::to_string)
-            .collect(),
-    )?;
+            .map(str::to_string),
+    );
     if meeting_ids
         .iter()
         .any(|meeting_id| !allowed_ids.contains(meeting_id))
@@ -863,6 +878,17 @@ mod tests {
         assert!(
             normalized_ids((0..=MAX_CORPUS_MEETINGS).map(|i| format!("m{i}")).collect()).is_err()
         );
+    }
+
+    #[test]
+    fn allow_list_is_deduplicated_but_not_run_limited() {
+        let ids = normalized_id_set(
+            (0..(MAX_CORPUS_MEETINGS + 10))
+                .map(|index| format!(" meeting-{index} "))
+                .chain(std::iter::once("meeting-1".to_string())),
+        );
+        assert_eq!(ids.len(), MAX_CORPUS_MEETINGS + 10);
+        assert!(ids.contains("meeting-1"));
     }
 
     #[test]
@@ -1102,7 +1128,8 @@ mod tests {
         .await
         .unwrap();
 
-        let (title, transcript) = meeting_input(&pool, "m1").await.unwrap();
+        let title = meeting_title(&pool, "m1").await.unwrap();
+        let transcript = meeting_transcript(&pool, "m1").await.unwrap();
         assert_eq!(title, "Standup");
         assert_eq!(transcript, "[00:00] Без таймкода\n[01:02] Готово");
     }
