@@ -4,7 +4,7 @@
 
 UPDATE meetings
 SET occurred_at = NULL
-WHERE (substr(title, 11, 1) != '_' OR substr(title, 17, 1) != '_')
+WHERE substr(title, 11, 1) != '_'
   AND date(substr(title, 1, 10)) IS NOT NULL
   AND time(replace(substr(title, 12, 5), '-', ':')) IS NOT NULL
   AND occurred_at = substr(title, 1, 10) || 'T' ||
@@ -18,7 +18,6 @@ WHEN NEW.occurred_at IS NULL
  AND date(substr(NEW.title, 1, 10)) IS NOT NULL
  AND substr(NEW.title, 11, 1) = '_'
  AND time(replace(substr(NEW.title, 12, 5), '-', ':')) IS NOT NULL
- AND substr(NEW.title, 17, 1) = '_'
 BEGIN
     UPDATE meetings
     SET occurred_at = substr(NEW.title, 1, 10) || 'T' ||
