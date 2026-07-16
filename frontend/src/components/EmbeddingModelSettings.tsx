@@ -46,6 +46,10 @@ function mb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
+function modelDownloadSize(downloadMb: number): string {
+  return downloadMb >= 1000 ? `${(downloadMb / 1000).toFixed(1)} GB` : `${downloadMb} MB`;
+}
+
 export function EmbeddingModelSettings() {
   const t = useT();
   const [status, setStatus] = useState<EmbedderStatus | null>(null);
@@ -140,6 +144,12 @@ export function EmbeddingModelSettings() {
   const present = !!status?.model_present;
   const modelName = status?.model ?? 'multilingual-e5-small';
   const dim = status?.dim ?? 384;
+  const availableModels = status?.available_models ?? [
+    { id: 'multilingual-e5-small', name: 'Multilingual E5 Small', dim: 384, download_mb: 470, present },
+    { id: 'frida', name: 'FRIDA', dim: 1536, download_mb: 3300, present: false },
+  ];
+  const selectedDownloadMb =
+    availableModels.find((model) => model.id === modelName)?.download_mb ?? 470;
   const activeJobs = (indexStatus?.queued_jobs ?? 0) + (indexStatus?.running_jobs ?? 0);
   const semanticCoverage = indexStatus?.chunks_total
     ? Math.round((indexStatus.embeddings_done / indexStatus.chunks_total) * 100)
@@ -158,15 +168,13 @@ export function EmbeddingModelSettings() {
             <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Semantic search model')}</h3>
             <p className="mt-1 text-sm leading-relaxed text-[var(--fg2)]">
               {t('Powers meaning-based (vector) search and Chat with archive. Runs fully locally —')}{' '}
-              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}
-              {t('-dim), ~470 MB. Until it\'s installed, Search and Chat use keyword (FTS) matching only.')}
+              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}{' '}
+              {t('dimensions')}, ~{modelDownloadSize(selectedDownloadMb)}).{' '}
+              {t('Until it is installed, Search and Chat use keyword (FTS) matching only.')}
             </p>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {(status?.available_models ?? [
-                { id: 'multilingual-e5-small', name: 'Multilingual E5 Small', dim: 384, download_mb: 470, present: present },
-                { id: 'frida', name: 'FRIDA', dim: 1536, download_mb: 3300, present: false },
-              ]).map((model) => {
+              {availableModels.map((model) => {
                 const selected = model.id === modelName;
                 return (
                   <button
@@ -185,9 +193,7 @@ export function EmbeddingModelSettings() {
                       {selected && <CheckCircle2 className="h-4 w-4 text-[var(--gold)]" />}
                     </div>
                     <p className="mt-1 text-xs text-[var(--fg3)]">
-                      {model.dim} {t('dimensions')} · ~{model.download_mb >= 1000
-                        ? `${(model.download_mb / 1000).toFixed(1)} GB`
-                        : `${model.download_mb} MB`}
+                      {model.dim} {t('dimensions')} · ~{modelDownloadSize(model.download_mb)}
                     </p>
                     <p className="mt-1 text-xs text-[var(--fg2)]">
                       {model.id === 'frida'

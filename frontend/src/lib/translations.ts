@@ -130,7 +130,7 @@ export const RU: Record<string, string> = {
   "Not set": "Не настроено",
   "Semantic search model": "Модель смыслового поиска",
   "Powers meaning-based (vector) search and Chat with archive. Runs fully locally —": "Нужна для смыслового поиска и чата с архивом. Работает локально —",
-  "-dim), ~470 MB. Until it's installed, Search and Chat use keyword (FTS) matching only.": " измерений), ~470 МБ. До установки поиск и чат используют только совпадения по словам.",
+  "Until it is installed, Search and Chat use keyword (FTS) matching only.": "До установки поиск и чат используют только совпадения по словам.",
   "Active — semantic search enabled": "Активна — смысловой поиск включён",
   "Installed — restart the app to activate": "Установлена — перезапусти приложение для активации",
   "Re-download": "Загрузить снова",

@@ -181,14 +181,20 @@ async fn activate_model<R: Runtime>(
 
     let _switch_guard = embedder::model_index_write_guard().await;
     persist_selected_kind(pool, kind).await?;
-    if let Err(error) = crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim()).await
-    {
+    let index_ready =
+        crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim()).await;
+    if !matches!(index_ready, Ok(true)) {
         if let Err(rollback_error) = persist_selected_kind(pool, previous_kind).await {
             return Err(format!(
-                "{error}; failed to restore embedding model selection: {rollback_error}"
+                "vector index is unavailable; failed to restore embedding model selection: \
+                 {rollback_error}"
             ));
         }
-        return Err(error.to_string());
+        return Err(match index_ready {
+            Ok(false) => "vector index is unavailable; model selection was not changed".to_string(),
+            Err(error) => error.to_string(),
+            Ok(true) => unreachable!(),
+        });
     }
     embedder::install_global(candidate);
     Ok(true)
