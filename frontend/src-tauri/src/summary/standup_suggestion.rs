@@ -37,15 +37,15 @@ fn contains_any(text: &str, markers: &[&str]) -> bool {
 }
 
 fn contains_one_to_one_marker(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    text.match_indices("1:1").any(|(index, _)| {
-        let before_is_word = index
-            .checked_sub(1)
-            .and_then(|before| bytes.get(before))
-            .is_some_and(u8::is_ascii_alphanumeric);
-        let after_is_word = bytes
-            .get(index + 3)
-            .is_some_and(u8::is_ascii_alphanumeric);
+    text.match_indices("1:1").any(|(index, marker)| {
+        let before_is_word = text[..index]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric);
+        let after_is_word = text[index + marker.len()..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric);
         !before_is_word && !after_is_word
     })
 }
@@ -319,8 +319,11 @@ mod tests {
     fn one_to_one_marker_does_not_match_clock_times() {
         assert!(contains_one_to_one_marker("product 1:1"));
         assert!(contains_one_to_one_marker("1:1 ivan"));
+        assert!(contains_one_to_one_marker("Встреча 1:1"));
         assert!(!contains_one_to_one_marker("standup 11:15"));
         assert!(!contains_one_to_one_marker("daily sync 21:10"));
+        assert!(!contains_one_to_one_marker("Встреча1:1"));
+        assert!(!contains_one_to_one_marker("1:1Иван"));
     }
 
     #[test]
