@@ -671,6 +671,24 @@ pub async fn stop_recording<R: Runtime>(
                 warn!("⚠️ No Parakeet engine found to unload model");
             }
         }
+        Some("qwen3Asr") => {
+            info!("Unloading Qwen3-ASR model...");
+            let engine = {
+                let guard = crate::qwen_asr_engine::commands::QWEN_ASR_ENGINE
+                    .lock()
+                    .unwrap();
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                if engine.unload_model().await {
+                    info!("Qwen3-ASR model '{}' unloaded successfully", current_model);
+                }
+            }
+        }
         _ => {
             // Default to Whisper
             info!("🎤 Unloading Whisper model...");

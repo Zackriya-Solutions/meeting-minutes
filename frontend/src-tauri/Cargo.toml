@@ -105,6 +105,8 @@ silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", 
 # Parakeet (ONNX-based fast transcription) dependencies
 ort = { version = "2.0.0-rc.10" }  # ONNX Runtime for Parakeet models
 thiserror = "2.0.16"                # Error handling for Parakeet
+sherpa-onnx = "1.13.4"              # Embedded Qwen3-ASR runtime
+sha2 = "0.10"                        # Model artifact integrity verification
 
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
