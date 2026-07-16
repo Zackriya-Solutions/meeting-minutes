@@ -10,7 +10,7 @@ applied only at **build time**, so merges from upstream (Meetily) never conflict
 |------|---------|
 | `source/valueos-agent-logo.svg` | The original VA logo (source of truth for the icon). |
 | `icons/` | Generated app icons (`icon.png` 1024² RGBA, `app_icon.icns`, `app_icon.ico`, `icon.icns`, `icon.ico`, + PNG sizes). |
-| `tauri.valueos.json` | Config **overlay** merged onto `tauri.conf.json` at build time — sets `productName`, `mainBinaryName`, and the window title to *ValueOS Agent*. |
+| `tauri.valueos.json` | Config **overlay** merged onto `tauri.conf.json` at build time — sets `productName`, `mainBinaryName`, the window title (*ValueOS Agent*), and the bundle **`identifier` → `com.valueos.io`** (which moves app data to `~/Library/Application Support/com.valueos.io/`). |
 | `apply-branding.sh` | Stages `icons/` into `frontend/src-tauri/icons/` at build time (working tree only). |
 | `make-ci-config.js` | Emits the combined CI overlay (branding + `createUpdaterArtifacts:false`). |
 

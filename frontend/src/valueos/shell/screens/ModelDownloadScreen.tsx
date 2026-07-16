@@ -58,7 +58,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    background: `linear-gradient(160deg, ${VA_BLUE} 0%, #001f7a 100%)`,
+    background: VA_BLUE,
     color: '#ffffff',
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     padding: 24,
