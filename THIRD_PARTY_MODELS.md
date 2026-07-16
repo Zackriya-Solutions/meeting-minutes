@@ -15,3 +15,16 @@ Meetily does not bundle the following model weights. They are downloaded separat
 The downloaded ONNX repository states that its files were exported from Qwen3-ASR using the linked conversion scripts. It does not currently publish separate license metadata, so distributors should verify the conversion artifact terms in addition to the Apache-2.0 terms of the original model and runtime.
 
 Attribution: Qwen3-ASR was developed by the Qwen team. The ONNX export was produced by the Qwen3-ASR-onnx contributors and packaged for sherpa-onnx by its maintainers.
+
+## Qwen3-ASR 1.7B Int8 ONNX
+
+- Meetily model identifier: `qwen3-asr-1.7b-int8`
+- ONNX artifacts: [ilmina/qwen3-asr-1.7b-sherpa-onnx](https://huggingface.co/ilmina/qwen3-asr-1.7b-sherpa-onnx)
+- Pinned revision: `66fb5ea2d4d1682ff8a663bf7e788913604996a0`
+- Original model: [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
+- Original model license: [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+- Runtime: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache License 2.0
+
+The community ONNX repository does not publish a model card or separate license metadata. Meetily pins and verifies every downloaded file, but distributors should independently review the conversion artifact provenance and terms before shipping this optional download.
+
+Attribution: Qwen3-ASR was developed by the Qwen team. The sherpa-onnx-compatible 1.7B export is hosted by the `ilmina` Hugging Face account.

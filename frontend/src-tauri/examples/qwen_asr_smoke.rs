@@ -18,13 +18,20 @@ async fn main() -> Result<()> {
         ));
     }
     let language = std::env::var("QWEN_ASR_LANGUAGE").ok();
+    let model_name =
+        std::env::var("QWEN_ASR_MODEL").unwrap_or_else(|_| QWEN3_ASR_MODEL.to_string());
 
     let engine = QwenAsrEngine::new(models_dir)?;
-    if engine.discover_model().status != ModelStatus::Available {
+    let model = engine
+        .discover_models()
+        .into_iter()
+        .find(|model| model.name == model_name)
+        .ok_or_else(|| anyhow!("Unknown Qwen3-ASR model: {model_name}"))?;
+    if model.status != ModelStatus::Available {
         engine
-            .download_model(|progress| {
+            .download_model(&model_name, |progress| {
                 eprint!(
-                    "\rDownloading Qwen3-ASR: {:3}% ({:.1}/{:.1} MiB, {:.1} MiB/s)",
+                    "\rDownloading {model_name}: {:3}% ({:.1}/{:.1} MiB, {:.1} MiB/s)",
                     progress.percent,
                     progress.downloaded_mb,
                     progress.total_mb,
@@ -36,7 +43,7 @@ async fn main() -> Result<()> {
     }
 
     let load_started = Instant::now();
-    engine.load_model(QWEN3_ASR_MODEL).await?;
+    engine.load_model(&model_name).await?;
     eprintln!(
         "Model loaded in {:.2}s",
         load_started.elapsed().as_secs_f64()

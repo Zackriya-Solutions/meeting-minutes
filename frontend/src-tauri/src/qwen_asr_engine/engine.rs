@@ -1,6 +1,6 @@
 use super::model::{
-    inspect_model, mark_model_verified, model_info, verify_model_hashes, DownloadProgress,
-    ModelInfo, ModelStatus, MODEL_FILES, QWEN3_ASR_MODEL, QWEN3_ASR_REVISION, QWEN3_ASR_SIZE_BYTES,
+    inspect_model, mark_model_verified, model_info, model_spec, model_specs, verify_model_file,
+    verify_model_hashes, DownloadProgress, ModelInfo, ModelSpec, ModelStatus,
 };
 use crate::audio::transcription::provider::{
     TranscriptResult, TranscriptionError, TranscriptionProvider,
@@ -12,21 +12,19 @@ use reqwest::header::RANGE;
 use sherpa_onnx::{OfflineQwen3ASRModelConfig, OfflineRecognizer, OfflineRecognizerConfig};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 
 const SAMPLE_RATE: i32 = 16_000;
 const MIN_AUDIO_SAMPLES: usize = 1_600;
-const MODEL_BASE_URL: &str =
-    "https://huggingface.co/csukuangfj2/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/resolve";
-
 pub struct QwenAsrEngine {
     models_dir: PathBuf,
     recognizer: RwLock<Option<Arc<OfflineRecognizer>>>,
     current_model: RwLock<Option<String>>,
     downloading: AtomicBool,
+    downloading_model: Mutex<Option<String>>,
     cancel_download: AtomicBool,
 }
 
@@ -43,22 +41,28 @@ impl QwenAsrEngine {
             recognizer: RwLock::new(None),
             current_model: RwLock::new(None),
             downloading: AtomicBool::new(false),
+            downloading_model: Mutex::new(None),
             cancel_download: AtomicBool::new(false),
         })
     }
 
-    pub fn discover_model(&self) -> ModelInfo {
-        let mut info = model_info(&self.models_dir);
-        if self.downloading.load(Ordering::SeqCst) {
-            info.status = ModelStatus::Downloading { progress: 0 };
-        }
-        info
+    pub fn discover_models(&self) -> Vec<ModelInfo> {
+        let downloading_model = self.downloading_model.lock().unwrap().clone();
+        model_specs()
+            .iter()
+            .map(|spec| {
+                let mut info = model_info(&self.models_dir, spec);
+                if downloading_model.as_deref() == Some(spec.name) {
+                    info.status = ModelStatus::Downloading { progress: 0 };
+                }
+                info
+            })
+            .collect()
     }
 
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
-        if model_name != QWEN3_ASR_MODEL {
-            return Err(anyhow!("Unknown Qwen3-ASR model: {model_name}"));
-        }
+        let spec = model_spec(model_name)
+            .ok_or_else(|| anyhow!("Unknown Qwen3-ASR model: {model_name}"))?;
 
         if self.current_model.read().await.as_deref() == Some(model_name)
             && self.recognizer.read().await.is_some()
@@ -67,13 +71,15 @@ impl QwenAsrEngine {
         }
 
         let model_dir = self.models_dir.join(model_name);
-        if inspect_model(&model_dir) != ModelStatus::Available {
+        if inspect_model(spec, &model_dir) != ModelStatus::Available {
             return Err(anyhow!(
                 "Qwen3-ASR model is not downloaded or is incomplete: {}",
                 model_dir.display()
             ));
         }
 
+        self.recognizer.write().await.take();
+        self.current_model.write().await.take();
         let recognizer = tokio::task::spawn_blocking(move || create_recognizer(&model_dir))
             .await
             .map_err(|error| anyhow!("Qwen3-ASR model loading task failed: {error}"))??;
@@ -144,7 +150,7 @@ impl QwenAsrEngine {
         Ok(text)
     }
 
-    pub async fn download_model<F>(&self, progress: F) -> Result<()>
+    pub async fn download_model<F>(&self, model_name: &str, progress: F) -> Result<()>
     where
         F: Fn(DownloadProgress) + Send + Sync,
     {
@@ -155,18 +161,27 @@ impl QwenAsrEngine {
         {
             return Err(anyhow!("Qwen3-ASR model download is already running"));
         }
+        let spec = match model_spec(model_name) {
+            Some(spec) => spec,
+            None => {
+                self.downloading.store(false, Ordering::SeqCst);
+                return Err(anyhow!("Unknown Qwen3-ASR model: {model_name}"));
+            }
+        };
+        *self.downloading_model.lock().unwrap() = Some(model_name.to_string());
         self.cancel_download.store(false, Ordering::SeqCst);
 
-        let result = self.download_model_inner(&progress).await;
+        let result = self.download_model_inner(spec, &progress).await;
+        self.downloading_model.lock().unwrap().take();
         self.downloading.store(false, Ordering::SeqCst);
         result
     }
 
-    async fn download_model_inner<F>(&self, progress: &F) -> Result<()>
+    async fn download_model_inner<F>(&self, spec: &'static ModelSpec, progress: &F) -> Result<()>
     where
         F: Fn(DownloadProgress) + Send + Sync,
     {
-        let model_dir = self.models_dir.join(QWEN3_ASR_MODEL);
+        let model_dir = self.models_dir.join(spec.name);
         tokio::fs::create_dir_all(&model_dir).await?;
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
@@ -174,12 +189,12 @@ impl QwenAsrEngine {
             .build()?;
 
         let started = Instant::now();
-        let mut completed_bytes = existing_valid_bytes(&model_dir).await;
+        let mut completed_bytes = existing_valid_bytes(spec, &model_dir).await;
         let initial_bytes = completed_bytes;
         let mut last_progress_emit = Instant::now();
-        emit_progress(progress, completed_bytes, initial_bytes, started);
+        emit_progress(spec, progress, completed_bytes, initial_bytes, started);
 
-        for file in MODEL_FILES {
+        for file in spec.files {
             if self.cancel_download.load(Ordering::SeqCst) {
                 return Err(anyhow!("Qwen3-ASR model download cancelled"));
             }
@@ -194,7 +209,18 @@ impl QwenAsrEngine {
                 .map(|metadata| metadata.len())
                 .unwrap_or(0);
             if existing_size == file.size {
-                continue;
+                let file_to_verify = *file;
+                let path_to_verify = destination.clone();
+                let hash_matches = tokio::task::spawn_blocking(move || {
+                    verify_model_file(&file_to_verify, &path_to_verify).is_ok()
+                })
+                .await
+                .map_err(|error| anyhow!("Qwen3-ASR file verification task failed: {error}"))?;
+                if hash_matches {
+                    continue;
+                }
+                tokio::fs::remove_file(&destination).await?;
+                completed_bytes = completed_bytes.saturating_sub(existing_size);
             }
             if existing_size > file.size {
                 tokio::fs::remove_file(&destination).await?;
@@ -204,10 +230,7 @@ impl QwenAsrEngine {
             } else {
                 0
             };
-            let url = format!(
-                "{}/{}/{}",
-                MODEL_BASE_URL, QWEN3_ASR_REVISION, file.relative_path
-            );
+            let url = format!("{}/{}/{}", spec.base_url, spec.revision, file.relative_path);
             let mut request = client.get(url);
             if resume_from > 0 {
                 request = request.header(RANGE, format!("bytes={resume_from}-"));
@@ -240,7 +263,7 @@ impl QwenAsrEngine {
                 output.write_all(&chunk).await?;
                 completed_bytes += chunk.len() as u64;
                 if last_progress_emit.elapsed() >= std::time::Duration::from_millis(250) {
-                    emit_progress(progress, completed_bytes, initial_bytes, started);
+                    emit_progress(spec, progress, completed_bytes, initial_bytes, started);
                     last_progress_emit = Instant::now();
                 }
             }
@@ -255,22 +278,22 @@ impl QwenAsrEngine {
                     file.size
                 ));
             }
-            emit_progress(progress, completed_bytes, initial_bytes, started);
+            emit_progress(spec, progress, completed_bytes, initial_bytes, started);
         }
 
         let verification_dir = model_dir.clone();
         tokio::task::spawn_blocking(move || {
-            verify_model_hashes(&verification_dir).map_err(anyhow::Error::msg)?;
-            mark_model_verified(&verification_dir).map_err(anyhow::Error::msg)
+            verify_model_hashes(spec, &verification_dir).map_err(anyhow::Error::msg)?;
+            mark_model_verified(spec, &verification_dir).map_err(anyhow::Error::msg)
         })
         .await
         .map_err(|error| anyhow!("Qwen3-ASR verification task failed: {error}"))??;
-        if inspect_model(&model_dir) != ModelStatus::Available {
+        if inspect_model(spec, &model_dir) != ModelStatus::Available {
             return Err(anyhow!(
                 "Downloaded Qwen3-ASR model failed final validation"
             ));
         }
-        emit_progress(progress, QWEN3_ASR_SIZE_BYTES, initial_bytes, started);
+        emit_progress(spec, progress, spec.size_bytes, initial_bytes, started);
         Ok(())
     }
 
@@ -283,9 +306,12 @@ impl QwenAsrEngine {
         }
     }
 
-    pub async fn delete_model(&self) -> Result<()> {
-        self.unload_model().await;
-        let model_dir = self.models_dir.join(QWEN3_ASR_MODEL);
+    pub async fn delete_model(&self, model_name: &str) -> Result<()> {
+        model_spec(model_name).ok_or_else(|| anyhow!("Unknown Qwen3-ASR model: {model_name}"))?;
+        if self.current_model.read().await.as_deref() == Some(model_name) {
+            self.unload_model().await;
+        }
+        let model_dir = self.models_dir.join(model_name);
         if model_dir.exists() {
             tokio::fs::remove_dir_all(model_dir).await?;
         }
@@ -321,9 +347,9 @@ fn path_string(path: PathBuf) -> Result<String> {
         .map_err(|_| anyhow!("Qwen3-ASR model path is not valid UTF-8"))
 }
 
-async fn existing_valid_bytes(model_dir: &Path) -> u64 {
+async fn existing_valid_bytes(spec: &ModelSpec, model_dir: &Path) -> u64 {
     let mut total = 0;
-    for file in MODEL_FILES {
+    for file in spec.files {
         if let Ok(metadata) = tokio::fs::metadata(model_dir.join(file.relative_path)).await {
             if metadata.len() <= file.size {
                 total += metadata.len();
@@ -333,18 +359,23 @@ async fn existing_valid_bytes(model_dir: &Path) -> u64 {
     total
 }
 
-fn emit_progress<F>(callback: &F, downloaded_bytes: u64, initial_bytes: u64, started: Instant)
-where
+fn emit_progress<F>(
+    spec: &ModelSpec,
+    callback: &F,
+    downloaded_bytes: u64,
+    initial_bytes: u64,
+    started: Instant,
+) where
     F: Fn(DownloadProgress),
 {
-    let downloaded_bytes = downloaded_bytes.min(QWEN3_ASR_SIZE_BYTES);
+    let downloaded_bytes = downloaded_bytes.min(spec.size_bytes);
     let elapsed = started.elapsed().as_secs_f64().max(0.001);
     callback(DownloadProgress {
-        percent: ((downloaded_bytes as f64 / QWEN3_ASR_SIZE_BYTES as f64) * 100.0) as u8,
+        percent: ((downloaded_bytes as f64 / spec.size_bytes as f64) * 100.0) as u8,
         downloaded_bytes,
-        total_bytes: QWEN3_ASR_SIZE_BYTES,
+        total_bytes: spec.size_bytes,
         downloaded_mb: downloaded_bytes as f64 / 1_048_576.0,
-        total_mb: QWEN3_ASR_SIZE_BYTES as f64 / 1_048_576.0,
+        total_mb: spec.size_bytes as f64 / 1_048_576.0,
         speed_mbps: downloaded_bytes.saturating_sub(initial_bytes) as f64 / 1_048_576.0 / elapsed,
     });
 }
@@ -431,7 +462,8 @@ fn qwen_language_name(language: Option<&str>) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::qwen_language_name;
+    use super::{qwen_language_name, QwenAsrEngine};
+    use crate::qwen_asr_engine::{QWEN3_ASR_1_7B_MODEL, QWEN3_ASR_MODEL};
 
     #[test]
     fn maps_supported_language_codes_to_qwen_prompts() {
@@ -441,5 +473,33 @@ mod tests {
         assert_eq!(qwen_language_name(Some("auto")), None);
         assert_eq!(qwen_language_name(Some("auto-translate")), None);
         assert_eq!(qwen_language_name(Some("unsupported")), None);
+    }
+
+    #[test]
+    fn discovers_both_qwen_model_options() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = QwenAsrEngine::new(temp.path().to_path_buf()).unwrap();
+        let models = engine.discover_models();
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].name, QWEN3_ASR_MODEL);
+        assert_eq!(models[1].name, QWEN3_ASR_1_7B_MODEL);
+    }
+
+    #[tokio::test]
+    async fn deletes_only_the_requested_model_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let compact = temp.path().join(QWEN3_ASR_MODEL);
+        let large = temp.path().join(QWEN3_ASR_1_7B_MODEL);
+        std::fs::create_dir_all(&compact).unwrap();
+        std::fs::create_dir_all(&large).unwrap();
+        std::fs::write(compact.join("keep"), b"compact").unwrap();
+        std::fs::write(large.join("delete"), b"large").unwrap();
+
+        let engine = QwenAsrEngine::new(temp.path().to_path_buf()).unwrap();
+        engine.delete_model(QWEN3_ASR_1_7B_MODEL).await.unwrap();
+
+        assert!(compact.exists());
+        assert!(!large.exists());
     }
 }

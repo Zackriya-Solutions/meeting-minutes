@@ -5,4 +5,7 @@ mod engine;
 mod model;
 
 pub use engine::QwenAsrEngine;
-pub use model::{DownloadProgress, ModelInfo, ModelStatus, QWEN3_ASR_MODEL};
+pub use model::{
+    is_supported_model, DownloadProgress, ModelInfo, ModelStatus, QWEN3_ASR_1_7B_MODEL,
+    QWEN3_ASR_MODEL,
+};

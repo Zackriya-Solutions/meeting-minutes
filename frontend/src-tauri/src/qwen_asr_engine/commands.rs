@@ -1,4 +1,4 @@
-use super::{ModelStatus, QwenAsrEngine, QWEN3_ASR_MODEL};
+use super::{ModelStatus, QwenAsrEngine};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -47,7 +47,7 @@ pub async fn qwen_asr_init() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn qwen_asr_get_available_models() -> Result<Vec<super::ModelInfo>, String> {
-    Ok(vec![engine()?.discover_model()])
+    Ok(engine()?.discover_models())
 }
 
 #[tauri::command]
@@ -87,19 +87,26 @@ pub async fn qwen_asr_is_model_loaded() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn qwen_asr_validate_model_ready() -> Result<String, String> {
+pub async fn qwen_asr_validate_model_ready(model_name: String) -> Result<String, String> {
     let engine = engine()?;
-    if engine.get_current_model().await.as_deref() == Some(QWEN3_ASR_MODEL) {
-        return Ok(QWEN3_ASR_MODEL.to_string());
+    if engine.get_current_model().await.as_deref() == Some(model_name.as_str()) {
+        return Ok(model_name);
     }
-    if engine.discover_model().status != ModelStatus::Available {
-        return Err("Qwen3-ASR model is not downloaded. Download it from Transcript Settings before recording.".to_string());
+    let model = engine
+        .discover_models()
+        .into_iter()
+        .find(|model| model.name == model_name)
+        .ok_or_else(|| format!("Unknown Qwen3-ASR model: {model_name}"))?;
+    if model.status != ModelStatus::Available {
+        return Err(format!(
+            "Qwen3-ASR model '{model_name}' is not downloaded. Download it from Transcript Settings before recording."
+        ));
     }
     engine
-        .load_model(QWEN3_ASR_MODEL)
+        .load_model(&model_name)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(QWEN3_ASR_MODEL.to_string())
+    Ok(model_name)
 }
 
 #[tauri::command]
@@ -115,14 +122,11 @@ pub async fn qwen_asr_download_model<R: Runtime>(
     app: AppHandle<R>,
     model_name: String,
 ) -> Result<(), String> {
-    if model_name != QWEN3_ASR_MODEL {
-        return Err(format!("Unknown Qwen3-ASR model: {model_name}"));
-    }
     let engine = engine()?;
     let progress_app = app.clone();
     let progress_model = model_name.clone();
     let result = engine
-        .download_model(move |progress| {
+        .download_model(&model_name, move |progress| {
             let _ = progress_app.emit(
                 "qwen-asr-model-download-progress",
                 serde_json::json!({
@@ -167,9 +171,9 @@ pub async fn qwen_asr_cancel_download() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn qwen_asr_delete_model() -> Result<(), String> {
+pub async fn qwen_asr_delete_model(model_name: String) -> Result<(), String> {
     engine()?
-        .delete_model()
+        .delete_model(&model_name)
         .await
         .map_err(|error| error.to_string())
 }

@@ -863,7 +863,7 @@ async fn get_or_init_qwen<R: Runtime>(
     requested_model: Option<&str>,
 ) -> Result<Arc<QwenAsrEngine>> {
     let target_model = requested_model.unwrap_or(crate::qwen_asr_engine::QWEN3_ASR_MODEL);
-    if target_model != crate::qwen_asr_engine::QWEN3_ASR_MODEL {
+    if !crate::qwen_asr_engine::is_supported_model(target_model) {
         return Err(anyhow!("Unsupported Qwen3-ASR model: {}", target_model));
     }
     let engine = {

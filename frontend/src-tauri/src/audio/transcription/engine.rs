@@ -15,9 +15,7 @@ fn max_live_segment_duration_ms(
     model: &str,
     language: Option<&str>,
 ) -> Option<u32> {
-    if provider == "qwen3Asr"
-        && model == crate::qwen_asr_engine::QWEN3_ASR_MODEL
-    {
+    if provider == "qwen3Asr" && crate::qwen_asr_engine::is_supported_model(model) {
         match language {
             Some(language)
                 if !language.is_empty()
@@ -168,14 +166,10 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
             info!("Validating Qwen3-ASR model...");
             crate::qwen_asr_engine::commands::qwen_asr_init().await?;
             let model_name =
-                crate::qwen_asr_engine::commands::qwen_asr_validate_model_ready().await?;
-            if model_name != config.model {
-                return Err(format!(
-                    "Configured Qwen3-ASR model '{}' is not supported; expected '{}'",
-                    config.model,
-                    crate::qwen_asr_engine::QWEN3_ASR_MODEL
-                ));
-            }
+                crate::qwen_asr_engine::commands::qwen_asr_validate_model_ready(
+                    config.model.clone(),
+                )
+                .await?;
             let language = crate::get_language_preference_internal();
             Ok(max_live_segment_duration_ms(
                 "qwen3Asr",
@@ -223,6 +217,14 @@ mod tests {
             max_live_segment_duration_ms(
                 "qwen3Asr",
                 crate::qwen_asr_engine::QWEN3_ASR_MODEL,
+                Some("zh"),
+            ),
+            Some(3_000),
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "qwen3Asr",
+                crate::qwen_asr_engine::QWEN3_ASR_1_7B_MODEL,
                 Some("zh"),
             ),
             Some(3_000),
