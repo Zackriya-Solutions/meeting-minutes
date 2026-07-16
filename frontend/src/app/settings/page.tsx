@@ -19,15 +19,69 @@ import { useLanguage, type Lang } from '@/lib/i18n';
 // Tabs configuration (constant). `label` is the English key; it is translated at
 // render time via `t()`.
 const TABS = [
-  { value: 'general', label: 'General', icon: 'settings' },
-  { value: 'recording', label: 'Recordings', icon: 'mic' },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: 'transcript' },
-  { value: 'summaryModels', label: 'Summary', icon: 'spark' },
-  { value: 'providers', label: 'Providers', icon: 'library' },
-  { value: 'privacy', label: 'Privacy', icon: 'lock' },
-  { value: 'search', label: 'Search', icon: 'search' },
-  { value: 'beta', label: 'Beta', icon: 'plus' }
-] as const satisfies ReadonlyArray<{ value: string; label: string; icon: MementoIconName }>;
+  {
+    value: 'general',
+    label: 'General',
+    description: 'Notifications, meeting detection, storage, and analytics',
+    icon: 'settings',
+    keywords: 'уведомления определение встречи хранение аналитика основные',
+  },
+  {
+    value: 'recording',
+    label: 'Recordings',
+    description: 'Audio recording, files, folders, and recording format',
+    icon: 'mic',
+    keywords: 'запись аудио файл папка формат mp4',
+  },
+  {
+    value: 'Transcriptionmodels',
+    label: 'Transcription',
+    description: 'Speech recognition, SaluteSpeech, GigaAM, and speakers',
+    icon: 'transcript',
+    keywords: 'расшифровка распознавание salutespeech gigaam спикеры',
+  },
+  {
+    value: 'summaryModels',
+    label: 'Summary',
+    description: 'Summary models, DeepSeek, languages, and templates',
+    icon: 'spark',
+    keywords: 'суммаризация модель deepseek язык шаблон',
+  },
+  {
+    value: 'providers',
+    label: 'Providers',
+    description: 'Managed services, gateways, and provider credentials',
+    icon: 'library',
+    keywords: 'провайдеры шлюз gateway api deepseek salutespeech',
+  },
+  {
+    value: 'privacy',
+    label: 'Privacy',
+    description: 'Local-only mode, extraction, and knowledge-base chat access',
+    icon: 'lock',
+    keywords: 'приватность конфиденциальность локальный режим чат база знаний rag',
+  },
+  {
+    value: 'search',
+    label: 'Search',
+    description: 'Meeting index, semantic search, embeddings, and FRIDA',
+    icon: 'search',
+    keywords: 'поиск индекс база знаний rag embeddings эмбеддинги frida',
+  },
+  {
+    value: 'beta',
+    label: 'Beta',
+    description: 'Experimental and preview features',
+    icon: 'plus',
+    keywords: 'бета эксперименты экспериментальные функции',
+  },
+] as const satisfies ReadonlyArray<{
+  value: string;
+  label: string;
+  description: string;
+  icon: MementoIconName;
+  keywords: string;
+}>;
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -36,6 +90,7 @@ export default function SettingsPage() {
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
+  const [settingsSearch, setSettingsSearch] = useState('');
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('tab');
@@ -63,6 +118,17 @@ export default function SettingsPage() {
     };
     loadTranscriptConfig();
   }, [setTranscriptModelConfig]);
+
+  const normalizedSettingsSearch = settingsSearch.trim().toLocaleLowerCase(
+    lang === 'ru' ? 'ru-RU' : 'en-US',
+  );
+  const settingsMatches = normalizedSettingsSearch
+    ? TABS.filter((tab) =>
+        `${t(tab.label)} ${t(tab.description)} ${tab.label} ${tab.description} ${tab.keywords}`
+          .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+          .includes(normalizedSettingsSearch),
+      )
+    : [];
 
   return (
     <div className="mm-page min-w-0 overflow-hidden !p-0">
@@ -101,6 +167,59 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+
+          <div className="relative mt-4 max-w-2xl">
+            <label className="mm-field h-11 min-h-11 w-full">
+              <Icon name="search" size={17} className="shrink-0 text-[var(--fg3)]" />
+              <input
+                data-slot="input-group-control"
+                value={settingsSearch}
+                onChange={(event) => setSettingsSearch(event.target.value)}
+                placeholder={t('Search settings…')}
+                className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none"
+              />
+              {settingsSearch && (
+                <button
+                  type="button"
+                  onClick={() => setSettingsSearch('')}
+                  className="text-[var(--fg3)] hover:text-[var(--fg1)]"
+                  aria-label={t('Clear')}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              )}
+            </label>
+
+            {normalizedSettingsSearch && (
+              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-2">
+                {settingsMatches.length === 0 ? (
+                  <p className="px-3 py-4 text-sm text-[var(--fg3)]">{t('No settings found')}</p>
+                ) : (
+                  settingsMatches.map((tab) => (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(tab.value);
+                        setSettingsSearch('');
+                      }}
+                      className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left hover:bg-[var(--state-hover-bg)]"
+                    >
+                      <Icon name={tab.icon} size={17} className="mt-0.5 shrink-0 text-[var(--gold)]" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold text-[var(--fg1)]">
+                          {t(tab.label)}
+                        </span>
+                        <span className="mt-0.5 block text-xs leading-relaxed text-[var(--fg3)]">
+                          {t(tab.description)}
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -109,7 +228,7 @@ export default function SettingsPage() {
         <div className="mx-auto w-full min-w-0 max-w-6xl p-4 pt-4 sm:p-8 sm:pt-6">
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0">
-            <TabsList className="mm-tab-list h-auto w-full max-w-full justify-start overflow-x-auto">
+            <TabsList className="mm-tab-list h-auto w-full max-w-full flex-wrap justify-start overflow-visible">
               {TABS.map((tab) => {
                 return (
                   <TabsTrigger
