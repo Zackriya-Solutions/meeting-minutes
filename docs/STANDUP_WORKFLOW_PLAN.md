@@ -25,6 +25,15 @@ separate `occurred_at` value and backfills it only from the safely normalized
 `YYYY-MM-DD_HH-MM_...` titles. Unknown source dates remain unknown and fall back to `created_at`;
 filesystem modification time is never silently promoted to meeting truth.
 
+### Boundary with 17:30 project meetings
+
+The first newly imported Gigatool recording is a release/product planning sync, not a standup:
+it sets a release target, changes task and sprint scope, discusses tester bugs, and evaluates
+product hypotheses. It should use the standard meeting pipeline plus collection-level decision,
+action, and hypothesis history. Standup V2 must not absorb every recurring team meeting merely
+because it contains status language. This recording also contains routine profanity, which is
+real-corpus evidence for the abuse filter and confirmation boundary in speaker-name candidates.
+
 The series-digest slice builds its weekly/sprint view deterministically from accepted records.
 It is anchored to the newest meeting in the series rather than today's date, so historical imports
 remain useful. Pending and rejected records never become facts; pending coverage stays visible.
@@ -44,6 +53,14 @@ remain useful. Pending and rejected records never become facts; pending coverage
 - suggest standup only from cadence, title, calendar/app signals, and reviewed history;
 - allow one-click correction because filename/time is not ground truth;
 - attach the meeting to a series before generation so carry-forward items are available.
+
+The first suggestion slice is deliberately assistive rather than automatic. A strong title,
+reviewed standups in the same series, or status-round language can contribute to a Standup V2
+prompt. Once a transcript exists, a round hand-off plus status language is required; this protects
+against real recordings whose filename says `standup` but whose content is team feedback. Time and
+duration alone are insufficient, and explicit planning, one-to-one, retrospective, or interview
+titles suppress the prompt. The user must still choose the template; no transcript leaves the
+device and no model is called for this decision.
 
 ## During the standup
 
@@ -104,6 +121,25 @@ automatic performance analysis.
 - summarize project movement over a week or sprint with citations;
 - support “what changed since I was away?” and handoff views;
 - surface terminology/custom-vocabulary candidates from repeated ASR corrections.
+
+## Proactive knowledge layer
+
+The reviewed `proactive-harness` recording adds a longer-term product direction beyond summaries:
+
+- cluster the same issue across meetings and show what changed, with citations;
+- build reviewable project, decision, action, person, and glossary pages from accepted facts;
+- suggest when an unfamiliar term may need an explanation; any external lookup is opt-in and must
+  not send transcript context by default;
+- maintain a local insight inbox for likely follow-ups, contradictions, missing owners, and aging
+  decisions instead of interrupting the user;
+- require confirmation before reminders, messages, tickets, web lookups, or any other external
+  action, and keep a visible audit trail of the supporting meetings.
+
+The current series digest, embeddings/RAG, accepted-record workflow, and safe identity candidates
+are the foundation. PR #34 implements the first deterministic slice: it ranks missing action
+ownership/dates, recurring risks, carried actions, and unresolved parking-lot topics from accepted
+records only. Every suggestion links to its source; private notes, rejected claims, sentiment, and
+employee-performance scores are excluded, and nothing is sent or changed automatically.
 
 The first implemented digest includes 7/14/30-day and all-history windows, accepted highlights,
 participant updates, open/completed actions, decisions, risks, and deep dives. Every row links to
