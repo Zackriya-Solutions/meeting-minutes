@@ -323,8 +323,6 @@ pub async fn generate_meeting_summary(
             custom_openai_endpoint,
             deepseek_base_url,
             max_tokens,
-            temperature,
-            top_p,
             app_data_dir,
             cancellation_token,
         })
