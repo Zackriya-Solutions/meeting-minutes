@@ -331,7 +331,12 @@ impl SummaryService {
         } else if provider == LLMProvider::DeepSeek {
             match crate::llm::providers::resolve_deepseek_transport(&pool).await {
                 Some(transport) => {
-                    effective_model_name = transport.model;
+                    // The summary picker is the source of truth for this request.
+                    // Transport-level configuration supplies only a fallback for
+                    // older/empty settings rows.
+                    if effective_model_name.trim().is_empty() {
+                        effective_model_name = transport.model;
+                    }
                     info!(
                         "Using DeepSeek transport at {} with model {}",
                         transport.base_url, effective_model_name
@@ -566,22 +571,26 @@ impl SummaryService {
                     }
                 }
 
-                let standup_report = structured_result.as_ref().and_then(|value| {
-                    match serde_json::from_value::<crate::summary::standup::StandupReport>(
-                        value.clone(),
-                    ) {
-                        Ok(report) => Some(report),
-                        Err(error) => {
-                            error!("Failed to decode Standup V2 result for review sync: {error}");
-                            None
-                        }
+                let standup_report = structured_result.as_ref();
+                let structured_result_json = match structured_result
+                    .as_ref()
+                    .map(serde_json::to_value)
+                    .transpose()
+                {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let message = format!(
+                            "Failed to serialize Standup V2 result for persistence: {error}"
+                        );
+                        Self::update_process_failed(&pool, &meeting_id, &message).await;
+                        return;
                     }
-                });
+                };
                 let result_json = build_summary_result_json(
                     &final_markdown,
                     cache_source,
                     &output_language,
-                    structured_result,
+                    structured_result_json,
                 );
 
                 // Review records must be visible before the completed status wakes the UI.
@@ -598,12 +607,11 @@ impl SummaryService {
                             count, meeting_id
                         ),
                         Err(error) => {
-                            // The generated summary is already valid at this point. Review sync is
-                            // a recoverable projection and must not discard that user-visible result.
-                            error!(
-                                "Failed to sync Standup V2 review records for {}: {}",
-                                meeting_id, error
+                            let message = format!(
+                                "Failed to sync Standup V2 review records for {meeting_id}: {error}"
                             );
+                            Self::update_process_failed(&pool, &meeting_id, &message).await;
+                            return;
                         }
                     }
                 }

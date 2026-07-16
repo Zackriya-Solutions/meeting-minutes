@@ -149,7 +149,7 @@ whatlang = "0.16.4"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
-sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono", "json"] }
 
 # V1 knowledge base: local vector search via sqlite-vec (PLAN.md Phase 0/1).
 # The extension is statically linked and registered via sqlite3_auto_extension
