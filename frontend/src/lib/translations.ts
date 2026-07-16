@@ -249,7 +249,7 @@ export const RU: Record<string, string> = {
   "Showing first": "Показаны первые",
   "transcript segments (of": "сегментов транскрипта (из",
   "total)": "всего)",
-  "and": "и еще",
+  "and": "и",
   "more transcript": "транскрипт",
   "more transcripts": "транскриптов",
   "No transcripts to preview": "Нет транскриптов для предпросмотра",

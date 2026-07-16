@@ -1205,6 +1205,9 @@ async fn run_import<R: Runtime>(
         avg_confidence,
     ) {
         if let Err(cleanup_error) = delete_newly_imported_meeting(pool, &meeting_id).await {
+            // The DB row still points at this folder. Keep it intact rather than
+            // letting the pending-folder guard create a broken database reference.
+            pending_folder.commit();
             return Err(anyhow!(
                 "Failed to write resumable import metadata: {error}; \
                  failed to roll back imported meeting: {cleanup_error}"
