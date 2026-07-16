@@ -23,7 +23,7 @@ pub fn retrieval_is_sufficient(hits: &[SearchHit]) -> bool {
 }
 
 /// A source the answer can cite. `index` is the 1-based `[N]` marker.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Citation {
     pub index: usize,
     pub chunk_id: i64,
@@ -37,7 +37,10 @@ pub fn build_context(hits: &[SearchHit]) -> (String, Vec<Citation>) {
     let mut citations = Vec::with_capacity(hits.len());
     for (i, h) in hits.iter().enumerate() {
         let n = i + 1;
-        ctx.push_str(&format!("[{n}] ({} · чанк {}) {}\n", h.meeting_title, h.chunk_id, h.text));
+        ctx.push_str(&format!(
+            "[{n}] ({} · чанк {}) {}\n",
+            h.meeting_title, h.chunk_id, h.text
+        ));
         citations.push(Citation {
             index: n,
             chunk_id: h.chunk_id,
@@ -73,11 +76,7 @@ pub enum AnswerVerdict {
 
 /// Apply the grounding guards to a generated `answer`. `top_score` is the best fused RRF
 /// score from retrieval; `available` are the citations from [`build_context`].
-pub fn evaluate_answer(
-    answer: &str,
-    top_score: f64,
-    available: &[Citation],
-) -> AnswerVerdict {
+pub fn evaluate_answer(answer: &str, top_score: f64, available: &[Citation]) -> AnswerVerdict {
     if available.is_empty() || top_score < MIN_CONFIDENCE {
         return AnswerVerdict::NotFound;
     }
@@ -92,7 +91,9 @@ pub fn evaluate_answer(
     if resolved.is_empty() {
         AnswerVerdict::NeedsCitation
     } else {
-        AnswerVerdict::Found { citations: resolved }
+        AnswerVerdict::Found {
+            citations: resolved,
+        }
     }
 }
 
@@ -111,14 +112,24 @@ impl RagScope {
     /// Map to (retrieval filters, router scope, a stable label for chat_sessions.scope).
     fn resolve(&self) -> (SearchFilters, router::Scope, String) {
         match self {
-            RagScope::Archive => (SearchFilters::default(), router::Scope::Archive, "archive".to_string()),
+            RagScope::Archive => (
+                SearchFilters::default(),
+                router::Scope::Archive,
+                "archive".to_string(),
+            ),
             RagScope::Collection(id) => (
-                SearchFilters { collection_ids: vec![*id], ..Default::default() },
+                SearchFilters {
+                    collection_ids: vec![*id],
+                    ..Default::default()
+                },
                 router::Scope::Collection,
                 format!("collection:{id}"),
             ),
             RagScope::Meeting(mid) => (
-                SearchFilters { meeting_ids: vec![mid.clone()], ..Default::default() },
+                SearchFilters {
+                    meeting_ids: vec![mid.clone()],
+                    ..Default::default()
+                },
                 router::Scope::SingleMeeting,
                 format!("meeting:{mid}"),
             ),
@@ -167,7 +178,12 @@ pub async fn ask(
     };
     if !retrieval_is_sufficient(&hits) {
         // Empty or low-confidence retrieval → don't call the LLM at all.
-        return Ok(RagAnswer { answer: NOT_FOUND_MESSAGE.to_string(), citations: vec![], found: false, warning: None });
+        return Ok(RagAnswer {
+            answer: NOT_FOUND_MESSAGE.to_string(),
+            citations: vec![],
+            found: false,
+            warning: None,
+        });
     }
     let top_score = hits.first().map(|h| h.score).unwrap_or(0.0);
     let (context, citations) = build_context(&hits);
@@ -181,8 +197,10 @@ pub async fn ask(
             history_block.push_str(&format!("{role}: {content}\n"));
         }
     }
-    let user = prompts::fill(prompts::rag_answer_v1(), &[("question", query), ("context", &context)])
-        + &history_block;
+    let user = prompts::fill(
+        prompts::rag_answer_v1(),
+        &[("question", query), ("context", &context)],
+    ) + &history_block;
     let system = "Отвечай только на основе фрагментов. Цитируй источники как [N]. \
                   Если ответа нет — верни «в записях не найдено».";
     let qchars = query.len();
@@ -192,24 +210,36 @@ pub async fn ask(
         .map_err(|e| e.to_string())?;
 
     match evaluate_answer(&raw, top_score, &citations) {
-        AnswerVerdict::NotFound => {
-            Ok(RagAnswer { answer: NOT_FOUND_MESSAGE.to_string(), citations: vec![], found: false, warning: None })
-        }
-        AnswerVerdict::Found { citations: cited } => {
-            Ok(RagAnswer { answer: raw, citations: cited, found: true, warning: None })
-        }
+        AnswerVerdict::NotFound => Ok(RagAnswer {
+            answer: NOT_FOUND_MESSAGE.to_string(),
+            citations: vec![],
+            found: false,
+            warning: None,
+        }),
+        AnswerVerdict::Found { citations: cited } => Ok(RagAnswer {
+            answer: raw,
+            citations: cited,
+            found: true,
+            warning: None,
+        }),
         AnswerVerdict::NeedsCitation => {
             // Reject + regenerate once (PLAN.md Phase 4), then accept with a warning.
             let raw2 = complete_routed(pool, Purpose::Chat, router_scope, qchars, system, &user)
                 .await
                 .map_err(|e| e.to_string())?;
             match evaluate_answer(&raw2, top_score, &citations) {
-                AnswerVerdict::Found { citations: cited } => {
-                    Ok(RagAnswer { answer: raw2, citations: cited, found: true, warning: None })
-                }
-                AnswerVerdict::NotFound => {
-                    Ok(RagAnswer { answer: NOT_FOUND_MESSAGE.to_string(), citations: vec![], found: false, warning: None })
-                }
+                AnswerVerdict::Found { citations: cited } => Ok(RagAnswer {
+                    answer: raw2,
+                    citations: cited,
+                    found: true,
+                    warning: None,
+                }),
+                AnswerVerdict::NotFound => Ok(RagAnswer {
+                    answer: NOT_FOUND_MESSAGE.to_string(),
+                    citations: vec![],
+                    found: false,
+                    warning: None,
+                }),
                 AnswerVerdict::NeedsCitation => Ok(RagAnswer {
                     answer: raw2,
                     citations: vec![],
@@ -239,7 +269,8 @@ mod tests {
 
     #[test]
     fn context_numbers_sources_from_one() {
-        let (ctx, cites) = build_context(&[hit(10, "Standup", "бюджет"), hit(20, "Review", "сроки")]);
+        let (ctx, cites) =
+            build_context(&[hit(10, "Standup", "бюджет"), hit(20, "Review", "сроки")]);
         assert!(ctx.contains("[1] (Standup") && ctx.contains("[2] (Review"));
         assert_eq!(cites[0].index, 1);
         assert_eq!(cites[0].chunk_id, 10);
@@ -248,19 +279,36 @@ mod tests {
 
     #[test]
     fn parse_citations_distinct_in_order() {
-        assert_eq!(parse_citations("Решили X [2]. Также Y [1] и снова [2]."), vec![2, 1]);
+        assert_eq!(
+            parse_citations("Решили X [2]. Также Y [1] и снова [2]."),
+            vec![2, 1]
+        );
         assert!(parse_citations("нет ссылок").is_empty());
     }
 
     #[test]
     fn low_confidence_and_sentinel_are_not_found() {
-        let cites = vec![Citation { index: 1, chunk_id: 1, meeting_id: "m1".into(), start_ms: 0 }];
+        let cites = vec![Citation {
+            index: 1,
+            chunk_id: 1,
+            meeting_id: "m1".into(),
+            start_ms: 0,
+        }];
         // top score below floor -> NotFound even with sources present
-        assert_eq!(evaluate_answer("ответ [1]", 0.0001, &cites), AnswerVerdict::NotFound);
+        assert_eq!(
+            evaluate_answer("ответ [1]", 0.0001, &cites),
+            AnswerVerdict::NotFound
+        );
         // sentinel -> NotFound
-        assert_eq!(evaluate_answer(RAG_NOT_FOUND, 0.05, &cites), AnswerVerdict::NotFound);
+        assert_eq!(
+            evaluate_answer(RAG_NOT_FOUND, 0.05, &cites),
+            AnswerVerdict::NotFound
+        );
         // no sources -> NotFound
-        assert_eq!(evaluate_answer("ответ [1]", 0.05, &[]), AnswerVerdict::NotFound);
+        assert_eq!(
+            evaluate_answer("ответ [1]", 0.05, &[]),
+            AnswerVerdict::NotFound
+        );
     }
 
     #[test]
@@ -269,20 +317,42 @@ mod tests {
         let mut low = hit(1, "Noise", "случайный фрагмент");
         low.score = MIN_CONFIDENCE / 2.0;
         assert!(!retrieval_is_sufficient(&[low]));
-        assert!(retrieval_is_sufficient(&[hit(2, "Relevant", "проект альфа")]));
+        assert!(retrieval_is_sufficient(&[hit(
+            2,
+            "Relevant",
+            "проект альфа"
+        )]));
     }
 
     #[test]
     fn uncited_answer_needs_regeneration() {
-        let cites = vec![Citation { index: 1, chunk_id: 1, meeting_id: "m1".into(), start_ms: 0 }];
-        assert_eq!(evaluate_answer("ответ без ссылок", 0.05, &cites), AnswerVerdict::NeedsCitation);
+        let cites = vec![Citation {
+            index: 1,
+            chunk_id: 1,
+            meeting_id: "m1".into(),
+            start_ms: 0,
+        }];
+        assert_eq!(
+            evaluate_answer("ответ без ссылок", 0.05, &cites),
+            AnswerVerdict::NeedsCitation
+        );
     }
 
     #[test]
     fn valid_cited_answer_is_found_with_resolved_citations() {
         let cites = vec![
-            Citation { index: 1, chunk_id: 11, meeting_id: "m1".into(), start_ms: 0 },
-            Citation { index: 2, chunk_id: 22, meeting_id: "m2".into(), start_ms: 5000 },
+            Citation {
+                index: 1,
+                chunk_id: 11,
+                meeting_id: "m1".into(),
+                start_ms: 0,
+            },
+            Citation {
+                index: 2,
+                chunk_id: 22,
+                meeting_id: "m2".into(),
+                start_ms: 5000,
+            },
         ];
         match evaluate_answer("Мы решили X [2].", 0.05, &cites) {
             AnswerVerdict::Found { citations } => {

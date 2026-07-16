@@ -48,5 +48,39 @@
         "action_item_f1": 1
       }
     }
+  ],
+  "standup": [
+    {
+      "id": "standup-smoke-1",
+      "series_id": "synthetic-team-daily",
+      "split": "test",
+      "provider": "synthetic",
+      "schema_version": "standup_v2",
+      "prompt_version": "synthetic-v1",
+      "meeting_type": "pure_status",
+      "recording_scope": "complete",
+      "success": true,
+      "latency_ms": 1500,
+      "valid_timestamps": ["[01:02]", "[02:03]"],
+      "reference_records": [
+        {"id": "action-1", "kind": "action", "owner": "Анна", "due_date": null},
+        {"id": "risk-1", "kind": "risk", "owner": null}
+      ],
+      "hypothesis_records": [
+        {
+          "kind": "action",
+          "match_id": "action-1",
+          "owner": "Анна",
+          "due_date": null,
+          "evidence": [{"timestamp": "[01:02]"}]
+        },
+        {
+          "kind": "risk",
+          "match_id": "risk-1",
+          "owner": null,
+          "evidence": [{"timestamp": "[02:03]"}]
+        }
+      ]
+    }
   ]
 }

@@ -100,7 +100,7 @@ export function PermissionWarning({
             {!hasMicrophone && (
               <>
                 <p className="mb-3">
-                  {t('Meetily needs access to your microphone to record meetings. No microphone devices were detected.')}
+                  {t('Memento needs access to your microphone to record meetings. No microphone devices were detected.')}
                 </p>
                 <div className="space-y-2 text-sm mb-4">
                   <p className="font-medium">{t('Please check:')}</p>
@@ -126,7 +126,7 @@ export function PermissionWarning({
                     <p className="font-medium">{t('To enable system audio on macOS:')}</p>
                     <ul className="list-disc list-inside ml-2 space-y-1">
                       <li>{t('Install a virtual audio device (e.g., BlackHole 2ch)')}</li>
-                      <li>{t('Grant Screen Recording permission to Meetily')}</li>
+                      <li>{t('Grant Screen Recording permission to Memento')}</li>
                       <li>{t('Configure your audio routing in Audio MIDI Setup')}</li>
                     </ul>
                   </div>

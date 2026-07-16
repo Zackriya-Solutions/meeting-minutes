@@ -195,12 +195,18 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             </button>
           </div>
 
-          <div className="p-4 border rounded-lg bg-[var(--gold-soft)]">
-            <div className="text-sm text-[var(--gold)]">
-              <strong>{t('File Format:')}</strong> {preferences.file_format.toUpperCase()} {t('files')}
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
+            <div className="text-sm font-medium text-[var(--fg1)]">
+              {t('Audio recording format')}
             </div>
-            <div className="text-xs text-[var(--gold)] mt-1">
-              {t('Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.')}{preferences.file_format}
+            <div className="mt-2 grid gap-1 text-xs leading-relaxed text-[var(--fg2)]">
+              <p>{t('Audio: AAC-LC, 192 kbps, mono')}</p>
+              <p>{t('Container: MP4 (.mp4)')}</p>
+              <p>{t('This is an audio-only file. Memento does not record video.')}</p>
+              <p>{t('MP4 is used for reliable checkpoint saving and recovery if recording is interrupted.')}</p>
+            </div>
+            <div className="mt-3 text-xs text-[var(--fg3)]">
+              {t('File name example: recording_YYYYMMDD_HHMMSS.mp4')}
             </div>
           </div>
         </div>

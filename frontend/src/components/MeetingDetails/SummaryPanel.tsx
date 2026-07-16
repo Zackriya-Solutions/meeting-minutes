@@ -7,6 +7,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { MeetingContentWindowNotice } from './MeetingContentWindowNotice';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import { useEffect, useRef, useState, RefObject } from 'react';
@@ -17,6 +18,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
+import { StandupWorkflowPanel } from './StandupWorkflowPanel';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -40,6 +42,7 @@ interface SummaryPanelProps {
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;
   onOpenFolder: () => Promise<void>;
+  onDiscussSummary: () => void;
   aiSummary: Summary | null;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
@@ -76,6 +79,7 @@ export function SummaryPanel({
   onSaveAll,
   onCopySummary,
   onOpenFolder,
+  onDiscussSummary,
   aiSummary,
   summaryStatus,
   transcripts,
@@ -272,7 +276,8 @@ export function SummaryPanel({
             the pane — without wrapping they clip at both edges until the user
             drags the splitter. */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex flex-wrap items-center justify-center w-full pt-0 gap-2">
+          <div className="flex w-full flex-col items-center gap-2 pt-0">
+            <div className="flex flex-wrap items-center justify-center gap-2">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup
@@ -306,12 +311,26 @@ export function SummaryPanel({
                   console.log('Find in summary clicked');
                 }}
                 onOpenFolder={onOpenFolder}
+                onDiscuss={onDiscussSummary}
                 hasSummary={!!aiSummary}
               />
             </div>
+            </div>
+            <p className="text-xs text-[var(--fg3)]">
+              {t('Saved automatically. The Save button becomes available after manual edits.')}
+            </p>
           </div>
         )}
       </div>
+
+      {transcripts.length > 0 && !isSummaryLoading && (
+        <MeetingContentWindowNotice meetingId={meeting.id} />
+      )}
+      <StandupWorkflowPanel
+        meetingId={meeting.id}
+        summaryStatus={summaryStatus}
+        standupSelected={selectedTemplate === 'daily_standup'}
+      />
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">

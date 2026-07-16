@@ -24,6 +24,38 @@ pub fn find_ffmpeg_path() -> Option<PathBuf> {
 fn find_ffmpeg_path_internal() -> Option<PathBuf> {
     debug!("Starting search for ffmpeg executable");
 
+    // Tauri bundles a target-specific sidecar in production. During local
+    // development that sidecar is still in the source tree rather than next
+    // to the debug executable, so make it available to import/retranscription
+    // code without requiring a separate system-wide ffmpeg installation.
+    #[cfg(all(debug_assertions, target_os = "macos", target_arch = "aarch64"))]
+    {
+        let development_sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join("ffmpeg-aarch64-apple-darwin");
+        if development_sidecar.is_file() {
+            debug!(
+                "Found development ffmpeg sidecar: {:?}",
+                development_sidecar
+            );
+            return Some(development_sidecar);
+        }
+    }
+
+    #[cfg(all(debug_assertions, target_os = "macos", target_arch = "x86_64"))]
+    {
+        let development_sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join("ffmpeg-x86_64-apple-darwin");
+        if development_sidecar.is_file() {
+            debug!(
+                "Found development ffmpeg sidecar: {:?}",
+                development_sidecar
+            );
+            return Some(development_sidecar);
+        }
+    }
+
     // ============================================================
     // PRIORITY 1: Bundled Binary (Production)
     // ============================================================
@@ -36,7 +68,6 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
             }
         }
     }
-
 
     // ============================================================
     // PRIORITY 2: Fallback to Existing Logic
@@ -57,7 +88,10 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
             debug!("Checking $HOME/.local/bin: {:?}", local_bin);
             let ffmpeg_in_local_bin = local_bin.join(EXECUTABLE_NAME);
             if ffmpeg_in_local_bin.exists() {
-                debug!("Found ffmpeg in $HOME/.local/bin: {:?}", ffmpeg_in_local_bin);
+                debug!(
+                    "Found ffmpeg in $HOME/.local/bin: {:?}",
+                    ffmpeg_in_local_bin
+                );
                 return Some(ffmpeg_in_local_bin);
             }
             debug!("ffmpeg not found in $HOME/.local/bin");

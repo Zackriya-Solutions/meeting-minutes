@@ -9,6 +9,10 @@ import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
 import { useT } from '@/lib/i18n';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Button } from '@/components/ui/button';
+import { Eye, Pencil } from '@/components/memento/LucideCompat';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -16,7 +20,7 @@ const Editor = dynamic(() => import('../BlockNoteEditor/Editor'), { ssr: false }
 
 interface BlockNoteSummaryViewProps {
   summaryData: SummaryDataResponse | Summary | null;
-  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => void;
+  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => Promise<void> | void;
   onSummaryChange?: (summary: Summary) => void;
   status?: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   error?: string | null;
@@ -81,6 +85,8 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [isDirty, setIsDirty] = useState(false);
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [markdownParseStatus, setMarkdownParseStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [isEditingMarkdown, setIsEditingMarkdown] = useState(false);
   const isContentLoaded = useRef(false);
 
   // Create BlockNote editor for markdown parsing
@@ -91,22 +97,34 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   // Parse markdown to blocks when format is markdown
   useEffect(() => {
     if (format === 'markdown' && data?.markdown && editor) {
+      let cancelled = false;
+      isContentLoaded.current = false;
+      setMarkdownParseStatus('loading');
+      setIsEditingMarkdown(false);
       const loadMarkdown = async () => {
         try {
           console.log('📝 Parsing markdown to BlockNote blocks...');
           const blocks = await editor.tryParseMarkdownToBlocks(data.markdown);
+          if (blocks.length === 0 && data.markdown.trim().length > 0) {
+            throw new Error('Markdown parser returned no blocks');
+          }
+          if (cancelled) return;
           editor.replaceBlocks(editor.document, blocks);
+          setCurrentBlocks(blocks);
+          setMarkdownParseStatus('ready');
           console.log('✅ Markdown parsed successfully');
 
           // Delay to ensure editor has finished rendering before allowing onChange
           setTimeout(() => {
-            isContentLoaded.current = true;
+            if (!cancelled) isContentLoaded.current = true;
           }, 100);
         } catch (err) {
           console.error('❌ Failed to parse markdown:', err);
+          if (!cancelled) setMarkdownParseStatus('error');
         }
       };
-      loadMarkdown();
+      void loadMarkdown();
+      return () => { cancelled = true; };
     }
   }, [format, data?.markdown, editor]);
 
@@ -155,13 +173,14 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         saveData.markdown = markdownResult.markdown;
       }
 
-      onSave(saveData);
+      await onSave(saveData);
 
       setIsDirty(false);
       console.log('✅ Save successful');
     } catch (err) {
       console.error('❌ Save failed:', err);
       alert(t('Failed to save changes. Please try again.'));
+      throw err;
     } finally {
       setIsSaving(false);
     }
@@ -259,18 +278,47 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     console.log('🎨 Rendering MARKDOWN format (parsed to BlockNote)');
     return (
       <div className="flex flex-col w-full">
-        <div className="w-full">
-          <BlockNoteView
-            editor={editor}
-            editable={true}
-            onChange={() => {
-              if (isContentLoaded.current) {
-                handleEditorChange(editor.document);
-              }
-            }}
-            theme="dark"
-          />
+        <div className="mb-3 flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={markdownParseStatus !== 'ready'}
+            onClick={() => setIsEditingMarkdown((editing) => !editing)}
+            title={isEditingMarkdown ? t('Preview summary') : t('Edit summary')}
+          >
+            {isEditingMarkdown ? <Eye className="mr-2 h-4 w-4" /> : <Pencil className="mr-2 h-4 w-4" />}
+            {isEditingMarkdown ? t('Preview') : t('Edit')}
+          </Button>
         </div>
+
+        {isEditingMarkdown && markdownParseStatus === 'ready' ? (
+          <div className="w-full">
+            <BlockNoteView
+              editor={editor}
+              editable={true}
+              onChange={() => {
+                if (isContentLoaded.current) {
+                  handleEditorChange(editor.document);
+                }
+              }}
+              theme="dark"
+            />
+          </div>
+        ) : (
+          <div className="prose prose-invert max-w-none break-words text-[var(--fg1)] prose-headings:text-[var(--fg1)] prose-p:text-[var(--fg1)] prose-strong:text-[var(--fg1)] prose-li:text-[var(--fg1)] prose-th:text-[var(--fg1)] prose-td:text-[var(--fg2)]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.markdown}</ReactMarkdown>
+          </div>
+        )}
+
+        {markdownParseStatus === 'error' && (
+          <p className="mt-4 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">
+            {t('The summary is shown in read-only mode because the editor could not parse its formatting.')}
+          </p>
+        )}
+        {markdownParseStatus === 'loading' && (
+          <p className="mt-3 text-xs text-[var(--fg3)]">{t('Preparing summary editor...')}</p>
+        )}
       </div>
     );
   }

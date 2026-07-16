@@ -10,7 +10,7 @@ pub fn ensure_ffmpeg_binary() {
         .or_else(|_| std::env::var("HOST"))
         .expect("Neither TARGET nor HOST environment variable set");
 
-    println!("cargo:warning=🎬 Checking FFmpeg binary for target: {}", target);
+    eprintln!("🎬 Checking FFmpeg binary for target: {}", target);
 
     let binary_name = if target.contains("windows") {
         format!("ffmpeg-{}.exe", target)
@@ -25,9 +25,9 @@ pub fn ensure_ffmpeg_binary() {
 
     // Cache check: Skip download if binary exists and works
     if binary_path.exists() {
-        println!("cargo:warning=🔍 Found cached FFmpeg binary: {}", binary_name);
+        eprintln!("🔍 Found cached FFmpeg binary: {}", binary_name);
         if verify_ffmpeg_binary(&binary_path) {
-            println!("cargo:warning=✅ FFmpeg binary already cached and verified: {}", binary_name);
+            eprintln!("✅ FFmpeg binary already cached and verified: {}", binary_name);
             return;
         } else {
             println!("cargo:warning=⚠️  Cached FFmpeg binary appears corrupted, re-downloading...");
@@ -35,7 +35,7 @@ pub fn ensure_ffmpeg_binary() {
         }
     }
 
-    println!("cargo:warning=📥 FFmpeg binary not found, downloading for {}", target);
+    eprintln!("📥 FFmpeg binary not found, downloading for {}", target);
 
     // Create binaries directory if it doesn't exist
     if !binaries_dir.exists() {
@@ -46,7 +46,7 @@ pub fn ensure_ffmpeg_binary() {
     // Download and extract
     match download_and_extract_ffmpeg(&target, &binary_path) {
         Ok(()) => {
-            println!("cargo:warning=✅ FFmpeg binary downloaded successfully: {}", binary_name);
+            eprintln!("✅ FFmpeg binary downloaded successfully: {}", binary_name);
 
             // Verify downloaded binary works
             if !verify_ffmpeg_binary(&binary_path) {
@@ -66,12 +66,12 @@ fn download_and_extract_ffmpeg(
 ) -> Result<(), String> {
     use std::io::Write;
 
-    println!("cargo:warning=🌐 Fetching FFmpeg download URL for {}", target);
+    eprintln!("🌐 Fetching FFmpeg download URL for {}", target);
 
     // Get platform-specific download URL
     let url = get_ffmpeg_url_for_target(target)?;
 
-    println!("cargo:warning=⬇️  Downloading from: {}", url);
+    eprintln!("⬇️  Downloading from: {}", url);
 
     // Download with timeout (using reqwest from build-dependencies)
     let client = reqwest::blocking::Client::builder()
@@ -89,7 +89,7 @@ fn download_and_extract_ffmpeg(
     }
 
     let total_size = response.content_length().unwrap_or(0);
-    println!("cargo:warning=📦 Download size: {:.1} MB", total_size as f64 / 1_048_576.0);
+    eprintln!("📦 Download size: {:.1} MB", total_size as f64 / 1_048_576.0);
 
     // Download to temp file
     let temp_dir = std::env::temp_dir();
@@ -107,8 +107,8 @@ fn download_and_extract_ffmpeg(
             .map_err(|e| format!("Failed to write archive: {}", e))?;
     }
 
-    println!("cargo:warning=📦 Downloaded to: {:?}", archive_path);
-    println!("cargo:warning=📂 Extracting FFmpeg binary...");
+    eprintln!("📦 Downloaded to: {:?}", archive_path);
+    eprintln!("📂 Extracting FFmpeg binary...");
 
     // Extract binary (platform-specific)
     extract_ffmpeg_from_archive(&archive_path, target, output_path)?;
@@ -116,7 +116,7 @@ fn download_and_extract_ffmpeg(
     // Cleanup archive
     let _ = std::fs::remove_file(&archive_path);
 
-    println!("cargo:warning=✨ Extraction complete");
+    eprintln!("✨ Extraction complete");
 
     Ok(())
 }
@@ -177,7 +177,7 @@ fn extract_ffmpeg_from_archive(
     // Find extracted FFmpeg binary (platform-specific locations)
     let ffmpeg_binary = find_ffmpeg_in_extracted_dir(&extract_dir, target)?;
 
-    println!("cargo:warning=📋 Found FFmpeg at: {:?}", ffmpeg_binary);
+    eprintln!("📋 Found FFmpeg at: {:?}", ffmpeg_binary);
 
     // Copy to target location
     std::fs::copy(&ffmpeg_binary, output_path)
@@ -193,7 +193,7 @@ fn extract_ffmpeg_from_archive(
         perms.set_mode(0o755); // rwxr-xr-x
         std::fs::set_permissions(output_path, perms)
             .map_err(|e| format!("Failed to set executable permissions: {}", e))?;
-        println!("cargo:warning=🔐 Set executable permissions");
+        eprintln!("🔐 Set executable permissions");
     }
 
     // Cleanup extraction directory
@@ -207,8 +207,6 @@ fn extract_zip(
     archive_path: &std::path::Path,
     extract_dir: &std::path::Path,
 ) -> Result<(), String> {
-    use std::io::Read;
-
     let file = std::fs::File::open(archive_path)
         .map_err(|e| format!("Failed to open ZIP: {}", e))?;
 
@@ -339,7 +337,7 @@ fn verify_ffmpeg_binary(path: &std::path::PathBuf) -> bool {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_line) = stdout.lines().next() {
-                    println!("cargo:warning=✅ FFmpeg verification passed: {}", version_line);
+                    eprintln!("✅ FFmpeg verification passed: {}", version_line);
                 }
                 true
             } else {

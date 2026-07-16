@@ -243,10 +243,28 @@ impl Embedder {
             TensorRef::from_array_view(ids.view()).map_err(|e| anyhow!("ort input_ids: {e}"))?;
         let mask_tensor = TensorRef::from_array_view(mask.view())
             .map_err(|e| anyhow!("ort attention_mask: {e}"))?;
-        let outputs = self
+        // Some multilingual-e5 ONNX exports retain BERT's token-type embedding input.
+        // A sentence is one segment, so its canonical token-type value is zero. Other
+        // exports omit the input; inspect the graph rather than passing an unknown name.
+        let needs_token_type_ids = self
             .session
-            .run(inputs!["input_ids" => ids_tensor, "attention_mask" => mask_tensor])
-            .map_err(|e| anyhow!("ort run: {e}"))?;
+            .inputs
+            .iter()
+            .any(|input| input.name == "token_type_ids");
+        let token_types = ndarray::Array2::<i64>::zeros((bsz, max_len));
+        let outputs = if needs_token_type_ids {
+            let token_types_tensor = TensorRef::from_array_view(token_types.view())
+                .map_err(|e| anyhow!("ort token_type_ids: {e}"))?;
+            self.session.run(inputs![
+                "input_ids" => ids_tensor,
+                "attention_mask" => mask_tensor,
+                "token_type_ids" => token_types_tensor,
+            ])
+        } else {
+            self.session
+                .run(inputs!["input_ids" => ids_tensor, "attention_mask" => mask_tensor])
+        }
+        .map_err(|e| anyhow!("ort run: {e}"))?;
 
         // last_hidden_state: [batch, seq, hidden]. Matches the parakeet extraction API
         // (ort rc): `.get(name).try_extract_array()` -> ArrayViewD<f32>.
@@ -468,5 +486,26 @@ mod tests {
         let mut v = vec![0.0, 0.0];
         l2_normalize(&mut v); // must not divide by zero
         assert_eq!(v, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    #[ignore = "requires MEETILY_TEST_EMBEDDING_MODEL_DIR with model.onnx and tokenizer.json"]
+    fn installed_embedding_model_runs_end_to_end() {
+        let model_dir = std::env::var("MEETILY_TEST_EMBEDDING_MODEL_DIR")
+            .expect("MEETILY_TEST_EMBEDDING_MODEL_DIR is required");
+        let config = EmbedderConfig::new(model_dir);
+        let tokenizer = Box::new(HfTokenizer::from_file(&config.tokenizer_path()).unwrap());
+        let mut embedder = Embedder::load(config, tokenizer).unwrap();
+        let embeddings = embedder
+            .embed_passages(&["проверка локальных эмбеддингов".to_string()])
+            .unwrap();
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0].len(), crate::vector::EMBEDDING_DIM);
+        let norm = embeddings[0]
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        assert!((norm - 1.0).abs() < 1e-4);
     }
 }

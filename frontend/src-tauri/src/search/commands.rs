@@ -52,9 +52,15 @@ pub async fn search_meetings(
     let query_embedding = crate::pipeline::embedder::embed_query(query.clone())
         .await
         .and_then(|r| r.ok());
-    HybridSearch::search(pool, &query, query_embedding.as_deref(), &filters, limit.unwrap_or(20))
-        .await
-        .map_err(|e| e.to_string())
+    HybridSearch::search(
+        pool,
+        &query,
+        query_embedding.as_deref(),
+        &filters,
+        limit.unwrap_or(20),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +91,103 @@ pub struct RagAskResponse {
     pub warning: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RagSessionScopeInput {
+    /// "archive" | "collection" | "meeting" (default archive).
+    #[serde(default = "default_scope")]
+    pub scope: String,
+    #[serde(default)]
+    pub collection_id: Option<i64>,
+    #[serde(default)]
+    pub meeting_id: Option<String>,
+}
+
+impl RagSessionScopeInput {
+    fn resolve(self) -> Result<RagScope, String> {
+        match self.scope.as_str() {
+            "collection" => Ok(RagScope::Collection(
+                self.collection_id
+                    .ok_or("collection_id required for collection scope")?,
+            )),
+            "meeting" => Ok(RagScope::Meeting(
+                self.meeting_id
+                    .filter(|id| !id.trim().is_empty())
+                    .ok_or("meeting_id required for meeting scope")?,
+            )),
+            _ => Ok(RagScope::Archive),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct RagHistoryMessage {
+    pub role: String,
+    pub content: String,
+    pub citations: Vec<Citation>,
+    pub found: bool,
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RagSessionResponse {
+    pub session_id: i64,
+    pub messages: Vec<RagHistoryMessage>,
+}
+
+/// Restore the latest persisted conversation for a particular RAG scope.
+#[tauri::command]
+pub async fn rag_get_latest_session(
+    state: tauri::State<'_, AppState>,
+    input: RagSessionScopeInput,
+) -> Result<Option<RagSessionResponse>, String> {
+    let pool = state.db_manager.pool();
+    let scope = input.resolve()?;
+    let scope_label = scope.label();
+    let session_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM chat_sessions
+         WHERE scope = ?
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1",
+    )
+    .bind(scope_label)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(session_id) = session_id else {
+        return Ok(None);
+    };
+
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT role, content, citations
+         FROM chat_messages
+         WHERE session_id = ?
+         ORDER BY id ASC",
+    )
+    .bind(session_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let messages = rows
+        .into_iter()
+        .map(|(role, content, citations_json)| {
+            let citations = serde_json::from_str(&citations_json).unwrap_or_default();
+            let found = role != "assistant" || content.trim() != rag::NOT_FOUND_MESSAGE;
+            RagHistoryMessage {
+                role,
+                content,
+                citations,
+                found,
+                warning: None,
+            }
+        })
+        .collect();
+
+    Ok(Some(RagSessionResponse {
+        session_id,
+        messages,
+    }))
+}
+
 /// Ask a question over the archive with citations (PLAN.md Phase 4). Retrieves within
 /// scope, generates a grounded answer via the routed LLM (GigaChat/DeepSeek), enforces
 /// citations, and persists the turn to chat history.
@@ -97,22 +200,45 @@ pub async fn rag_ask(
 
     let scope = match input.scope.as_str() {
         "collection" => RagScope::Collection(
-            input.collection_id.ok_or("collection_id required for collection scope")?,
+            input
+                .collection_id
+                .ok_or("collection_id required for collection scope")?,
         ),
         "meeting" => RagScope::Meeting(
-            input.meeting_id.clone().ok_or("meeting_id required for meeting scope")?,
+            input
+                .meeting_id
+                .clone()
+                .ok_or("meeting_id required for meeting scope")?,
         ),
         _ => RagScope::Archive,
     };
 
     // Resolve or create the chat session for this scope.
+    let scope_label = scope.label();
     let session_id = match input.session_id {
-        Some(id) => id,
-        None => sqlx::query_scalar::<_, i64>("INSERT INTO chat_sessions(scope) VALUES(?) RETURNING id")
-            .bind(scope.label())
+        Some(id) => {
+            let belongs_to_scope: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM chat_sessions WHERE id = ? AND scope = ?
+                 )",
+            )
+            .bind(id)
+            .bind(&scope_label)
             .fetch_one(pool)
             .await
-            .map_err(|e| e.to_string())?,
+            .map_err(|error| error.to_string())?;
+            if belongs_to_scope == 0 {
+                return Err("Chat session does not belong to the selected scope".to_string());
+            }
+            id
+        }
+        None => {
+            sqlx::query_scalar::<_, i64>("INSERT INTO chat_sessions(scope) VALUES(?) RETURNING id")
+                .bind(&scope_label)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| e.to_string())?
+        }
     };
 
     // Last 6 turns (oldest-first) as conversation history.
@@ -134,7 +260,8 @@ pub async fn rag_ask(
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
-    let citations_json = serde_json::to_string(&answer.citations).unwrap_or_else(|_| "[]".to_string());
+    let citations_json =
+        serde_json::to_string(&answer.citations).unwrap_or_else(|_| "[]".to_string());
     sqlx::query("INSERT INTO chat_messages(session_id, role, content, citations) VALUES(?, 'assistant', ?, ?)")
         .bind(session_id)
         .bind(&answer.answer)
@@ -146,6 +273,15 @@ pub async fn rag_ask(
         .bind(session_id)
         .execute(pool)
         .await;
+    let _ = sqlx::query(
+        "UPDATE chat_sessions
+         SET title = COALESCE(title, substr(?, 1, 120))
+         WHERE id = ?",
+    )
+    .bind(&input.query)
+    .bind(session_id)
+    .execute(pool)
+    .await;
 
     Ok(RagAskResponse {
         session_id,

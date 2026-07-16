@@ -14,6 +14,13 @@ rust-version = "1.77"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Keep the package name stable for Cargo/workspace compatibility, but expose a
+# Memento-named executable so macOS crash reports and process lists no longer
+# show the retired Meetily brand.
+[[bin]]
+name = "memento"
+path = "src/main.rs"
+
 
 # Hardware acceleration features for whisper-rs
 # Cross-platform GPU acceleration with smart defaults
@@ -68,6 +75,7 @@ anyhow = "1.0"
 once_cell = "1.17.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 base64 = "0.22"
+sha2 = "0.10"
 posthog-rs = "0.3.7"
 
 # Cross-platform audio capture
@@ -149,7 +157,7 @@ whatlang = "0.16.4"
 
 ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
 
-sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono", "json"] }
 
 # V1 knowledge base: local vector search via sqlite-vec (PLAN.md Phase 0/1).
 # The extension is statically linked and registered via sqlite3_auto_extension
@@ -233,7 +241,3 @@ memory-stats = "1.0"
 strsim = "0.10.0"
 futures = "0.3.31"
 tracing-subscriber = "0.3.16"
-
-[patch.crates-io]
-cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }
-esaxx-rs = { git = "https://github.com/thewh1teagle/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }

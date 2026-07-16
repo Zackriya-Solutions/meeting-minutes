@@ -13,7 +13,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "../ui/dialog";
-import { DiarizationStatus, DiarizeMeetingResult } from "@/types";
+import { DiarizationStatus, DiarizeMeetingResult, SpeakerInfo } from "@/types";
 import Analytics from "@/lib/analytics";
 import { useT } from "@/lib/i18n";
 
@@ -38,6 +38,8 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
     const t = useT();
     const [phase, setPhase] = useState<Phase>("idle");
     const [showDownload, setShowDownload] = useState(false);
+    const [showRerunConfirmation, setShowRerunConfirmation] = useState(false);
+    const [existingSpeakerCount, setExistingSpeakerCount] = useState(0);
     const [downloading, setDownloading] = useState(false);
 
     const busy = phase !== "idle";
@@ -59,9 +61,8 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
         }
     };
 
-    const handleClick = async () => {
+    const checkModelsAndRun = async () => {
         if (!meetingId || busy) return;
-        Analytics.trackButtonClick("detect_speakers", "meeting_details");
         setPhase("checking");
         try {
             // Cloud diarization (SaluteSpeech) skips the local-model download gate — it
@@ -104,6 +105,25 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
         }
     };
 
+    const handleClick = async () => {
+        if (!meetingId || busy) return;
+        Analytics.trackButtonClick("detect_speakers", "meeting_details");
+        setPhase("checking");
+        try {
+            const existing = await invoke<SpeakerInfo[]>("get_meeting_speakers", { meetingId });
+            if (existing.length > 0) {
+                setExistingSpeakerCount(existing.length);
+                setShowRerunConfirmation(true);
+                setPhase("idle");
+                return;
+            }
+        } catch (err) {
+            console.warn("Could not inspect existing meeting speakers:", err);
+        }
+        setPhase("idle");
+        await checkModelsAndRun();
+    };
+
     const handleDownloadAndDetect = async () => {
         setDownloading(true);
         try {
@@ -138,6 +158,40 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                     {phase === "diarizing" ? t('Detecting...') : t('Speakers')}
                 </span>
             </Button>
+
+            <Dialog
+                open={showRerunConfirmation}
+                onOpenChange={(open) => { if (!busy) setShowRerunConfirmation(open); }}
+            >
+                <DialogContent className="sm:max-w-[460px]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Users className="h-5 w-5 text-[var(--gold)]" />
+                            {t('Run speaker detection again?')}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {t('This meeting already has detected speakers. Running detection again replaces the current automatic speaker assignments and may produce a different count. User-confirmed speaker names are preserved.')}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <p className="text-sm text-[var(--fg2)]">
+                        {t('Currently detected')}: {existingSpeakerCount}
+                    </p>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowRerunConfirmation(false)}>
+                            {t('Cancel')}
+                        </Button>
+                        <Button
+                            onClick={async () => {
+                                setShowRerunConfirmation(false);
+                                await checkModelsAndRun();
+                            }}
+                            className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                        >
+                            {t('Run again')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={showDownload}

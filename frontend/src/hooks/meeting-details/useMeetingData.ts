@@ -63,7 +63,6 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       );
       setMeetings(updatedMeetings);
       setCurrentMeeting({ id: meeting.id, title: meetingTitle });
-      return true;
     } catch (error) {
       console.error('Failed to save meeting title:', error);
       if (error instanceof Error) {
@@ -71,7 +70,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       } else {
         setError('Failed to save meeting title: Unknown error');
       }
-      return false;
+      throw error;
     }
   }, [meeting.id, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting]);
 
@@ -115,6 +114,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       } else {
         setError('Failed to save meeting summary: Unknown error');
       }
+      throw error;
     }
   }, [meeting.id, meetingTitle]);
 
@@ -130,8 +130,6 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       if (blockNoteSummaryRef.current?.isDirty) {
         console.log('💾 Saving BlockNote editor changes...');
         await blockNoteSummaryRef.current.saveSummary();
-      } else if (aiSummary) {
-        await handleSaveSummary(aiSummary);
       }
 
       toast.success(t("Changes saved successfully"));
@@ -141,7 +139,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     } finally {
       setIsSaving(false);
     }
-  }, [isTitleDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary]);
+  }, [isTitleDirty, handleSaveMeetingTitle]);
 
   // Update meeting title from external source (e.g., AI summary)
   const updateMeetingTitle = useCallback((newTitle: string) => {

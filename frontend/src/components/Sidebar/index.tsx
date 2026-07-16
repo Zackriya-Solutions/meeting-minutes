@@ -23,7 +23,8 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useT } from '@/lib/i18n';
+import { useLanguage } from '@/lib/i18n';
+import { getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 
 import {
   Dialog,
@@ -45,6 +46,9 @@ interface SidebarItem {
   id: string;
   title: string;
   type: 'folder' | 'file';
+  createdAt?: string | null;
+  occurredAt?: string | null;
+  folderPath?: string | null;
   children?: SidebarItem[];
 }
 
@@ -111,7 +115,7 @@ const Sidebar: React.FC = () => {
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -309,26 +313,39 @@ const Sidebar: React.FC = () => {
   };
 
   // Handle search input changes
-  const handleSearchChange = useCallback(async (value: string) => {
+  const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
 
-    // If search query is empty, just return to normal view
-    if (!value.trim()) return;
-
-    // Search through transcripts
-    await searchTranscripts(value);
-
     // Make sure the meetings folder is expanded when searching
-    if (!expandedFolders.has('meetings')) {
+    if (value.trim() && !expandedFolders.has('meetings')) {
       const newExpanded = new Set(expandedFolders);
       newExpanded.add('meetings');
       setExpandedFolders(newExpanded);
     }
-  }, [expandedFolders, searchTranscripts]);
+  }, [expandedFolders]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      searchTranscripts('');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      searchTranscripts(searchQuery);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, searchTranscripts]);
 
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {
     if (!searchQuery.trim()) return sidebarItems;
+    const normalizedQuery = searchQuery.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US');
+    const titleMatches = (item: SidebarItem) => {
+      const displayTitle = getMeetingDisplayInfo(item, lang).title;
+      return (
+        item.title.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US').includes(normalizedQuery)
+        || displayTitle.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US').includes(normalizedQuery)
+      );
+    };
 
     // If we have search results, highlight matching meetings
     if (searchResults.length > 0) {
@@ -347,7 +364,7 @@ const Sidebar: React.FC = () => {
               if (matchedMeetingIds.has(item.id)) return true;
 
               // Or if the title matches the search query
-              return item.title.toLowerCase().includes(searchQuery.toLowerCase());
+              return titleMatches(item);
             });
 
             return {
@@ -358,7 +375,7 @@ const Sidebar: React.FC = () => {
 
           // For non-folder items, check if they match the search
           return (matchedMeetingIds.has(folder.id) ||
-            folder.title.toLowerCase().includes(searchQuery.toLowerCase()))
+            titleMatches(folder))
             ? folder : undefined;
         })
         .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
@@ -372,7 +389,7 @@ const Sidebar: React.FC = () => {
 
             // Filter children based on search query
             const filteredChildren = folder.children.filter(item =>
-              item.title.toLowerCase().includes(searchQuery.toLowerCase())
+              titleMatches(item)
             );
 
             return {
@@ -382,11 +399,11 @@ const Sidebar: React.FC = () => {
           }
 
           // For non-folder items, check if they match the search
-          return folder.title.toLowerCase().includes(searchQuery.toLowerCase()) ? folder : undefined;
+          return titleMatches(folder) ? folder : undefined;
         })
         .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
     }
-  }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
+  }, [sidebarItems, searchQuery, searchResults, lang]);
 
 
   const handleDelete = async (itemId: string) => {
@@ -399,6 +416,7 @@ const Sidebar: React.FC = () => {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('api_delete_meeting', {
         meetingId: itemId,
+        deleteRecordingFiles: false,
       });
       console.log('Встреча удалена');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
@@ -409,7 +427,7 @@ const Sidebar: React.FC = () => {
 
       // Show success toast
       toast.success(t("Meeting deleted successfully"), {
-        description: t("All associated data has been removed")
+        description: t("The recording folder and audio files were kept on this Mac.")
       });
 
       // If deleting the active meeting, navigate to home
@@ -675,6 +693,9 @@ const Sidebar: React.FC = () => {
     const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
+    const displayInfo = isMeetingItem
+      ? getMeetingDisplayInfo(item, lang)
+      : { title: item.title, dateLabel: '', dateUnknown: false };
 
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
@@ -696,7 +717,13 @@ const Sidebar: React.FC = () => {
             if (item.type === 'folder') {
               toggleFolder(item.id);
             } else {
-              setCurrentMeeting({ id: item.id, title: item.title });
+              setCurrentMeeting({
+                id: item.id,
+                title: item.title,
+                createdAt: item.createdAt,
+                occurredAt: item.occurredAt,
+                folderPath: item.folderPath,
+              });
               const basePath = item.id.startsWith('intro-call') ? '/' :
                 item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
               router.push(basePath);
@@ -734,7 +761,19 @@ const Sidebar: React.FC = () => {
                     <Plus className="w-3.5 h-3.5 text-[var(--gold)]" />
                   </div>
                 )}
-                <span className="flex-1 break-words">{item.title}</span>
+                <span
+                  className="min-w-0 flex-1"
+                  title={displayInfo.title !== item.title ? item.title : undefined}
+                >
+                  <span className="block line-clamp-2 break-words leading-snug">
+                    {displayInfo.title}
+                  </span>
+                  {isMeetingItem && (
+                    <span className={`mt-1 block text-xs font-normal ${displayInfo.dateUnknown ? 'text-[var(--gold)]' : 'text-[var(--fg3)]'}`}>
+                      {displayInfo.dateLabel}
+                    </span>
+                  )}
+                </span>
                 {isMeetingItem && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <button

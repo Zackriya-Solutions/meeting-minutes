@@ -18,6 +18,7 @@ export default function AnalyticsConsentSwitch() {
   const [showModal, setShowModal] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
+  const [runtimeEnabled, setRuntimeEnabled] = useState(false);
 
   // Note: Store loading is handled by AnalyticsProvider to avoid race conditions
 
@@ -37,6 +38,10 @@ export default function AnalyticsConsentSwitch() {
     loadUserId();
   }, [isAnalyticsOptedIn]);
 
+  useEffect(() => {
+    Analytics.isEnabled().then(setRuntimeEnabled).catch(() => setRuntimeEnabled(false));
+  }, [isAnalyticsOptedIn, isProcessing]);
+
   const handleCopyUserId = async () => {
     if (!userId) return;
 
@@ -55,19 +60,6 @@ export default function AnalyticsConsentSwitch() {
   };
 
   const handleToggle = async (enabled: boolean) => {
-    // If user is trying to DISABLE, show the modal first
-    if (!enabled) {
-      setShowModal(true);
-      // Track that user viewed the transparency modal
-      try {
-        await invoke('track_analytics_transparency_viewed');
-      } catch (error) {
-        console.error('Failed to track transparency view:', error);
-      }
-      return; // Don't disable yet, wait for modal confirmation
-    }
-
-    // If ENABLING, proceed immediately
     await performToggle(enabled);
   };
 
@@ -125,6 +117,7 @@ export default function AnalyticsConsentSwitch() {
         }
 
         await Analytics.disable();
+        setRuntimeEnabled(false);
         console.log('Analytics disabled successfully');
       }
     } catch (error) {
@@ -137,14 +130,14 @@ export default function AnalyticsConsentSwitch() {
     }
   };
 
-  const handleConfirmDisable = async () => {
-    setShowModal(false);
-    await performToggle(false);
-  };
-
-  const handleCancelDisable = () => {
-    setShowModal(false);
-    // Keep analytics enabled, no state change needed
+  const handleShowDetails = async () => {
+    setShowModal(true);
+    if (!isAnalyticsOptedIn) return;
+    try {
+      await invoke('track_analytics_transparency_viewed');
+    } catch (error) {
+      console.error('Failed to track transparency view:', error);
+    }
   };
 
   const handlePrivacyPolicyClick = async () => {
@@ -169,7 +162,13 @@ export default function AnalyticsConsentSwitch() {
           <div>
             <h4 className="font-semibold text-[var(--fg1)]">{t('Enable Analytics')}</h4>
             <p className="text-sm text-[var(--fg2)]">
-              {isProcessing ? t('Updating...') : t('Off unless you choose to enable it')}
+              {isProcessing
+                ? t('Updating...')
+                : isAnalyticsOptedIn && runtimeEnabled
+                  ? t('Enabled and sending anonymous events to PostHog')
+                  : isAnalyticsOptedIn
+                    ? t('Enabled, but the analytics client is not connected')
+                    : t('Disabled — no analytics events are sent')}
             </p>
           </div>
           <div className="flex items-center gap-2 ml-4">
@@ -183,6 +182,11 @@ export default function AnalyticsConsentSwitch() {
             />
           </div>
         </div>
+
+        <Button variant="outline" size="sm" onClick={handleShowDetails}>
+          <Info className="h-4 w-4" />
+          {t('What analytics collects and where it goes')}
+        </Button>
 
         {/* User ID Display */}
         {isAnalyticsOptedIn && userId && (
@@ -241,8 +245,7 @@ export default function AnalyticsConsentSwitch() {
       {/* 2-Step Opt-Out Modal */}
       <AnalyticsDataModal
         isOpen={showModal}
-        onClose={handleCancelDisable}
-        onConfirmDisable={handleConfirmDisable}
+        onClose={() => setShowModal(false)}
       />
     </>
   );

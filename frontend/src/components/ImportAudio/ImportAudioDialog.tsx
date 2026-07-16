@@ -10,6 +10,7 @@ import {
   FileAudio,
   Clock,
   HardDrive,
+  FolderOpen,
   ChevronDown,
   ChevronUp,
 } from '@/components/memento/LucideCompat';
@@ -32,7 +33,7 @@ import {
 } from '../ui/select';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useImportAudio, ImportResult } from '@/hooks/useImportAudio';
+import { useImportAudio, BatchImportResult, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
@@ -110,20 +111,39 @@ export function ImportAudioDialog({
     toast.error(t('Import failed'), { description: error });
   }, [t]);
 
+  const handleBatchImportComplete = useCallback((result: BatchImportResult) => {
+    const description = `${result.imported.length} ${t('imported')}, ${result.skipped.length} ${t('skipped')}, ${result.truncated.length} ${t('not attempted')}, ${result.failed.length} ${t('failed')}`;
+    if (result.cancelled) {
+      toast.info(t('Batch import cancelled'), { description });
+    } else if (result.failed.length > 0) {
+      toast.warning(t('Batch import completed with errors'), { description });
+    } else {
+      toast.success(t('Batch import complete'), { description });
+    }
+    refetchMeetings();
+    onComplete?.();
+    onOpenChange(false);
+  }, [t, refetchMeetings, onComplete, onOpenChange]);
+
   const {
     status,
     fileInfo,
+    batchFiles,
     progress,
+    batchProgress,
     error,
     isProcessing,
     isBusy,
     selectFile,
+    selectFolder,
     validateFile,
     startImport,
+    startBatchImport,
     cancelImport,
     reset,
   } = useImportAudio({
     onComplete: handleImportComplete,
+    onBatchComplete: handleBatchImportComplete,
     onError: handleImportError,
   });
 
@@ -177,6 +197,16 @@ export function ImportAudioDialog({
   // GigaAM (Russian e2e), Parakeet, and SaluteSpeech don't take a language hint here —
   // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
   const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
+  const batchProcessed = batchProgress
+    ? batchProgress.completed + batchProgress.skipped + batchProgress.truncated + batchProgress.failed
+    : 0;
+  const displayedProgress = Math.min(
+    progress?.progress_percentage
+      ?? (batchProgress && batchProgress.total > 0
+        ? (batchProcessed / batchProgress.total) * 100
+        : 0),
+    100,
+  );
 
   useEffect(() => {
     if (languageAutoOnly && selectedLang !== 'auto') {
@@ -191,7 +221,23 @@ export function ImportAudioDialog({
     }
   };
 
+  const handleSelectFolder = async () => {
+    await selectFolder();
+  };
+
   const handleStartImport = async () => {
+    if (batchFiles.length > 0) {
+      await startBatchImport(
+        batchFiles.map((file) => ({
+          source_path: file.path,
+          title: file.filename.replace(/__[0-9a-f]{8}$/i, ''),
+        })),
+        languageAutoOnly ? null : selectedLang === 'auto' ? null : selectedLang,
+        selectedModel?.name || null,
+        selectedModel?.provider || null
+      );
+      return;
+    }
     if (!fileInfo) return;
 
     await startImport(
@@ -234,7 +280,7 @@ export function ImportAudioDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="sm:max-w-[500px]"
+        className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[760px] overflow-x-hidden overflow-y-auto sm:max-w-[760px]"
         onEscapeKeyDown={handleEscapeKeyDown}
         onInteractOutside={handleInteractOutside}
       >
@@ -271,11 +317,43 @@ export function ImportAudioDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="min-w-0 space-y-4 py-4">
           {/* File selection / info */}
           {!isProcessing && !error && (
             <>
-              {fileInfo ? (
+              {batchFiles.length > 0 ? (
+                <div className="bg-[var(--bg-sheet)] rounded-lg p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <FolderOpen className="h-8 w-8 text-[var(--gold)] flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-[var(--fg1)]">
+                        {batchFiles.length} {t('audio files selected')}
+                      </p>
+                      <div className="flex items-center gap-4 text-sm text-[var(--fg2)] mt-1">
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          {formatDuration(batchFiles.reduce((sum, file) => sum + file.duration_seconds, 0))}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <HardDrive className="h-3.5 w-3.5" />
+                          {formatFileSize(batchFiles.reduce((sum, file) => sum + file.size_bytes, 0))}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="max-h-28 overflow-y-auto text-xs text-[var(--fg2)] space-y-1">
+                    {batchFiles.slice(0, 20).map((file) => (
+                      <div key={file.path} className="truncate">{file.filename}</div>
+                    ))}
+                    {batchFiles.length > 20 && (
+                      <div>{t('and')} {batchFiles.length - 20} {t('more files')}</div>
+                    )}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleSelectFolder} className="w-full">
+                    {t('Choose Different Folder')}
+                  </Button>
+                </div>
+              ) : fileInfo ? (
                 <div className="bg-[var(--bg-sheet)] rounded-lg p-4 space-y-3">
                   <div className="flex items-start gap-3">
                     <FileAudio className="h-8 w-8 text-[var(--gold)] flex-shrink-0" />
@@ -313,27 +391,33 @@ export function ImportAudioDialog({
                   </Button>
                 </div>
               ) : (
-                <div className="border-2 border-dashed border-[var(--border-strong)] rounded-lg p-8 text-center">
+                <div className="min-w-0 border-2 border-dashed border-[var(--border-strong)] rounded-lg p-5 text-center sm:p-8">
                   <FileAudio className="h-12 w-12 text-[var(--fg3)] mx-auto mb-4" />
-                  <Button onClick={handleSelectFile} disabled={status === 'validating'}>
-                    {status === 'validating' ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        {t('Validating...')}
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="h-4 w-4 mr-2" />
-                        {t('Select Audio File')}
-                      </>
-                    )}
-                  </Button>
+                  <div className="flex min-w-0 flex-col justify-center gap-2 sm:flex-row sm:flex-wrap">
+                    <Button className="min-w-0 whitespace-normal" onClick={handleSelectFile} disabled={status === 'validating'}>
+                      {status === 'validating' ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          {t('Validating...')}
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          {t('Select Audio File')}
+                        </>
+                      )}
+                    </Button>
+                    <Button className="min-w-0 whitespace-normal" variant="outline" onClick={handleSelectFolder} disabled={status === 'validating'}>
+                      <FolderOpen className="h-4 w-4 mr-2" />
+                      {t('Select Audio Folder')}
+                    </Button>
+                  </div>
                   <p className="text-sm text-[var(--fg2)] mt-2">{t('MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA')}</p>
                 </div>
               )}
 
               {/* Advanced options (collapsible) */}
-              {fileInfo && (
+              {(fileInfo || batchFiles.length > 0) && (
                 <div className="border rounded-lg">
                   <button
                     onClick={() => setShowAdvanced(!showAdvanced)}
@@ -422,21 +506,27 @@ export function ImportAudioDialog({
           )}
 
           {/* Progress display */}
-          {isProcessing && progress && (
+          {isProcessing && (progress || batchProgress) && (
             <div className="space-y-2">
               <div className="relative">
                 <div className="w-full bg-[var(--bg-elevated)] rounded-full h-3">
                   <div
                     className="bg-[var(--gold)] h-3 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${Math.min(progress.progress_percentage, 100)}%` }}
+                    style={{ width: `${displayedProgress}%` }}
                   />
                 </div>
                 <div className="flex justify-between text-xs text-[var(--fg2)] mt-1">
-                  <span>{progress.stage}</span>
-                  <span>{Math.round(progress.progress_percentage)}%</span>
+                  <span>{progress?.stage || batchProgress?.state}</span>
+                  <span>{Math.round(displayedProgress)}%</span>
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground text-center">{progress.message}</p>
+              {progress && <p className="text-sm text-muted-foreground text-center">{progress.message}</p>}
+              {batchProgress && (
+                <p className="text-sm text-[var(--fg2)] text-center">
+                  {t('File')} {batchProgress.current_index} {t('of')} {batchProgress.total}: {batchProgress.current_title}
+                  {' · '}{batchProgress.completed} {t('imported')}, {batchProgress.skipped} {t('skipped')}, {batchProgress.truncated} {t('not attempted')}, {batchProgress.failed} {t('failed')}
+                </p>
+              )}
             </div>
           )}
 
@@ -448,19 +538,19 @@ export function ImportAudioDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="min-w-0 gap-2 sm:flex-wrap sm:space-x-0">
           {!isProcessing && !error && (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button className="min-w-0" variant="outline" onClick={() => onOpenChange(false)}>
                 {t('Cancel')}
               </Button>
               <Button
                 onClick={handleStartImport}
-                className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
-                disabled={!fileInfo}
+                className="min-w-0 whitespace-normal bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                disabled={!fileInfo && batchFiles.length === 0}
               >
                 <Upload className="h-4 w-4 mr-2" />
-                {t('Import')}
+                {batchFiles.length > 0 ? `${t('Import')} ${batchFiles.length}` : t('Import')}
               </Button>
             </>
           )}

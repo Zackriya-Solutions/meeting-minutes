@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 function parseArgs(argv) {
   const args = { mode: 'release' };
@@ -194,6 +195,201 @@ function summaryMetrics(rows) {
   };
 }
 
+function normalizedOptional(value) {
+  const normalized = words(value).join(' ');
+  return normalized || null;
+}
+
+function f1(precision, recall) {
+  if (precision == null || recall == null) return null;
+  return precision + recall ? (2 * precision * recall) / (precision + recall) : 0;
+}
+
+function standupMetrics(rows) {
+  const meetingTypes = new Set([
+    'pure_status',
+    'status_plus_deep_dive',
+    'planning_sync',
+    'one_to_one',
+    'general_meeting',
+    'uncertain',
+  ]);
+  const reviewedStandupTypes = new Set(['pure_status', 'status_plus_deep_dive']);
+  const contrastTypes = new Set(['planning_sync', 'one_to_one', 'general_meeting']);
+  const recordingScopes = new Set(['complete', 'partial', 'unknown']);
+  const scoredRecordKinds = new Set([
+    'participant_update',
+    'decision',
+    'action',
+    'risk',
+    'deep_dive',
+    'unattributed_fact',
+  ]);
+  const successes = rows.filter((row) => row.success === true);
+  const sampleIds = new Set();
+  const seriesSplits = new Map();
+  const providerRows = new Map();
+  let protocolErrors = 0;
+  let qualityCount = 0;
+  let referenceRecords = 0;
+  let coveredReferenceRecords = 0;
+  let outputRecords = 0;
+  let unsupportedOutputRecords = 0;
+  let decisionActionOutputs = 0;
+  let unsupportedDecisionActions = 0;
+  let referenceActions = 0;
+  let outputActions = 0;
+  let matchedActions = 0;
+  let shownOwners = 0;
+  let correctOwners = 0;
+  let evidenceItems = 0;
+  let invalidEvidenceItems = 0;
+  let recordsMissingEvidence = 0;
+  let duplicateOutputs = 0;
+
+  for (const row of rows) {
+    if (!row.id || sampleIds.has(row.id)) protocolErrors += 1;
+    if (row.id) sampleIds.add(row.id);
+    if (!row.provider || row.provider === 'unknown'
+      || !row.schema_version || row.schema_version === 'UNASSIGNED'
+      || !row.prompt_version || row.prompt_version === 'UNASSIGNED') {
+      protocolErrors += 1;
+    }
+    if (!meetingTypes.has(row.meeting_type)) protocolErrors += 1;
+    if (!recordingScopes.has(row.recording_scope)) protocolErrors += 1;
+    if (row.provider && row.provider !== 'unknown') {
+      const provider = providerRows.get(row.provider) ?? [];
+      provider.push(row);
+      providerRows.set(row.provider, provider);
+    }
+    if (!row.series_id || !['train', 'dev', 'test'].includes(row.split)) {
+      protocolErrors += 1;
+    } else {
+      const splits = seriesSplits.get(row.series_id) ?? new Set();
+      splits.add(row.split);
+      seriesSplits.set(row.series_id, splits);
+    }
+  }
+  for (const splits of seriesSplits.values()) {
+    if (splits.size > 1) protocolErrors += 1;
+  }
+
+  for (const row of successes) {
+    const references = new Map(
+      (row.reference_records ?? [])
+        .filter((item) => item?.id && item?.kind)
+        .map((item) => [item.id, item]),
+    );
+    const evidenceOutputs = (row.hypothesis_records ?? []).filter((item) => item?.kind);
+    const outputs = evidenceOutputs.filter((item) => scoredRecordKinds.has(item.kind));
+    const validTimestamps = new Set(row.valid_timestamps ?? []);
+    if (references.size > 0) qualityCount += 1;
+    referenceRecords += references.size;
+    outputRecords += outputs.length;
+    referenceActions += [...references.values()].filter((item) => item.kind === 'action').length;
+    outputActions += outputs.filter((item) => item.kind === 'action').length;
+
+    const covered = new Set();
+    const matchedActionIds = new Set();
+    for (const output of evidenceOutputs) {
+      const evidence = Array.isArray(output.evidence) ? output.evidence : [];
+      if (evidence.length === 0) recordsMissingEvidence += 1;
+      for (const item of evidence) {
+        evidenceItems += 1;
+        if (!validTimestamps.has(item?.timestamp)) invalidEvidenceItems += 1;
+      }
+    }
+    for (const output of outputs) {
+      const reference = output.match_id ? references.get(output.match_id) : null;
+      const validMatch = Boolean(reference && reference.kind === output.kind);
+      if (!validMatch) unsupportedOutputRecords += 1;
+      if (['action', 'decision'].includes(output.kind)) {
+        decisionActionOutputs += 1;
+        if (!validMatch) unsupportedDecisionActions += 1;
+      }
+      if (validMatch) {
+        if (covered.has(reference.id)) duplicateOutputs += 1;
+        covered.add(reference.id);
+        if (output.kind === 'action') matchedActionIds.add(reference.id);
+      }
+
+      const owner = normalizedOptional(output.owner);
+      if (owner) {
+        shownOwners += 1;
+        if (validMatch && owner === normalizedOptional(reference.owner)) correctOwners += 1;
+      }
+    }
+    coveredReferenceRecords += covered.size;
+    matchedActions += matchedActionIds.size;
+  }
+
+  const actionPrecision = outputActions ? matchedActions / outputActions : null;
+  const actionRecall = referenceActions ? matchedActions / referenceActions : null;
+  const evidenceDenominator = evidenceItems + recordsMissingEvidence;
+  const providers = Object.fromEntries(
+    [...providerRows.entries()].sort(([left], [right]) => left.localeCompare(right)).map(
+      ([provider, providerSamples]) => [provider, {
+        count: providerSamples.length,
+        success_rate: providerSamples.filter((row) => row.success === true).length
+          / providerSamples.length,
+        p95_latency_ms: percentile(
+          providerSamples
+            .filter((row) => row.success === true)
+            .map((row) => row.latency_ms)
+            .filter(Number.isFinite),
+          0.95,
+        ),
+      }],
+    ),
+  );
+  return {
+    count: rows.length,
+    reviewed_standup_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && reviewedStandupTypes.has(row.meeting_type),
+    ).length,
+    pure_status_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && row.meeting_type === 'pure_status',
+    ).length,
+    status_plus_deep_dive_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && row.meeting_type === 'status_plus_deep_dive',
+    ).length,
+    contrast_count: rows.filter(
+      (row) => row.recording_scope === 'complete' && contrastTypes.has(row.meeting_type),
+    ).length,
+    uncertain_count: rows.filter((row) => row.meeting_type === 'uncertain').length,
+    complete_recording_count: rows.filter((row) => row.recording_scope === 'complete').length,
+    partial_recording_count: rows.filter((row) => row.recording_scope === 'partial').length,
+    unknown_recording_count: rows.filter((row) => row.recording_scope === 'unknown').length,
+    train_count: rows.filter((row) => row.split === 'train').length,
+    dev_count: rows.filter((row) => row.split === 'dev').length,
+    test_count: rows.filter((row) => row.split === 'test').length,
+    provider_count: providerRows.size,
+    providers,
+    success_rate: rows.length ? successes.length / rows.length : null,
+    p95_latency_ms: percentile(
+      successes.map((row) => row.latency_ms).filter(Number.isFinite),
+      0.95,
+    ),
+    quality_count: qualityCount,
+    protocol_error_count: protocolErrors,
+    reference_record_count: referenceRecords,
+    output_record_count: outputRecords,
+    fact_coverage: referenceRecords ? coveredReferenceRecords / referenceRecords : null,
+    unsupported_claim_rate: outputRecords ? unsupportedOutputRecords / outputRecords : null,
+    unsupported_decision_action_rate: decisionActionOutputs
+      ? unsupportedDecisionActions / decisionActionOutputs
+      : null,
+    action_precision: actionPrecision,
+    action_recall: actionRecall,
+    action_f1: f1(actionPrecision, actionRecall),
+    owner_precision_when_shown: shownOwners ? correctOwners / shownOwners : null,
+    invalid_evidence_rate: evidenceDenominator
+      ? (invalidEvidenceItems + recordsMissingEvidence) / evidenceDenominator
+      : null,
+    duplicate_output_rate: outputRecords ? duplicateOutputs / outputRecords : null,
+  };
+}
+
 function getMetric(metrics, dottedPath) {
   return dottedPath.split('.').reduce((value, key) => value?.[key], metrics);
 }
@@ -215,36 +411,47 @@ function evaluate(metrics, thresholds) {
   return failures;
 }
 
-try {
-  const args = parseArgs(process.argv.slice(2));
-  const datasetPath = args.dataset ?? process.env.MEMENTO_QUALITY_DATASET;
-  if (!datasetPath) {
-    throw new Error('dataset is required; pass --dataset or set MEMENTO_QUALITY_DATASET');
+function runCli() {
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    const datasetPath = args.dataset ?? process.env.MEMENTO_QUALITY_DATASET;
+    if (!datasetPath) {
+      throw new Error('dataset is required; pass --dataset or set MEMENTO_QUALITY_DATASET');
+    }
+    const thresholdsPath = args.thresholds ?? `evals/thresholds.${args.mode}.json`;
+    const dataset = loadJson(datasetPath, 'dataset');
+    const thresholds = loadJson(thresholdsPath, 'thresholds');
+    const metrics = {
+      transcription: transcriptionMetrics(dataset.transcription ?? []),
+      diarization: diarizationMetrics(dataset.diarization ?? [], dataset.frame_ms ?? 100),
+      retrieval: retrievalMetrics(dataset.retrieval ?? []),
+      summary: summaryMetrics(dataset.summary ?? []),
+      standup: standupMetrics(dataset.standup ?? []),
+    };
+    const failures = evaluate(metrics, thresholds);
+    const report = {
+      version: 1,
+      mode: args.mode,
+      dataset_id: dataset.dataset_id ?? path.basename(datasetPath),
+      generated_at: new Date().toISOString(),
+      passed: failures.length === 0,
+      metrics,
+      thresholds,
+      failures,
+    };
+    if (args.report) {
+      fs.writeFileSync(path.resolve(args.report), `${JSON.stringify(report, null, 2)}\n`);
+    }
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    process.exitCode = failures.length ? 1 : 0;
+  } catch (error) {
+    process.stderr.write(`quality gate error: ${error instanceof Error ? error.message : error}\n`);
+    process.exitCode = 2;
   }
-  const thresholdsPath = args.thresholds ?? `evals/thresholds.${args.mode}.json`;
-  const dataset = loadJson(datasetPath, 'dataset');
-  const thresholds = loadJson(thresholdsPath, 'thresholds');
-  const metrics = {
-    transcription: transcriptionMetrics(dataset.transcription ?? []),
-    diarization: diarizationMetrics(dataset.diarization ?? [], dataset.frame_ms ?? 100),
-    retrieval: retrievalMetrics(dataset.retrieval ?? []),
-    summary: summaryMetrics(dataset.summary ?? []),
-  };
-  const failures = evaluate(metrics, thresholds);
-  const report = {
-    version: 1,
-    mode: args.mode,
-    dataset_id: dataset.dataset_id ?? path.basename(datasetPath),
-    generated_at: new Date().toISOString(),
-    passed: failures.length === 0,
-    metrics,
-    thresholds,
-    failures,
-  };
-  if (args.report) fs.writeFileSync(path.resolve(args.report), `${JSON.stringify(report, null, 2)}\n`);
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  process.exitCode = failures.length ? 1 : 0;
-} catch (error) {
-  process.stderr.write(`quality gate error: ${error instanceof Error ? error.message : error}\n`);
-  process.exitCode = 2;
 }
+
+const isMain = process.argv[1]
+  && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMain) runCli();
+
+export { evaluate, runCli, standupMetrics };

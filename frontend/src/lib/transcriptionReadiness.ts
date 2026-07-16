@@ -3,6 +3,12 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 /** Minimal invoke signature — injectable so the readiness logic is unit-testable. */
 export type InvokeFn = <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
+export interface TranscriptionReadiness {
+  provider: string;
+  ready: boolean;
+  requiresLocalModel: boolean;
+}
+
 /**
  * Whether the CURRENTLY CONFIGURED transcription model is ready to record with.
  *
@@ -17,9 +23,9 @@ export type InvokeFn = <T = unknown>(cmd: string, args?: Record<string, unknown>
  *
  * `invoke` is injected (defaults to the real Tauri invoke) so tests can supply a stub.
  */
-export async function isConfiguredTranscriptionModelReady(
+export async function getConfiguredTranscriptionReadiness(
   invoke: InvokeFn = tauriInvoke as InvokeFn,
-): Promise<boolean> {
+): Promise<TranscriptionReadiness> {
   let provider = 'parakeet';
   try {
     const cfg = await invoke<{ provider?: string } | null>('api_get_transcript_config');
@@ -30,25 +36,43 @@ export async function isConfiguredTranscriptionModelReady(
 
   if (provider === 'gigaam') {
     const status = await invoke<{ model_present?: boolean; loaded?: boolean }>('gigaam_status');
-    return !!status?.loaded;
+    return { provider, ready: !!status?.loaded, requiresLocalModel: true };
   }
   if (provider === 'localWhisper' || provider === 'whisper') {
-    return await invoke<boolean>('whisper_has_available_models');
+    return {
+      provider,
+      ready: await invoke<boolean>('whisper_has_available_models'),
+      requiresLocalModel: true,
+    };
   }
   if (provider === 'parakeet') {
     await invoke('parakeet_init');
-    return await invoke<boolean>('parakeet_has_available_models');
+    return {
+      provider,
+      ready: await invoke<boolean>('parakeet_has_available_models'),
+      requiresLocalModel: true,
+    };
   }
   if (provider === 'salutespeech') {
     // Cloud — ready when usable via either a user Authorization Key OR the managed
     // Memento gateway. The backend resolves both (a bare auth_key check would wrongly
     // report "not ready" in the keyless managed build).
     try {
-      return await invoke<boolean>('salutespeech_is_configured');
+      return {
+        provider,
+        ready: await invoke<boolean>('salutespeech_is_configured'),
+        requiresLocalModel: false,
+      };
     } catch {
-      return false;
+      return { provider, ready: false, requiresLocalModel: false };
     }
   }
   // Cloud providers authenticate via API key; no local model to gate on.
-  return true;
+  return { provider, ready: true, requiresLocalModel: false };
+}
+
+export async function isConfiguredTranscriptionModelReady(
+  invoke: InvokeFn = tauriInvoke as InvokeFn,
+): Promise<boolean> {
+  return (await getConfiguredTranscriptionReadiness(invoke)).ready;
 }

@@ -31,11 +31,17 @@ pub struct CustomOpenAIConfig {
 }
 
 pub mod commands;
+pub mod content_window;
+pub mod corpus_runner;
 pub(crate) mod language_detection;
 pub mod llm_client;
 pub(crate) mod metadata;
 pub mod processor;
 pub mod service;
+pub mod standup;
+pub mod standup_notes;
+pub mod standup_suggestion;
+pub mod standup_workflow;
 pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;

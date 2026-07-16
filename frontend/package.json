@@ -28,7 +28,9 @@
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
         "typecheck": "tsc -p tsconfig.release.json --noEmit",
-        "quality:smoke": "node evals/quality-gate.mjs --mode smoke --dataset evals/fixtures/smoke.json --thresholds evals/thresholds.smoke.json",
+    "quality:smoke": "node evals/quality-gate.mjs --mode smoke --dataset evals/fixtures/smoke.json --thresholds evals/thresholds.smoke.json",
+    "quality:standup-test": "node evals/standup-metrics.test.mjs && python3 evals/prepare_standup_corpus_test.py && python3 evals/apply_standup_gold_test.py && python3 evals/apply_standup_matches_test.py",
+    "quality:standup": "node evals/quality-gate.mjs --mode standup --thresholds evals/thresholds.standup.json",
         "quality:gate": "node evals/quality-gate.mjs --mode release --thresholds evals/thresholds.release.json"
     },
     "dependencies": {
@@ -89,15 +91,6 @@
         "tailwind-merge": "^3.3.1",
         "tailwindcss-animate": "^1.0.7",
         "zod": "^3.25.71"
-    },
-    "pnpm": {
-        "overrides": {
-            "prosemirror-model": "1.25.3",
-            "prosemirror-state": "1.4.3",
-            "prosemirror-view": "1.41.3",
-            "prosemirror-transform": "1.10.4",
-            "prosemirror-tables": "1.8.1"
-        }
     },
     "devDependencies": {
         "@tailwindcss/typography": "^0.5.15",

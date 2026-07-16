@@ -18,6 +18,9 @@ interface SidebarItem {
 export interface CurrentMeeting {
   id: string;
   title: string;
+  createdAt?: string | null;
+  occurredAt?: string | null;
+  folderPath?: string | null;
 }
 
 // Search result type for transcript search
@@ -116,6 +119,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
   const [activeSummaryPolls, setActiveSummaryPolls] = useState<Map<string, NodeJS.Timeout>>(new Map());
+  const latestSearchRequestRef = React.useRef(0);
 
   // Use recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -127,10 +131,19 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
       try {
-        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
+        const meetings = await invoke('api_get_meetings') as Array<{
+          id: string;
+          title: string;
+          created_at: string;
+          occurred_at?: string | null;
+          folder_path?: string | null;
+        }>;
         const transformedMeetings = meetings.map((meeting: any) => ({
           id: meeting.id,
-          title: meeting.title
+          title: meeting.title,
+          createdAt: meeting.created_at,
+          occurredAt: meeting.occurred_at ?? null,
+          folderPath: meeting.folder_path ?? null,
         }));
         setMeetings(transformedMeetings);
         Analytics.trackBackendConnection(true);
@@ -160,7 +173,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       title: t('Meeting Notes'),
       type: 'folder' as const,
       children: [
-        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
+        ...meetings.map(meeting => ({
+          id: meeting.id,
+          title: meeting.title,
+          createdAt: meeting.createdAt,
+          occurredAt: meeting.occurredAt,
+          folderPath: meeting.folderPath,
+          type: 'file' as const,
+        }))
       ]
     },
   ];
@@ -205,7 +225,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Function to search through meeting transcripts
-  const searchTranscripts = async (query: string) => {
+  const searchTranscripts = React.useCallback(async (query: string) => {
+    const requestId = ++latestSearchRequestRef.current;
     if (!query.trim()) {
       setSearchResults([]);
       return;
@@ -216,14 +237,20 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 
       const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
-      setSearchResults(results);
+      if (requestId === latestSearchRequestRef.current) {
+        setSearchResults(results);
+      }
     } catch (error) {
       console.error('Error searching transcripts:', error);
-      setSearchResults([]);
+      if (requestId === latestSearchRequestRef.current) {
+        setSearchResults([]);
+      }
     } finally {
-      setIsSearching(false);
+      if (requestId === latestSearchRequestRef.current) {
+        setIsSearching(false);
+      }
     }
-  };
+  }, []);
 
   // Summary polling management
   const startSummaryPolling = React.useCallback((

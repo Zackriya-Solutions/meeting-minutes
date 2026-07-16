@@ -26,7 +26,7 @@ export function WelcomeStep() {
 
   return (
     <OnboardingContainer
-      title={t('Welcome to Meetily')}
+      title={t('Welcome to Memento')}
       description={t('Record. Transcribe. Summarize. All on your device.')}
       step={1}
       hideProgress={true}

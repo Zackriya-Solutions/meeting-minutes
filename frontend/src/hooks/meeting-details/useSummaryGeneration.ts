@@ -15,6 +15,46 @@ import {
   readPinnedSummaryLanguageDefault,
 } from '@/lib/summary-language-preferences';
 
+interface MeetingContentWindowSuggestion {
+  suggested: boolean;
+  selected: boolean;
+  primaryEndMs?: number | null;
+}
+
+async function applyMeetingContentWindow(
+  meetingId: string,
+  transcripts: Transcript[],
+): Promise<Transcript[]> {
+  try {
+    const suggestion = await invokeTauri<MeetingContentWindowSuggestion>(
+      'get_meeting_content_window_suggestion',
+      { meetingId },
+    );
+    const endMs = suggestion.primaryEndMs;
+    if (!suggestion.suggested || !suggestion.selected || endMs == null) {
+      return transcripts;
+    }
+    // The backend never selects a primary window when an untimed row exists. Keep this
+    // fail-closed guard as well so a stale preference cannot silently mix unknown-position
+    // transcript text into a supposedly confirmed time window.
+    if (transcripts.some((transcript) => transcript.audio_start_time == null)) {
+      return transcripts;
+    }
+    const filtered = transcripts.filter((transcript) => {
+      const startTime = transcript.audio_start_time;
+      return startTime != null && startTime * 1_000 <= endMs;
+    });
+    if (filtered.length === 0) return transcripts;
+    console.info(
+      `Using confirmed primary meeting window for summary: ${filtered.length}/${transcripts.length} segments`,
+    );
+    return filtered;
+  } catch (error) {
+    console.warn('Failed to apply meeting content window; using the full transcript:', error);
+    return transcripts;
+  }
+}
+
 async function resolveSummaryLanguage(
   meetingId: string,
   transcriptTexts: string[]
@@ -85,6 +125,22 @@ export function useSummaryGeneration({
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
+
+  const restorePersistedSummary = useCallback(async (): Promise<boolean> => {
+    try {
+      const existingSummary = await invokeTauri('api_get_summary', {
+        meetingId: meeting.id,
+      }) as any;
+      if (!existingSummary?.data) return false;
+      setAiSummary(existingSummary.data);
+      setSummaryStatus('completed');
+      setSummaryError(null);
+      return true;
+    } catch (error) {
+      console.error('Failed to reload persisted summary:', error);
+      return false;
+    }
+  }, [meeting.id, setAiSummary]);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -205,36 +261,23 @@ export function useSummaryGeneration({
           console.error('Backend returned error:', pollingResult.error);
           const errorMessage = pollingResult.error || (isRegeneration ? t('Summary regeneration failed') : t('Summary generation failed'));
 
-          // If this was a regeneration, try to restore previous summary from database
-          if (isRegeneration) {
-            try {
-              const existingSummary = await invokeTauri('api_get_summary', {
-                meetingId: meeting.id
-              }) as any;
-
-              if (existingSummary?.data) {
-                console.log('Restored previous summary after regeneration failure');
-                setAiSummary(existingSummary.data);
-                setSummaryStatus('completed');
-                setSummaryError(null);
-
-                // Show error toast with restoration message
-                toast.error(t('Failed to regenerate summary'), {
-                  description: `${errorMessage}. ${t('Your previous summary has been restored.')}`,
-                });
-
-                await Analytics.trackSummaryGenerationCompleted(
-                  modelConfig.provider,
-                  modelConfig.model,
-                  false,
-                  undefined,
-                  errorMessage
-                );
-                return;
-              }
-            } catch (error) {
-              console.error('Failed to reload summary after error:', error);
-            }
+          // A provider or polling error can arrive after the backend has already
+          // persisted a usable result. Always reload before replacing the content with
+          // an error state; this also restores the previous summary after regeneration.
+          if (await restorePersistedSummary()) {
+            toast.error(isRegeneration ? t('Failed to regenerate summary') : t('Summary status reported an error'), {
+              description: isRegeneration
+                ? `${errorMessage}. ${t('Your previous summary has been restored.')}`
+                : `${errorMessage}. ${t('The saved summary remains available.')}`,
+            });
+            await Analytics.trackSummaryGenerationCompleted(
+              modelConfig.provider,
+              modelConfig.model,
+              false,
+              undefined,
+              errorMessage
+            );
+            return;
           }
 
           // Continue with normal error handling if not regeneration or reload failed
@@ -291,9 +334,10 @@ export function useSummaryGeneration({
               duration: 4000,
             });
 
-            if (meetingName && onMeetingUpdated) {
-              await onMeetingUpdated();
-            }
+            // Refresh persisted meeting data even when the model did not return a
+            // new title. This makes a summary generated while the user is on
+            // another screen visible immediately when they return.
+            if (onMeetingUpdated) await onMeetingUpdated();
 
             await Analytics.trackSummaryGenerationCompleted(
               modelConfig.provider,
@@ -371,20 +415,23 @@ export function useSummaryGeneration({
             true
           );
 
-          if (meetingName && onMeetingUpdated) {
-            await onMeetingUpdated();
-          }
+          if (onMeetingUpdated) await onMeetingUpdated();
         }
       });
     } catch (error) {
       console.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setSummaryError(errorMessage);
-      setSummaryStatus('error');
+      const restored = await restorePersistedSummary();
+      if (!restored) {
+        setSummaryError(errorMessage);
+        setSummaryStatus('error');
+      }
       // Note: We don't clear the summary here because the backend has already restored from backup
 
       toast.error(isRegeneration ? t('Failed to regenerate summary') : t('Failed to generate summary'), {
-        description: errorMessage,
+        description: restored
+          ? `${errorMessage}. ${t('The saved summary remains available.')}`
+          : errorMessage,
       });
 
       await Analytics.trackSummaryGenerationCompleted(
@@ -404,6 +451,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    restorePersistedSummary,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation
@@ -616,7 +664,8 @@ export function useSummaryGeneration({
       }
     }
 
-    const summaryPayload = buildSummaryTranscriptPayload(allTranscripts);
+    const summaryTranscripts = await applyMeetingContentWindow(meeting.id, allTranscripts);
+    const summaryPayload = buildSummaryTranscriptPayload(summaryTranscripts);
 
     await processSummary({
       ...summaryPayload,
@@ -634,8 +683,9 @@ export function useSummaryGeneration({
       return;
     }
 
+    const summaryTranscripts = await applyMeetingContentWindow(meeting.id, allTranscripts);
     await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
+      ...buildSummaryTranscriptPayload(summaryTranscripts),
       isRegeneration: true
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);

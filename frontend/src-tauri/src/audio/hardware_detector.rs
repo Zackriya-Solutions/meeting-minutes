@@ -1,3 +1,4 @@
+#[cfg(any(target_os = "windows", test))]
 use std::path::Path;
 use std::sync::OnceLock;
 use log::info;
@@ -196,6 +197,7 @@ impl HardwareProfile {
         Self::has_windows_vulkan_loader(Path::new(r"C:\Windows"))
     }
 
+    #[cfg(any(target_os = "windows", test))]
     fn has_windows_vulkan_loader(system_root: &Path) -> bool {
         system_root.join("System32").join("vulkan-1.dll").is_file()
     }

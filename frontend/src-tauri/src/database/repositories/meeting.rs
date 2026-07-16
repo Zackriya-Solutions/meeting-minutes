@@ -2,7 +2,7 @@ use crate::api::{MeetingDetails, MeetingTranscript};
 use crate::database::models::{MeetingModel, Transcript};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqliteConnection, SqlitePool};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct MeetingsRepository;
 
@@ -61,11 +61,12 @@ impl MeetingsRepository {
         let mut transaction = conn.begin().await?;
 
         // Get meeting details
-        let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
-                .bind(meeting_id)
-                .fetch_optional(&mut *transaction)
-                .await?;
+        let meeting: Option<MeetingModel> = sqlx::query_as(
+            "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
 
         if meeting.is_none() {
             transaction.rollback().await?;
@@ -121,11 +122,12 @@ impl MeetingsRepository {
             ));
         }
 
-        let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
-                .bind(meeting_id)
-                .fetch_optional(pool)
-                .await?;
+        let meeting: Option<MeetingModel> = sqlx::query_as(
+            "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
 
         Ok(meeting)
     }
@@ -193,19 +195,17 @@ impl MeetingsRepository {
         }
 
         // Get total count of transcripts for this meeting
-        let total: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?"
-        )
-        .bind(meeting_id)
-        .fetch_one(pool)
-        .await?;
+        let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_one(pool)
+            .await?;
 
         // Get paginated transcripts ordered by audio_start_time
         let transcripts = sqlx::query_as::<_, Transcript>(
             "SELECT * FROM transcripts
              WHERE meeting_id = ?
              ORDER BY audio_start_time ASC
-             LIMIT ? OFFSET ?"
+             LIMIT ? OFFSET ?",
         )
         .bind(meeting_id)
         .bind(limit)
@@ -244,6 +244,14 @@ impl MeetingsRepository {
             return Ok(false);
         }
         transaction.commit().await?;
+        if let Err(error) =
+            crate::collections::auto_assign_meeting(pool, meeting_id, new_title).await
+        {
+            warn!(
+                "Could not apply automatic series rules after renaming meeting {}: {}",
+                meeting_id, error
+            );
+        }
         Ok(true)
     }
 
@@ -277,6 +285,14 @@ impl MeetingsRepository {
             .await?;
 
         transaction.commit().await?;
+        if let Err(error) =
+            crate::collections::auto_assign_meeting(pool, meeting_id, new_title).await
+        {
+            warn!(
+                "Could not apply automatic series rules after generated title for {}: {}",
+                meeting_id, error
+            );
+        }
         Ok(true)
     }
 }
@@ -296,26 +312,104 @@ async fn delete_meeting_with_transaction(
         return Ok(false);
     }
 
-    // Delete from related tables in proper order
-    // 1. Delete from transcript_chunks
+    // SQLite foreign-key enforcement is not guaranteed on every existing app
+    // connection, so meeting-scoped data is removed explicitly.
+    sqlx::query("DELETE FROM action_items WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM standup_records WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM standup_private_notes WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM meeting_collections WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM pending_merges WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM entity_mentions WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM speaker_name_candidates WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM rejected_speaker_name_candidate_instances WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM rejected_speaker_name_observations WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    // Vector rows are not foreign-key linked to chunks. Remove them before the
+    // source chunks so deleting a meeting cannot leave searchable transcript
+    // content behind when foreign-key enforcement is disabled.
+    let embeddings_table_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+         WHERE type = 'table' AND name = 'chunk_embeddings')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if embeddings_table_exists {
+        sqlx::query(
+            "DELETE FROM chunk_embeddings \
+             WHERE chunk_id IN (SELECT id FROM chunks WHERE meeting_id = ?)",
+        )
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+
+    sqlx::query("DELETE FROM chunks WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM jobs WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    // Delete from the older related tables in proper order.
     sqlx::query("DELETE FROM transcript_chunks WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 2. Delete from summary_processes
     sqlx::query("DELETE FROM summary_processes WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 3. Delete from transcripts
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 4. Finally, delete the meeting
+    sqlx::query("DELETE FROM app_settings_kv WHERE key = ?")
+        .bind(crate::summary::content_window::preference_key(meeting_id))
+        .execute(&mut *transaction)
+        .await?;
+
+    // Finally, delete the meeting itself.
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
@@ -359,32 +453,135 @@ mod tests {
         let pool = prefs_test_pool().await;
 
         // Untouched meeting: both prefs unset.
-        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1")
+            .await
+            .unwrap();
         assert_eq!(prefs, Some((None, None)));
 
         // Pill choices: speaker ID off, 3 expected speakers.
-        let updated =
-            MeetingsRepository::set_diarization_prefs(&pool, "m1", Some(false), Some(3))
-                .await
-                .unwrap();
+        let updated = MeetingsRepository::set_diarization_prefs(&pool, "m1", Some(false), Some(3))
+            .await
+            .unwrap();
         assert!(updated);
-        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1")
+            .await
+            .unwrap();
         assert_eq!(prefs, Some((Some(false), Some(3))));
 
         // Nulls reset back to defaults.
-        MeetingsRepository::set_diarization_prefs(&pool, "m1", None, None).await.unwrap();
-        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        MeetingsRepository::set_diarization_prefs(&pool, "m1", None, None)
+            .await
+            .unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1")
+            .await
+            .unwrap();
         assert_eq!(prefs, Some((None, None)));
     }
 
     #[tokio::test]
     async fn diarization_prefs_missing_meeting_and_empty_id() {
         let pool = prefs_test_pool().await;
-        assert_eq!(MeetingsRepository::get_diarization_prefs(&pool, "nope").await.unwrap(), None);
-        assert!(!MeetingsRepository::set_diarization_prefs(&pool, "nope", Some(true), None)
+        assert_eq!(
+            MeetingsRepository::get_diarization_prefs(&pool, "nope")
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            !MeetingsRepository::set_diarization_prefs(&pool, "nope", Some(true), None)
+                .await
+                .unwrap()
+        );
+        assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ")
+            .await
+            .is_err());
+        assert!(
+            MeetingsRepository::set_diarization_prefs(&pool, "", None, None)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_meeting_removes_standup_and_private_workflow_data() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT)",
+            "CREATE TABLE action_items(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE standup_records(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE standup_private_notes(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
+            "CREATE TABLE meeting_collections(meeting_id TEXT, collection_id INTEGER)",
+            "CREATE TABLE pending_merges(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE entity_mentions(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE rejected_speaker_name_candidate_instances(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE rejected_speaker_name_observations(meeting_id TEXT, candidate_hash TEXT, evidence_start_ms INTEGER, evidence_kind TEXT)",
+            "CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
+            "CREATE TABLE chunk_embeddings(chunk_id INTEGER PRIMARY KEY)",
+            "CREATE TABLE jobs(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT)",
+            "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO meetings VALUES('m1', 'Standup')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for statement in [
+            "INSERT INTO action_items(meeting_id) VALUES('m1')",
+            "INSERT INTO standup_records(meeting_id) VALUES('m1')",
+            "INSERT INTO standup_private_notes(meeting_id, text) VALUES('m1', 'secret')",
+            "INSERT INTO meeting_collections VALUES('m1', 1)",
+            "INSERT INTO pending_merges(meeting_id) VALUES('m1')",
+            "INSERT INTO entity_mentions(meeting_id) VALUES('m1')",
+            "INSERT INTO speaker_name_candidates(meeting_id) VALUES('m1')",
+            "INSERT INTO rejected_speaker_name_candidate_instances(meeting_id) VALUES('m1')",
+            "INSERT INTO rejected_speaker_name_observations VALUES('m1', 'hash', 1000, 'direct_address')",
+            "INSERT INTO chunks(id, meeting_id, text) VALUES(42, 'm1', 'private transcript')",
+            "INSERT INTO chunk_embeddings(chunk_id) VALUES(42)",
+            "INSERT INTO jobs(meeting_id) VALUES('m1')",
+            "INSERT INTO app_settings_kv(key, value) VALUES('summary.content_window.m1', 'primary:0:1000:2000:1')",
+            "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
+            "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
+            "INSERT INTO transcripts(meeting_id) VALUES('m1')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+
+        assert!(MeetingsRepository::delete_meeting(&pool, "m1")
             .await
             .unwrap());
-        assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ").await.is_err());
-        assert!(MeetingsRepository::set_diarization_prefs(&pool, "", None, None).await.is_err());
+        for table in [
+            "meetings",
+            "action_items",
+            "standup_records",
+            "standup_private_notes",
+            "meeting_collections",
+            "pending_merges",
+            "entity_mentions",
+            "speaker_name_candidates",
+            "rejected_speaker_name_candidate_instances",
+            "rejected_speaker_name_observations",
+            "chunks",
+            "chunk_embeddings",
+            "jobs",
+            "app_settings_kv",
+            "transcript_chunks",
+            "summary_processes",
+            "transcripts",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 0, "{table} still contains meeting-scoped data");
+        }
     }
 }

@@ -29,7 +29,9 @@ macro_rules! perf_trace {
 }
 
 // Make these macros available to other modules
+#[allow(unused_imports)]
 pub(crate) use perf_debug;
+#[allow(unused_imports)]
 pub(crate) use perf_trace;
 
 // Re-export async logging macros for external use (removed due to macro conflicts)
@@ -44,6 +46,7 @@ pub mod console_utils;
 pub mod database;
 pub mod jobs;
 pub mod llm;
+pub mod meeting_detection;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -225,14 +228,6 @@ fn get_transcription_status() -> TranscriptionStatus {
         chunks_in_queue: 0,
         is_processing: false,
         last_activity_ms: 0,
-    }
-}
-
-#[tauri::command]
-fn read_audio_file(file_path: String) -> Result<Vec<u8>, String> {
-    match std::fs::read(&file_path) {
-        Ok(data) => Ok(data),
-        Err(e) => Err(format!("Failed to read audio file: {}", e)),
     }
 }
 
@@ -424,61 +419,75 @@ pub fn run() {
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
+        .manage(meeting_detection::AutoMeetingDetectionState::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+            let corpus_mode = summary::corpus_runner::corpus_mode_requested();
 
-            // Initialize system tray
-            if let Err(e) = tray::create_tray(_app.handle()) {
-                log::error!("Failed to create system tray: {}", e);
+            if corpus_mode {
+                log::info!("Starting isolated standup corpus mode");
             }
 
-            // Initialize notification system with proper defaults
-            log::info!("Initializing notification system...");
-            let app_for_notif = _app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let notif_state = app_for_notif.state::<NotificationManagerState<tauri::Wry>>();
-                match notifications::commands::initialize_notification_manager(app_for_notif.clone()).await {
-                    Ok(manager) => {
-                        // Set default consent and permissions on first launch
-                        if let Err(e) = manager.set_consent(true).await {
-                            log::error!("Failed to set initial consent: {}", e);
+            if !corpus_mode {
+                // Initialize system tray
+                if let Err(e) = tray::create_tray(_app.handle()) {
+                    log::error!("Failed to create system tray: {}", e);
+                }
+
+                // Initialize notification system with proper defaults
+                log::info!("Initializing notification system...");
+                let app_for_notif = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let notif_state = app_for_notif.state::<NotificationManagerState<tauri::Wry>>();
+                    match notifications::commands::initialize_notification_manager(app_for_notif.clone()).await {
+                        Ok(manager) => {
+                            // Set default consent and permissions on first launch
+                            if let Err(e) = manager.set_consent(true).await {
+                                log::error!("Failed to set initial consent: {}", e);
+                            }
+                            if let Err(e) = manager.request_permission().await {
+                                log::error!("Failed to request initial permission: {}", e);
+                            }
+
+                            // Store the initialized manager
+                            let mut state_lock = notif_state.write().await;
+                            *state_lock = Some(manager);
+                            log::info!("Notification system initialized with default permissions");
                         }
-                        if let Err(e) = manager.request_permission().await {
-                            log::error!("Failed to request initial permission: {}", e);
+                        Err(e) => {
+                            log::error!("Failed to initialize notification manager: {}", e);
                         }
-
-                        // Store the initialized manager
-                        let mut state_lock = notif_state.write().await;
-                        *state_lock = Some(manager);
-                        log::info!("Notification system initialized with default permissions");
                     }
-                    Err(e) => {
-                        log::error!("Failed to initialize notification manager: {}", e);
+                });
+
+                // Set models directory to use app_data_dir (unified storage location)
+                whisper_engine::commands::set_models_directory(&_app.handle());
+
+                // Initialize Whisper engine on startup
+                tauri::async_runtime::spawn(async {
+                    if let Err(e) = whisper_engine::commands::whisper_init().await {
+                        log::error!("Failed to initialize Whisper engine on startup: {}", e);
                     }
-                }
-            });
+                });
 
-            // Set models directory to use app_data_dir (unified storage location)
-            whisper_engine::commands::set_models_directory(&_app.handle());
+                // Start the privacy-preserving process/microphone signal detector. It remains
+                // active while the app is hidden in the tray and never starts recording itself.
+                _app
+                    .state::<meeting_detection::AutoMeetingDetectionState>()
+                    .start(_app.handle().clone());
 
-            // Initialize Whisper engine on startup
-            tauri::async_runtime::spawn(async {
-                if let Err(e) = whisper_engine::commands::whisper_init().await {
-                    log::error!("Failed to initialize Whisper engine on startup: {}", e);
-                }
-            });
+                // Set Parakeet models directory
+                parakeet_engine::commands::set_models_directory(&_app.handle());
 
-            // Set Parakeet models directory
-            parakeet_engine::commands::set_models_directory(&_app.handle());
-
-            // Initialize Parakeet engine on startup
-            tauri::async_runtime::spawn(async {
-                if let Err(e) = parakeet_engine::commands::parakeet_init().await {
-                    log::error!("Failed to initialize Parakeet engine on startup: {}", e);
-                }
-            });
+                // Initialize Parakeet engine on startup
+                tauri::async_runtime::spawn(async {
+                    if let Err(e) = parakeet_engine::commands::parakeet_init().await {
+                        log::error!("Failed to initialize Parakeet engine on startup: {}", e);
+                    }
+                });
+            }
 
             // Initialize ModelManager for summary engine (async, non-blocking)
             let app_handle_for_model_manager = _app.handle().clone();
@@ -504,29 +513,77 @@ pub fn run() {
 
             // Store the process-wide app handle for the background job runner (which owns
             // no AppHandle). Must precede DB init, since that spawns the job runner.
-            pipeline::diarization_commands::set_app_handle(_app.handle().clone());
+            if !corpus_mode {
+                pipeline::diarization_commands::set_app_handle(_app.handle().clone());
+            }
 
             // Initialize database (handles first launch detection and conditional setup)
             tauri::async_runtime::block_on(async {
-                database::setup::initialize_database_on_startup(&_app.handle()).await
+                database::setup::initialize_database_on_startup(
+                    &_app.handle(),
+                    !corpus_mode,
+                    !corpus_mode,
+                )
+                .await
             })
             .expect("Failed to initialize database");
 
-            // Load the local embedding model in the background if it's already downloaded
-            // (enables the vector branch of search/RAG). Never blocks startup.
-            {
-                let app_handle = _app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    pipeline::commands::init_embedder_at_startup(&app_handle).await;
-                });
-            }
+            if !corpus_mode {
+                // Load the local embedding model in the background if it's already downloaded
+                // (enables the vector branch of search/RAG). Never blocks startup.
+                {
+                    let app_handle = _app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        pipeline::commands::init_embedder_at_startup(&app_handle).await;
+                    });
+                }
 
-            // Load the GigaAM transcription model in the background if downloaded.
-            {
-                let app_handle = _app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
-                });
+                // Load the GigaAM transcription model in the background if downloaded.
+                {
+                    let app_handle = _app.handle().clone();
+                    #[cfg(debug_assertions)]
+                    let batch_folder = std::env::var_os("MEETILY_BATCH_IMPORT_FOLDER")
+                        .map(std::path::PathBuf::from);
+                    #[cfg(debug_assertions)]
+                    let batch_provider = std::env::var("MEETILY_BATCH_IMPORT_PROVIDER").ok();
+                    #[cfg(debug_assertions)]
+                    let batch_model = std::env::var("MEETILY_BATCH_IMPORT_MODEL").ok();
+                    #[cfg(debug_assertions)]
+                    let batch_language = std::env::var("MEETILY_BATCH_IMPORT_LANGUAGE").ok();
+                    #[cfg(debug_assertions)]
+                    let batch_report = std::env::var_os("MEETILY_BATCH_IMPORT_REPORT")
+                        .map(std::path::PathBuf::from);
+                    tauri::async_runtime::spawn(async move {
+                        gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
+                        #[cfg(debug_assertions)]
+                        if let Some(folder) = batch_folder {
+                            log::info!(
+                                "Starting configured resumable batch import from {}",
+                                folder.display()
+                            );
+                            match audio::import::start_batch_import_folder(
+                                app_handle,
+                                folder,
+                                batch_language,
+                                batch_model,
+                                batch_provider,
+                                batch_report,
+                            )
+                            .await
+                            {
+                                Ok(result) => log::info!(
+                                    "Configured batch import complete: {} imported, {} skipped, {} failed",
+                                    result.imported.len(),
+                                    result.skipped.len(),
+                                    result.failed.len()
+                                ),
+                                Err(error) => {
+                                    log::error!("Configured batch import failed: {}", error)
+                                }
+                            }
+                        }
+                    });
+                }
             }
 
             // Initialize bundled templates directory for dynamic template discovery
@@ -539,11 +596,66 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
+            // Explicit local corpus automation. It is inert unless meeting IDs are supplied;
+            // ordinary users never trigger evaluation work at startup.
+            if let Ok(raw_ids) = std::env::var("MEETILY_STANDUP_CORPUS_IDS") {
+                let meeting_ids = raw_ids
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if !meeting_ids.is_empty() {
+                    let provider = std::env::var("MEETILY_STANDUP_CORPUS_PROVIDER")
+                        .unwrap_or_else(|_| "builtin-ai".to_string());
+                    let model = std::env::var("MEETILY_STANDUP_CORPUS_MODEL")
+                        .unwrap_or_else(|_| "qwen3.5:4b".to_string());
+                    let summary_language =
+                        std::env::var("MEETILY_STANDUP_CORPUS_LANGUAGE").ok();
+                    let overwrite = summary::corpus_runner::corpus_overwrite_requested();
+                    let report_path = std::env::var_os("MEETILY_STANDUP_CORPUS_REPORT")
+                        .map(std::path::PathBuf::from);
+                    let app_handle = _app.handle().clone();
+                    if let Some(state) = _app.try_state::<state::AppState>() {
+                        let pool = state.db_manager.pool().clone();
+                        tauri::async_runtime::spawn(async move {
+                            match summary::corpus_runner::run_standup_corpus(
+                                app_handle,
+                                pool,
+                                meeting_ids,
+                                provider,
+                                model,
+                                summary_language,
+                                overwrite,
+                                report_path,
+                            )
+                            .await
+                            {
+                                Ok(report) => log::info!(
+                                    "Standup corpus run complete: {} completed, {} skipped, {} declined, {} failed",
+                                    report.completed,
+                                    report.skipped,
+                                    report.declined,
+                                    report.failed
+                                ),
+                                Err(error) => log::error!("Standup corpus run failed: {error}"),
+                            }
+                        });
+                    } else {
+                        log::error!(
+                            "Standup corpus run cannot start before the local database is initialized"
+                        );
+                    }
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+                if window.label() == "main"
+                    && !summary::corpus_runner::corpus_mode_requested()
+                {
                     api.prevent_close();
                     if let Err(e) = window.hide() {
                         log::error!("Failed to hide main window on close request: {}", e);
@@ -556,6 +668,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             search::commands::search_meetings,
             search::commands::rag_ask,
+            search::commands::rag_get_latest_session,
             pipeline::commands::embedder_status,
             pipeline::commands::indexing_status,
             pipeline::commands::embedder_download_model,
@@ -566,11 +679,15 @@ pub fn run() {
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
             pipeline::diarization_commands::set_meeting_diarization_prefs,
+            pipeline::speaker_names::scan_speaker_name_candidates,
+            pipeline::speaker_names::list_speaker_name_candidates,
+            pipeline::speaker_names::review_speaker_name_candidate,
             gigaam_engine::commands::gigaam_status,
             gigaam_engine::commands::gigaam_download_model,
             gigaam_engine::commands::gigaam_select_variant,
             gigaam_engine::commands::gigaam_transcribe_audio,
             salutespeech::salutespeech_is_configured,
+            salutespeech::salutespeech_can_be_selected,
             collections::commands::create_collection,
             collections::commands::rename_collection,
             collections::commands::delete_collection,
@@ -581,14 +698,19 @@ pub fn run() {
             collections::commands::save_search,
             collections::commands::suggest_meeting_series,
             collections::commands::accept_series_suggestion,
+            collections::commands::set_series_auto_add,
+            collections::commands::convert_collection_to_series,
             collections::commands::run_backfill,
             collections::commands::set_app_setting,
             collections::commands::get_app_settings,
+            database::managed_defaults::resolve_managed_defaults_migration,
             start_recording,
             stop_recording,
             is_recording,
             get_transcription_status,
-            read_audio_file,
+            meeting_detection::get_auto_meeting_detection_status,
+            audio::export::get_meeting_audio_path,
+            audio::export::export_meeting_audio_mp3,
             save_transcript,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
@@ -727,6 +849,18 @@ pub fn run() {
             summary::commands::api_save_meeting_detected_summary_language,
             summary::commands::api_detect_transcript_summary_language,
             summary::commands::api_cancel_summary,
+            summary::content_window::get_meeting_content_window_suggestion,
+            summary::content_window::set_meeting_content_window_preference,
+            summary::standup_workflow::list_standup_records,
+            summary::standup_workflow::review_standup_record,
+            summary::standup_workflow::set_standup_action_status,
+            summary::standup_workflow::get_standup_prebrief,
+            summary::standup_workflow::get_standup_series_digest,
+            summary::corpus_runner::start_standup_corpus_run,
+            summary::standup_notes::list_standup_private_notes,
+            summary::standup_notes::create_standup_private_note,
+            summary::standup_notes::set_standup_private_note_status,
+            summary::standup_suggestion::suggest_summary_template,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
@@ -804,8 +938,11 @@ pub fn run() {
             audio::retranscription::is_retranscription_in_progress_command,
             // Import audio commands
             audio::import::select_and_validate_audio_command,
+            audio::import::select_and_validate_audio_folder_command,
             audio::import::validate_audio_file_command,
             audio::import::start_import_audio_command,
+            audio::import::start_batch_import_audio_command,
+            audio::import::start_batch_import_folder_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
         ])
@@ -819,6 +956,9 @@ pub fn run() {
                 }
                 tauri::RunEvent::Exit => {
                     log::info!("Application exiting, cleaning up resources...");
+                    _app_handle
+                        .state::<meeting_detection::AutoMeetingDetectionState>()
+                        .stop();
                     tauri::async_runtime::block_on(async {
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
