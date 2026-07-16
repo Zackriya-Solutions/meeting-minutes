@@ -309,6 +309,7 @@ impl SummaryService {
         // Resolve both credential and transport. Managed DeepSeek bootstrap returns a
         // server-selected base URL; keeping only its token breaks local/pilot gateways.
         let mut effective_model_name = model_name.clone();
+        let mut deepseek_max_tokens = None;
         let (api_key, deepseek_base_url) = if provider == LLMProvider::Ollama
             || provider == LLMProvider::BuiltInAI
             || provider == LLMProvider::CustomOpenAI
@@ -338,9 +339,10 @@ impl SummaryService {
                         effective_model_name = transport.model;
                     }
                     info!(
-                        "Using DeepSeek transport at {} with model {}",
-                        transport.base_url, effective_model_name
+                        "Using DeepSeek transport at {} with model {} and max_tokens={}",
+                        transport.base_url, effective_model_name, transport.max_tokens
                     );
+                    deepseek_max_tokens = Some(transport.max_tokens);
                     (transport.api_key, Some(transport.base_url))
                 }
                 None => {
@@ -419,6 +421,11 @@ impl SummaryService {
             custom_openai_api_key.unwrap_or_default()
         } else {
             api_key
+        };
+        let generation_max_tokens = if provider == LLMProvider::DeepSeek {
+            deepseek_max_tokens
+        } else {
+            custom_openai_max_tokens
         };
 
         // Dynamically fetch context size based on provider and model
@@ -510,7 +517,7 @@ impl SummaryService {
             ollama_endpoint.as_deref(),
             custom_openai_endpoint.as_deref(),
             deepseek_base_url.as_deref(),
-            custom_openai_max_tokens,
+            generation_max_tokens,
             custom_openai_temperature,
             custom_openai_top_p,
         );
@@ -530,7 +537,7 @@ impl SummaryService {
             ollama_endpoint.as_deref(),
             custom_openai_endpoint.as_deref(),
             deepseek_base_url.as_deref(),
-            custom_openai_max_tokens,
+            generation_max_tokens,
             custom_openai_temperature,
             custom_openai_top_p,
             app_data_dir.as_ref(),
