@@ -124,10 +124,15 @@ fn record_key(kind: &str, payload: &Value) -> String {
         .get("category")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let owner = payload
+        .get("owner")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     format!(
-        "{kind}|{}|{}|{}|{}",
+        "{kind}|{}|{}|{}|{}|{}",
         normalized_identity(participant),
         category,
+        normalized_identity(owner),
         evidence_timestamps(payload),
         normalized_identity(identity)
     )
@@ -552,14 +557,14 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
                         THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at) END < \
+                        ELSE julianday(source.created_at, 'localtime') END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
                         THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at) END \
+                        ELSE julianday(current.created_at, 'localtime') END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
              ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
                            THEN julianday(source.occurred_at) \
-                           ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
+                           ELSE julianday(source.created_at, 'localtime') END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -596,7 +601,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
                     source.id AS source_id, source.title AS source_title, \
                     CASE WHEN source.occurred_at IS NOT NULL \
                          THEN julianday(source.occurred_at) \
-                         ELSE julianday(source.created_at) END AS source_time \
+                         ELSE julianday(source.created_at, 'localtime') END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -606,10 +611,10 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
                         THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at) END < \
+                        ELSE julianday(source.created_at, 'localtime') END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
                         THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at) END \
+                        ELSE julianday(current.created_at, 'localtime') END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
@@ -618,7 +623,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              FROM eligible \
          ) \
          SELECT id, kind, payload, source_id, source_title FROM ranked \
-         WHERE kind_rank <= 40 ORDER BY source_time DESC, id DESC",
+         WHERE kind_rank <= 5 ORDER BY source_time DESC, id DESC",
     )
     .bind(meeting_id)
     .fetch_all(pool)
