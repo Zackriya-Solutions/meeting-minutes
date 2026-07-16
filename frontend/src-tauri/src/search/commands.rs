@@ -47,6 +47,7 @@ pub async fn search_meetings(
     let pool = state.db_manager.pool();
     let filters: SearchFilters = filters.unwrap_or_default().into();
 
+    let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
     // Embed the query for the vector branch (None → FTS-only when no model is loaded).
     let query_embedding = crate::pipeline::embedder::embed_query(query.clone())
         .await

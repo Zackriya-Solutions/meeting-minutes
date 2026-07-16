@@ -155,13 +155,16 @@ pub async fn ask(
 
     let (filters, router_scope, _label) = scope.resolve();
 
-    // Embed the question for the vector branch (None → FTS-only when no model is loaded).
-    let query_embedding = crate::pipeline::embedder::embed_query(query.to_string())
-        .await
-        .and_then(|r| r.ok());
-    let hits = HybridSearch::search(pool, query, query_embedding.as_deref(), &filters, RAG_TOP_K)
-        .await
-        .map_err(|e| format!("retrieval failed: {e}"))?;
+    let hits = {
+        let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
+        // Embed the question for the vector branch (None → FTS-only when no model is loaded).
+        let query_embedding = crate::pipeline::embedder::embed_query(query.to_string())
+            .await
+            .and_then(|r| r.ok());
+        HybridSearch::search(pool, query, query_embedding.as_deref(), &filters, RAG_TOP_K)
+            .await
+            .map_err(|e| format!("retrieval failed: {e}"))?
+    };
     if !retrieval_is_sufficient(&hits) {
         // Empty or low-confidence retrieval → don't call the LLM at all.
         return Ok(RagAnswer { answer: NOT_FOUND_MESSAGE.to_string(), citations: vec![], found: false, warning: None });

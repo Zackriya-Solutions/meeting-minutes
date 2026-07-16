@@ -178,6 +178,7 @@ async fn activate_model<R: Runtime>(
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
+    let _switch_guard = embedder::model_index_write_guard().await;
     crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
         .await
         .map_err(|e| e.to_string())?;
@@ -375,6 +376,19 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
     let kind = selected_kind(state.db_manager.pool()).await;
     if model_present(&base, kind) {
         let dir = model_dir(&base, kind);
+        let candidate =
+            match tokio::task::spawn_blocking(move || embedder::load_kind(dir, kind)).await {
+                Ok(Ok(candidate)) => candidate,
+                Ok(Err(e)) => {
+                    log::warn!("failed to load embedder at startup: {e}");
+                    return;
+                }
+                Err(e) => {
+                    log::warn!("embedding startup task failed: {e}");
+                    return;
+                }
+            };
+        let switch_guard = embedder::model_index_write_guard().await;
         if let Err(e) = crate::vector::ensure_chunk_embeddings_table_for_dim(
             state.db_manager.pool(),
             kind.dim(),
@@ -384,31 +398,21 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
             log::warn!("failed to prepare vector table for {}: {e}", kind.id());
             return;
         }
-        let loaded = tokio::task::spawn_blocking(move || {
-            if let Err(e) = embedder::load_global_kind(dir, kind) {
-                log::warn!("failed to load embedder at startup: {e}");
-                false
-            } else {
-                true
-            }
-        })
+        embedder::install_global(candidate);
+        drop(switch_guard);
+        match crate::jobs::store::enqueue_unique(
+            state.db_manager.pool(),
+            crate::jobs::kind::BACKFILL,
+            None,
+            &serde_json::json!({ "reason": "startup", "model": kind.id() }),
+        )
         .await
-        .unwrap_or(false);
-        if loaded {
-            match crate::jobs::store::enqueue_unique(
-                state.db_manager.pool(),
-                crate::jobs::kind::BACKFILL,
-                None,
-                &serde_json::json!({ "reason": "startup", "model": kind.id() }),
-            )
-            .await
-            {
-                Ok(outcome) if outcome.created => {
-                    log::info!("queued archive index repair after embedder startup")
-                }
-                Ok(_) => {}
-                Err(e) => log::warn!("failed to queue startup archive repair: {e}"),
+        {
+            Ok(outcome) if outcome.created => {
+                log::info!("queued archive index repair after embedder startup")
             }
+            Ok(_) => {}
+            Err(e) => log::warn!("failed to queue startup archive repair: {e}"),
         }
     } else {
         log::info!("embedding model not present; search/RAG run FTS-only until it is downloaded");

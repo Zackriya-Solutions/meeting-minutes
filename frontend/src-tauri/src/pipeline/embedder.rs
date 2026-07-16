@@ -341,6 +341,18 @@ impl TextTokenizer for HfTokenizer {
 // const-initialized `std::sync::Mutex` (Embedder is Send; ONNX inference is synchronous,
 // so the lock is never held across an await — async callers go through spawn_blocking).
 static EMBEDDER: Mutex<Option<Embedder>> = Mutex::new(None);
+static MODEL_INDEX_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// Hold while an embedding is produced and consumed by vector search or persistence.
+/// Model switches take the write side so the active model and sqlite-vec dimension
+/// cannot change between inference and the corresponding database operation.
+pub async fn model_index_read_guard() -> tokio::sync::RwLockReadGuard<'static, ()> {
+    MODEL_INDEX_LOCK.read().await
+}
+
+pub async fn model_index_write_guard() -> tokio::sync::RwLockWriteGuard<'static, ()> {
+    MODEL_INDEX_LOCK.write().await
+}
 
 /// Load the default e5-small embedder from `model_dir` (expects `model.onnx` +
 /// `tokenizer.json`) into the global slot, replacing any previous model.

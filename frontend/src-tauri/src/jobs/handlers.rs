@@ -106,6 +106,7 @@ impl JobHandler for ChunkEmbedHandler {
             // Embedding step: embed each chunk and write to the vec0 table. If no model is
             // loaded (or sqlite-vec is unavailable), chunks stay embedding_status='pending'
             // and search runs on the FTS branch only — never fatal.
+            let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
             if crate::pipeline::embedder::is_loaded() {
                 let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
                 match crate::pipeline::embedder::embed_passages(texts).await {
@@ -208,6 +209,7 @@ impl JobHandler for EmbeddingRepairHandler {
     ) -> anyhow::Result<()> {
         let meeting_id =
             meeting_id.ok_or_else(|| anyhow::anyhow!("embedding_repair requires a meeting_id"))?;
+        let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
         if !crate::pipeline::embedder::is_loaded() {
             log::info!(
                 "[embedding_repair] meeting {meeting_id}: model not loaded; leaving chunks pending"
