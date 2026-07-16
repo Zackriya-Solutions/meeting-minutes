@@ -61,11 +61,12 @@ impl MeetingsRepository {
         let mut transaction = conn.begin().await?;
 
         // Get meeting details
-        let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
-                .bind(meeting_id)
-                .fetch_optional(&mut *transaction)
-                .await?;
+        let meeting: Option<MeetingModel> = sqlx::query_as(
+            "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
 
         if meeting.is_none() {
             transaction.rollback().await?;
@@ -121,11 +122,12 @@ impl MeetingsRepository {
             ));
         }
 
-        let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
-                .bind(meeting_id)
-                .fetch_optional(pool)
-                .await?;
+        let meeting: Option<MeetingModel> = sqlx::query_as(
+            "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
 
         Ok(meeting)
     }
@@ -193,19 +195,17 @@ impl MeetingsRepository {
         }
 
         // Get total count of transcripts for this meeting
-        let total: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?"
-        )
-        .bind(meeting_id)
-        .fetch_one(pool)
-        .await?;
+        let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_one(pool)
+            .await?;
 
         // Get paginated transcripts ordered by audio_start_time
         let transcripts = sqlx::query_as::<_, Transcript>(
             "SELECT * FROM transcripts
              WHERE meeting_id = ?
              ORDER BY audio_start_time ASC
-             LIMIT ? OFFSET ?"
+             LIMIT ? OFFSET ?",
         )
         .bind(meeting_id)
         .bind(limit)
@@ -328,6 +328,16 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    sqlx::query("DELETE FROM speaker_name_candidates WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM rejected_speaker_name_candidate_instances WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
     // Delete from the older related tables in proper order.
     sqlx::query("DELETE FROM transcript_chunks WHERE meeting_id = ?")
         .bind(meeting_id)
@@ -388,33 +398,53 @@ mod tests {
         let pool = prefs_test_pool().await;
 
         // Untouched meeting: both prefs unset.
-        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1")
+            .await
+            .unwrap();
         assert_eq!(prefs, Some((None, None)));
 
         // Pill choices: speaker ID off, 3 expected speakers.
-        let updated =
-            MeetingsRepository::set_diarization_prefs(&pool, "m1", Some(false), Some(3))
-                .await
-                .unwrap();
+        let updated = MeetingsRepository::set_diarization_prefs(&pool, "m1", Some(false), Some(3))
+            .await
+            .unwrap();
         assert!(updated);
-        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1")
+            .await
+            .unwrap();
         assert_eq!(prefs, Some((Some(false), Some(3))));
 
         // Nulls reset back to defaults.
-        MeetingsRepository::set_diarization_prefs(&pool, "m1", None, None).await.unwrap();
-        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1").await.unwrap();
+        MeetingsRepository::set_diarization_prefs(&pool, "m1", None, None)
+            .await
+            .unwrap();
+        let prefs = MeetingsRepository::get_diarization_prefs(&pool, "m1")
+            .await
+            .unwrap();
         assert_eq!(prefs, Some((None, None)));
     }
 
     #[tokio::test]
     async fn diarization_prefs_missing_meeting_and_empty_id() {
         let pool = prefs_test_pool().await;
-        assert_eq!(MeetingsRepository::get_diarization_prefs(&pool, "nope").await.unwrap(), None);
-        assert!(!MeetingsRepository::set_diarization_prefs(&pool, "nope", Some(true), None)
+        assert_eq!(
+            MeetingsRepository::get_diarization_prefs(&pool, "nope")
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            !MeetingsRepository::set_diarization_prefs(&pool, "nope", Some(true), None)
+                .await
+                .unwrap()
+        );
+        assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ")
             .await
-            .unwrap());
-        assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ").await.is_err());
-        assert!(MeetingsRepository::set_diarization_prefs(&pool, "", None, None).await.is_err());
+            .is_err());
+        assert!(
+            MeetingsRepository::set_diarization_prefs(&pool, "", None, None)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -432,6 +462,8 @@ mod tests {
             "CREATE TABLE meeting_collections(meeting_id TEXT, collection_id INTEGER)",
             "CREATE TABLE pending_merges(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE entity_mentions(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE rejected_speaker_name_candidate_instances(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
@@ -449,6 +481,8 @@ mod tests {
             "INSERT INTO meeting_collections VALUES('m1', 1)",
             "INSERT INTO pending_merges(meeting_id) VALUES('m1')",
             "INSERT INTO entity_mentions(meeting_id) VALUES('m1')",
+            "INSERT INTO speaker_name_candidates(meeting_id) VALUES('m1')",
+            "INSERT INTO rejected_speaker_name_candidate_instances(meeting_id) VALUES('m1')",
             "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
             "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
             "INSERT INTO transcripts(meeting_id) VALUES('m1')",
@@ -467,6 +501,8 @@ mod tests {
             "meeting_collections",
             "pending_merges",
             "entity_mentions",
+            "speaker_name_candidates",
+            "rejected_speaker_name_candidate_instances",
             "transcript_chunks",
             "summary_processes",
             "transcripts",
