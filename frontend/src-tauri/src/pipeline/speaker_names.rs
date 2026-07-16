@@ -203,11 +203,20 @@ fn normalize_name(value: &str) -> String {
 
 fn display_name(value: &str) -> String {
     let normalized = value.trim().to_lowercase();
-    let mut characters = normalized.chars();
-    match characters.next() {
-        Some(first) => first.to_uppercase().chain(characters).collect(),
-        None => String::new(),
+    let mut output = String::with_capacity(normalized.len());
+    let mut capitalize_next = true;
+    for character in normalized.chars() {
+        if capitalize_next && character.is_alphabetic() {
+            output.extend(character.to_uppercase());
+            capitalize_next = false;
+        } else {
+            output.push(character);
+        }
+        if matches!(character, '-' | '\'' | '’') {
+            capitalize_next = true;
+        }
     }
+    output
 }
 
 fn validate_candidate(value: &str) -> Result<String, &'static str> {
@@ -641,6 +650,8 @@ mod tests {
     fn display_name_normalizes_asr_casing() {
         assert_eq!(display_name("АННА"), "Анна");
         assert_eq!(display_name("иВаН"), "Иван");
+        assert_eq!(display_name("МАРИЯ-АННА"), "Мария-Анна");
+        assert_eq!(display_name("o'NEILL"), "O'Neill");
     }
 
     #[test]
