@@ -817,11 +817,12 @@ fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesIn
         let missing_owner = is_missing(action.owner.as_ref());
         let missing_due = is_missing(action.due_date.as_ref());
         if missing_owner || missing_due {
-            let kind = match (missing_owner, missing_due) {
-                (true, true) => "action_missing_owner_and_due",
-                (true, false) => "action_missing_owner",
-                (false, true) => "action_missing_due",
-                (false, false) => unreachable!(),
+            let kind = if missing_owner && missing_due {
+                "action_missing_owner_and_due"
+            } else if missing_owner {
+                "action_missing_owner"
+            } else {
+                "action_missing_due"
             };
             insights.push(StandupSeriesInsight {
                 kind: kind.to_string(),
