@@ -4,6 +4,8 @@
  * to enable recovery after app crashes or unexpected closures.
  */
 
+import type { TranscriptSource } from '@/types';
+
 // Database schema interfaces
 export interface MeetingMetadata {
   meetingId: string;          // Primary key: "meeting-{timestamp}"
@@ -26,13 +28,14 @@ export interface StoredTranscript {
   audio_start_time?: number;  // Recording-relative start time in seconds
   audio_end_time?: number;    // Recording-relative end time in seconds
   duration?: number;          // Duration in seconds
+  source?: TranscriptSource;
   [key: string]: any;         // Allow additional fields from TranscriptUpdate
 }
 
 class IndexedDBService {
   private db: IDBDatabase | null = null;
   private readonly DB_NAME = 'MeetilyRecoveryDB';
-  private readonly DB_VERSION = 1;
+  private readonly DB_VERSION = 2;
   private initPromise: Promise<void> | null = null;
 
   /**
@@ -73,14 +76,25 @@ class IndexedDBService {
             meetingsStore.createIndex('savedToSQLite', 'savedToSQLite', { unique: false });
           }
 
-          // Create transcripts store
+          // Create or upgrade the transcripts store.
+          let transcriptsStore: IDBObjectStore;
           if (!db.objectStoreNames.contains('transcripts')) {
-            const transcriptsStore = db.createObjectStore('transcripts', {
+            transcriptsStore = db.createObjectStore('transcripts', {
               keyPath: 'id',
               autoIncrement: true
             });
             transcriptsStore.createIndex('meetingId', 'meetingId', { unique: false });
             transcriptsStore.createIndex('storedAt', 'storedAt', { unique: false });
+          } else {
+            transcriptsStore = (event.target as IDBOpenDBRequest).transaction!
+              .objectStore('transcripts');
+          }
+          if (!transcriptsStore.indexNames.contains('meetingSequence')) {
+            transcriptsStore.createIndex(
+              'meetingSequence',
+              ['meetingId', 'sequenceId'],
+              { unique: false }
+            );
           }
         };
       } catch (error) {
@@ -234,6 +248,7 @@ class IndexedDBService {
       const storedTranscript: StoredTranscript = {
         ...transcript,
         meetingId,
+        sequenceId: transcript.sequence_id ?? transcript.sequenceId,
         storedAt: Date.now()
       };
 
@@ -241,9 +256,22 @@ class IndexedDBService {
       const transcriptsStore = transaction.objectStore('transcripts');
       const meetingsStore = transaction.objectStore('meetings');
 
-      // Save transcript
+      const existingKey = await new Promise<IDBValidKey | undefined>((resolve, reject) => {
+        const request = transcriptsStore
+          .index('meetingSequence')
+          .getKey([meetingId, storedTranscript.sequenceId]);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      if (existingKey !== undefined) {
+        storedTranscript.id = Number(existingKey);
+      }
+
+      // Insert a new transcript or replace a source-deduplicated segment.
       await new Promise<void>((resolve, reject) => {
-        const request = transcriptsStore.add(storedTranscript);
+        const request = existingKey === undefined
+          ? transcriptsStore.add(storedTranscript)
+          : transcriptsStore.put(storedTranscript);
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
       });
@@ -257,7 +285,7 @@ class IndexedDBService {
 
       if (meeting) {
         meeting.lastUpdated = Date.now();
-        meeting.transcriptCount += 1;
+        if (existingKey === undefined) meeting.transcriptCount += 1;
         await new Promise<void>((resolve, reject) => {
           const request = meetingsStore.put(meeting);
           request.onsuccess = () => resolve();

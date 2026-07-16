@@ -166,13 +166,14 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         id: t.id?.toString() || `${Date.now()}-${index}`,
         text: t.text,
         timestamp: t.timestamp,
-        sequence_id: t.sequenceId || index,
+        sequence_id: t.sequenceId ?? index,
         chunk_start_time: (t as any).chunk_start_time,
         is_partial: (t as any).is_partial || false,
         confidence: t.confidence,
         audio_start_time: (t as any).audio_start_time,
         audio_end_time: (t as any).audio_end_time,
         duration: (t as any).duration,
+        source: (t as any).source,
       }));
 
       // 6. Save to backend database using existing save utilities

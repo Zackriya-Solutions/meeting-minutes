@@ -4,6 +4,8 @@ export interface Message {
   timestamp: string;
 }
 
+export type TranscriptSource = 'mic' | 'system';
+
 export interface Transcript {
   id: string;
   text: string;
@@ -16,12 +18,13 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  source?: TranscriptSource;
 }
 
 export interface TranscriptUpdate {
   text: string;
   timestamp: string; // Wall-clock time for reference
-  source: string;
+  source: TranscriptSource;
   sequence_id: number;
   chunk_start_time: number; // Legacy field
   is_partial: boolean;
@@ -107,4 +110,5 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  source?: TranscriptSource;
 }
