@@ -676,6 +676,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             search::commands::search_meetings,
             search::commands::rag_ask,
+            search::commands::rag_get_latest_session,
             pipeline::commands::embedder_status,
             pipeline::commands::indexing_status,
             pipeline::commands::embedder_download_model,
