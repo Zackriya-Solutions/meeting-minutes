@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useValueOs } from '../../context/ValueOsProvider';
 // alias import so tests can vi.mock this module cleanly
@@ -36,6 +36,13 @@ export function CaptureScreen({
   const [targets, setTargets] = useState<TargetItem[]>([]);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState('');
+  const liveRef = useRef<HTMLDivElement>(null);
+
+  // Keep the live transcript scrolled to the newest line as speech is recognized.
+  useEffect(() => {
+    const el = liveRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [rec.transcriptText]);
 
   // Load the (searchable) target list whenever tenant/type/search changes.
   useEffect(() => {
@@ -75,8 +82,15 @@ export function CaptureScreen({
 
   const start = async () => {
     if (!canStart) return;
-    setRecording(true);
-    await rec.start(`${target!.label} — ${new Date().toISOString()}`);
+    setError('');
+    setRecording(true); // show the live view immediately…
+    try {
+      await rec.start(`${target!.label} — ${new Date().toISOString()}`);
+    } catch (e) {
+      // …but revert if the engine/recording couldn't start (e.g. model not ready).
+      setRecording(false);
+      setError((e as Error)?.message ?? 'Could not start recording.');
+    }
   };
 
   const stop = async () => {
@@ -93,14 +107,33 @@ export function CaptureScreen({
 
   if (recording) {
     return (
-      <div data-testid="valueos-capture-recording" style={ui.page}>
-        <div style={ui.card}>
-          <h1 style={ui.h1}>Recording…</h1>
-          <p style={ui.sub}>
-            Attaching to <strong>{target?.label}</strong>. Transcription runs locally on
-            this device.
+      <div
+        data-testid="valueos-capture-recording"
+        style={{ ...ui.page, justifyContent: 'flex-start', padding: '48px 24px 24px' }}
+      >
+        <div style={{ width: '100%', maxWidth: 720, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={recDot} />
+            <h1 style={{ ...ui.h1, margin: 0, fontSize: 24, textAlign: 'left' }}>Recording…</h1>
+          </div>
+          <p style={{ ...ui.sub, textAlign: 'left', margin: '6px 0 14px' }}>
+            Attaching to <strong>{target?.label}</strong> · transcribing locally on this device.
           </p>
-          <button data-testid="valueos-capture-stop" style={ui.primaryBtn} onClick={stop}>
+          <label style={label}>Live transcript</label>
+          <div ref={liveRef} data-testid="valueos-capture-live" style={liveBox}>
+            {rec.transcriptText ? (
+              rec.transcriptText
+            ) : (
+              <span style={{ opacity: 0.6 }}>
+                Listening… recognized speech will appear here in real time.
+              </span>
+            )}
+          </div>
+          <button
+            data-testid="valueos-capture-stop"
+            style={{ ...ui.primaryBtn, marginTop: 16 }}
+            onClick={stop}
+          >
             Stop &amp; finish
           </button>
         </div>
@@ -207,6 +240,28 @@ export function CaptureScreen({
   );
 }
 
+const recDot: CSSProperties = {
+  width: 12,
+  height: 12,
+  borderRadius: '50%',
+  background: '#ff5f57',
+  boxShadow: '0 0 0 4px rgba(255,95,87,0.25)',
+  flex: '0 0 auto',
+};
+const liveBox: CSSProperties = {
+  flex: 1,
+  minHeight: 140,
+  textAlign: 'left',
+  background: 'rgba(0,0,0,0.2)',
+  borderRadius: 10,
+  padding: '14px 16px',
+  fontSize: 14,
+  lineHeight: 1.55,
+  whiteSpace: 'pre-wrap',
+  overflowY: 'auto',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  color: '#fff',
+};
 const label: CSSProperties = { fontSize: 13, fontWeight: 700, opacity: 0.85, margin: '16px 0 6px' };
 const field: CSSProperties = {
   width: '100%',

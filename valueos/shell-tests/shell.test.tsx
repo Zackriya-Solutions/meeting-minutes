@@ -27,9 +27,16 @@ vi.mock('@/contexts/OnboardingContext', () => ({
 const rec = vi.hoisted(() => ({
   start: vi.fn(() => Promise.resolve()),
   stop: vi.fn(() => Promise.resolve('We discussed pricing and agreed next steps.')),
+  transcriptText: '',
 }));
 vi.mock('@/valueos/capture/useRecordingController', () => ({
-  useRecordingController: () => ({ isRecording: false, status: 'idle', transcriptText: '', start: rec.start, stop: rec.stop }),
+  useRecordingController: () => ({
+    isRecording: false,
+    status: 'idle',
+    transcriptText: rec.transcriptText,
+    start: rec.start,
+    stop: rec.stop,
+  }),
 }));
 
 function servicesFromSeed(seed: MockSeed) {
@@ -79,6 +86,7 @@ async function selectLeadTarget() {
 beforeEach(() => {
   rec.start.mockClear();
   rec.stop.mockClear();
+  rec.transcriptText = '';
 });
 
 describe('ValueOS full flow', () => {
@@ -184,6 +192,21 @@ describe('ValueOS full flow', () => {
     expect(startBtn().disabled).toBe(true); // tenant + type, no target
     fireEvent.click(screen.getByTestId('valueos-capture-target-lead-1'));
     expect(startBtn().disabled).toBe(false); // all three → enabled
+  });
+
+  it('shows recognized speech live while recording', async () => {
+    rec.transcriptText = 'Ada: I have questions on API limits and the timeline.';
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToHome();
+    await homeToCapture();
+    await selectLeadTarget();
+    fireEvent.click(screen.getByTestId('valueos-capture-start'));
+    await screen.findByTestId('valueos-capture-recording');
+    expect(screen.getByTestId('valueos-capture-live')).toHaveTextContent(
+      'Ada: I have questions on API limits and the timeline.',
+    );
   });
 
   it('records, then stores + digests + uploads BOTH artifacts to the selected target', async () => {
