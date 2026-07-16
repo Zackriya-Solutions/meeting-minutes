@@ -135,6 +135,11 @@ collapsed from `0.50` to `0.185`, action recall from `0.483` to `0.207`, action 
 `0.289` to `0.250`, and the overall unsupported rate increased from `0.844` to `0.872`.
 This candidate must not ship as the precision fix. Verbatim evidence remains useful, but the next
 iteration needs an explicit semantic claim/category verifier and must preserve supported recall.
+A first same-model verifier prototype was also rejected after the first held-out standup: it kept
+22 records, including obvious category errors, while increasing that meeting's latency from about
+49 to 149 seconds. Do not add an expensive Qwen self-review pass without evidence that its
+precision is independently calibrated; prioritize conservative template gating, human review, and
+a genuinely independent entailment signal.
 
 ## Speaker-name and alias safety
 
