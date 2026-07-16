@@ -137,6 +137,8 @@ export const RU: Record<string, string> = {
   "Routing: single-meeting / short questions → GigaChat; cross-meeting synthesis & extraction → DeepSeek. If only one provider is configured, it handles everything.": "Маршрутизация: одна встреча / короткие вопросы → GigaChat; синтез по нескольким встречам и извлечение данных → DeepSeek. Если настроен только один провайдер, он обрабатывает всё.",
   "Configured": "Настроено",
   "Not set": "Не настроено",
+  "Managed cloud services": "Управляемые облачные сервисы",
+  "DeepSeek is used for summaries and the knowledge base. SaluteSpeech is used for transcription and speaker detection. Access is provided through the Memento gateway; no API keys are required.": "DeepSeek используется для суммаризации и базы знаний. SaluteSpeech — для расшифровки и определения спикеров. Доступ предоставляется через шлюз Memento, API-ключи не нужны.",
   "Semantic search model": "Модель смыслового поиска",
   "Powers meaning-based (vector) search and Chat with archive. Runs fully locally —": "Нужна для смыслового поиска и чата с архивом. Работает локально —",
   "-dim), ~470 MB. Until it's installed, Search and Chat use keyword (FTS) matching only.": " измерений), ~470 МБ. До установки поиск и чат используют только совпадения по словам.",
