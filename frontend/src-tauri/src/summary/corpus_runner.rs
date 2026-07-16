@@ -646,12 +646,23 @@ async fn run_standup_corpus_inner<R: Runtime>(
         .await
         {
             Ok(item) => item,
-            Err(_) => failed_item(
-                meeting_id,
-                String::new(),
-                &provenance,
-                "Standup pipeline panicked; inspect the local application log",
-            ),
+            Err(_) => {
+                let error_message = "Standup pipeline panicked; inspect the local application log";
+                if let Err(error) = SummaryProcessesRepository::update_process_failed(
+                    &pool,
+                    meeting_id,
+                    error_message,
+                )
+                .await
+                {
+                    log::error!(
+                        "Failed to mark panicked standup corpus item {} as failed: {}",
+                        meeting_id,
+                        error
+                    );
+                }
+                failed_item(meeting_id, String::new(), &provenance, error_message)
+            }
         };
         let _ = app.emit(
             "standup-corpus-run-progress",
