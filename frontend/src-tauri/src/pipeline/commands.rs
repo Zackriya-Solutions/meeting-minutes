@@ -18,12 +18,13 @@ const E5_MODEL_URL: &str =
 const E5_TOKENIZER_URL: &str =
     "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json";
 const FRIDA_REVISION: &str = "d3a04c3460f6b16f2f8f0859b2b67a46cb388558";
-const FRIDA_MODEL_URL: &str =
-    "https://huggingface.co/geologist387/FRIDA-transformed/resolve/d3a04c3460f6b16f2f8f0859b2b67a46cb388558/onnx/frida-onnx/FRIDA.onnx";
-const FRIDA_MODEL_DATA_URL: &str =
-    "https://huggingface.co/geologist387/FRIDA-transformed/resolve/d3a04c3460f6b16f2f8f0859b2b67a46cb388558/onnx/frida-onnx/FRIDA.onnx.data";
-const FRIDA_TOKENIZER_URL: &str =
-    "https://huggingface.co/geologist387/FRIDA-transformed/resolve/d3a04c3460f6b16f2f8f0859b2b67a46cb388558/onnx/frida-onnx/tokenizer.json";
+
+fn frida_model_url(file: &str) -> String {
+    format!(
+        "https://huggingface.co/geologist387/FRIDA-transformed/resolve/{FRIDA_REVISION}/\
+         onnx/frida-onnx/{file}"
+    )
+}
 
 fn embedding_model_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
@@ -172,7 +173,6 @@ async fn activate_model<R: Runtime>(
         return Ok(false);
     }
 
-    let previous_kind = selected_kind(pool).await;
     let dir = model_dir(&base, kind);
     let candidate = tokio::task::spawn_blocking(move || embedder::load_kind(dir, kind))
         .await
@@ -180,6 +180,7 @@ async fn activate_model<R: Runtime>(
         .map_err(|e| e.to_string())?;
 
     let _switch_guard = embedder::model_index_write_guard().await;
+    let previous_kind = selected_kind(pool).await;
     persist_selected_kind(pool, kind).await?;
     let index_ready =
         crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim()).await;
@@ -332,17 +333,20 @@ pub async fn embedder_download_model<R: Runtime>(
             download_file(&app, E5_MODEL_URL, &dir.join("model.onnx"), "model.onnx").await?;
         }
         EmbedderKind::Frida => {
+            let tokenizer_url = frida_model_url("tokenizer.json");
             download_file(
                 &app,
-                FRIDA_TOKENIZER_URL,
+                &tokenizer_url,
                 &dir.join("tokenizer.json"),
                 "tokenizer.json",
             )
             .await?;
-            download_file(&app, FRIDA_MODEL_URL, &dir.join("FRIDA.onnx"), "FRIDA.onnx").await?;
+            let model_url = frida_model_url("FRIDA.onnx");
+            download_file(&app, &model_url, &dir.join("FRIDA.onnx"), "FRIDA.onnx").await?;
+            let model_data_url = frida_model_url("FRIDA.onnx.data");
             download_file(
                 &app,
-                FRIDA_MODEL_DATA_URL,
+                &model_data_url,
                 &dir.join("FRIDA.onnx.data"),
                 "FRIDA.onnx.data",
             )
