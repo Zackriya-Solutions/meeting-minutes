@@ -1,5 +1,11 @@
 name: Claude Code Review
 
+# The inline-comment MCP currently uses one fixed file under /tmp. Review jobs that overlap on a
+# persistent self-hosted machine can lock or delete each other's buffer before Claude starts.
+concurrency:
+  group: claude-code-review-${{ github.repository }}
+  cancel-in-progress: false
+
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
