@@ -180,7 +180,7 @@ impl Notification {
     pub fn meeting_detected() -> Self {
         Notification::new(
             "Memento",
-            "Похоже, началась встреча. Откройте Memento, чтобы начать запись.",
+            "A meeting may have started. Open Memento to begin recording.",
             NotificationType::MeetingDetected,
         )
         .with_priority(NotificationPriority::High)
