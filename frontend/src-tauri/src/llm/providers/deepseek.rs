@@ -9,6 +9,8 @@ use std::time::Duration;
 pub const DEFAULT_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
 pub const DEFAULT_MAX_TOKENS: u32 = 8_192;
+pub const MIN_MAX_TOKENS: u32 = 1_024;
+pub const MAX_MAX_TOKENS: u32 = 32_768;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Summary/extraction calls need predictable latency and a complete final answer rather
@@ -73,15 +75,22 @@ pub struct DeepSeekClient {
     api_key: String,
     base_url: String,
     model: String,
+    max_tokens: u32,
 }
 
 impl DeepSeekClient {
-    pub fn new(api_key: String, model: Option<String>, base_url: Option<String>) -> Self {
+    pub fn new(
+        api_key: String,
+        model: Option<String>,
+        base_url: Option<String>,
+        max_tokens: Option<u32>,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             api_key,
             base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
         }
     }
 
@@ -92,7 +101,7 @@ impl DeepSeekClient {
     /// Run a system+user completion, returning the assistant text.
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, String> {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let body = build_request_body(&self.model, system, user, None);
+        let body = build_request_body(&self.model, system, user, Some(self.max_tokens));
 
         let resp = self
             .client
@@ -157,6 +166,12 @@ mod tests {
         assert_eq!(body["temperature"], 0.2);
         assert_eq!(body["top_p"], 0.9);
         assert_eq!(body["stream"], false);
+    }
+
+    #[test]
+    fn request_accepts_a_configured_output_budget() {
+        let body = build_request_body("deepseek-v4-pro", "system", "user", Some(MAX_MAX_TOKENS));
+        assert_eq!(body["max_tokens"], MAX_MAX_TOKENS);
     }
 
     #[test]
