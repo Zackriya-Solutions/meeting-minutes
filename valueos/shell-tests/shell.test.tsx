@@ -1,110 +1,145 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ValueOsShell } from '@/valueos/shell/ValueOsShell';
-import { valueOsShellEnabled } from '@/valueos/shell/flag';
+import { MockValueOsClient, defaultMockSeed } from '@/valueos/api/mockClient';
+import { createMockAuthService } from '@/valueos/auth/authService';
+import { InMemoryTokenStore } from '@/valueos/auth/tokenStore';
+import { createMockConfigService } from '@/valueos/config/configService';
+import { MockDigestGenerator } from '@/valueos/digest/digest';
+import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
+import type { ValueOsServices } from '@/valueos/context/ValueOsProvider';
+import type { EntitlementState } from '@/valueos/api/types';
 
-// Mock the UPSTREAM model-download capability our shell reuses. We assert our shell
-// drives it correctly; we do not test the real download (that's upstream's code).
-const h = vi.hoisted(() => ({
-  state: {
-    currentStep: 1,
-    parakeetDownloaded: false,
-    parakeetProgress: 0,
-    parakeetProgressInfo: { percent: 0, downloadedMb: 0, totalMb: 0, speedMbps: 0 },
-    summaryModelDownloaded: false,
-    summaryModelProgress: 0,
-    summaryModelProgressInfo: { percent: 0, downloadedMb: 0, totalMb: 0, speedMbps: 0 },
-    selectedSummaryModel: 'rec-model',
-    recommendedSummaryModel: 'rec-model',
-    databaseExists: true,
-    isBackgroundDownloading: false,
-  },
-  startBackgroundDownloads: vi.fn(() => Promise.resolve()),
-  retryParakeetDownload: vi.fn(() => Promise.resolve()),
-}));
-
+// Reused model-download screen auto-completes (models already present) so the flow
+// advances download → config in tests.
 vi.mock('@/contexts/OnboardingContext', () => ({
   useOnboarding: () => ({
-    ...h.state,
-    goToStep: vi.fn(),
-    goNext: vi.fn(),
-    goPrevious: vi.fn(),
-    setParakeetDownloaded: vi.fn(),
-    setSummaryModelDownloaded: vi.fn(),
-    setSelectedSummaryModel: vi.fn(),
-    setDatabaseExists: vi.fn(),
-    setPermissionStatus: vi.fn(),
-    setPermissionsSkipped: vi.fn(),
-    completeOnboarding: vi.fn(() => Promise.resolve()),
-    startBackgroundDownloads: h.startBackgroundDownloads,
-    retryParakeetDownload: h.retryParakeetDownload,
+    parakeetDownloaded: true,
+    summaryModelDownloaded: true,
+    recommendedSummaryModel: 'rec-model',
+    startBackgroundDownloads: vi.fn(() => Promise.resolve()),
+    retryParakeetDownload: vi.fn(() => Promise.resolve()),
   }),
 }));
 
+// Recording is upstream/native — mock our adapter so tests need no Tauri.
+const rec = vi.hoisted(() => ({
+  start: vi.fn(() => Promise.resolve()),
+  stop: vi.fn(() => Promise.resolve('We discussed pricing and agreed next steps.')),
+}));
+vi.mock('@/valueos/capture/useRecordingController', () => ({
+  useRecordingController: () => ({ isRecording: false, status: 'idle', transcriptText: '', start: rec.start, stop: rec.stop }),
+}));
+
+function makeServices(entitlement: EntitlementState = 'active') {
+  const seed = defaultMockSeed();
+  seed.entitlements['tenant-acme'] = entitlement;
+  const client = new MockValueOsClient(seed);
+  const services: ValueOsServices = {
+    client,
+    auth: createMockAuthService(client, new InMemoryTokenStore()),
+    config: createMockConfigService({ pickResult: '/tmp/tx', writable: true }),
+    digest: new MockDigestGenerator(),
+    uploadQueue: new PendingUploadQueue(client, new InMemoryPendingUploadStore()),
+  };
+  return { services, client };
+}
+
+async function loginToConfig() {
+  fireEvent.click(screen.getByTestId('valueos-proceed')); // landing → login
+  fireEvent.click(screen.getByTestId('valueos-login-start')); // login → (download auto) → config
+  await screen.findByTestId('valueos-config');
+}
+
+async function configToCapture() {
+  fireEvent.click(screen.getByTestId('valueos-config-pick'));
+  await screen.findByTestId('valueos-config-folder');
+  fireEvent.click(screen.getByTestId('valueos-config-continue'));
+  await screen.findByTestId('valueos-capture');
+}
+
+async function selectLeadTarget() {
+  fireEvent.change(screen.getByTestId('valueos-capture-tenant'), { target: { value: 'tenant-acme' } });
+  fireEvent.click(screen.getByTestId('valueos-capture-type-lead'));
+  await screen.findByTestId('valueos-capture-target-lead-1');
+  fireEvent.click(screen.getByTestId('valueos-capture-target-lead-1'));
+}
+
 beforeEach(() => {
-  h.state.parakeetDownloaded = false;
-  h.state.summaryModelDownloaded = false;
-  h.state.parakeetProgress = 0;
-  h.state.summaryModelProgress = 0;
-  h.startBackgroundDownloads.mockClear();
-  h.retryParakeetDownload.mockClear();
+  rec.start.mockClear();
+  rec.stop.mockClear();
 });
 
-describe('ValueOS branded shell', () => {
-  it('is enabled as the entry point by default', () => {
-    expect(valueOsShellEnabled).toBe(true);
-  });
-
-  it('A: renders Value Accelerator branding on the landing screen', () => {
-    render(<ValueOsShell />);
-    expect(screen.getByTestId('valueos-landing')).toBeInTheDocument();
+describe('ValueOS full flow', () => {
+  it('landing shows VA branding and advances to login', () => {
+    const { services } = makeServices();
+    render(<ValueOsShell services={services} />);
     expect(screen.getByText('ValueOS Agent')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /value accelerator/i })).toBeInTheDocument();
-    expect(screen.getByText('Value Accelerator GmbH')).toBeInTheDocument();
-    expect(screen.getByTestId('valueos-proceed')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    expect(screen.getByTestId('valueos-login')).toBeInTheDocument();
   });
 
-  it('A→B: the proceed control advances to the model-download screen', () => {
-    render(<ValueOsShell />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
-    expect(screen.getByTestId('valueos-download')).toBeInTheDocument();
-    expect(screen.queryByTestId('valueos-landing')).not.toBeInTheDocument();
+  it('entitled login proceeds through download to configuration', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    expect(screen.getByTestId('valueos-config')).toBeInTheDocument();
   });
 
-  it('B: entering the download screen auto-triggers the reused capability with the right args', async () => {
-    render(<ValueOsShell />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
-    await waitFor(() => expect(h.startBackgroundDownloads).toHaveBeenCalledTimes(1));
-    expect(h.startBackgroundDownloads).toHaveBeenCalledWith({
-      includeParakeet: true,
-      includeSummary: true,
-      summaryModel: 'rec-model',
-    });
+  it.each(['expired', 'never'] as EntitlementState[])(
+    'blocks (%s) with a subscription CTA and no path to capture',
+    async (state) => {
+      const { services } = makeServices(state);
+      render(<ValueOsShell services={services} />);
+      fireEvent.click(screen.getByTestId('valueos-proceed'));
+      fireEvent.click(screen.getByTestId('valueos-login-start'));
+      await screen.findByTestId('valueos-blocked');
+      expect(screen.getByTestId('valueos-blocked-url')).toHaveTextContent('value-accelerator.io');
+      expect(screen.queryByTestId('valueos-config')).toBeNull();
+      expect(screen.queryByTestId('valueos-capture')).toBeNull();
+    },
+  );
+
+  it('recording CANNOT start until tenant + type + target are all selected', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToCapture();
+    const startBtn = () => screen.getByTestId('valueos-capture-start') as HTMLButtonElement;
+    expect(startBtn().disabled).toBe(true); // nothing selected
+    fireEvent.change(screen.getByTestId('valueos-capture-tenant'), { target: { value: 'tenant-acme' } });
+    expect(startBtn().disabled).toBe(true); // tenant only
+    fireEvent.click(screen.getByTestId('valueos-capture-type-lead'));
+    await screen.findByTestId('valueos-capture-target-lead-1');
+    expect(startBtn().disabled).toBe(true); // tenant + type, no target
+    fireEvent.click(screen.getByTestId('valueos-capture-target-lead-1'));
+    expect(startBtn().disabled).toBe(false); // all three → enabled
   });
 
-  it('B: shows a generic loading state and never leaks engine/model details', () => {
-    render(<ValueOsShell />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
-    expect(screen.getByTestId('valueos-spinner')).toBeInTheDocument();
-    expect(screen.getByTestId('valueos-download-status')).toHaveTextContent(/downloading models/i);
-    // No details that would reveal the underlying engine.
-    expect(screen.queryByText(/parakeet|meetily|whisper|transcription model|summary model/i)).toBeNull();
-  });
+  it('records, then stores + digests + uploads BOTH artifacts to the selected target', async () => {
+    const { services, client } = makeServices('active');
+    const uploadSpy = vi.spyOn(client, 'uploadTranscript');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToCapture();
+    await selectLeadTarget();
 
-  it('B→C: completing the download advances to the stop page and ends the flow', async () => {
-    const { rerender } = render(<ValueOsShell />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
-    await waitFor(() => expect(h.startBackgroundDownloads).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('valueos-capture-start'));
+    expect(rec.start).toHaveBeenCalledTimes(1);
+    await screen.findByTestId('valueos-capture-recording');
+    fireEvent.click(screen.getByTestId('valueos-capture-stop'));
 
-    // Simulate the reused download reporting both models ready.
-    h.state.parakeetDownloaded = true;
-    h.state.summaryModelDownloaded = true;
-    rerender(<ValueOsShell />);
+    await screen.findByTestId('valueos-finalize');
+    await waitFor(() => expect(screen.getByTestId('valueos-finalize-status')).toHaveTextContent(/attached to/i));
 
-    await waitFor(() => expect(screen.getByTestId('valueos-stop')).toBeInTheDocument());
-    expect(screen.getByText('Setup complete')).toBeInTheDocument();
-    // The flow ends here: the hand-off control is a disabled no-op.
-    expect(screen.getByTestId('valueos-handoff')).toBeDisabled();
-    expect(screen.queryByTestId('valueos-download')).not.toBeInTheDocument();
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    const [tenantId, activityType, targetId, req] = uploadSpy.mock.calls[0];
+    expect(tenantId).toBe('tenant-acme');
+    expect(activityType).toBe('lead');
+    expect(targetId).toBe('lead-1');
+    expect(req.raw_content).toBe('We discussed pricing and agreed next steps.'); // transcript
+    expect(req.digest.length).toBeGreaterThan(0); // digest — both artifacts uploaded
+    expect(req.idempotency_key).toBeTruthy();
   });
 });

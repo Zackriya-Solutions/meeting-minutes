@@ -14,7 +14,7 @@ upstream via imports. Delivered in phases; this doc is the living source of trut
 | Phase | Scope | Upstream edits | State |
 |------|-------|----------------|-------|
 | **1** | Typed ValueOS client + PKCE + token store + digest + upload queue, all against interfaces + **mocks** | **none** | ✅ done, tested |
-| **2** | Screens + `ValueOsShell` wiring (login → entitlement → config → capture → finalize), mock-backed | none | ⏳ next |
+| **2** | Screens + `ValueOsShell` wiring (login → entitlement → config → capture → finalize) + `ValueOsProvider` (service injection), mock-backed | none | ✅ done, tested |
 | **3** | Real transport: `tauri-plugin-oauth` (loopback) + `tauri-plugin-stronghold` (token vault) + real ValueOS HTTP; swap mocks for real behind the same interfaces | **small, marked** (see below) — needs approval before applied | ⏳ pending |
 
 ## Identity, scopes, least privilege

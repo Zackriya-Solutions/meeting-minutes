@@ -12,7 +12,12 @@ const frontendSrc = path.resolve(repoRoot, 'frontend/src');
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { '@': frontendSrc },
+    alias: {
+      // Stub Tauri APIs (native calls are unused/mocked in tests). Must precede '@'.
+      '@tauri-apps/api/core': path.resolve(here, 'tauri-stub.ts'),
+      '@tauri-apps/api/path': path.resolve(here, 'tauri-stub.ts'),
+      '@': frontendSrc,
+    },
     // Ensure a single React instance even though components live outside this root.
     dedupe: ['react', 'react-dom'],
   },
