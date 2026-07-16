@@ -407,6 +407,12 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
             .or_insert((candidate, 1));
     }
 
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+    sqlx::query("DELETE FROM speaker_name_candidates WHERE meeting_id=? AND status='pending'")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
     let mut inserted = 0;
     for ((normalized, speaker_id, evidence_kind), (candidate, occurrence_count)) in grouped {
         let hash = candidate_hash(&salt, &normalized);
@@ -418,7 +424,11 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
               evidence_start_ms, confidence, occurrence_count) \
              VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              ON CONFLICT(meeting_id, candidate_hash, proposed_speaker_key, evidence_kind) \
-             DO UPDATE SET occurrence_count=MAX(occurrence_count, excluded.occurrence_count), \
+             DO UPDATE SET candidate_text=excluded.candidate_text, \
+             evidence_quote=excluded.evidence_quote, \
+             evidence_start_ms=excluded.evidence_start_ms, \
+             confidence=excluded.confidence, \
+             occurrence_count=excluded.occurrence_count, \
              updated_at=datetime('now') \
              WHERE status='pending'",
         )
@@ -433,11 +443,15 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
         .bind(candidate.start_ms)
         .bind(candidate.confidence)
         .bind(occurrence_count)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
         inserted += result.rows_affected() as usize;
     }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(inserted)
 }
 
@@ -547,11 +561,11 @@ pub async fn review_candidate(
     let speaker_belongs_to_meeting: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM transcripts WHERE meeting_id=? AND speaker_id=?)",
     )
-            .bind(&meeting_id)
-            .bind(speaker_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| error.to_string())?;
+    .bind(&meeting_id)
+    .bind(speaker_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
     if speaker_belongs_to_meeting == 0 {
         return Err("Speaker does not belong to this meeting".to_string());
     }
@@ -699,9 +713,9 @@ mod tests {
         sqlx::query(
             "INSERT INTO speakers VALUES(7,'Speaker 7',0),(8,'Speaker 8',0),(9,'Speaker 9',0)",
         )
-            .execute(&pool)
-            .await
-            .unwrap();
+        .execute(&pool)
+        .await
+        .unwrap();
         for (id, text, speaker_id, start) in [
             ("1", "Меня зовут Анна", 7, 0.0),
             ("2", "Иван, расскажи", 7, 5.0),
@@ -742,13 +756,12 @@ mod tests {
         // Preserve the extracted identity key when the reviewer intentionally maps a
         // candidate to another speaker. Rewriting it to the target would collide with
         // an existing candidate for that same name/evidence kind.
-        let anna_hash: String = sqlx::query_scalar(
-            "SELECT candidate_hash FROM speaker_name_candidates WHERE id=?",
-        )
-        .bind(anna_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let anna_hash: String =
+            sqlx::query_scalar("SELECT candidate_hash FROM speaker_name_candidates WHERE id=?")
+                .bind(anna_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         sqlx::query(
             "INSERT INTO speaker_name_candidates \
              (meeting_id, proposed_speaker_id, proposed_speaker_key, candidate_text, \
@@ -862,6 +875,71 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(direct_address_rejections, 3);
+    }
+
+    #[tokio::test]
+    async fn rescan_replaces_pending_evidence_and_recomputes_occurrences() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)",
+            "CREATE TABLE transcripts(id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, speaker_id INTEGER, audio_start_time REAL)",
+            "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT, proposed_speaker_id INTEGER, proposed_speaker_key INTEGER NOT NULL, candidate_text TEXT, normalized_name TEXT, candidate_hash TEXT, evidence_kind TEXT, evidence_quote TEXT, evidence_start_ms INTEGER, confidence REAL, occurrence_count INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
+            "CREATE TABLE rejected_speaker_name_fingerprints(candidate_hash TEXT PRIMARY KEY, reason TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE rejected_speaker_name_candidate_instances(meeting_id TEXT, candidate_hash TEXT, proposed_speaker_key INTEGER, evidence_kind TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        for (id, text, speaker_id, start) in [
+            ("1", "Иван, первый вопрос", 7, 5.0),
+            ("2", "Первый ответ", 8, 6.0),
+            ("3", "Иван, второй вопрос", 7, 10.0),
+            ("4", "Второй ответ", 8, 11.0),
+        ] {
+            sqlx::query("INSERT INTO transcripts VALUES(?, 'm1', ?, ?, ?)")
+                .bind(id)
+                .bind(text)
+                .bind(speaker_id)
+                .bind(start)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        scan_candidates(&pool, "m1").await.unwrap();
+        let initial = list_candidates(&pool, "m1").await.unwrap();
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].occurrence_count, 2);
+        assert_eq!(
+            initial[0].evidence_quote.as_deref(),
+            Some("Иван, первый вопрос")
+        );
+
+        sqlx::query("UPDATE transcripts SET transcript='Иван, новый вопрос' WHERE id='1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM transcripts WHERE id IN ('3', '4')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        scan_candidates(&pool, "m1").await.unwrap();
+
+        assert!(list_candidates(&pool, "m1").await.unwrap().is_empty());
+        let refreshed: (Option<String>, Option<i64>, i64) = sqlx::query_as(
+            "SELECT evidence_quote, evidence_start_ms, occurrence_count \
+             FROM speaker_name_candidates WHERE meeting_id='m1' AND status='pending'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            refreshed,
+            (Some("Иван, новый вопрос".into()), Some(5_000), 1)
+        );
     }
 
     #[tokio::test]
