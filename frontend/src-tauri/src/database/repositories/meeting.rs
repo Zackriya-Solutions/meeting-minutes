@@ -386,6 +386,11 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    sqlx::query("DELETE FROM app_settings_kv WHERE key = ?")
+        .bind(format!("summary.content_window.{meeting_id}"))
+        .execute(&mut *transaction)
+        .await?;
+
     // Finally, delete the meeting itself.
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
@@ -499,6 +504,7 @@ mod tests {
             "CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
             "CREATE TABLE chunk_embeddings(chunk_id INTEGER PRIMARY KEY)",
             "CREATE TABLE jobs(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT)",
             "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
@@ -521,6 +527,7 @@ mod tests {
             "INSERT INTO chunks(id, meeting_id, text) VALUES(42, 'm1', 'private transcript')",
             "INSERT INTO chunk_embeddings(chunk_id) VALUES(42)",
             "INSERT INTO jobs(meeting_id) VALUES('m1')",
+            "INSERT INTO app_settings_kv(key, value) VALUES('summary.content_window.m1', 'primary:0:1000:2000:1')",
             "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
             "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
             "INSERT INTO transcripts(meeting_id) VALUES('m1')",
@@ -544,6 +551,7 @@ mod tests {
             "chunks",
             "chunk_embeddings",
             "jobs",
+            "app_settings_kv",
             "transcript_chunks",
             "summary_processes",
             "transcripts",
@@ -555,4 +563,5 @@ mod tests {
             assert_eq!(count, 0, "{table} still contains meeting-scoped data");
         }
     }
+
 }
