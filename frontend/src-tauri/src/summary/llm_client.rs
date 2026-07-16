@@ -25,6 +25,8 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<serde_json::Value>,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -59,6 +61,42 @@ pub struct ClaudeRequest {
     pub max_tokens: u32,
     pub system: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+}
+
+fn openai_compatible_request(
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    json_mode: bool,
+) -> ChatRequest {
+    ChatRequest {
+        model: model_name.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_prompt.to_string(),
+            },
+        ],
+        max_tokens,
+        temperature,
+        top_p,
+        response_format: json_mode.then(|| serde_json::json!({"type": "json_object"})),
+    }
+}
+
+fn supports_structured_json(provider: &LLMProvider) -> bool {
+    !matches!(provider, LLMProvider::Claude | LLMProvider::GigaChat)
 }
 
 // Claude-specific response structure
@@ -119,9 +157,9 @@ impl LLMProvider {
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
 /// * `deepseek_base_url` - Resolved DeepSeek base URL (managed gateway or custom endpoint)
-/// * `max_tokens` - Optional max tokens (for CustomOpenAI provider)
-/// * `temperature` - Optional temperature (for CustomOpenAI provider)
-/// * `top_p` - Optional top_p (for CustomOpenAI provider)
+/// * `max_tokens` - Optional provider generation limit
+/// * `temperature` - Optional provider sampling temperature
+/// * `top_p` - Optional provider nucleus-sampling threshold
 /// * `app_data_dir` - Optional app data directory (for BuiltInAI provider)
 /// * `cancellation_token` - Optional token to cancel the request
 ///
@@ -186,6 +224,16 @@ pub async fn generate_summary_with_builtin_json_schema(
         if token.is_cancelled() {
             return Err("Summary generation was cancelled".to_string());
         }
+    }
+
+    // These transports do not currently expose a schema/JSON-mode contract in this
+    // client. Failing visibly is safer than silently running Standup V2 as unconstrained
+    // prose and hoping its output parses as evidence-bearing JSON.
+    if builtin_json_schema.is_some() && !supports_structured_json(provider) {
+        return Err(format!(
+            "{} does not support structured JSON generation in this client",
+            provider_name(provider)
+        ));
     }
 
     // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)
@@ -306,47 +354,36 @@ pub async fn generate_summary_with_builtin_json_schema(
 
     // Build request body based on provider
     let request_body = if provider == &LLMProvider::DeepSeek {
-        crate::llm::providers::deepseek::build_request_body_with_json_mode(
+        crate::llm::providers::deepseek::build_request_body_with_options(
             model_name,
             system_prompt,
             user_prompt,
             max_tokens,
+            temperature,
+            top_p,
             builtin_json_schema.is_some(),
         )
     } else if provider != &LLMProvider::Claude {
-        // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI
-        {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
-
-        serde_json::json!(ChatRequest {
-            model: model_name.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                }
-            ],
-            max_tokens: max_tokens_val,
-            temperature: temperature_val,
-            top_p: top_p_val,
-        })
+        serde_json::json!(openai_compatible_request(
+            model_name,
+            system_prompt,
+            user_prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            builtin_json_schema.is_some(),
+        ))
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
             model: model_name.to_string(),
-            max_tokens: 2048,
+            max_tokens: max_tokens.unwrap_or(2048),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: user_prompt.to_string(),
-            }]
+            }],
+            temperature,
+            top_p,
         })
     };
 
@@ -466,6 +503,48 @@ pub async fn generate_summary_with_builtin_json_schema(
             return Err("No final answer content in LLM response".to_string());
         }
         Ok(content.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_compatible_structured_request_keeps_generation_controls() {
+        let value = serde_json::to_value(openai_compatible_request(
+            "model",
+            "system",
+            "user",
+            Some(4_096),
+            Some(0.0),
+            Some(1.0),
+            true,
+        ))
+        .unwrap();
+
+        assert_eq!(value["max_tokens"], 4_096);
+        assert_eq!(value["temperature"], 0.0);
+        assert_eq!(value["top_p"], 1.0);
+        assert_eq!(value["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn ordinary_openai_compatible_request_omits_json_mode() {
+        let value = serde_json::to_value(openai_compatible_request(
+            "model", "system", "user", None, None, None, false,
+        ))
+        .unwrap();
+
+        assert!(value.get("response_format").is_none());
+    }
+
+    #[test]
+    fn unsupported_structured_transports_are_explicit() {
+        assert!(!supports_structured_json(&LLMProvider::Claude));
+        assert!(!supports_structured_json(&LLMProvider::GigaChat));
+        assert!(supports_structured_json(&LLMProvider::Ollama));
+        assert!(supports_structured_json(&LLMProvider::DeepSeek));
     }
 }
 
