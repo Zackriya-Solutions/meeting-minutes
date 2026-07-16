@@ -1053,6 +1053,10 @@ pub async fn get_series_digest(
         let Some(item) = digest_item(&row, &payload) else {
             continue;
         };
+        if row.kind == "action" && item.action_status.as_deref() == Some("cancelled") {
+            digest.cancelled_actions.push(item);
+            continue;
+        }
         accepted_meetings.insert(row.meeting_id);
         match row.kind.as_str() {
             "overview" | "unattributed_fact" => digest.highlights.push(item),
@@ -1063,7 +1067,7 @@ pub async fn get_series_digest(
             "deep_dive" => digest.deep_dives.push(item),
             "action" => match item.action_status.as_deref().unwrap_or("open") {
                 "done" => digest.done_actions.push(item),
-                "cancelled" => digest.cancelled_actions.push(item),
+                "cancelled" => unreachable!("cancelled actions are handled before coverage"),
                 _ => digest.open_actions.push(item),
             },
             _ => {}
