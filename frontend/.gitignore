@@ -47,6 +47,7 @@ yarn-error.log*
 
 # local signing credentials for build-mac-signed.sh (never commit)
 .env.signing
+/Certificates.p12
 
 # vercel
 .vercel
