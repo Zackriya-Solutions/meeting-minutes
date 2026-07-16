@@ -25,21 +25,21 @@ fn main() {
 fn detect_and_report_gpu_capabilities() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    println!("cargo:warning=🚀 Building Meetily for: {}", target_os);
+    eprintln!("🚀 Building Meetily for: {}", target_os);
 
     match target_os.as_str() {
         "macos" => {
-            println!("cargo:warning=✅ macOS: Metal GPU acceleration ENABLED by default");
+            eprintln!("✅ macOS: Metal GPU acceleration ENABLED by default");
             #[cfg(feature = "coreml")]
-            println!("cargo:warning=✅ CoreML acceleration ENABLED");
+            eprintln!("✅ CoreML acceleration ENABLED");
         }
         "windows" => {
             if cfg!(feature = "cuda") {
-                println!("cargo:warning=✅ Windows: CUDA GPU acceleration ENABLED");
+                eprintln!("✅ Windows: CUDA GPU acceleration ENABLED");
             } else if cfg!(feature = "vulkan") {
-                println!("cargo:warning=✅ Windows: Vulkan GPU acceleration ENABLED");
+                eprintln!("✅ Windows: Vulkan GPU acceleration ENABLED");
             } else if cfg!(feature = "openblas") {
-                println!("cargo:warning=✅ Windows: OpenBLAS CPU optimization ENABLED");
+                eprintln!("✅ Windows: OpenBLAS CPU optimization ENABLED");
             } else {
                 println!("cargo:warning=⚠️  Windows: Using CPU-only mode (no GPU or BLAS acceleration)");
                 println!("cargo:warning=💡 For NVIDIA GPU: cargo build --release --features cuda");
@@ -54,13 +54,13 @@ fn detect_and_report_gpu_capabilities() {
         }
         "linux" => {
             if cfg!(feature = "cuda") {
-                println!("cargo:warning=✅ Linux: CUDA GPU acceleration ENABLED");
+                eprintln!("✅ Linux: CUDA GPU acceleration ENABLED");
             } else if cfg!(feature = "vulkan") {
-                println!("cargo:warning=✅ Linux: Vulkan GPU acceleration ENABLED");
+                eprintln!("✅ Linux: Vulkan GPU acceleration ENABLED");
             } else if cfg!(feature = "hipblas") {
-                println!("cargo:warning=✅ Linux: AMD ROCm (HIP) acceleration ENABLED");
+                eprintln!("✅ Linux: AMD ROCm (HIP) acceleration ENABLED");
             } else if cfg!(feature = "openblas") {
-                println!("cargo:warning=✅ Linux: OpenBLAS CPU optimization ENABLED");
+                eprintln!("✅ Linux: OpenBLAS CPU optimization ENABLED");
             } else {
                 println!("cargo:warning=⚠️  Linux: Using CPU-only mode (no GPU or BLAS acceleration)");
                 println!("cargo:warning=💡 For NVIDIA GPU: cargo build --release --features cuda");
@@ -80,7 +80,7 @@ fn detect_and_report_gpu_capabilities() {
             }
         }
         _ => {
-            println!("cargo:warning=ℹ️  Unknown platform: {}", target_os);
+            eprintln!("ℹ️  Unknown platform: {}", target_os);
         }
     }
 

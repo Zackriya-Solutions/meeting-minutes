@@ -16,3 +16,9 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.32.0", features = ["full"] }
+
+# Package-specific release settings must live at the workspace root.
+# LTO cannot be overridden per package, so keep the workspace default.
+[profile.release.package.llama-helper]
+codegen-units = 1
+opt-level = "s"

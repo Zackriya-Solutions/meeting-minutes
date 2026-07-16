@@ -744,7 +744,7 @@ mod tests {
     #[test]
     fn test_chunked_resample_downsamples_correctly() {
         // 48kHz to 16kHz = 3x downsampling with a 2-second signal
-        let input: Vec<f32> = (0..96000).map(|i| (i as f32 / 96000.0)).collect();
+        let input: Vec<f32> = (0..96000).map(|i| i as f32 / 96000.0).collect();
         let result = chunked_resample_with_progress(&input, 48000, 16000, None);
 
         // Output should be approximately 1/3 the length

@@ -29,7 +29,9 @@ macro_rules! perf_trace {
 }
 
 // Make these macros available to other modules
+#[allow(unused_imports)]
 pub(crate) use perf_debug;
+#[allow(unused_imports)]
 pub(crate) use perf_trace;
 
 // Re-export async logging macros for external use (removed due to macro conflicts)
