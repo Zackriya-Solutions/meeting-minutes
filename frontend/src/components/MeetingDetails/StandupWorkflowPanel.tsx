@@ -249,7 +249,7 @@ export function StandupWorkflowPanel({
   };
 
   const hasPrebrief = prebrief.series.length > 0;
-  if (loading || (!hasPrebrief && records.length === 0 && privateNotes.length === 0)) return null;
+  if (loading) return null;
 
   const kindLabel = (kind: string) => {
     const labels: Record<string, string> = {
