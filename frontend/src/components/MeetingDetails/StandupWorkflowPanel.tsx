@@ -8,6 +8,7 @@ import { useT } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Check, ChevronDown, Pencil, RefreshCw, X } from '@/components/memento/LucideCompat';
+import { getStandupLiveState, type StandupLiveState } from '@/lib/standupLiveState';
 
 type ReviewStatus = 'pending' | 'accepted' | 'rejected';
 
@@ -124,6 +125,9 @@ export function StandupWorkflowPanel({
   const [newNoteKind, setNewNoteKind] = useState<PrivateNoteKind>('planned_update');
   const [newNoteText, setNewNoteText] = useState('');
   const [noteBusy, setNoteBusy] = useState(false);
+  const [liveState, setLiveState] = useState<StandupLiveState>(() =>
+    getStandupLiveState(meetingId)
+  );
   const noteBusyRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [busyRecordId, setBusyRecordId] = useState<number | null>(null);
@@ -132,6 +136,7 @@ export function StandupWorkflowPanel({
   const [draft, setDraft] = useState<Draft>({ text: '', owner: '', dueDate: '' });
 
   const refresh = useCallback(async () => {
+    setLiveState(getStandupLiveState(meetingId));
     try {
       const [nextRecords, nextPrebrief, nextPrivateNotes] = await Promise.all([
         invoke<StandupRecordRow[]>('list_standup_records', { meetingId }),
@@ -249,7 +254,8 @@ export function StandupWorkflowPanel({
   };
 
   const hasPrebrief = prebrief.series.length > 0;
-  if (loading || (!hasPrebrief && records.length === 0 && privateNotes.length === 0)) return null;
+  const hasLiveState = liveState.enabled || liveState.completedUpdates > 0 || liveState.markers.length > 0;
+  if (loading || (!hasPrebrief && records.length === 0 && privateNotes.length === 0 && !hasLiveState)) return null;
 
   const kindLabel = (kind: string) => {
     const labels: Record<string, string> = {
@@ -324,6 +330,40 @@ export function StandupWorkflowPanel({
               ))}
             </div>
           </div>
+        </details>
+      )}
+
+      {hasLiveState && (
+        <details className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-[var(--fg)]">
+            <span>{t('Live standup markers')}</span>
+            <ChevronDown size={16} />
+          </summary>
+          <p className="mt-2 text-xs text-[var(--fg3)]">
+            {t('Manual facilitation data is local context, not transcript evidence and not a score of any participant.')}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-sm text-[var(--fg2)]">
+            <span className="rounded bg-[var(--bg-elevated)] px-2 py-1">
+              {t('Time-box')}: {liveState.targetMinutes}:00
+            </span>
+            <span className="rounded bg-[var(--bg-elevated)] px-2 py-1">
+              {t('Updates covered')}: {liveState.completedUpdates}
+            </span>
+          </div>
+          {liveState.markers.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {liveState.markers.map((marker) => (
+                <button
+                  type="button"
+                  key={marker.id}
+                  onClick={() => router.push(sourceHref(meetingId, marker.seconds * 1000))}
+                  className="rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs text-[var(--gold)] hover:underline"
+                >
+                  {marker.kind === 'parking_lot' ? t('Parking lot') : t('Question')} · {Math.floor(marker.seconds / 60)}:{String(marker.seconds % 60).padStart(2, '0')}
+                </button>
+              ))}
+            </div>
+          )}
         </details>
       )}
 

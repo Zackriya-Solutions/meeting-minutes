@@ -17,6 +17,8 @@ Turn a standup recording into an evidence-backed operating loop, not just a pros
 | Infer speaker names and aliases safely | PR #27 adds a local candidate store, abuse filtering, evidence UI, confirmation, aliases, and salted rejection fingerprints | Evaluate precision after diarization is available on the corpus |
 | Keep DeepSeek summaries reliable | PR #21 implements bounded generation and direct Russian output | Merge/review and Standup V2 provider evaluation |
 | Automatic meeting detection | PR #22 is open | Merge/review and false-positive/false-negative evaluation |
+| Prepare and facilitate rather than only summarize | PR #30 adds private planned updates/parking/scratchpad; PR #32 adds explicit live time-box, manual update count, and timestamped markers | Validate the workflow in real standups and avoid adding surveillance metrics |
+| Make cross-meeting retrieval usable | PR #31 supplies the ONNX `token_type_ids` input required by the installed embedding model and passes an end-to-end 384-dimensional inference test | Re-run pending embedding jobs after the import |
 
 The database previously treated import time as meeting time. The standup-series slice adds a
 separate `occurred_at` value and backfills it only from the safely normalized
@@ -64,6 +66,12 @@ The preparation-notes slice implements meeting-local planned updates, parking-lo
 private scratchpad. They are stored separately from transcripts and generated records, never sent
 to the summary model, and can be completed, reopened, or archived by the user. This separation is
 intentional: a private thought must not silently become a claim that somebody said during the call.
+
+The live-facilitation slice is explicitly enabled per recording. It adds a 10/15/20/30-minute
+time-box, a manual count of completed status updates, and timestamped parking-lot/question markers.
+The state stays local, follows the temporary recording ID to the saved meeting, and is shown next
+to the transcript afterwards. It is not model input, transcript evidence, participant scoring, or
+automatic performance analysis.
 
 ## After the standup
 
