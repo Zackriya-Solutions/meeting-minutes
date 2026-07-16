@@ -31,7 +31,7 @@ export function ValueOsShell({ services }: { services?: ValueOsServices }) {
 }
 
 function Flow() {
-  const { auth } = useValueOs();
+  const { auth, config } = useValueOs();
   const [screen, setScreen] = useState<Screen>('landing');
   const [entitled, setEntitled] = useState<EntitledTenant[]>([]);
   const [blockedReason, setBlockedReason] = useState<'no-membership' | 'no-addon'>('no-addon');
@@ -59,6 +59,16 @@ function Flow() {
       } catch {
         setScreen('login'); // gate re-check failed (e.g. 401) → re-auth
       }
+    })();
+  };
+
+  // After the model download, the transcript-folder config is a ONE-TIME step: show it only
+  // on the first run (no folder set yet). On later logins the saved folder persists
+  // (localStorage in the packaged app), so we skip straight to home.
+  const afterDownload = () => {
+    void (async () => {
+      const folder = await config.getTranscriptFolder();
+      setScreen(folder ? 'home' : 'config');
     })();
   };
 
@@ -94,7 +104,7 @@ function Flow() {
         />
       )}
 
-      {screen === 'download' && <ModelDownloadScreen onComplete={() => setScreen('config')} />}
+      {screen === 'download' && <ModelDownloadScreen onComplete={afterDownload} />}
 
       {screen === 'config' && <ConfigScreen onDone={() => setScreen('home')} />}
 

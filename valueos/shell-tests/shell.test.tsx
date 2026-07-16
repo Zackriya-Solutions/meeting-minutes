@@ -95,11 +95,29 @@ describe('ValueOS full flow', () => {
     expect(screen.getByTestId('valueos-build-stamp')).toBeInTheDocument();
   });
 
-  it('entitled login proceeds through download to configuration', async () => {
+  it('entitled login proceeds through download to configuration (first run — no folder yet)', async () => {
     const { services } = makeServices('active');
     render(<ValueOsShell services={services} />);
     await loginToConfig();
     expect(screen.getByTestId('valueos-config')).toBeInTheDocument();
+  });
+
+  it('skips the folder config on a later run when a folder is already saved', async () => {
+    const seed = defaultMockSeed();
+    const client = new MockValueOsClient(seed);
+    const services: ValueOsServices = {
+      client,
+      auth: createMockAuthService(client, new InMemoryTokenStore()),
+      config: createMockConfigService({ initialFolder: '/Users/me/ValueOS Transcripts', writable: true }),
+      digest: new MockDigestGenerator(),
+      uploadQueue: new PendingUploadQueue(client, new InMemoryPendingUploadStore()),
+      history: new InMemoryTranscriptHistory(),
+    };
+    render(<ValueOsShell services={services} />);
+    fireEvent.click(screen.getByTestId('valueos-proceed')); // landing → login
+    fireEvent.click(screen.getByTestId('valueos-login-start')); // login → download(auto) → …
+    await screen.findByTestId('valueos-home'); // straight to home — config was skipped
+    expect(screen.queryByTestId('valueos-config')).toBeNull();
   });
 
   it.each(['expired', 'never'] as EntitlementState[])(
