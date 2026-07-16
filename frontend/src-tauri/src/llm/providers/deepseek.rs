@@ -6,7 +6,7 @@
 use serde_json::{json, Value};
 use std::time::Duration;
 
-pub const DEFAULT_BASE_URL: &str = "https://gw.gigatool.app/deepseek/v1";
+pub const DEFAULT_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
 pub const DEFAULT_MAX_TOKENS: u32 = 8_192;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
@@ -236,5 +236,10 @@ mod tests {
         assert!(parse_response(&empty)
             .unwrap_err()
             .contains("no final answer"));
+    }
+
+    #[test]
+    fn default_gateway_uses_multitool_domain() {
+        assert_eq!(DEFAULT_BASE_URL, "https://gw.multitool.works/deepseek/v1");
     }
 }
