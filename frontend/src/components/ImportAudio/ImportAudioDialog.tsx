@@ -197,6 +197,16 @@ export function ImportAudioDialog({
   // GigaAM (Russian e2e), Parakeet, and SaluteSpeech don't take a language hint here —
   // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
   const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
+  const batchProcessed = batchProgress
+    ? batchProgress.completed + batchProgress.skipped + batchProgress.failed
+    : 0;
+  const displayedProgress = Math.min(
+    progress?.progress_percentage
+      ?? (batchProgress && batchProgress.total > 0
+        ? (batchProcessed / batchProgress.total) * 100
+        : 0),
+    100,
+  );
 
   useEffect(() => {
     if (languageAutoOnly && selectedLang !== 'auto') {
@@ -502,12 +512,12 @@ export function ImportAudioDialog({
                 <div className="w-full bg-[var(--bg-elevated)] rounded-full h-3">
                   <div
                     className="bg-[var(--gold)] h-3 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${Math.min(progress?.progress_percentage ?? 0, 100)}%` }}
+                    style={{ width: `${displayedProgress}%` }}
                   />
                 </div>
                 <div className="flex justify-between text-xs text-[var(--fg2)] mt-1">
                   <span>{progress?.stage || batchProgress?.state}</span>
-                  <span>{Math.round(progress?.progress_percentage ?? 0)}%</span>
+                  <span>{Math.round(displayedProgress)}%</span>
                 </div>
               </div>
               {progress && <p className="text-sm text-muted-foreground text-center">{progress.message}</p>}
