@@ -636,6 +636,19 @@ impl SummaryService {
                     error!("Failed to save completed process for {}: {}", meeting_id, e);
                 } else {
                     info!("Summary saved successfully for meeting_id: {}", meeting_id);
+                    // A generated summary is already final persisted state; requiring the
+                    // user to press Save before search/RAG indexing made auto-save
+                    // misleading and left freshly summarized meetings unavailable in chat.
+                    match crate::jobs::enqueue_post_meeting_pipeline(&pool, &meeting_id).await {
+                        Ok(job_id) => info!(
+                            "Enqueued post-meeting pipeline job {} for generated summary {}",
+                            job_id, meeting_id
+                        ),
+                        Err(error) => warn!(
+                            "Failed to enqueue post-meeting pipeline for generated summary {}: {}",
+                            meeting_id, error
+                        ),
+                    }
                 }
             }
             Err(e) => {

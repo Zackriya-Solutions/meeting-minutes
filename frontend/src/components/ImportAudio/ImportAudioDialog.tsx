@@ -280,7 +280,7 @@ export function ImportAudioDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="sm:max-w-[500px]"
+        className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[760px] overflow-x-hidden overflow-y-auto sm:max-w-[760px]"
         onEscapeKeyDown={handleEscapeKeyDown}
         onInteractOutside={handleInteractOutside}
       >
@@ -317,7 +317,7 @@ export function ImportAudioDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="min-w-0 space-y-4 py-4">
           {/* File selection / info */}
           {!isProcessing && !error && (
             <>
@@ -391,10 +391,10 @@ export function ImportAudioDialog({
                   </Button>
                 </div>
               ) : (
-                <div className="border-2 border-dashed border-[var(--border-strong)] rounded-lg p-8 text-center">
+                <div className="min-w-0 border-2 border-dashed border-[var(--border-strong)] rounded-lg p-5 text-center sm:p-8">
                   <FileAudio className="h-12 w-12 text-[var(--fg3)] mx-auto mb-4" />
-                  <div className="flex flex-col sm:flex-row justify-center gap-2">
-                    <Button onClick={handleSelectFile} disabled={status === 'validating'}>
+                  <div className="flex min-w-0 flex-col justify-center gap-2 sm:flex-row sm:flex-wrap">
+                    <Button className="min-w-0 whitespace-normal" onClick={handleSelectFile} disabled={status === 'validating'}>
                       {status === 'validating' ? (
                         <>
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -407,7 +407,7 @@ export function ImportAudioDialog({
                         </>
                       )}
                     </Button>
-                    <Button variant="outline" onClick={handleSelectFolder} disabled={status === 'validating'}>
+                    <Button className="min-w-0 whitespace-normal" variant="outline" onClick={handleSelectFolder} disabled={status === 'validating'}>
                       <FolderOpen className="h-4 w-4 mr-2" />
                       {t('Select Audio Folder')}
                     </Button>
@@ -538,15 +538,15 @@ export function ImportAudioDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="min-w-0 gap-2 sm:flex-wrap sm:space-x-0">
           {!isProcessing && !error && (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button className="min-w-0" variant="outline" onClick={() => onOpenChange(false)}>
                 {t('Cancel')}
               </Button>
               <Button
                 onClick={handleStartImport}
-                className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                className="min-w-0 whitespace-normal bg-[var(--gold)] hover:bg-[var(--gold-active)]"
                 disabled={!fileInfo && batchFiles.length === 0}
               >
                 <Upload className="h-4 w-4 mr-2" />

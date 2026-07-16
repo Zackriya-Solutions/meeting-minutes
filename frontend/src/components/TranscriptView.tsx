@@ -383,7 +383,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           ) : (
             <>
               <p className="text-lg font-semibold">{t('Welcome to Memento')}</p>
-              <p className="mt-1 text-xs">{t('Start recording to see live transcription')}</p>
+              <p className="mt-1 text-xs">{t('Select a meeting in the sidebar or start a new recording')}</p>
+              <p className="mx-auto mt-2 max-w-md text-xs text-[var(--fg3)]">
+                {t('For a standup summary: open a meeting, choose Improve → Template → Daily Standup, then generate the summary.')}
+              </p>
             </>
           )}
         </motion.div>

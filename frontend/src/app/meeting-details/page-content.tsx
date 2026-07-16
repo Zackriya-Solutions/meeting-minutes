@@ -19,6 +19,7 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useT } from '@/lib/i18n';
+import { useRouter } from 'next/navigation';
 
 // Transcript/summary splitter: user-dragged width of the transcript pane (px),
 // persisted across meetings. Bounded so neither pane can be crushed.
@@ -82,6 +83,7 @@ export default function PageContent({
   });
 
   const t = useT();
+  const router = useRouter();
 
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
@@ -336,6 +338,9 @@ export default function PageContent({
           onSaveAll={meetingData.saveAllChanges}
           onCopySummary={copyOperations.handleCopySummary}
           onOpenFolder={meetingOperations.handleOpenMeetingFolder}
+          onDiscussSummary={() => {
+            router.push(`/chat?scope=meeting&meetingId=${encodeURIComponent(meeting.id)}`);
+          }}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}
           transcripts={meetingData.transcripts}

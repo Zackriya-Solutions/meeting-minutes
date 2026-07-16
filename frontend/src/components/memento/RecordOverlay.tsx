@@ -160,7 +160,16 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
   }, [meetingId]);
 
   const addLiveMarker = useCallback((kind: StandupLiveMarkerKind) => {
-    setStandup(addStandupLiveMarker(meetingId, kind, elapsed));
+    const previous = getStandupLiveState(meetingId);
+    const next = addStandupLiveMarker(meetingId, kind, elapsed);
+    setStandup(next);
+    if (next.markers.length === previous.markers.length) {
+      toast.info(t('This moment is already marked'), {
+        description: formatTime(elapsed),
+        duration: 2000,
+      });
+      return;
+    }
     setMarks(addMarkedMoment(meetingId, elapsed));
     toast.success(kind === 'parking_lot' ? t('Added to parking lot') : t('Question marked'), {
       description: formatTime(elapsed),
@@ -268,7 +277,7 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
             />
           </div>
           <div className="flex items-center justify-between gap-2 text-xs text-[var(--fg2)]">
-            <span>{t('Updates covered')}: {standup.completedUpdates}</span>
+            <span>{t('Completed status updates')}: {standup.completedUpdates}</span>
             <div className="flex gap-1">
               <button
                 type="button"
@@ -295,6 +304,7 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
               size="sm"
               icon={<Icon name="pin" size={14} />}
               onClick={() => addLiveMarker('parking_lot')}
+              title={t('Save this timestamp as a topic to discuss after the status round')}
             >
               {t('Park topic')}
             </Button>
@@ -303,6 +313,7 @@ export function RecordOverlay({ title = 'Новая встреча', onStop, mee
               size="sm"
               icon={<Icon name="alert" size={14} />}
               onClick={() => addLiveMarker('question')}
+              title={t('Save this timestamp as an unresolved question')}
             >
               {t('Mark question')}
             </Button>

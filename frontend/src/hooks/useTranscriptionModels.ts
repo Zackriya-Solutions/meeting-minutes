@@ -72,19 +72,22 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch GigaAM status:', err);
     }
 
-    // SaluteSpeech (cloud) — only offered when a Sber Authorization Key is configured.
+    // SaluteSpeech (cloud) — offered when either a user Authorization Key or the
+    // managed Memento gateway is available. Checking app_settings_kv directly hid
+    // SaluteSpeech in managed builds because those builds intentionally do not persist
+    // a user key.
     try {
-      const settings = await invoke<Record<string, string>>('get_app_settings');
-      if (settings?.['salutespeech.auth_key'] && settings['salutespeech.auth_key'].length > 0) {
+      const saluteSpeechReady = await invoke<boolean>('salutespeech_is_configured');
+      if (saluteSpeechReady) {
         allModels.push({
           provider: 'salutespeech' as const,
           name: SALUTE_MODEL_NAME,
-          displayName: 'SaluteSpeech (Sber cloud)',
+          displayName: t('SaluteSpeech (Sber cloud)'),
           size_mb: 0,
         });
       }
     } catch (err) {
-      console.error('Failed to fetch SaluteSpeech settings:', err);
+      console.error('Failed to check SaluteSpeech readiness:', err);
     }
 
     // Fetch Whisper models

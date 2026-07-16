@@ -84,14 +84,14 @@ impl Default for NotificationSettings {
 }
 
 const fn default_auto_meeting_detection() -> bool {
-    false
+    true
 }
 
 impl Default for NotificationPreferences {
     fn default() -> Self {
         Self {
-            show_recording_started: false,
-            show_recording_stopped: false,
+            show_recording_started: true,
+            show_recording_stopped: true,
             show_recording_paused: true,
             show_recording_resumed: true,
             show_transcription_complete: true,
@@ -294,7 +294,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_settings_keep_new_detection_opted_out() {
+    fn legacy_settings_enable_new_detection_by_default() {
         let legacy = serde_json::json!({
             "recording_notifications": true,
             "time_based_reminders": true,
@@ -308,11 +308,14 @@ mod tests {
         });
 
         let settings: NotificationSettings = serde_json::from_value(legacy).unwrap();
-        assert!(!settings.auto_meeting_detection);
+        assert!(settings.auto_meeting_detection);
     }
 
     #[test]
     fn fresh_settings_enable_detection_by_default() {
-        assert!(NotificationSettings::default().auto_meeting_detection);
+        let settings = NotificationSettings::default();
+        assert!(settings.auto_meeting_detection);
+        assert!(settings.notification_preferences.show_recording_started);
+        assert!(settings.notification_preferences.show_recording_stopped);
     }
 }

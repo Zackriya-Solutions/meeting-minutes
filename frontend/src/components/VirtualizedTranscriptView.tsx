@@ -353,7 +353,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     ) : (
                         <>
                             <p className="text-lg font-semibold">{t('Welcome to Memento')}</p>
-                            <p className="text-xs mt-1">{t('Start recording to see live transcription')}</p>
+                            <p className="text-xs mt-1">{t('Select a meeting in the sidebar or start a new recording')}</p>
+                            <p className="mx-auto mt-2 max-w-md text-xs text-[var(--fg3)]">
+                              {t('For a standup summary: open a meeting, choose Improve → Template → Daily Standup, then generate the summary.')}
+                            </p>
                         </>
                     )}
                 </motion.div>

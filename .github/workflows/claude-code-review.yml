@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -33,16 +33,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           API_URL: ${{ github.api_url }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           curl -fsSL \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$API_URL/repos/$GH_REPO/pulls/$PR_NUMBER" > "$GITHUB_WORKSPACE/.pr-meta.json"
-          curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3.diff" \
-            "$API_URL/repos/$GH_REPO/pulls/$PR_NUMBER" > "$GITHUB_WORKSPACE/.pr-diff.patch"
+          # GitHub's REST diff media type returns HTTP 406 for this private
+          # repository. Build the exact PR diff from the event SHAs instead.
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA"
+          git diff --binary "$BASE_SHA...$HEAD_SHA" > "$GITHUB_WORKSPACE/.pr-diff.patch"
           echo "Prepared .pr-meta.json ($(wc -c < "$GITHUB_WORKSPACE/.pr-meta.json") bytes) and .pr-diff.patch ($(wc -c < "$GITHUB_WORKSPACE/.pr-diff.patch") bytes)"
 
       # The action appends inline comments to this fixed path. Clear leftovers from

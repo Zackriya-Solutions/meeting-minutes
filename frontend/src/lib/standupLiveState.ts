@@ -21,6 +21,7 @@ const DEFAULT_STATE: StandupLiveState = {
 };
 const TARGETS = [10, 15, 20, 30];
 const MAX_MARKERS = 100;
+const MARKER_DEDUPE_WINDOW_SECONDS = 3;
 const keyFor = (meetingId: string) => `memento:standup-live:${meetingId}`;
 
 function normalize(raw: unknown): StandupLiveState {
@@ -118,6 +119,13 @@ export function addStandupLiveMarker(
 ): StandupLiveState {
   if (!meetingId) return { ...DEFAULT_STATE };
   const current = read(meetingId);
+  const normalizedSeconds = Math.max(0, Math.floor(seconds));
+  const duplicate = current.markers.some(
+    (marker) =>
+      marker.kind === kind &&
+      Math.abs(marker.seconds - normalizedSeconds) <= MARKER_DEDUPE_WINDOW_SECONDS,
+  );
+  if (duplicate) return current;
   return write(meetingId, {
     ...current,
     markers: [
@@ -125,7 +133,7 @@ export function addStandupLiveMarker(
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         kind,
-        seconds,
+        seconds: normalizedSeconds,
       },
     ],
   });
