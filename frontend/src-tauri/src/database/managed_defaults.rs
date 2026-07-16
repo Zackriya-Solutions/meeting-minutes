@@ -134,13 +134,15 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
             .bind(MARKER)
             .fetch_optional(&mut *tx)
             .await?;
-    if marker.as_deref().and_then(pending_candidates).is_none() {
+    let Some((pending_transcription, pending_summary)) =
+        marker.as_deref().and_then(pending_candidates)
+    else {
         tx.commit().await?;
         return Ok(MigrationReport {
             already_applied: true,
             ..MigrationReport::default()
         });
-    }
+    };
 
     if !accept {
         sqlx::query(
@@ -172,25 +174,50 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
     }
 
     let mut report = MigrationReport::default();
-    let transcription = sqlx::query(
-        "UPDATE transcript_settings SET provider='salutespeech', model=? WHERE id='1' \
-         AND ((provider='gigaam' AND model='gigaam-v3-e2e-ctc') \
-           OR (provider='parakeet' AND model='parakeet-tdt-0.6b-v3-int8'))",
-    )
-    .bind(SALUTESPEECH_MODEL)
-    .execute(&mut *tx)
-    .await?;
-    report.transcription_changed = transcription.rows_affected() > 0;
+    if pending_transcription {
+        if let Some(row) =
+            sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+                .fetch_optional(&mut *tx)
+                .await?
+        {
+            let provider: String = row.try_get("provider")?;
+            let model: String = row.try_get("model")?;
+            if is_legacy_transcription(&provider, &model) {
+                let updated = sqlx::query(
+                    "UPDATE transcript_settings SET provider='salutespeech', model=? \
+                     WHERE id='1' AND provider=? AND model=?",
+                )
+                .bind(SALUTESPEECH_MODEL)
+                .bind(provider)
+                .bind(model)
+                .execute(&mut *tx)
+                .await?;
+                report.transcription_changed = updated.rows_affected() > 0;
+            }
+        }
+    }
 
-    let summary = sqlx::query(
-        "UPDATE settings SET provider='deepseek', model=? WHERE id='1' \
-         AND ((provider='ollama' AND model='llama3.2:latest') \
-           OR (provider='builtin-ai' AND model IN ('qwen3.5:2b','qwen3.5:4b')))",
-    )
-    .bind(DEEPSEEK_MODEL)
-    .execute(&mut *tx)
-    .await?;
-    report.summary_changed = summary.rows_affected() > 0;
+    if pending_summary {
+        if let Some(row) = sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
+            .fetch_optional(&mut *tx)
+            .await?
+        {
+            let provider: String = row.try_get("provider")?;
+            let model: String = row.try_get("model")?;
+            if is_legacy_summary(&provider, &model) {
+                let updated = sqlx::query(
+                    "UPDATE settings SET provider='deepseek', model=? \
+                     WHERE id='1' AND provider=? AND model=?",
+                )
+                .bind(DEEPSEEK_MODEL)
+                .bind(provider)
+                .bind(model)
+                .execute(&mut *tx)
+                .await?;
+                report.summary_changed = updated.rows_affected() > 0;
+            }
+        }
+    }
 
     sqlx::query(
         "UPDATE app_settings_kv SET value='applied', updated_at=datetime('now') WHERE key=?",

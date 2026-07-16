@@ -76,8 +76,12 @@ export function ManagedDefaultsMigrationDialog() {
   }, [t]);
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !saving && setOpen(next)}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent
+        hideClose
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{t('Choose where meeting processing runs')}</DialogTitle>
           <DialogDescription className="space-y-3 text-left">
