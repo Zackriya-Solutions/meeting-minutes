@@ -64,6 +64,7 @@ struct SummaryCacheSource {
     model_name: String,
     ollama_endpoint: Option<String>,
     custom_openai_endpoint: Option<String>,
+    deepseek_base_url: Option<String>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -99,6 +100,7 @@ fn build_summary_cache_source(
     model_name: &str,
     ollama_endpoint: Option<&str>,
     custom_openai_endpoint: Option<&str>,
+    deepseek_base_url: Option<&str>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -113,6 +115,7 @@ fn build_summary_cache_source(
         model_name: model_name.to_string(),
         ollama_endpoint: ollama_endpoint.map(str::to_string),
         custom_openai_endpoint: custom_openai_endpoint.map(str::to_string),
+        deepseek_base_url: deepseek_base_url.map(str::to_string),
         max_tokens,
         temperature,
         top_p,
@@ -305,6 +308,7 @@ impl SummaryService {
 
         // Resolve both credential and transport. Managed DeepSeek bootstrap returns a
         // server-selected base URL; keeping only its token breaks local/pilot gateways.
+        let mut effective_model_name = model_name.clone();
         let (api_key, deepseek_base_url) = if provider == LLMProvider::Ollama
             || provider == LLMProvider::BuiltInAI
             || provider == LLMProvider::CustomOpenAI
@@ -327,7 +331,11 @@ impl SummaryService {
         } else if provider == LLMProvider::DeepSeek {
             match crate::llm::providers::resolve_deepseek_transport(&pool).await {
                 Some(transport) => {
-                    info!("Using DeepSeek transport at {}", transport.base_url);
+                    effective_model_name = transport.model;
+                    info!(
+                        "Using DeepSeek transport at {} with model {}",
+                        transport.base_url, effective_model_name
+                    );
                     (transport.api_key, Some(transport.base_url))
                 }
                 None => {
@@ -493,9 +501,10 @@ impl SummaryService {
             &template_fingerprint,
             token_threshold,
             &model_provider,
-            &model_name,
+            &effective_model_name,
             ollama_endpoint.as_deref(),
             custom_openai_endpoint.as_deref(),
+            deepseek_base_url.as_deref(),
             custom_openai_max_tokens,
             custom_openai_temperature,
             custom_openai_top_p,
@@ -505,7 +514,7 @@ impl SummaryService {
         let result = generate_meeting_summary(
             &client,
             &provider,
-            &model_name,
+            &effective_model_name,
             &final_api_key,
             &meeting_id,
             &text,
@@ -764,6 +773,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -857,5 +867,30 @@ mod tests {
             })),
         );
         assert_eq!(result["standup_v2"]["schema_version"], "standup_v2");
+    }
+
+    #[test]
+    fn test_generation_source_records_deepseek_transport() {
+        let source = build_summary_cache_source(
+            "transcript",
+            "",
+            "standard_meeting",
+            "template-fingerprint",
+            60_000,
+            "deepseek",
+            "deepseek-custom",
+            None,
+            None,
+            Some("https://deepseek.example/v1"),
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(source.model_name, "deepseek-custom");
+        assert_eq!(
+            source.deepseek_base_url.as_deref(),
+            Some("https://deepseek.example/v1")
+        );
     }
 }
