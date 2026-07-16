@@ -89,6 +89,14 @@ pub struct SeriesDigestItem {
     pub source_start_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct StandupSeriesInsight {
+    pub kind: String,
+    pub priority: String,
+    pub text: String,
+    pub sources: Vec<SeriesDigestItem>,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct StandupSeriesDigest {
     pub collection_id: i64,
@@ -99,6 +107,7 @@ pub struct StandupSeriesDigest {
     pub meeting_count: usize,
     pub meetings_with_accepted_records: usize,
     pub pending_review_count: usize,
+    pub insights: Vec<StandupSeriesInsight>,
     pub highlights: Vec<SeriesDigestItem>,
     pub updates: Vec<SeriesDigestItem>,
     pub decisions: Vec<SeriesDigestItem>,
@@ -802,6 +811,156 @@ fn escape_digest_markdown(value: &str) -> String {
     escaped
 }
 
+fn is_missing(value: Option<&String>) -> bool {
+    value.map_or(true, |value| value.trim().is_empty())
+}
+
+fn build_proactive_insights(digest: &StandupSeriesDigest) -> Vec<StandupSeriesInsight> {
+    let mut insights = Vec::new();
+
+    for action in &digest.open_actions {
+        let missing_owner = is_missing(action.owner.as_ref());
+        let missing_due = is_missing(action.due_date.as_ref());
+        if missing_owner || missing_due {
+            let kind = if missing_owner && missing_due {
+                "action_missing_owner_and_due"
+            } else if missing_owner {
+                "action_missing_owner"
+            } else {
+                "action_missing_due"
+            };
+            insights.push(StandupSeriesInsight {
+                kind: kind.to_string(),
+                priority: if missing_owner { "high" } else { "medium" }.to_string(),
+                text: action.text.clone(),
+                sources: vec![action.clone()],
+            });
+        }
+    }
+
+    let mut risks: HashMap<String, Vec<SeriesDigestItem>> = HashMap::new();
+    for risk in &digest.risks {
+        let key = normalized_identity(&risk.text);
+        if !key.is_empty() {
+            risks.entry(key).or_default().push(risk.clone());
+        }
+    }
+    for sources in risks.into_values() {
+        let distinct_meetings = sources
+            .iter()
+            .map(|item| item.source_meeting_id.as_str())
+            .collect::<HashSet<_>>();
+        if distinct_meetings.len() >= 2 {
+            insights.push(StandupSeriesInsight {
+                kind: "recurring_risk".to_string(),
+                priority: "high".to_string(),
+                text: sources[0].text.clone(),
+                sources,
+            });
+        }
+    }
+
+    if let Some(latest) = digest.period_end.as_deref().and_then(parse_digest_datetime) {
+        for action in &digest.open_actions {
+            // Missing ownership/due metadata already creates a higher-priority card
+            // above. Keep one actionable insight per source record instead of a
+            // second carried-over card pointing at the same evidence.
+            if is_missing(action.owner.as_ref()) || is_missing(action.due_date.as_ref()) {
+                continue;
+            }
+            if parse_digest_datetime(&action.source_occurred_at)
+                .map(|occurred_at| occurred_at < latest)
+                .unwrap_or(false)
+            {
+                insights.push(StandupSeriesInsight {
+                    kind: "carried_open_action".to_string(),
+                    priority: "medium".to_string(),
+                    text: action.text.clone(),
+                    sources: vec![action.clone()],
+                });
+            }
+        }
+    }
+
+    for item in &digest.parking_lot {
+        insights.push(StandupSeriesInsight {
+            kind: "unresolved_parking_lot".to_string(),
+            priority: "low".to_string(),
+            text: item.text.clone(),
+            sources: vec![item.clone()],
+        });
+    }
+
+    insights.sort_by(|left, right| {
+        fn rank(priority: &str) -> u8 {
+            match priority {
+                "high" => 0,
+                "medium" => 1,
+                _ => 2,
+            }
+        }
+        rank(&left.priority)
+            .cmp(&rank(&right.priority))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.text.cmp(&right.text))
+    });
+    insights
+}
+
+fn insight_label(kind: &str, russian: bool) -> &'static str {
+    match (kind, russian) {
+        ("action_missing_owner_and_due", true) => "У действия не указаны ответственный и срок",
+        ("action_missing_owner_and_due", false) => "Action is missing owner and due date",
+        ("action_missing_owner", true) => "У действия не указан ответственный",
+        ("action_missing_owner", false) => "Action is missing an owner",
+        ("action_missing_due", true) => "У действия не указан срок",
+        ("action_missing_due", false) => "Action is missing a due date",
+        ("recurring_risk", true) => "Риск повторяется в нескольких встречах",
+        ("recurring_risk", false) => "Risk recurs across meetings",
+        ("carried_open_action", true) => "Действие перенесено из прошлой встречи",
+        ("carried_open_action", false) => "Action carried over from an earlier meeting",
+        ("unresolved_parking_lot", true) => "Тема остаётся в списке отложенных вопросов",
+        ("unresolved_parking_lot", false) => "Topic remains in the parking lot",
+        (_, true) => "Проверить подтверждённый факт",
+        (_, false) => "Review accepted fact",
+    }
+}
+
+fn render_insight_section(markdown: &mut String, insights: &[StandupSeriesInsight], russian: bool) {
+    let title = if russian {
+        "Предлагаемые следующие шаги"
+    } else {
+        "Suggested follow-ups"
+    };
+    markdown.push_str(&format!("## {title}\n\n"));
+    if insights.is_empty() {
+        markdown.push_str("—\n\n");
+        return;
+    }
+    for insight in insights {
+        let evidence = insight
+            .sources
+            .first()
+            .map(markdown_evidence)
+            .unwrap_or_default();
+        let source_count = if insight.sources.len() > 1 {
+            if russian {
+                format!(" · источников: {}", insight.sources.len())
+            } else {
+                format!(" · {} sources", insight.sources.len())
+            }
+        } else {
+            String::new()
+        };
+        markdown.push_str(&format!(
+            "- **{}:** {} {evidence}{source_count}\n",
+            insight_label(&insight.kind, russian),
+            escape_digest_markdown(&insight.text)
+        ));
+    }
+    markdown.push('\n');
+}
+
 fn digest_category_label(category: Option<&str>, russian: bool) -> Option<&'static str> {
     match (category, russian) {
         (Some("completed_or_recent"), true) => Some("сделано"),
@@ -935,6 +1094,7 @@ fn render_series_digest_markdown(
         digest.meetings_with_accepted_records,
         digest.pending_review_count
     ));
+    render_insight_section(&mut markdown, &digest.insights, russian);
     render_digest_section(&mut markdown, highlights, &digest.highlights, russian);
     render_digest_section(&mut markdown, updates, &digest.updates, russian);
     render_digest_section(&mut markdown, open, &digest.open_actions, russian);
@@ -1074,6 +1234,7 @@ pub async fn get_series_digest(
         }
     }
     digest.meetings_with_accepted_records = accepted_meetings.len();
+    digest.insights = build_proactive_insights(&digest);
     digest.markdown = render_series_digest_markdown(&digest, output_language);
     Ok(digest)
 }
@@ -1164,6 +1325,30 @@ mod tests {
         report
     }
 
+    fn digest_test_item(
+        record_id: i64,
+        kind: &str,
+        text: &str,
+        meeting_id: &str,
+        occurred_at: &str,
+    ) -> SeriesDigestItem {
+        SeriesDigestItem {
+            record_id,
+            kind: kind.into(),
+            text: text.into(),
+            participant: None,
+            category: None,
+            owner: None,
+            due_date: None,
+            action_status: None,
+            parking_lot: false,
+            source_meeting_id: meeting_id.into(),
+            source_meeting_title: format!("Standup {meeting_id}"),
+            source_occurred_at: occurred_at.into(),
+            source_start_ms: Some(record_id * 1_000),
+        }
+    }
+
     #[test]
     fn relative_due_dates_stay_raw_instead_of_becoming_fake_iso_dates() {
         assert_eq!(
@@ -1172,6 +1357,112 @@ mod tests {
         );
         assert_eq!(split_due_date(Some("в пятницу")), (None, Some("в пятницу")));
         assert_eq!(split_due_date(Some("  ")), (None, None));
+    }
+
+    #[test]
+    fn proactive_insights_are_prioritized_and_keep_accepted_sources() {
+        let mut carried_action = digest_test_item(
+            1,
+            "action",
+            "Проверить сборку",
+            "previous",
+            "2026-07-14T10:00:00Z",
+        );
+        carried_action.owner = Some("Анна".into());
+        carried_action.due_date = Some("2026-07-16".into());
+        let later_action = digest_test_item(
+            5,
+            "action",
+            "Выпустить следующую сборку",
+            "current",
+            "2026-07-15 11:00:00",
+        );
+        let first_risk = digest_test_item(
+            2,
+            "risk",
+            "Нет доступа к стенду",
+            "previous",
+            "2026-07-14T10:00:00Z",
+        );
+        let second_risk = digest_test_item(
+            3,
+            "risk",
+            "Нет доступа к стенду",
+            "current",
+            "2026-07-15T10:00:00Z",
+        );
+        let mut parking = digest_test_item(
+            4,
+            "deep_dive",
+            "Обсудить миграцию отдельно",
+            "current",
+            "2026-07-15T10:00:00Z",
+        );
+        parking.parking_lot = true;
+        let digest = StandupSeriesDigest {
+            period_end: Some("2026-07-15T10:00:00Z".into()),
+            open_actions: vec![carried_action, later_action],
+            risks: vec![first_risk, second_risk],
+            parking_lot: vec![parking],
+            ..StandupSeriesDigest::default()
+        };
+
+        let insights = build_proactive_insights(&digest);
+        assert_eq!(insights[0].priority, "high");
+        assert!(insights.iter().any(|insight| {
+            insight.kind == "action_missing_owner_and_due" && insight.sources[0].record_id == 5
+        }));
+        assert!(insights.iter().any(|insight| {
+            insight.kind == "recurring_risk"
+                && insight.sources.len() == 2
+                && insight
+                    .sources
+                    .iter()
+                    .map(|item| item.source_meeting_id.as_str())
+                    .collect::<HashSet<_>>()
+                    .len()
+                    == 2
+        }));
+        assert!(insights
+            .iter()
+            .any(|insight| insight.kind == "carried_open_action"));
+        for record_id in [1, 5] {
+            assert_eq!(
+                insights
+                    .iter()
+                    .filter(|insight| insight.sources[0].record_id == record_id)
+                    .count(),
+                1,
+                "record {record_id} produced duplicate insight cards"
+            );
+        }
+        assert!(!insights.iter().any(|insight| {
+            insight.kind == "carried_open_action" && insight.sources[0].record_id == 5
+        }));
+        assert!(insights
+            .iter()
+            .any(|insight| insight.kind == "unresolved_parking_lot"));
+    }
+
+    #[test]
+    fn proactive_insights_do_not_silently_drop_accepted_sources() {
+        let parking_lot = (0..30)
+            .map(|index| {
+                digest_test_item(
+                    index + 1,
+                    "deep_dive",
+                    &format!("Parking item {index}"),
+                    "current",
+                    "2026-07-15T10:00:00Z",
+                )
+            })
+            .collect::<Vec<_>>();
+        let digest = StandupSeriesDigest {
+            parking_lot,
+            ..StandupSeriesDigest::default()
+        };
+
+        assert_eq!(build_proactive_insights(&digest).len(), 30);
     }
 
     #[tokio::test]
@@ -1439,6 +1730,9 @@ mod tests {
         assert_eq!(digest.risks.len(), 1);
         assert_eq!(digest.parking_lot.len(), 1);
         assert!(digest.deep_dives.is_empty());
+        assert_eq!(digest.insights.len(), 1);
+        assert_eq!(digest.insights[0].kind, "unresolved_parking_lot");
+        assert_eq!(digest.insights[0].sources[0].source_meeting_id, "accepted");
         assert!(digest
             .markdown
             .contains("/meeting-details?id=accepted&t=62"));
@@ -1489,6 +1783,12 @@ mod tests {
         let mut digest = StandupSeriesDigest {
             series_name: "[series](https://example.test)".into(),
             highlights: vec![item],
+            insights: vec![StandupSeriesInsight {
+                kind: "unresolved_parking_lot".into(),
+                priority: "medium".into(),
+                text: "[insight](https://example.test)\n# injected".into(),
+                sources: Vec::new(),
+            }],
             ..StandupSeriesDigest::default()
         };
         digest.markdown = render_series_digest_markdown(&digest, Some("en"));
@@ -1496,6 +1796,8 @@ mod tests {
         assert!(!digest.markdown.contains("[fake](https://example.test)"));
         assert!(!digest.markdown.contains("\n# heading"));
         assert!(!digest.markdown.contains("[meeting](https://example.test)"));
+        assert!(!digest.markdown.contains("[insight](https://example.test)"));
+        assert!(!digest.markdown.contains("\n# injected"));
         assert!(digest.markdown.contains("meeting+id%26unsafe"));
         assert!(digest.markdown.contains("2026-07-15"));
         assert!(!digest.markdown.contains("2026\\-07\\-15"));
