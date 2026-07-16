@@ -89,7 +89,8 @@ replay) → dequeue. **Write-only** (transcripts are never read back).
 | `upload/pendingQueue.ts` | Retry queue — never loses data |
 
 Tests: `valueos/shell-tests/{pkce,valueos-client,upload-queue,digest}.test.ts` (+ existing
-shell tests) — 23 passing, run in CI (`valueos-tests.yml`).
+shell tests) — run in CI as the **main-branch gate** inside `valueos-build.yml` (the build
+on `main` requires them; feature/`macos-test` builds skip the gate for fast iteration).
 
 ## Phase 3b — native module (the remaining step)
 

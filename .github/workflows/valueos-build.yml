@@ -45,6 +45,33 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # VALUEOS: automated tests — MAIN-ONLY build gate. On a push to `main` this MUST
+  # pass before the build runs, so every main build is validated by our test suite.
+  # On feature branches and the `macos-test` tag it is SKIPPED (fast iteration) and
+  # the build proceeds unblocked.
+  # ---------------------------------------------------------------------------
+  test:
+    name: ValueOS tests (main gate)
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: valueos/shell-tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: valueos/shell-tests/package-lock.json
+      - name: Install test dependencies
+        run: npm ci
+      - name: Run ValueOS shell tests (OUR code only)
+        run: npm test
+
+  # ---------------------------------------------------------------------------
   # Decide which platforms to build, based on how the workflow was triggered.
   # ---------------------------------------------------------------------------
   setup:
@@ -80,7 +107,11 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.label }}
-    needs: setup
+    # Wait for platform selection AND (on main only) the test gate. `always()` lets the
+    # build run when `test` was SKIPPED (non-main) while still blocking it if `test` FAILED
+    # on main. So main is gated by tests; feature/tag builds are not.
+    needs: [setup, test]
+    if: ${{ always() && needs.setup.result == 'success' && needs.test.result != 'failure' && needs.test.result != 'cancelled' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
