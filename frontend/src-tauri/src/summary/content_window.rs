@@ -114,14 +114,31 @@ fn preference_key(meeting_id: &str) -> String {
     format!("summary.content_window.{meeting_id}")
 }
 
-async fn preference_selected(pool: &SqlitePool, meeting_id: &str) -> Result<bool, String> {
+fn preference_value(suggestion: &MeetingContentWindowSuggestion) -> Option<String> {
+    if !suggestion.suggested {
+        return None;
+    }
+    Some(format!(
+        "primary:{}:{}:{}:{}",
+        suggestion.primary_start_ms?,
+        suggestion.primary_end_ms?,
+        suggestion.gap_ms?,
+        suggestion.excluded_segment_count
+    ))
+}
+
+async fn preference_selected(
+    pool: &SqlitePool,
+    meeting_id: &str,
+    suggestion: &MeetingContentWindowSuggestion,
+) -> Result<bool, String> {
     let value: Option<String> =
         sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
             .bind(preference_key(meeting_id))
             .fetch_optional(pool)
             .await
             .map_err(|error| error.to_string())?;
-    Ok(value.as_deref() == Some("primary"))
+    Ok(value == preference_value(suggestion))
 }
 
 async fn analyze_meeting(
@@ -159,7 +176,8 @@ async fn analyze_meeting(
         })
         .collect();
     let mut result = analyze_segments_with_untimed(segments, untimed_segment_count);
-    result.selected = result.suggested && preference_selected(pool, meeting_id).await?;
+    let selected = result.suggested && preference_selected(pool, meeting_id, &result).await?;
+    result.selected = selected;
     Ok(result)
 }
 
@@ -184,11 +202,14 @@ pub async fn set_meeting_content_window_preference(
         if !suggestion.suggested {
             return Err("No safe primary content window is available".to_string());
         }
+        let value = preference_value(&suggestion)
+            .ok_or_else(|| "Primary content window is incomplete".to_string())?;
         sqlx::query(
-            "INSERT INTO app_settings_kv(key, value, updated_at) VALUES(?, 'primary', datetime('now')) \
-             ON CONFLICT(key) DO UPDATE SET value='primary', updated_at=datetime('now')",
+            "INSERT INTO app_settings_kv(key, value, updated_at) VALUES(?, ?, datetime('now')) \
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
         )
         .bind(&key)
+        .bind(value)
         .execute(pool)
         .await
         .map_err(|error| error.to_string())?;
@@ -227,6 +248,10 @@ mod tests {
         assert_eq!(result.excluded_segment_count, 2);
         assert_eq!(result.gap_ms, Some(21 * 60_000));
         assert_eq!(result.confidence.as_deref(), Some("high"));
+        assert_eq!(
+            preference_value(&result).as_deref(),
+            Some("primary:0:600000:1260000:2")
+        );
     }
 
     #[test]
