@@ -951,6 +951,7 @@ export const RU: Record<string, string> = {
   "Failed to save provider choice.": "Не удалось сохранить выбор сервисов.",
   "Choose how meetings are transcribed.": "Выбери, как Memento будет расшифровывать встречи.",
   "GigaAM v3 · on-device": "GigaAM v3 · на устройстве",
+  "Parakeet · on-device": "Parakeet · на устройстве",
   "Sber · offline Russian speech recognition with punctuation. Private — audio never leaves your machine.": "Сбер · локальное распознавание русской речи с пунктуацией. Аудио не покидает устройство.",
   "SaluteSpeech · Sber cloud": "SaluteSpeech · облако Сбера",
   "Cloud recognition via speech.giga.chat (ru-RU). Audio is sent to Sber for transcription; needs an internet connection.": "Облачное распознавание через speech.giga.chat (ru-RU). Аудио отправляется в Сбер, требуется интернет.",

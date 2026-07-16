@@ -135,29 +135,39 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
         return Ok(report);
     }
 
-    let transcription_candidate = transcription_capable
-        && if let Some(row) =
-            sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
-                .fetch_optional(&mut *tx)
-                .await?
-        {
-            let provider: String = row.try_get("provider")?;
-            let model: String = row.try_get("model")?;
-            is_legacy_transcription(&provider, &model)
-        } else {
-            false
-        };
-    let summary_candidate = summary_capable
-        && if let Some(row) = sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
+    let legacy_transcription = if let Some(row) =
+        sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
             .fetch_optional(&mut *tx)
             .await?
-        {
-            let provider: String = row.try_get("provider")?;
-            let model: String = row.try_get("model")?;
-            is_legacy_summary(&provider, &model)
-        } else {
-            false
-        };
+    {
+        let provider: String = row.try_get("provider")?;
+        let model: String = row.try_get("model")?;
+        is_legacy_transcription(&provider, &model)
+    } else {
+        false
+    };
+    let legacy_summary = if let Some(row) =
+        sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
+            .fetch_optional(&mut *tx)
+            .await?
+    {
+        let provider: String = row.try_get("provider")?;
+        let model: String = row.try_get("model")?;
+        is_legacy_summary(&provider, &model)
+    } else {
+        false
+    };
+
+    // Capability can be temporarily absent in a development or unsigned build.
+    // Do not turn that transient state into the same terminal marker used after
+    // explicit user confirmation; the official build should still offer consent.
+    if (legacy_transcription && !transcription_capable) || (legacy_summary && !summary_capable) {
+        tx.commit().await?;
+        return Ok(report);
+    }
+
+    let transcription_candidate = transcription_capable && legacy_transcription;
+    let summary_candidate = summary_capable && legacy_summary;
 
     // Updating the app must never switch local processing to cloud processing.
     // Stage the exact-default migration until the renderer obtains consent.
@@ -563,6 +573,16 @@ mod tests {
             values(&pool, "settings").await,
             ("builtin-ai".into(), "qwen3.5:4b".into())
         );
+        let marker: Option<String> =
+            sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
+                .bind(MARKER)
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert_eq!(marker, None);
+
+        enable_managed_providers(&pool).await;
+        assert!(migrate(&pool).await.unwrap().pending_confirmation);
     }
 
     #[tokio::test]

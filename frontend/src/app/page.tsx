@@ -242,7 +242,9 @@ export default function Home() {
     ? t('SaluteSpeech · Sber cloud')
     : transcriptModelConfig.provider === 'gigaam'
       ? t('GigaAM v3 · on-device')
-      : `${transcriptModelConfig.provider} · ${transcriptModelConfig.model}`;
+      : transcriptModelConfig.provider === 'parakeet'
+        ? t('Parakeet · on-device')
+        : `${transcriptModelConfig.provider} · ${transcriptModelConfig.model}`;
 
   return (
     <motion.div
