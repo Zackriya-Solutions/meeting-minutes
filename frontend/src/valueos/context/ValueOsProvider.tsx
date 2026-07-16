@@ -10,6 +10,7 @@ import { InMemoryTokenStore } from '../auth/tokenStore';
 import { ConfigService, createMockConfigService } from '../config/configService';
 import { DigestGenerator, MockDigestGenerator } from '../digest/digest';
 import { InMemoryPendingUploadStore, PendingUploadQueue } from '../upload/pendingQueue';
+import { createRealServices, valueosRealTransportEnabled } from './realServices';
 
 export interface ValueOsServices {
   client: ValueOsClient;
@@ -39,7 +40,10 @@ export function ValueOsProvider({
   services?: ValueOsServices;
   children: React.ReactNode;
 }) {
-  const value = useMemo(() => services ?? createMockServices(), [services]);
+  const value = useMemo(
+    () => services ?? (valueosRealTransportEnabled ? createRealServices() : createMockServices()),
+    [services],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
