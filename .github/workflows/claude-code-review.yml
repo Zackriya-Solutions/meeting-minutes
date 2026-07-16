@@ -27,26 +27,16 @@ jobs:
           # actual merge base, not only the two tip commits.
           fetch-depth: 0
 
-      # Prepare the complete PR context outside the model sandbox. On the persistent
-      # self-hosted runner, curl is available while gh may not be on PATH.
+      # Prepare the complete PR context outside the model sandbox. Pull-request
+      # metadata is already present in the signed GitHub event payload, so avoid a
+      # redundant API request that can make reviews fail during GitHub API outages.
       - name: Prepare PR context
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          API_URL: ${{ github.api_url }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          curl -fsSL \
-            --retry 5 \
-            --retry-delay 2 \
-            --retry-max-time 60 \
-            --retry-all-errors \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "$API_URL/repos/$GH_REPO/pulls/$PR_NUMBER" > "$GITHUB_WORKSPACE/.pr-meta.json"
+          jq '.pull_request' "$GITHUB_EVENT_PATH" > "$GITHUB_WORKSPACE/.pr-meta.json"
           # GitHub's REST diff media type returns HTTP 406 for this private
           # repository. Build the exact PR diff from the event SHAs instead.
           git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
