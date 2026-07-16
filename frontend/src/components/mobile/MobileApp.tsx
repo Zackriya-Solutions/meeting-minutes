@@ -26,6 +26,7 @@ import { RecordingScreen } from './RecordingScreen';
 import { MeetingDetailScreen } from './MeetingDetailScreen';
 import { ModelsScreen } from './ModelsScreen';
 import { SettingsScreen } from './SettingsScreen';
+import { ImportAudioScreen } from './ImportAudioScreen';
 
 const LS_THEME = 'vm-theme';
 const LS_ACCENT = 'vm-accent';
@@ -189,12 +190,23 @@ export default function MobileApp() {
               onOpenMeeting={(id) => openMeeting(id)}
               onStartRecording={() => setScreen('recording')}
               onOpenModels={() => gotoModels('home')}
+              onOpenImport={() => setScreen('import')}
             />
           )}
           {screen === 'recording' && (
             <RecordingScreen
               onStopped={onRecordingStopped}
               onDiscard={() => setScreen('home')}
+            />
+          )}
+          {screen === 'import' && (
+            <ImportAudioScreen
+              models={models}
+              onBack={() => setScreen('home')}
+              onImported={(meetingId) => {
+                reloadMeetings();
+                openMeeting(meetingId, 'summary');
+              }}
             />
           )}
           {screen === 'detail' && activeMeetingId && (

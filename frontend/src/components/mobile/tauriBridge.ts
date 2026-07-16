@@ -429,3 +429,78 @@ export async function saveModelConfig(config: VmModelConfig): Promise<boolean> {
 export async function setLanguagePreference(language: string): Promise<void> {
   await invoke('set_language_preference', { language }).catch(() => {});
 }
+
+// ── Audio import (transcribe an uploaded file) ──────────────────────────
+
+export interface AudioFileInfo {
+  path: string;
+  filename: string;
+  duration_seconds: number;
+  size_bytes: number;
+  format: string;
+}
+
+/** Opens the native file picker (Android SAF) and validates the chosen file. */
+export async function pickAndValidateAudioFile(): Promise<AudioFileInfo | null> {
+  return invoke<AudioFileInfo | null>('select_and_validate_audio_command');
+}
+
+export async function startAudioImport(
+  sourcePath: string,
+  title: string,
+  whisperModelName: string,
+  language?: string
+): Promise<void> {
+  await invoke('start_import_audio_command', {
+    sourcePath,
+    title,
+    language: language ?? null,
+    model: whisperModelName,
+    provider: 'localWhisper',
+  });
+}
+
+export async function cancelAudioImport(): Promise<void> {
+  await invoke('cancel_import_command').catch(() => {});
+}
+
+export async function isAudioImportInProgress(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('is_import_in_progress_command');
+  } catch {
+    return false;
+  }
+}
+
+export interface ImportProgressEvent {
+  stage: string;
+  progress_percentage: number;
+  message: string;
+}
+
+export function onImportProgress(cb: (e: ImportProgressEvent) => void): Promise<UnlistenFn> {
+  return listen<ImportProgressEvent>('import-progress', (e) => cb(e.payload));
+}
+
+export interface ImportCompleteEvent {
+  meeting_id: string;
+  title: string;
+  segments_count: number;
+  duration_seconds: number;
+}
+
+export function onImportComplete(cb: (e: ImportCompleteEvent) => void): Promise<UnlistenFn> {
+  return listen<ImportCompleteEvent>('import-complete', (e) => cb(e.payload));
+}
+
+export function onImportError(cb: (error: string) => void): Promise<UnlistenFn> {
+  return listen<{ error: string }>('import-error', (e) => cb(e.payload.error));
+}
+
+export function onImportWarning(
+  cb: (warning: string, details?: string) => void
+): Promise<UnlistenFn> {
+  return listen<{ warning: string; details?: string }>('import-warning', (e) =>
+    cb(e.payload.warning, e.payload.details)
+  );
+}

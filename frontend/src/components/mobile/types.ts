@@ -3,7 +3,7 @@
 
 export type VmTheme = 'light' | 'dark';
 export type VmAccent = 'teal' | 'blue' | 'green' | 'amber' | 'berry';
-export type VmScreen = 'home' | 'recording' | 'detail' | 'models' | 'settings';
+export type VmScreen = 'home' | 'recording' | 'detail' | 'models' | 'settings' | 'import';
 
 export interface VmMeeting {
   id: string;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Mic, Search } from 'lucide-react';
+import { Mic, Search, Upload } from 'lucide-react';
 import type { VmMeeting } from './types';
 
 function formatDateLine(iso?: string): string {
@@ -19,12 +19,14 @@ export function HomeScreen({
   onOpenMeeting,
   onStartRecording,
   onOpenModels,
+  onOpenImport,
 }: {
   meetings: VmMeeting[];
   hasModel: boolean;
   onOpenMeeting: (id: string) => void;
   onStartRecording: () => void;
   onOpenModels: () => void;
+  onOpenImport: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -50,6 +52,9 @@ export function HomeScreen({
     <div className="col f1" style={{ height: '100%', overflow: 'hidden', position: 'relative' }}>
       <div className="appbar" style={{ padding: '10px 16px 4px' }}>
         <h1>Meetings</h1>
+        <button className="iconbtn" onClick={onOpenImport} aria-label="Import audio">
+          <Upload size={20} strokeWidth={2} />
+        </button>
         <button
           className="iconbtn"
           onClick={() => {
@@ -72,7 +77,7 @@ export function HomeScreen({
         </div>
       )}
 
-      <div className="content" style={{ paddingBottom: 110 }}>
+      <div className="content content--above-fab">
         {meetings.length === 0 && (
           <div className="col ac jc" style={{ padding: '60px 32px', textAlign: 'center', gap: 16 }}>
             <svg className="shield" viewBox="0 0 64 74" fill="none">

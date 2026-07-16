@@ -133,6 +133,15 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Extra bottom clearance for scrollable content sitting under the
+   floating Record FAB, so the last list item isn't clipped by it.
+   Matches the FAB's own safe-area-aware bottom offset (82px) plus its
+   height (50px) plus a margin, instead of a flat px value that ignores
+   the gesture-nav inset on Android. */
+.vm-app .content--above-fab {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 150px) !important;
+}
+
 /* Bottom tab bar */
 .vm-app .tabbar {
   flex-shrink: 0;
