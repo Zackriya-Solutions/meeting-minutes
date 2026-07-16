@@ -18,43 +18,100 @@ use std::sync::Mutex;
 
 use anyhow::{anyhow, Context, Result};
 
-/// Where to find the embedding model. Mirrors the Parakeet model layout: a directory
-/// containing `model.onnx` and `tokenizer.json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbedderKind {
+    MultilingualE5Small,
+    Frida,
+}
+
+impl EmbedderKind {
+    pub fn parse(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("frida") {
+            Self::Frida
+        } else {
+            Self::MultilingualE5Small
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::MultilingualE5Small => "multilingual-e5-small",
+            Self::Frida => "frida",
+        }
+    }
+
+    pub fn dim(self) -> usize {
+        match self {
+            Self::MultilingualE5Small => crate::vector::EMBEDDING_DIM,
+            Self::Frida => crate::vector::FRIDA_EMBEDDING_DIM,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Pooling {
+    Mean,
+    Cls,
+}
+
+/// Where to find the embedding model and how to execute it.
 #[derive(Debug, Clone)]
 pub struct EmbedderConfig {
     pub model_dir: PathBuf,
     pub dim: usize,
     /// Inference batch size (PLAN.md: 8–16).
     pub batch_size: usize,
+    kind: EmbedderKind,
+    pooling: Pooling,
 }
 
 impl EmbedderConfig {
     pub fn new(model_dir: impl Into<PathBuf>) -> Self {
+        Self::for_kind(model_dir, EmbedderKind::MultilingualE5Small)
+    }
+
+    pub fn for_kind(model_dir: impl Into<PathBuf>, kind: EmbedderKind) -> Self {
         Self {
             model_dir: model_dir.into(),
-            dim: crate::vector::EMBEDDING_DIM,
-            batch_size: 16,
+            dim: kind.dim(),
+            batch_size: if kind == EmbedderKind::Frida { 4 } else { 16 },
+            kind,
+            pooling: if kind == EmbedderKind::Frida {
+                Pooling::Cls
+            } else {
+                Pooling::Mean
+            },
         }
     }
     pub fn model_path(&self) -> PathBuf {
-        self.model_dir.join("model.onnx")
+        self.model_dir.join(match self.kind {
+            EmbedderKind::MultilingualE5Small => "model.onnx",
+            EmbedderKind::Frida => "FRIDA.onnx",
+        })
     }
     pub fn tokenizer_path(&self) -> PathBuf {
         self.model_dir.join("tokenizer.json")
     }
     pub fn is_available(&self) -> bool {
-        self.model_path().exists() && self.tokenizer_path().exists()
+        self.model_path().exists()
+            && self.tokenizer_path().exists()
+            && (self.kind != EmbedderKind::Frida || self.model_dir.join("FRIDA.onnx.data").exists())
     }
 }
 
 /// Apply the e5 instruction prefix. Queries and passages use different prefixes; getting
 /// this wrong silently degrades recall, which is why it lives in one place.
-pub fn build_input_text(text: &str, is_query: bool) -> String {
-    if is_query {
-        format!("query: {text}")
-    } else {
-        format!("passage: {text}")
+pub fn build_input_text_for_kind(kind: EmbedderKind, text: &str, is_query: bool) -> String {
+    match (kind, is_query) {
+        (EmbedderKind::MultilingualE5Small, true) => format!("query: {text}"),
+        (EmbedderKind::MultilingualE5Small, false) => format!("passage: {text}"),
+        (EmbedderKind::Frida, true) => format!("search_query: {text}"),
+        (EmbedderKind::Frida, false) => format!("search_document: {text}"),
     }
+}
+
+pub fn build_input_text(text: &str, is_query: bool) -> String {
+    build_input_text_for_kind(EmbedderKind::MultilingualE5Small, text, is_query)
 }
 
 /// Mean-pool token embeddings using the attention mask (standard e5 pooling): the
@@ -124,7 +181,11 @@ impl Embedder {
         }
         let session = build_session(&config.model_path())
             .with_context(|| format!("loading embedder from {}", config.model_path().display()))?;
-        Ok(Self { config, session, tokenizer })
+        Ok(Self {
+            config,
+            session,
+            tokenizer,
+        })
     }
 
     pub fn dim(&self) -> usize {
@@ -159,7 +220,10 @@ impl Embedder {
         // Tokenize with prefixes, pad to the batch's max length.
         let encoded: Vec<TokenizedInput> = texts
             .iter()
-            .map(|t| self.tokenizer.encode(&build_input_text(t, is_query)))
+            .map(|t| {
+                self.tokenizer
+                    .encode(&build_input_text_for_kind(self.config.kind, t, is_query))
+            })
             .collect::<Result<_>>()?;
         let max_len = encoded.iter().map(|e| e.input_ids.len()).max().unwrap_or(0);
         let bsz = encoded.len();
@@ -201,8 +265,20 @@ impl Embedder {
             let token_embeddings: Vec<Vec<f32>> = (0..seq)
                 .map(|s| (0..hidden).map(|h| hidden_states[[b, s, h]]).collect())
                 .collect();
-            let attn: Vec<f32> = (0..seq).map(|s| mask[[b, s]] as f32).collect();
-            let mut pooled = mean_pool(&token_embeddings, &attn);
+            let mut pooled = match self.config.pooling {
+                Pooling::Mean => {
+                    let attn: Vec<f32> = (0..seq).map(|s| mask[[b, s]] as f32).collect();
+                    mean_pool(&token_embeddings, &attn)
+                }
+                Pooling::Cls => token_embeddings.first().cloned().unwrap_or_default(),
+            };
+            if pooled.len() != self.config.dim {
+                return Err(anyhow!(
+                    "embedding dimension mismatch: model returned {}, expected {}",
+                    pooled.len(),
+                    self.config.dim
+                ));
+            }
             l2_normalize(&mut pooled);
             result.push(pooled);
         }
@@ -232,7 +308,10 @@ impl HfTokenizer {
     pub fn from_file(path: &Path) -> Result<Self> {
         let inner = tokenizers::Tokenizer::from_file(path)
             .map_err(|e| anyhow!("failed to load tokenizer {}: {e}", path.display()))?;
-        Ok(Self { inner, max_len: 512 })
+        Ok(Self {
+            inner,
+            max_len: 512,
+        })
     }
 }
 
@@ -243,12 +322,16 @@ impl TextTokenizer for HfTokenizer {
             .encode(text, true)
             .map_err(|e| anyhow!("tokenize failed: {e}"))?;
         let mut input_ids: Vec<i64> = enc.get_ids().iter().map(|&i| i as i64).collect();
-        let mut attention_mask: Vec<i64> = enc.get_attention_mask().iter().map(|&m| m as i64).collect();
+        let mut attention_mask: Vec<i64> =
+            enc.get_attention_mask().iter().map(|&m| m as i64).collect();
         if input_ids.len() > self.max_len {
             input_ids.truncate(self.max_len);
             attention_mask.truncate(self.max_len);
         }
-        Ok(TokenizedInput { input_ids, attention_mask })
+        Ok(TokenizedInput {
+            input_ids,
+            attention_mask,
+        })
     }
 }
 
@@ -262,11 +345,16 @@ static EMBEDDER: Mutex<Option<Embedder>> = Mutex::new(None);
 /// Load the default e5-small embedder from `model_dir` (expects `model.onnx` +
 /// `tokenizer.json`) into the global slot, replacing any previous model.
 pub fn load_global(model_dir: impl Into<PathBuf>) -> Result<()> {
-    let config = EmbedderConfig::new(model_dir);
-    let tokenizer: Box<dyn TextTokenizer> = Box::new(HfTokenizer::from_file(&config.tokenizer_path())?);
+    load_global_kind(model_dir, EmbedderKind::MultilingualE5Small)
+}
+
+pub fn load_global_kind(model_dir: impl Into<PathBuf>, kind: EmbedderKind) -> Result<()> {
+    let config = EmbedderConfig::for_kind(model_dir, kind);
+    let tokenizer: Box<dyn TextTokenizer> =
+        Box::new(HfTokenizer::from_file(&config.tokenizer_path())?);
     let embedder = Embedder::load(config, tokenizer)?;
     *EMBEDDER.lock().unwrap() = Some(embedder);
-    log::info!("embedding model loaded (dim={})", crate::vector::EMBEDDING_DIM);
+    log::info!("embedding model {} loaded (dim={})", kind.id(), kind.dim());
     Ok(())
 }
 
@@ -288,7 +376,9 @@ pub async fn embed_query(text: String) -> Option<Result<Vec<f32>, String>> {
     }
     tokio::task::spawn_blocking(move || {
         let mut guard = EMBEDDER.lock().unwrap();
-        guard.as_mut().map(|e| e.embed_query(&text).map_err(|e| e.to_string()))
+        guard
+            .as_mut()
+            .map(|e| e.embed_query(&text).map_err(|e| e.to_string()))
     })
     .await
     .ok()
@@ -303,7 +393,9 @@ pub async fn embed_passages(texts: Vec<String>) -> Option<Result<Vec<Vec<f32>>, 
     }
     tokio::task::spawn_blocking(move || {
         let mut guard = EMBEDDER.lock().unwrap();
-        guard.as_mut().map(|e| e.embed_passages(&texts).map_err(|e| e.to_string()))
+        guard
+            .as_mut()
+            .map(|e| e.embed_passages(&texts).map_err(|e| e.to_string()))
     })
     .await
     .ok()
@@ -318,6 +410,18 @@ mod tests {
     fn e5_prefixes() {
         assert_eq!(build_input_text("бюджет", true), "query: бюджет");
         assert_eq!(build_input_text("текст", false), "passage: текст");
+    }
+
+    #[test]
+    fn frida_retrieval_prefixes() {
+        assert_eq!(
+            build_input_text_for_kind(EmbedderKind::Frida, "бюджет", true),
+            "search_query: бюджет"
+        );
+        assert_eq!(
+            build_input_text_for_kind(EmbedderKind::Frida, "текст", false),
+            "search_document: текст"
+        );
     }
 
     #[test]

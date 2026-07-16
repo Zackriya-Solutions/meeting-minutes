@@ -21,6 +21,7 @@ use sqlx::SqlitePool;
 /// migration) and holds no data until Phase 1, changing this constant only requires
 /// dropping/recreating the empty table.
 pub const EMBEDDING_DIM: usize = 384;
+pub const FRIDA_EMBEDDING_DIM: usize = 1536;
 
 static REGISTER: Once = Once::new();
 
@@ -47,6 +48,15 @@ pub fn register() {
 /// Returns `Ok(true)` when vector search is usable, `Ok(false)` when the extension
 /// is unavailable (logged, not fatal).
 pub async fn ensure_chunk_embeddings_table(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    ensure_chunk_embeddings_table_for_dim(pool, EMBEDDING_DIM).await
+}
+
+/// Ensure the vector index matches the active embedder dimension. Vectors are derived
+/// data, so changing models rebuilds only this table and marks chunks for backfill.
+pub async fn ensure_chunk_embeddings_table_for_dim(
+    pool: &SqlitePool,
+    dim: usize,
+) -> Result<bool, sqlx::Error> {
     // Probe: is the extension actually loaded on this pool's connections?
     match sqlx::query_scalar::<_, String>("SELECT vec_version()")
         .fetch_one(pool)
@@ -62,16 +72,35 @@ pub async fn ensure_chunk_embeddings_table(pool: &SqlitePool) -> Result<bool, sq
         }
     }
 
+    let current_sql: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    let expected_marker = format!("FLOAT[{dim}]");
+    if current_sql
+        .as_deref()
+        .is_some_and(|sql| !sql.contains(&expected_marker))
+    {
+        log::info!("embedding dimension changed; rebuilding vector index for dim={dim}");
+        sqlx::query("DROP TABLE chunk_embeddings")
+            .execute(pool)
+            .await?;
+        let _ = sqlx::query("UPDATE chunks SET embedding_status='pending'")
+            .execute(pool)
+            .await;
+    }
+
     let ddl = format!(
         "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(\
-         chunk_id INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}])"
+         chunk_id INTEGER PRIMARY KEY, embedding FLOAT[{dim}])"
     );
     if let Err(e) = sqlx::query(&ddl).execute(pool).await {
         log::warn!("failed to create chunk_embeddings vec0 table ({e}); vector search disabled");
         return Ok(false);
     }
 
-    log::info!("chunk_embeddings vec0 table ready (dim={EMBEDDING_DIM})");
+    log::info!("chunk_embeddings vec0 table ready (dim={dim})");
     Ok(true)
 }
 
@@ -189,12 +218,19 @@ mod tests {
 
         let results = knn(&pool, &[1.0, 0.0, 0.0, 0.0], 3).await.expect("knn");
         let ids: Vec<i64> = results.iter().map(|(id, _)| *id).collect();
-        assert_eq!(&ids[..2], &[1, 4], "expected exact match then near-duplicate");
+        assert_eq!(
+            &ids[..2],
+            &[1, 4],
+            "expected exact match then near-duplicate"
+        );
         assert!(!ids[..2].contains(&2), "orthogonal vector ranked too high");
 
         let filtered = knn_filtered(&pool, &[1.0, 0.0, 0.0, 0.0], &[2, 3, 4], 2)
             .await
             .expect("filtered knn");
-        assert_eq!(filtered.iter().map(|row| row.0).collect::<Vec<_>>(), vec![4, 2]);
+        assert_eq!(
+            filtered.iter().map(|row| row.0).collect::<Vec<_>>(),
+            vec![4, 2]
+        );
     }
 }

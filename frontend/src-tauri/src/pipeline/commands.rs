@@ -10,13 +10,20 @@ use std::path::{Path, PathBuf};
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::pipeline::embedder;
+use crate::pipeline::embedder::{self, EmbedderConfig, EmbedderKind};
 use crate::state::AppState;
 
-const MODEL_URL: &str =
+const E5_MODEL_URL: &str =
     "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model.onnx";
-const TOKENIZER_URL: &str =
+const E5_TOKENIZER_URL: &str =
     "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json";
+const FRIDA_REVISION: &str = "d3a04c3460f6b16f2f8f0859b2b67a46cb388558";
+const FRIDA_MODEL_URL: &str =
+    "https://huggingface.co/geologist387/FRIDA-transformed/resolve/d3a04c3460f6b16f2f8f0859b2b67a46cb388558/onnx/frida-onnx/FRIDA.onnx";
+const FRIDA_MODEL_DATA_URL: &str =
+    "https://huggingface.co/geologist387/FRIDA-transformed/resolve/d3a04c3460f6b16f2f8f0859b2b67a46cb388558/onnx/frida-onnx/FRIDA.onnx.data";
+const FRIDA_TOKENIZER_URL: &str =
+    "https://huggingface.co/geologist387/FRIDA-transformed/resolve/d3a04c3460f6b16f2f8f0859b2b67a46cb388558/onnx/frida-onnx/tokenizer.json";
 
 fn embedding_model_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
@@ -29,8 +36,37 @@ fn embedding_model_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String
     Ok(dir)
 }
 
-fn model_present(dir: &Path) -> bool {
-    dir.join("model.onnx").exists() && dir.join("tokenizer.json").exists()
+fn model_dir(base: &Path, kind: EmbedderKind) -> PathBuf {
+    match kind {
+        EmbedderKind::MultilingualE5Small => base.to_path_buf(),
+        EmbedderKind::Frida => base.join("frida"),
+    }
+}
+
+fn model_present(base: &Path, kind: EmbedderKind) -> bool {
+    EmbedderConfig::for_kind(model_dir(base, kind), kind).is_available()
+}
+
+async fn selected_kind(pool: &sqlx::SqlitePool) -> EmbedderKind {
+    let selected: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key='embedding.model'")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    EmbedderKind::parse(selected.as_deref().unwrap_or("multilingual-e5-small"))
+}
+
+async fn persist_selected_kind(pool: &sqlx::SqlitePool, kind: EmbedderKind) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO app_settings_kv(key,value,updated_at) VALUES('embedding.model',?,CURRENT_TIMESTAMP) \
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+    )
+    .bind(kind.id())
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -95,14 +131,79 @@ async fn download_file<R: Runtime>(
 
 /// Report whether the model is downloaded and loaded.
 #[tauri::command]
-pub async fn embedder_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
-    let dir = embedding_model_dir(&app)?;
+pub async fn embedder_status<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let base = embedding_model_dir(&app)?;
+    let kind = selected_kind(state.db_manager.pool()).await;
     Ok(serde_json::json!({
-        "model": "multilingual-e5-small",
-        "dim": crate::vector::EMBEDDING_DIM,
-        "model_present": model_present(&dir),
+        "model": kind.id(),
+        "dim": kind.dim(),
+        "model_present": model_present(&base, kind),
         "loaded": embedder::is_loaded(),
+        "available_models": [
+            {
+                "id": "multilingual-e5-small",
+                "name": "Multilingual E5 Small",
+                "dim": crate::vector::EMBEDDING_DIM,
+                "download_mb": 470,
+                "present": model_present(&base, EmbedderKind::MultilingualE5Small),
+            },
+            {
+                "id": "frida",
+                "name": "FRIDA",
+                "dim": crate::vector::FRIDA_EMBEDDING_DIM,
+                "download_mb": 3300,
+                "present": model_present(&base, EmbedderKind::Frida),
+                "revision": FRIDA_REVISION,
+            }
+        ],
     }))
+}
+
+async fn activate_model<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &sqlx::SqlitePool,
+    kind: EmbedderKind,
+) -> Result<bool, String> {
+    persist_selected_kind(pool, kind).await?;
+    crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim())
+        .await
+        .map_err(|e| e.to_string())?;
+    embedder::unload_global();
+    let base = embedding_model_dir(app)?;
+    if !model_present(&base, kind) {
+        return Ok(false);
+    }
+    let dir = model_dir(&base, kind);
+    tokio::task::spawn_blocking(move || embedder::load_global_kind(dir, kind))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn embedder_select_model<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    model: String,
+) -> Result<(), String> {
+    let kind = EmbedderKind::parse(&model);
+    let loaded = activate_model(&app, state.db_manager.pool(), kind).await?;
+    if loaded {
+        let _ = crate::jobs::store::enqueue_unique(
+            state.db_manager.pool(),
+            crate::jobs::kind::BACKFILL,
+            None,
+            &serde_json::json!({ "reason": "embedding_model_changed", "model": kind.id() }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let _ = app.emit("embedder-ready", ());
+    }
+    Ok(())
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -194,22 +295,46 @@ pub async fn indexing_status(state: tauri::State<'_, AppState>) -> Result<Indexi
 pub async fn embedder_download_model<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
+    model: Option<String>,
 ) -> Result<(), String> {
-    let dir = embedding_model_dir(&app)?;
-    download_file(
-        &app,
-        TOKENIZER_URL,
-        &dir.join("tokenizer.json"),
-        "tokenizer.json",
-    )
-    .await?;
-    download_file(&app, MODEL_URL, &dir.join("model.onnx"), "model.onnx").await?;
+    let kind = model
+        .as_deref()
+        .map(EmbedderKind::parse)
+        .unwrap_or_else(|| EmbedderKind::parse("multilingual-e5-small"));
+    let base = embedding_model_dir(&app)?;
+    let dir = model_dir(&base, kind);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    match kind {
+        EmbedderKind::MultilingualE5Small => {
+            download_file(
+                &app,
+                E5_TOKENIZER_URL,
+                &dir.join("tokenizer.json"),
+                "tokenizer.json",
+            )
+            .await?;
+            download_file(&app, E5_MODEL_URL, &dir.join("model.onnx"), "model.onnx").await?;
+        }
+        EmbedderKind::Frida => {
+            download_file(
+                &app,
+                FRIDA_TOKENIZER_URL,
+                &dir.join("tokenizer.json"),
+                "tokenizer.json",
+            )
+            .await?;
+            download_file(&app, FRIDA_MODEL_URL, &dir.join("FRIDA.onnx"), "FRIDA.onnx").await?;
+            download_file(
+                &app,
+                FRIDA_MODEL_DATA_URL,
+                &dir.join("FRIDA.onnx.data"),
+                "FRIDA.onnx.data",
+            )
+            .await?;
+        }
+    }
 
-    let dir_for_load = dir.clone();
-    tokio::task::spawn_blocking(move || embedder::load_global(dir_for_load))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    activate_model(&app, state.db_manager.pool(), kind).await?;
 
     let _ = app.emit("embedder-ready", ());
     let outcome = crate::jobs::store::enqueue_unique(
@@ -229,22 +354,36 @@ pub async fn embedder_download_model<R: Runtime>(
             "already active"
         }
     );
-    log::info!("embedding model downloaded and loaded");
+    log::info!("embedding model {} downloaded and loaded", kind.id());
     Ok(())
 }
 
 /// Load the embedder at startup if its files are already present. Non-blocking.
 pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
-    let dir = match embedding_model_dir(app) {
+    let base = match embedding_model_dir(app) {
         Ok(d) => d,
         Err(e) => {
             log::warn!("could not resolve embedding model dir: {e}");
             return;
         }
     };
-    if model_present(&dir) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let kind = selected_kind(state.db_manager.pool()).await;
+    if model_present(&base, kind) {
+        let dir = model_dir(&base, kind);
+        if let Err(e) = crate::vector::ensure_chunk_embeddings_table_for_dim(
+            state.db_manager.pool(),
+            kind.dim(),
+        )
+        .await
+        {
+            log::warn!("failed to prepare vector table for {}: {e}", kind.id());
+            return;
+        }
         let loaded = tokio::task::spawn_blocking(move || {
-            if let Err(e) = embedder::load_global(dir) {
+            if let Err(e) = embedder::load_global_kind(dir, kind) {
                 log::warn!("failed to load embedder at startup: {e}");
                 false
             } else {
@@ -254,21 +393,19 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
         .await
         .unwrap_or(false);
         if loaded {
-            if let Some(state) = app.try_state::<AppState>() {
-                match crate::jobs::store::enqueue_unique(
-                    state.db_manager.pool(),
-                    crate::jobs::kind::BACKFILL,
-                    None,
-                    &serde_json::json!({ "reason": "startup" }),
-                )
-                .await
-                {
-                    Ok(outcome) if outcome.created => {
-                        log::info!("queued archive index repair after embedder startup")
-                    }
-                    Ok(_) => {}
-                    Err(e) => log::warn!("failed to queue startup archive repair: {e}"),
+            match crate::jobs::store::enqueue_unique(
+                state.db_manager.pool(),
+                crate::jobs::kind::BACKFILL,
+                None,
+                &serde_json::json!({ "reason": "startup", "model": kind.id() }),
+            )
+            .await
+            {
+                Ok(outcome) if outcome.created => {
+                    log::info!("queued archive index repair after embedder startup")
                 }
+                Ok(_) => {}
+                Err(e) => log::warn!("failed to queue startup archive repair: {e}"),
             }
         }
     } else {

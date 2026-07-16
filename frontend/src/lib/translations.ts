@@ -993,5 +993,10 @@ export const RU: Record<string, string> = {
   "Fast, general-purpose recognition. Recommended.": "Быстрое универсальное распознавание. Рекомендуется.",
   "Highest accuracy, best for clear speech. A little slower.": "Максимальная точность, лучше для чёткой речи. Чуть медленнее.",
   "Boost sensitivity for Bluetooth / quiet microphones": "Повысить чувствительность для Bluetooth / тихих микрофонов",
-  "Detects speech more aggressively for low-quality inputs like AirPods used as a mic (Bluetooth hands-free mode). Turn on if phrases are being skipped. Applies to the next recording.": "Активнее распознаёт речь для низкокачественных источников — например, AirPods в роли микрофона (режим Bluetooth hands-free). Включите, если фразы пропускаются. Применяется со следующей записи."
+  "Detects speech more aggressively for low-quality inputs like AirPods used as a mic (Bluetooth hands-free mode). Turn on if phrases are being skipped. Applies to the next recording.": "Активнее распознаёт речь для низкокачественных источников — например, AirPods в роли микрофона (режим Bluetooth hands-free). Включите, если фразы пропускаются. Применяется со следующей записи.",
+  "dimensions": "измерений",
+  "Could not switch the embedding model.": "Не удалось переключить модель эмбеддингов.",
+  "Russian-first retrieval model. Uses search_query/search_document prefixes and CLS pooling.": "Retrieval-модель с приоритетом русского языка. Использует префиксы search_query/search_document и CLS-pooling.",
+  "Compact multilingual retrieval model. Recommended for most devices.": "Компактная многоязычная retrieval-модель. Рекомендуется для большинства устройств.",
+  "FRIDA is optional and large (~3.3 GB ONNX). Memento downloads a community ONNX conversion of the ai-forever/FRIDA weights. Switching models rebuilds the semantic index in the background; keyword search remains available during reindexing.": "FRIDA — опциональная крупная модель (~3,3 ГБ ONNX). Memento загружает стороннюю ONNX-конверсию весов ai-forever/FRIDA. При переключении семантический индекс перестраивается в фоне; во время переиндексации поиск по ключевым словам продолжает работать."
 };
