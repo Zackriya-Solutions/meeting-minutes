@@ -16,9 +16,9 @@ pnpm run tauri:dev
 ```
 
 Optional variables are `MEETILY_BATCH_IMPORT_LANGUAGE` and `MEETILY_BATCH_IMPORT_MODEL`. The
-selected provider model must already be installed. The report contains imported, skipped, failed,
-and cancelled items. A failure or panic in one file is recorded and does not abort the remaining
-queue.
+selected provider model must already be installed. The report distinguishes imported,
+hash-deduplicated `skipped`, limit-exceeded `truncated`, failed, and cancelled items. A failure or
+panic in one file is recorded and does not abort the remaining queue.
 
 Do not point automated corpus runs at folders containing recordings that have not been approved
 for local processing. Audio, transcripts, metadata, and reports remain local, but they may contain

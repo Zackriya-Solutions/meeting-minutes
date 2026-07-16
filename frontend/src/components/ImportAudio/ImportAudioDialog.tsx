@@ -112,7 +112,7 @@ export function ImportAudioDialog({
   }, [t]);
 
   const handleBatchImportComplete = useCallback((result: BatchImportResult) => {
-    const description = `${result.imported.length} ${t('imported')}, ${result.skipped.length} ${t('skipped')}, ${result.failed.length} ${t('failed')}`;
+    const description = `${result.imported.length} ${t('imported')}, ${result.skipped.length} ${t('skipped')}, ${result.truncated.length} ${t('not attempted')}, ${result.failed.length} ${t('failed')}`;
     if (result.cancelled) {
       toast.info(t('Batch import cancelled'), { description });
     } else if (result.failed.length > 0) {
@@ -198,7 +198,7 @@ export function ImportAudioDialog({
   // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
   const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
   const batchProcessed = batchProgress
-    ? batchProgress.completed + batchProgress.skipped + batchProgress.failed
+    ? batchProgress.completed + batchProgress.skipped + batchProgress.truncated + batchProgress.failed
     : 0;
   const displayedProgress = Math.min(
     progress?.progress_percentage
@@ -524,7 +524,7 @@ export function ImportAudioDialog({
               {batchProgress && (
                 <p className="text-sm text-[var(--fg2)] text-center">
                   {t('File')} {batchProgress.current_index} {t('of')} {batchProgress.total}: {batchProgress.current_title}
-                  {' · '}{batchProgress.completed} {t('imported')}, {batchProgress.skipped} {t('skipped')}, {batchProgress.failed} {t('failed')}
+                  {' · '}{batchProgress.completed} {t('imported')}, {batchProgress.skipped} {t('skipped')}, {batchProgress.truncated} {t('not attempted')}, {batchProgress.failed} {t('failed')}
                 </p>
               )}
             </div>

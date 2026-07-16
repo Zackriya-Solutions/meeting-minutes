@@ -47,6 +47,7 @@ export interface BatchImportProgress {
   current_title: string;
   completed: number;
   skipped: number;
+  truncated: number;
   failed: number;
   state: string;
 }
@@ -55,6 +56,7 @@ export interface BatchImportResult {
   total: number;
   imported: ImportResult[];
   skipped: BatchImportItem[];
+  truncated: BatchImportItem[];
   failed: Array<BatchImportItem & { error: string }>;
   cancelled: boolean;
 }

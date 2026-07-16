@@ -795,6 +795,7 @@ export const RU: Record<string, string> = {
   "Batch import completed with errors": "Массовый импорт завершён с ошибками",
   "imported": "импортировано",
   "skipped": "пропущено",
+  "not attempted": "не обработано из-за лимита",
   "more files": "файлов",
   "File": "Файл",
   "Validating...": "Проверка…",
