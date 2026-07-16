@@ -25,6 +25,18 @@ pub fn build_request_body_with_json_mode(
     max_tokens: Option<u32>,
     json_mode: bool,
 ) -> Value {
+    build_request_body_with_options(model, system, user, max_tokens, None, None, json_mode)
+}
+
+pub fn build_request_body_with_options(
+    model: &str,
+    system: &str,
+    user: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    json_mode: bool,
+) -> Value {
     let mut body = json!({
         "model": model,
         "messages": [
@@ -33,8 +45,8 @@ pub fn build_request_body_with_json_mode(
         ],
         "thinking": {"type": "disabled"},
         "max_tokens": max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
-        "temperature": 0.2,
-        "top_p": 0.9,
+        "temperature": temperature.map(f64::from).unwrap_or(0.2),
+        "top_p": top_p.map(f64::from).unwrap_or(0.9),
         "stream": false,
     });
     if json_mode {
@@ -185,6 +197,22 @@ mod tests {
         );
         assert_eq!(body["response_format"]["type"], "json_object");
         assert_eq!(body["max_tokens"], 4_096);
+    }
+
+    #[test]
+    fn structured_request_honors_generation_controls() {
+        let body = build_request_body_with_options(
+            "deepseek-v4-pro",
+            "return json",
+            "extract",
+            Some(4_096),
+            Some(0.0),
+            Some(1.0),
+            true,
+        );
+        assert_eq!(body["temperature"], 0.0);
+        assert_eq!(body["top_p"], 1.0);
+        assert_eq!(body["response_format"]["type"], "json_object");
     }
 
     #[test]
