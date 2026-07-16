@@ -179,6 +179,15 @@ jobs:
           #
           # The overlay is produced by a small node script (not inline JSON) and passed by
           # relative path, so nothing can be mangled by Git Bash / MSYS on windows-latest.
+          #
+          # VALUEOS: stamp the build identity into the frontend. beforeBuildCommand runs
+          # `pnpm build` (next build) as a child of `tauri build`, so exporting these
+          # NEXT_PUBLIC_* vars here makes Next inline them into the static export. The
+          # landing screen then shows exactly which commit this installer came from —
+          # so a stale build is instantly obvious. Works on macOS + Windows (git bash).
+          export NEXT_PUBLIC_VALUEOS_BUILD="${GITHUB_SHA:0:7}"
+          export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Stamping build: ${NEXT_PUBLIC_VALUEOS_BUILD} @ ${NEXT_PUBLIC_VALUEOS_BUILD_TIME}"
           node ../valueos/branding/make-ci-config.js valueos-ci.config.json
           pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
 
