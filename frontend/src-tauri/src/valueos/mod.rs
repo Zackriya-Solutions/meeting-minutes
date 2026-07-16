@@ -201,6 +201,13 @@ async fn valid_access_token() -> Result<String, ValueOsErr> {
     Ok(refreshed.access_token)
 }
 
+/// Force a token refresh regardless of expiry — used to recover from a server 401
+/// mid-session (contract §2.6). Returns the new access token, or an auth error.
+async fn force_refresh() -> Result<String, ValueOsErr> {
+    let tokens = read_tokens().ok_or_else(|| ValueOsErr::new(401, "Not logged in"))?;
+    Ok(refresh(&tokens).await?.access_token)
+}
+
 // ---- authenticated ValueOS HTTP ---------------------------------------------------------
 async fn map_http_error(resp: reqwest::Response) -> ValueOsErr {
     let status = resp.status().as_u16();
@@ -219,13 +226,24 @@ async fn map_http_error(resp: reqwest::Response) -> ValueOsErr {
 }
 
 async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
+    let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let resp = reqwest::Client::new()
-        .get(format!("{}{}", cfg_api_base(), path))
+    let mut resp = reqwest::Client::new()
+        .get(url.as_str())
         .bearer_auth(token)
         .send()
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    // Contract §2.6: on 401, force one token refresh and retry the call once.
+    if resp.status().as_u16() == 401 {
+        let token = force_refresh().await?;
+        resp = reqwest::Client::new()
+            .get(url.as_str())
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    }
     if !resp.status().is_success() {
         return Err(map_http_error(resp).await);
     }
@@ -234,14 +252,27 @@ async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
 }
 
 async fn api_post(path: &str, payload: &serde_json::Value) -> Result<serde_json::Value, ValueOsErr> {
+    let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let resp = reqwest::Client::new()
-        .post(format!("{}{}", cfg_api_base(), path))
+    let mut resp = reqwest::Client::new()
+        .post(url.as_str())
         .bearer_auth(token)
         .json(payload)
         .send()
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    // Contract §2.6: on 401, force one token refresh and retry once (idempotency_key makes
+    // the retried upload safe — the server replays the same ids, never duplicates).
+    if resp.status().as_u16() == 401 {
+        let token = force_refresh().await?;
+        resp = reqwest::Client::new()
+            .post(url.as_str())
+            .bearer_auth(token)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    }
     if !resp.status().is_success() {
         return Err(map_http_error(resp).await);
     }
@@ -351,6 +382,14 @@ pub async fn valueos_login() -> Result<(), ValueOsErr> {
 #[tauri::command]
 pub async fn valueos_api_get_tenants() -> Result<serde_json::Value, ValueOsErr> {
     api_get("/me/tenants").await
+}
+
+/// The post-login gate (contract §2): tenants where the agent add-on is ACTIVE right now,
+/// plus total_memberships. The webview uses this to gate the app; not-a-member / never /
+/// expired tenants are filtered server-side.
+#[tauri::command]
+pub async fn valueos_api_get_agent_tenants() -> Result<serde_json::Value, ValueOsErr> {
+    api_get("/me/agent-tenants").await
 }
 
 #[tauri::command]

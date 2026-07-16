@@ -30,10 +30,13 @@ valueos/read:tenants  valueos/read:leads  valueos/read:opportunities  valueos/wr
 
 PKCE S256 is computed in the webview (Web Crypto, `auth/pkce.ts`); the browser opens to the
 Cognito authorize URL; the code returns via a **loopback** redirect
-(`http://127.0.0.1:8765/callback`, or 14321). Tokens persist in secure storage and refresh;
-**401/403 → re-auth**. After login, the **entitlement gate** checks the tenant's agent
-add-on: `expired`/`never` → hard block with a CTA to <https://www.value-accelerator.io>;
-`active` → continue. No bypass.
+(`http://127.0.0.1:8765/callback`, or 14321). Tokens persist in secure storage and refresh
+(**401 → force-refresh + retry once, else re-auth**). After login, the **entitlement gate**
+calls `GET /me/agent-tenants` (contract §2): an **empty list → hard block** (worded from
+`total_memberships`: `0` = "no workspace"; `>0` = "no add-on") with a CTA to
+<https://www.value-accelerator.io>; a **non-empty list → those are the ONLY workspaces
+offered**. No per-tenant `/me/entitlements` enumeration, and the gate never relies on
+catching 403s. No bypass.
 
 ## The blocking-metadata rule (capture)
 
@@ -117,8 +120,9 @@ All reject with `{ status, message, scope?, feature?, fields? }` on error (TS ma
 | `valueos_login` | — | opens browser (PKCE loopback via tauri-plugin-oauth), exchanges code, stores tokens in keychain |
 | `valueos_is_logged_in` | — | `boolean` |
 | `valueos_logout` | — | clears keychain tokens |
-| `valueos_api_get_tenants` | — | `{ items: Tenant[], total }` |
-| `valueos_api_get_entitlement` | `tenant_id` | `Entitlement` |
+| `valueos_api_get_tenants` | — | `{ items: Tenant[], total }` (all memberships) |
+| `valueos_api_get_agent_tenants` | — | `{ items: AgentTenant[], total, total_memberships }` — **the post-login gate** |
+| `valueos_api_get_entitlement` | `tenant_id` | `Entitlement` (optional detail; not the gate) |
 | `valueos_api_list_leads` | `tenant_id, q?, limit?, offset?` | `{ items: Lead[], total, … }` |
 | `valueos_api_list_opportunities` | `tenant_id, q?, limit?, offset?` | `{ items: Opportunity[], total, … }` |
 | `valueos_api_upload_transcript` | `tenant_id, activity_type, target_id, request` | `UploadResult` |

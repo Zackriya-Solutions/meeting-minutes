@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ValueOsShell } from '@/valueos/shell/ValueOsShell';
-import { MockValueOsClient, defaultMockSeed } from '@/valueos/api/mockClient';
+import { MockValueOsClient, defaultMockSeed, type MockSeed } from '@/valueos/api/mockClient';
 import { createMockAuthService } from '@/valueos/auth/authService';
 import { InMemoryTokenStore } from '@/valueos/auth/tokenStore';
 import { createMockConfigService } from '@/valueos/config/configService';
@@ -32,9 +32,7 @@ vi.mock('@/valueos/capture/useRecordingController', () => ({
   useRecordingController: () => ({ isRecording: false, status: 'idle', transcriptText: '', start: rec.start, stop: rec.stop }),
 }));
 
-function makeServices(entitlement: EntitlementState = 'active') {
-  const seed = defaultMockSeed();
-  seed.entitlements['tenant-acme'] = entitlement;
+function servicesFromSeed(seed: MockSeed) {
   const client = new MockValueOsClient(seed);
   const services: ValueOsServices = {
     client,
@@ -45,6 +43,12 @@ function makeServices(entitlement: EntitlementState = 'active') {
     history: new InMemoryTranscriptHistory(),
   };
   return { services, client };
+}
+
+function makeServices(entitlement: EntitlementState = 'active') {
+  const seed = defaultMockSeed();
+  seed.entitlements['tenant-acme'] = entitlement;
+  return servicesFromSeed(seed);
 }
 
 async function loginToConfig() {
@@ -95,7 +99,7 @@ describe('ValueOS full flow', () => {
   });
 
   it.each(['expired', 'never'] as EntitlementState[])(
-    'blocks (%s) with a subscription CTA and no path to capture',
+    'blocks (%s) with a CTA and no path to capture',
     async (state) => {
       const { services } = makeServices(state);
       render(<ValueOsShell services={services} />);
@@ -107,6 +111,41 @@ describe('ValueOS full flow', () => {
       expect(screen.queryByTestId('valueos-capture')).toBeNull();
     },
   );
+
+  it('gate uses /me/agent-tenants (no per-tenant entitlement enumeration)', async () => {
+    const { services, client } = makeServices('active');
+    const agentSpy = vi.spyOn(client, 'getAgentTenants');
+    const entSpy = vi.spyOn(client, 'getEntitlement');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    expect(agentSpy).toHaveBeenCalledTimes(1); // single gate call
+    expect(entSpy).not.toHaveBeenCalled(); // never enumerates /me/entitlements
+  });
+
+  it('blocks with a "no workspace" message when the user belongs to none', async () => {
+    const { services } = servicesFromSeed({ tenants: [], entitlements: {}, leads: {}, opportunities: {} });
+    render(<ValueOsShell services={services} />);
+    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    fireEvent.click(screen.getByTestId('valueos-login-start'));
+    await screen.findByTestId('valueos-blocked');
+    expect(screen.getByTestId('valueos-blocked')).toHaveTextContent(/don't belong to any ValueOS workspace/i);
+  });
+
+  it('blocks with a "no add-on" message when workspaces exist but lack the add-on', async () => {
+    const { services } = servicesFromSeed({
+      tenants: [{ id: 'tenant-acme', name: 'Acme', role: 'sales_user', roles: ['sales_user'] }],
+      entitlements: { 'tenant-acme': 'expired' },
+      leads: {},
+      opportunities: {},
+    });
+    render(<ValueOsShell services={services} />);
+    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    fireEvent.click(screen.getByTestId('valueos-login-start'));
+    await screen.findByTestId('valueos-blocked');
+    expect(screen.getByTestId('valueos-blocked')).toHaveTextContent(
+      /none of your workspaces have the ValueOS Agent add-on/i,
+    );
+  });
 
   it('recording CANNOT start until tenant + type + target are all selected', async () => {
     const { services } = makeServices('active');

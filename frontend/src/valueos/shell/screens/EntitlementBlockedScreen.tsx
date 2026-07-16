@@ -1,30 +1,31 @@
 import React from 'react';
 import * as ui from './ui';
 
-// VALUEOS: hard entitlement block — shown when no accessible tenant has an active ValueOS
-// Agent subscription. No bypass: there is no path forward to capture from here.
+// VALUEOS: hard entitlement block — shown when GET /me/agent-tenants returns no workspace
+// (contract §2). No bypass: there is no path forward to capture from here. The wording is
+// driven by whether the user belongs to no workspace at all vs. workspaces without the add-on.
 export const VALUEOS_PURCHASE_URL = 'https://www.value-accelerator.io';
 
 export function EntitlementBlockedScreen({
-  state,
+  reason,
   onContact,
   onRetry,
 }: {
-  state: 'expired' | 'never' | 'none';
+  reason: 'no-membership' | 'no-addon';
   onContact: () => void;
   onRetry: () => void;
 }) {
   const msg =
-    state === 'expired'
-      ? 'Your ValueOS Agent subscription has expired.'
-      : "This account isn't subscribed to ValueOS Agent.";
+    reason === 'no-membership'
+      ? "You don't belong to any ValueOS workspace yet."
+      : 'None of your workspaces have the ValueOS Agent add-on. Ask an admin to enable it.';
   return (
     <div data-testid="valueos-blocked" style={ui.page}>
       <div style={ui.card}>
-        <h1 style={ui.h1}>ValueOS subscription required</h1>
+        <h1 style={ui.h1}>ValueOS Agent access required</h1>
         <p style={ui.sub}>
-          {msg} A valid ValueOS Agent subscription is required to capture and upload
-          meetings. Contact Value Accelerator to get set up.
+          {msg} A workspace with an active ValueOS Agent add-on is required to capture and
+          upload meetings. Contact Value Accelerator to get set up.
         </p>
         <button data-testid="valueos-blocked-contact" style={ui.primaryBtn} onClick={onContact}>
           Contact Value Accelerator
@@ -33,7 +34,7 @@ export function EntitlementBlockedScreen({
           {VALUEOS_PURCHASE_URL}
         </p>
         <button data-testid="valueos-blocked-retry" style={ui.ghostBtn} onClick={onRetry}>
-          I&apos;ve subscribed — check again
+          Check access again
         </button>
       </div>
       <footer style={ui.footer}>Value Accelerator GmbH</footer>

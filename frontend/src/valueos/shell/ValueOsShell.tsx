@@ -32,7 +32,7 @@ export function ValueOsShell({ services }: { services?: ValueOsServices }) {
 function Flow() {
   const [screen, setScreen] = useState<Screen>('landing');
   const [entitled, setEntitled] = useState<EntitledTenant[]>([]);
-  const [blockedState, setBlockedState] = useState<'expired' | 'never' | 'none'>('none');
+  const [blockedReason, setBlockedReason] = useState<'no-membership' | 'no-addon'>('no-addon');
   const [capture, setCapture] = useState<CaptureResult | null>(null);
 
   const contactSales = () => {
@@ -46,9 +46,10 @@ function Flow() {
       setScreen('download');
       return;
     }
-    // Entitlement gate: no active add-on anywhere → hard block. No bypass.
-    const anyExpired = summary.all.some((e) => e.entitlement.state === 'expired');
-    setBlockedState(summary.all.length === 0 ? 'none' : anyExpired ? 'expired' : 'never');
+    // Gate (contract §2): no workspace has the agent add-on active → hard block, no bypass.
+    // total_memberships tells us whether they're a member of nothing vs. a member of
+    // workspaces that lack the add-on, so we can word it correctly.
+    setBlockedReason(summary.totalMemberships === 0 ? 'no-membership' : 'no-addon');
     setScreen('blocked');
   };
 
@@ -62,7 +63,7 @@ function Flow() {
 
       {screen === 'blocked' && (
         <EntitlementBlockedScreen
-          state={blockedState}
+          reason={blockedReason}
           onContact={contactSales}
           onRetry={() => setScreen('login')}
         />

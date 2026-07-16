@@ -4,6 +4,7 @@
 import type { ValueOsClient } from './client';
 import {
   ActivityType,
+  AgentTenantsResult,
   Entitlement,
   Lead,
   ListParams,
@@ -16,6 +17,9 @@ import {
 import { callValueOs } from '../transport/invoke';
 
 export class TauriValueOsClient implements ValueOsClient {
+  getAgentTenants(): Promise<AgentTenantsResult> {
+    return callValueOs('valueos_api_get_agent_tenants');
+  }
   getTenants(): Promise<Paginated<Tenant>> {
     return callValueOs('valueos_api_get_tenants');
   }

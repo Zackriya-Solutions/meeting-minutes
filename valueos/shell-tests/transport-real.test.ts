@@ -19,6 +19,9 @@ describe('real transport (invoke wrappers)', () => {
     inv.fn.mockResolvedValue({ items: [], total: 0 });
     const c = new TauriValueOsClient();
 
+    await c.getAgentTenants();
+    expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_get_agent_tenants', undefined);
+
     await c.listLeads('t1', { q: 'ada', limit: 10, offset: 5 });
     expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_list_leads', {
       tenant_id: 't1',

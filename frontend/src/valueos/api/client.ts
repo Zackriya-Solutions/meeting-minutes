@@ -4,6 +4,7 @@
 // wire the native transport later without touching any screen.
 import type {
   ActivityType,
+  AgentTenantsResult,
   Entitlement,
   Lead,
   ListParams,
@@ -15,9 +16,14 @@ import type {
 } from './types';
 
 export interface ValueOsClient {
-  /** Tenants the authenticated user is a member of. scope read:tenants */
+  /** The post-login GATE (contract §2): the workspaces where the agent add-on is ACTIVE
+   *  right now — the ONLY tenants the app may offer. scope read:tenants */
+  getAgentTenants(): Promise<AgentTenantsResult>;
+  /** All tenants the user is a member of (entitled or not). Not the gate; kept for
+   *  completeness. scope read:tenants */
   getTenants(): Promise<Paginated<Tenant>>;
-  /** Agent entitlement for a tenant (active | expired | never). scope read:tenants */
+  /** Agent entitlement detail for a tenant (active | expired | never); optional — the gate
+   *  is getAgentTenants(). scope read:tenants */
   getEntitlement(tenantId: string): Promise<Entitlement>;
   /** Existing leads in a permitted, entitled tenant (read-only, searchable). scope read:leads */
   listLeads(tenantId: string, params?: ListParams): Promise<Paginated<Lead>>;

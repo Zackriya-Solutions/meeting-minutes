@@ -5,6 +5,7 @@
 import type { ValueOsClient } from './client';
 import {
   ActivityType,
+  AgentTenantsResult,
   Entitlement,
   EntitlementState,
   Lead,
@@ -79,6 +80,22 @@ export class MockValueOsClient implements ValueOsClient {
         feature: 'feat_agent',
       });
     }
+  }
+
+  async getAgentTenants(): Promise<AgentTenantsResult> {
+    this.guardAuth();
+    // Server-side filter: ONLY tenants whose add-on is active right now (never/expired and
+    // not-a-member are excluded). total_memberships counts ALL of the user's tenants.
+    const items = this.seed.tenants
+      .filter((t) => (this.seed.entitlements[t.id] ?? 'never') === 'active')
+      .map((t) => ({ ...t, state: 'active' as EntitlementState, active: true }));
+    return {
+      items,
+      total: items.length,
+      total_memberships: this.seed.tenants.length,
+      capability: 'valueos_agent',
+      feature: 'feat_agent',
+    };
   }
 
   async getTenants(): Promise<Paginated<Tenant>> {

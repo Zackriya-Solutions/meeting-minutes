@@ -10,6 +10,22 @@ describe('MockValueOsClient (contract behaviors)', () => {
     expect(t.items[0].id).toBe('tenant-acme');
   });
 
+  it('agent-tenants is the gate: returns ONLY active workspaces + total_memberships', async () => {
+    const c = new MockValueOsClient(defaultMockSeed());
+    const a = await c.getAgentTenants();
+    expect(a.items).toHaveLength(1);
+    expect(a.items[0].id).toBe('tenant-acme');
+    expect(a.items[0].active).toBe(true);
+    expect(a.total).toBe(1);
+    expect(a.total_memberships).toBe(1);
+    // Lapsing the add-on removes it from the gate, but membership still counts.
+    c.setEntitlement('tenant-acme', 'expired');
+    const b = await c.getAgentTenants();
+    expect(b.items).toHaveLength(0);
+    expect(b.total).toBe(0);
+    expect(b.total_memberships).toBe(1);
+  });
+
   it('reports entitlement state: active / expired / never', async () => {
     const c = new MockValueOsClient(defaultMockSeed());
     expect((await c.getEntitlement('tenant-acme')).active).toBe(true);

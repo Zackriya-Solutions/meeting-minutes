@@ -36,6 +36,24 @@ export interface Entitlement {
   active: boolean;
 }
 
+/** One workspace where the ValueOS Agent capability is ACTIVE right now (an item of
+ *  GET /me/agent-tenants). Superset of Tenant carrying the live entitlement state. */
+export interface AgentTenant extends Tenant {
+  state: EntitlementState;
+  active: boolean;
+}
+
+/** GET /me/agent-tenants — the post-login gate (contract §2). `items` are the ONLY
+ *  workspaces the agent may operate in; `total_memberships` distinguishes "member of
+ *  nothing" from "member of workspaces that lack the add-on" so the block can be worded. */
+export interface AgentTenantsResult {
+  items: AgentTenant[];
+  total: number;
+  total_memberships: number;
+  capability?: 'valueos_agent';
+  feature?: 'feat_agent';
+}
+
 export interface Lead {
   id: string;
   label: string; // full name, else company, else email
