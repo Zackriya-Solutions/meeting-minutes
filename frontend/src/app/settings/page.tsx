@@ -65,11 +65,11 @@ export default function SettingsPage() {
   }, [setTranscriptModelConfig]);
 
   return (
-    <div className="mm-page !p-0">
+    <div className="mm-page min-w-0 overflow-hidden !p-0">
       {/* Fixed Header */}
       <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
-        <div className="mx-auto max-w-6xl px-8 py-6">
-          <div className="flex items-center gap-4">
+        <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-8 sm:py-6">
+          <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
             <button
               onClick={() => router.back()}
               className="mm-icon-button mm-hover"
@@ -105,17 +105,17 @@ export default function SettingsPage() {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
+      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto w-full min-w-0 max-w-6xl p-4 pt-4 sm:p-8 sm:pt-6">
           {/* Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="mm-tab-list h-auto">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0">
+            <TabsList className="mm-tab-list h-auto w-full max-w-full justify-start overflow-x-auto">
               {TABS.map((tab) => {
                 return (
                   <TabsTrigger
                     key={tab.value}
                     value={tab.value}
-                    className="mm-tab"
+                    className="mm-tab shrink-0"
                   >
                     <Icon name={tab.icon} size={16} />
                     {t(tab.label)}
@@ -124,31 +124,31 @@ export default function SettingsPage() {
               })}
             </TabsList>
 
-            <TabsContent value="general">
+            <TabsContent value="general" className="min-w-0">
               <PreferenceSettings />
             </TabsContent>
-            <TabsContent value="recording">
+            <TabsContent value="recording" className="min-w-0">
               <RecordingSettings />
             </TabsContent>
-            <TabsContent value="Transcriptionmodels">
+            <TabsContent value="Transcriptionmodels" className="min-w-0">
               <TranscriptSettings
                 transcriptModelConfig={transcriptModelConfig}
                 setTranscriptModelConfig={setTranscriptModelConfig}
               />
             </TabsContent>
-            <TabsContent value="summaryModels">
+            <TabsContent value="summaryModels" className="min-w-0">
               <SummaryModelSettings />
             </TabsContent>
-            <TabsContent value="providers">
+            <TabsContent value="providers" className="min-w-0">
               <ProviderSettings />
             </TabsContent>
-            <TabsContent value="privacy">
+            <TabsContent value="privacy" className="min-w-0">
               <PrivacySettings />
             </TabsContent>
-            <TabsContent value="search">
+            <TabsContent value="search" className="min-w-0">
               <EmbeddingModelSettings />
             </TabsContent>
-            <TabsContent value="beta" className="mt-6">
+            <TabsContent value="beta" className="mt-6 min-w-0">
               <BetaSettings />
             </TabsContent>
           </Tabs>

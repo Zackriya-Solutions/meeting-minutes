@@ -168,25 +168,26 @@ export function PreferenceSettings() {
     <div className="space-y-6">
       {/* Уведомления Section */}
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
             <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Notifications')}</h3>
             <p className="text-sm text-[var(--fg2)]">{t('Enable or disable notifications of start and end of meeting')}</p>
           </div>
-          <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+          <Switch className="shrink-0" checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
       </div>
 
       {/* Automatic meeting detection stores only the preference; observed signals stay in memory. */}
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <div className="flex items-center justify-between gap-6">
-          <div>
+        <div className="flex items-start justify-between gap-4 sm:gap-6">
+          <div className="min-w-0">
             <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Automatic meeting detection')}</h3>
             <p className="text-sm text-[var(--fg2)]">
               {t('Suggest recording when a supported meeting app or browser call becomes active. Detection signals stay in memory and recording never starts without your confirmation.')}
             </p>
           </div>
           <Switch
+            className="shrink-0"
             checked={notificationSettings?.auto_meeting_detection ?? true}
             disabled={!notificationSettings}
             onCheckedChange={handleAutoMeetingDetectionChange}
