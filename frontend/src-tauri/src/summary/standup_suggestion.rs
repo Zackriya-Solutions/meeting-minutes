@@ -4,6 +4,7 @@
 //! metadata, transcript-language categories, and user-reviewed history from the same series.
 
 use crate::state::AppState;
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Timelike, Utc};
 use serde::Serialize;
 use sqlx::SqlitePool;
 
@@ -47,6 +48,28 @@ fn time_is_standup_like(value: &str) -> bool {
             hour.zip(minute)
                 .is_some_and(|(hour, minute)| hour_minute_is_standup_like(hour, minute))
         })
+}
+
+fn parse_utc_created_at(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .ok()
+        .or_else(|| {
+            ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f"]
+                .into_iter()
+                .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
+                .map(|value| value.and_utc())
+        })
+}
+
+fn datetime_is_standup_like<Tz: TimeZone>(value: DateTime<Tz>) -> bool {
+    hour_minute_is_standup_like(value.hour() as u8, value.minute() as u8)
+}
+
+fn created_at_is_standup_like(value: &str) -> bool {
+    parse_utc_created_at(value)
+        .map(|value| datetime_is_standup_like(value.with_timezone(&Local)))
+        .unwrap_or(false)
 }
 
 fn title_time_is_standup_like(title: &str) -> bool {
@@ -167,14 +190,14 @@ async fn suggestion_for_meeting(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<TemplateSuggestion, String> {
-    let meeting: Option<(String, String)> = sqlx::query_as(
-        "SELECT title, COALESCE(occurred_at, created_at) FROM meetings WHERE id = ?",
-    )
-    .bind(meeting_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| error.to_string())?;
-    let (title, occurred_at) = meeting.ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
+    let meeting: Option<(String, Option<String>, String)> =
+        sqlx::query_as("SELECT title, occurred_at, created_at FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+    let (title, occurred_at, created_at) =
+        meeting.ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
     let title = title.to_lowercase();
 
     let transcript: Vec<String> = sqlx::query_scalar(
@@ -229,7 +252,11 @@ async fn suggestion_for_meeting(
         transcript_available: !transcript.trim().is_empty(),
         status_categories: transcript_status_categories(&transcript),
         status_round_handoff: transcript_has_status_round_handoff(&transcript),
-        standup_time: time_is_standup_like(&occurred_at) || title_time_is_standup_like(&title),
+        standup_time: occurred_at
+            .as_deref()
+            .map(time_is_standup_like)
+            .unwrap_or_else(|| created_at_is_standup_like(&created_at))
+            || title_time_is_standup_like(&title),
         standup_duration: duration.is_some_and(|seconds| (300.0..=2_700.0).contains(&seconds)),
     }))
 }
@@ -314,6 +341,16 @@ mod tests {
         assert!(time_is_standup_like("2026-07-15 11:05:00 UTC"));
         assert!(!time_is_standup_like("2026-07-15T17:35:00"));
         assert!(!time_is_standup_like("2026-07-15T12:30:00"));
+        assert_eq!(
+            parse_utc_created_at("2026-07-15 08:05:00.123456"),
+            parse_utc_created_at("2026-07-15T08:05:00.123456Z")
+        );
+        let moscow = chrono::FixedOffset::east_opt(3 * 60 * 60).unwrap();
+        assert!(datetime_is_standup_like(
+            parse_utc_created_at("2026-07-15 08:05:00.123456")
+                .unwrap()
+                .with_timezone(&moscow)
+        ));
         assert!(title_time_is_standup_like(
             "date-unknown_mon_11-04_standup_assistant"
         ));
