@@ -113,9 +113,11 @@ function sourceHref(meetingId: string, startMs?: number | null): string {
 export function StandupWorkflowPanel({
   meetingId,
   summaryStatus,
+  standupSelected,
 }: {
   meetingId: string;
   summaryStatus: string;
+  standupSelected: boolean;
 }) {
   const t = useT();
   const router = useRouter();
@@ -258,7 +260,16 @@ export function StandupWorkflowPanel({
 
   const hasPrebrief = prebrief.series.length > 0;
   const hasLiveState = liveState.enabled || liveState.completedUpdates > 0 || liveState.markers.length > 0;
-  if (loading) return null;
+  if (
+    loading
+    || (
+      !standupSelected
+      && !hasPrebrief
+      && !hasLiveState
+      && records.length === 0
+      && privateNotes.length === 0
+    )
+  ) return null;
 
   const kindLabel = (kind: string) => {
     const labels: Record<string, string> = {
