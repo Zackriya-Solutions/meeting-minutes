@@ -26,6 +26,10 @@ pub struct SpeechSegment {
     pub confidence: f32,
 }
 
+fn absolute_vad_timestamp_to_sample(timestamp_ms: usize) -> usize {
+    timestamp_ms * 16000 / 1000
+}
+
 /// Processes audio in 30ms chunks but returns complete speech segments
 pub struct ContinuousVadProcessor {
     session: VadSession,
@@ -39,6 +43,7 @@ pub struct ContinuousVadProcessor {
     speech_start_sample: usize,
     // State tracking for smart logging
     last_logged_state: bool,
+    last_large_buffer_warning_samples: usize,
 }
 
 impl ContinuousVadProcessor {
@@ -103,6 +108,7 @@ impl ContinuousVadProcessor {
             speech_start_sample: 0,
             // Initialize state tracking
             last_logged_state: false,
+            last_large_buffer_warning_samples: 0,
         })
     }
 
@@ -222,6 +228,7 @@ impl ContinuousVadProcessor {
 
             self.speech_segments.push_back(segment);
             self.current_speech.clear();
+            self.last_large_buffer_warning_samples = 0;
             self.in_speech = false;
         }
 
@@ -236,10 +243,16 @@ impl ContinuousVadProcessor {
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
         // Track accumulated speech buffer size to detect memory issues
         let current_speech_size = self.current_speech.len();
-        if current_speech_size > 1_000_000 {
-            // More than ~62 seconds of accumulated speech at 16kHz
+        // Warn once after roughly one minute, then at most once per additional
+        // minute. The old condition emitted on every 30ms VAD chunk and could
+        // produce thousands of lines for a single continuous segment.
+        if current_speech_size >= 1_000_000
+            && current_speech_size.saturating_sub(self.last_large_buffer_warning_samples)
+                >= 960_000
+        {
             warn!("VAD: Accumulated speech buffer is large: {} samples ({:.1}s) - possible memory issue",
                   current_speech_size, current_speech_size as f64 / 16000.0);
+            self.last_large_buffer_warning_samples = current_speech_size;
         }
 
         let transitions = self.session.process(chunk)
@@ -260,9 +273,12 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // Silero timestamps are absolute for the whole session. Adding
+                    // processed_samples here double-counts the chunk offset and makes
+                    // a final flushed segment start after the audio has already ended.
+                    self.speech_start_sample = absolute_vad_timestamp_to_sample(timestamp_ms);
                     self.current_speech.clear();
+                    self.last_large_buffer_warning_samples = 0;
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
                     // Only log if we were previously in speech state
@@ -294,6 +310,7 @@ impl ContinuousVadProcessor {
                     }
 
                     self.current_speech.clear();
+                    self.last_large_buffer_warning_samples = 0;
                 }
             }
         }
@@ -435,6 +452,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_absolute_vad_timestamp_does_not_include_chunk_offset_twice() {
+        assert_eq!(absolute_vad_timestamp_to_sample(184_830), 2_957_280);
+    }
 
     /// Generate synthetic speech-like audio with alternating speech/silence
     fn generate_test_audio_with_speech(duration_seconds: f32, sample_rate: u32) -> Vec<f32> {
@@ -616,4 +638,3 @@ mod tests {
         }
     }
 }
-
