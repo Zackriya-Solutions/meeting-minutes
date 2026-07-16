@@ -23,7 +23,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          # The reviewer builds a three-dot PR diff and therefore needs the
+          # actual merge base, not only the two tip commits.
+          fetch-depth: 0
 
       # Prepare the complete PR context outside the model sandbox. On the persistent
       # self-hosted runner, curl is available while gh may not be on PATH.
