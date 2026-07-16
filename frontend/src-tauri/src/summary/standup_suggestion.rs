@@ -36,6 +36,20 @@ fn contains_any(text: &str, markers: &[&str]) -> bool {
     markers.iter().any(|marker| text.contains(marker))
 }
 
+fn contains_one_to_one_marker(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    text.match_indices("1:1").any(|(index, _)| {
+        let before_is_word = index
+            .checked_sub(1)
+            .and_then(|before| bytes.get(before))
+            .is_some_and(u8::is_ascii_alphanumeric);
+        let after_is_word = bytes
+            .get(index + 3)
+            .is_some_and(u8::is_ascii_alphanumeric);
+        !before_is_word && !after_is_word
+    })
+}
+
 fn hour_minute_is_standup_like(hour: u8, minute: u8) -> bool {
     ((hour, minute) >= (10, 30)) && ((hour, minute) <= (12, 0))
 }
@@ -247,19 +261,20 @@ async fn suggestion_for_meeting(
                 "ministandup",
             ],
         ),
-        other_meeting_title: contains_any(
-            &title,
-            &[
-                "one-to-one",
-                "1:1",
-                "planning",
-                "планир",
-                "retro",
-                "ретро",
-                "interview",
-                "собесед",
-            ],
-        ),
+        other_meeting_title: contains_one_to_one_marker(&title)
+            || contains_any(
+                &title,
+                &[
+                    "one-to-one",
+                    "1-on-1",
+                    "planning",
+                    "планир",
+                    "retro",
+                    "ретро",
+                    "interview",
+                    "собесед",
+                ],
+            ),
         reviewed_series_history,
         transcript_available: !transcript.trim().is_empty(),
         status_categories: transcript_status_categories(&transcript),
@@ -298,6 +313,14 @@ mod tests {
         assert_eq!(suggestion.template_id, STANDUP_TEMPLATE);
         assert_eq!(suggestion.confidence, "high");
         assert!(suggestion.reasons.contains(&"standup_title".to_string()));
+    }
+
+    #[test]
+    fn one_to_one_marker_does_not_match_clock_times() {
+        assert!(contains_one_to_one_marker("product 1:1"));
+        assert!(contains_one_to_one_marker("1:1 ivan"));
+        assert!(!contains_one_to_one_marker("standup 11:15"));
+        assert!(!contains_one_to_one_marker("daily sync 21:10"));
     }
 
     #[test]
