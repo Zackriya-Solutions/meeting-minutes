@@ -110,7 +110,7 @@ fn analyze_segments_with_untimed(
     analyze_segments(segments)
 }
 
-fn preference_key(meeting_id: &str) -> String {
+pub(crate) fn preference_key(meeting_id: &str) -> String {
     format!("summary.content_window.{meeting_id}")
 }
 
