@@ -412,12 +412,6 @@ pub async fn generate_summary(
             .get(0)
             .ok_or("No content in LLM response")?;
 
-        if let Some(reason) = choice.finish_reason.as_deref() {
-            if reason != "stop" {
-                return Err(format!("LLM response incomplete: finish_reason={reason}"));
-            }
-        }
-
         let content = choice.message.content.as_deref().unwrap_or_default().trim();
         if content.is_empty() {
             return Err("No final answer content in LLM response".to_string());

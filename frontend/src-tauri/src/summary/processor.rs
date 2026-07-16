@@ -349,7 +349,7 @@ pub async fn generate_meeting_summary(
 
             info!("Processing chunk {}/{}", i + 1, num_chunks);
             let user_prompt_chunk = build_chunk_summary_user_prompt(chunk, output_language);
-            let summary = generate_summary(
+            match generate_summary(
                 client,
                 provider,
                 model_name,
@@ -366,12 +366,47 @@ pub async fn generate_meeting_summary(
                 cancellation_token,
             )
             .await
-            .map_err(|e| {
-                error!("Failed processing chunk {}/{}: {}", i + 1, num_chunks, e);
-                format!("Summary chunk {}/{} failed: {}", i + 1, num_chunks, e)
-            })?;
-            chunk_summaries.push(summary);
-            info!("✓ Chunk {}/{} processed successfully", i + 1, num_chunks);
+            {
+                Ok(summary) => {
+                    chunk_summaries.push(summary);
+                    info!("✓ Chunk {}/{} processed successfully", i + 1, num_chunks);
+                }
+                Err(error) if error.contains("cancelled") => return Err(error),
+                Err(error)
+                    if provider == &LLMProvider::Ollama || provider == &LLMProvider::BuiltInAI =>
+                {
+                    // Preserve the established best-effort behavior of local models: a
+                    // constrained model may truncate or fail one chunk while the remaining
+                    // chunks still provide a useful summary.
+                    error!(
+                        "Failed processing chunk {}/{}: {}",
+                        i + 1,
+                        num_chunks,
+                        error
+                    );
+                }
+                Err(error) => {
+                    error!(
+                        "Failed processing chunk {}/{}: {}",
+                        i + 1,
+                        num_chunks,
+                        error
+                    );
+                    return Err(format!(
+                        "Summary chunk {}/{} failed: {}",
+                        i + 1,
+                        num_chunks,
+                        error
+                    ));
+                }
+            }
+        }
+
+        if chunk_summaries.is_empty() {
+            return Err(
+                "Multi-level summarization failed: No chunks were processed successfully."
+                    .to_string(),
+            );
         }
 
         successful_chunk_count = chunk_summaries.len() as i64;
