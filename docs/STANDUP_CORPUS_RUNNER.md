@@ -24,7 +24,8 @@ app enforces a single instance; if an older instance is still resident, the new 
 exits before its startup runner can execute.
 
 The JSON report contains meeting IDs, titles, status, latency, chunk count, extracted-record count,
-and bounded provider errors. Every item also records its provider, model, and template fingerprint,
+and sanitized provider-error categories. Raw provider errors are never copied into the report,
+because an upstream error may echo request text. Every item also records its provider, model, and template fingerprint,
 so a resumed report cannot silently attribute an old result to a new run. It deliberately contains
 neither transcripts nor generated facts. Keep it under `evals/private/` anyway because titles may
 contain personal data.

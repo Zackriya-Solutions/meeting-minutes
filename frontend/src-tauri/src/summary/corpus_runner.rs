@@ -210,6 +210,61 @@ fn bounded_error(value: Option<String>) -> Option<String> {
     })
 }
 
+fn report_error_category(value: Option<&str>) -> Option<String> {
+    let value = value?.to_ascii_lowercase();
+    let category = if value.contains("provenance") {
+        "provenance_mismatch"
+    } else if value.contains("panic") {
+        "pipeline_panic"
+    } else if value.contains("meeting not found") {
+        "meeting_not_found"
+    } else if value.contains("no non-empty transcript") || value.contains("transcript is missing") {
+        "transcript_missing"
+    } else if value.contains("cancel") {
+        "cancelled"
+    } else if value.contains("consent") {
+        "consent_required"
+    } else if value.contains("credential")
+        || value.contains("api key")
+        || value.contains("unauthorized")
+        || value.contains("status 401")
+        || value.contains("status 403")
+    {
+        "authentication_failed"
+    } else if value.contains("context length")
+        || value.contains("context limit")
+        || value.contains("token limit")
+        || value.contains("too many tokens")
+    {
+        "context_limit"
+    } else if value.contains("timeout") || value.contains("timed out") {
+        "timeout"
+    } else if value.contains("rate limit") || value.contains("status 429") {
+        "rate_limited"
+    } else if value.contains("schema")
+        || value.contains("json")
+        || value.contains("deserialize")
+        || value.contains("validation")
+        || value.contains("invalid provider")
+    {
+        "invalid_provider_output"
+    } else if value.contains("sqlite")
+        || value.contains("database")
+        || value.contains("constraint failed")
+    {
+        "storage_error"
+    } else if value.contains("network")
+        || value.contains("connect")
+        || value.contains("http request")
+        || value.contains("provider request")
+    {
+        "provider_unavailable"
+    } else {
+        "generation_failed"
+    };
+    Some(category.to_string())
+}
+
 async fn meeting_input(pool: &SqlitePool, meeting_id: &str) -> Result<(String, String), String> {
     let title: Option<String> = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
         .bind(meeting_id)
@@ -321,6 +376,7 @@ fn failed_item(
     provenance: &CorpusRunProvenance,
     error: impl ToString,
 ) -> StandupCorpusRunItem {
+    let error = error.to_string();
     StandupCorpusRunItem {
         meeting_id: meeting_id.to_string(),
         title,
@@ -331,7 +387,7 @@ fn failed_item(
         processing_time_ms: 0,
         chunk_count: 0,
         extracted_record_count: 0,
-        error: bounded_error(Some(error.to_string())),
+        error: report_error_category(Some(&error)),
     }
 }
 
@@ -460,14 +516,12 @@ async fn process_meeting<R: Runtime>(
         extracted_record_count,
         error: if completed {
             None
+        } else if outcome.status == "completed" {
+            Some("provenance_mismatch".to_string())
+        } else if let Some(error) = outcome.error.as_deref() {
+            report_error_category(Some(error))
         } else {
-            bounded_error(outcome.error.or_else(|| {
-                Some(if outcome.status == "completed" {
-                    "Completed result provenance does not match the requested corpus run".into()
-                } else {
-                    format!("Summary generation ended with status {}", outcome.status)
-                })
-            }))
+            Some("unexpected_summary_status".to_string())
         },
     }
 }
@@ -793,10 +847,15 @@ mod tests {
     }
 
     #[test]
-    fn report_errors_are_bounded_and_single_line() {
-        let error = bounded_error(Some(format!("a\n{}", "b".repeat(800)))).unwrap();
-        assert!(!error.contains('\n'));
-        assert_eq!(error.chars().count(), 500);
+    fn report_errors_are_categorized_without_echoing_private_content() {
+        let private = "context length exceeded near transcript: confidential customer phrase";
+        let error = report_error_category(Some(private)).unwrap();
+        assert_eq!(error, "context_limit");
+        assert!(!error.contains("confidential"));
+        assert_eq!(
+            report_error_category(Some("opaque provider failure")).as_deref(),
+            Some("generation_failed")
+        );
     }
 
     #[test]
