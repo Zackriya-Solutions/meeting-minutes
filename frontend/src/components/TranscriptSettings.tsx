@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, KeyRound, Loader2 } from '@/components/mem
 import { useT } from '@/lib/i18n';
 import { GigaamModelManager } from './GigaamModelManager';
 import { Label } from './ui/label';
+import { Switch } from './ui/switch';
 
 export interface TranscriptModelProps {
   // Kept broad for backward compatibility. The current UI offers GigaAM and SaluteSpeech.
@@ -67,6 +68,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
       {provider === 'gigaam' && <GigaamModelManager />}
       {provider === 'salutespeech' && <SaluteSpeechSettings />}
+
+      <MicSensitivitySetting />
 
       <DiarizationEngineSetting />
     </div>
@@ -165,12 +168,100 @@ function EngineOption({ active, onClick, title, subtitle }: {
   );
 }
 
+// SaluteSpeech cloud recognition models (query param `model=`). Persisted to
+// app_settings_kv `salutespeech.model`; the next recording's provider picks it up.
+const SALUTE_RECOG_MODELS: { id: string; title: string; subtitle: string }[] = [
+  { id: 'universal_turbo', title: 'Universal Turbo', subtitle: 'Fast, general-purpose recognition. Recommended.' },
+  { id: 'transcribation_hq', title: 'Transcription HQ', subtitle: 'Highest accuracy, best for clear speech. A little slower.' },
+];
+
+// Speech-detection sensitivity. Bluetooth/HFP mics (AirPods used as input) produce weak,
+// narrowband audio that the VAD skips — this switches the backend to a more sensitive
+// profile (persisted to app_settings_kv `vad.high_sensitivity`, applied next recording).
+function MicSensitivitySetting() {
+  const t = useT();
+  const [enabled, setEnabled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await invoke<Record<string, string>>('get_app_settings');
+        setEnabled((settings?.['vad.high_sensitivity'] || '').trim().toLowerCase() === 'true');
+      } catch {
+        // default off
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+
+  const toggle = (next: boolean) => {
+    setEnabled(next);
+    invoke('set_app_setting', { key: 'vad.high_sensitivity', value: next ? 'true' : 'false' })
+      .catch((error) => console.error('Failed to save VAD sensitivity setting:', error));
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="flex items-start justify-between gap-4 border-t border-[var(--border-subtle)] pt-4">
+      <div>
+        <Label className="block text-sm font-medium text-[var(--fg2)]">{t('Boost sensitivity for Bluetooth / quiet microphones')}</Label>
+        <p className="mt-0.5 text-xs text-[var(--fg3)]">{t('Detects speech more aggressively for low-quality inputs like AirPods used as a mic (Bluetooth hands-free mode). Turn on if phrases are being skipped. Applies to the next recording.')}</p>
+      </div>
+      <Switch checked={enabled} onCheckedChange={toggle} />
+    </div>
+  );
+}
+
 function SaluteSpeechSettings() {
   const t = useT();
+  const [recogModel, setRecogModel] = useState('universal_turbo');
+  const [recogLoaded, setRecogLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await invoke<Record<string, string>>('get_app_settings');
+        const m = (settings?.['salutespeech.model'] || 'universal_turbo').trim();
+        setRecogModel(m || 'universal_turbo');
+      } catch {
+        // default to universal_turbo
+      } finally {
+        setRecogLoaded(true);
+      }
+    })();
+  }, []);
+
+  const chooseModel = (m: string) => {
+    setRecogModel(m);
+    invoke('set_app_setting', { key: 'salutespeech.model', value: m })
+      .catch((error) => console.error('Failed to save SaluteSpeech model:', error));
+  };
+
   return (
-    <div className="rounded-[var(--radius-24)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
-      <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('SaluteSpeech · managed')}</h3>
-      <p className="mt-1 text-xs text-[var(--fg3)]">{t('Ready to use through the Memento gateway. No Authorization Key is required.')}</p>
+    <div className="space-y-4 rounded-[var(--radius-24)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
+      <div>
+        <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('SaluteSpeech · managed')}</h3>
+        <p className="mt-1 text-xs text-[var(--fg3)]">{t('Ready to use through the Memento gateway. No Authorization Key is required.')}</p>
+      </div>
+      {recogLoaded && (
+        <div className="space-y-2 border-t border-[var(--border-subtle)] pt-4">
+          <Label className="block text-sm font-medium text-[var(--fg2)]">{t('Recognition model')}</Label>
+          <div className="grid gap-2">
+            {SALUTE_RECOG_MODELS.map((m) => (
+              <EngineOption
+                key={m.id}
+                active={recogModel === m.id}
+                onClick={() => chooseModel(m.id)}
+                title={m.title}
+                subtitle={t(m.subtitle)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
   /* Legacy BYOK controls intentionally retained below for easy future opt-in. */
