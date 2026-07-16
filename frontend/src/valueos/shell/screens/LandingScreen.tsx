@@ -1,6 +1,5 @@
 import React from 'react';
 import { VaLogo, VA_BLUE } from '../../assets/VaLogo';
-import { BuildStamp } from '../BuildStamp';
 
 // VALUEOS: Screen A — Value Accelerator branded landing / entry point.
 export function LandingScreen({ onProceed }: { onProceed: () => void }) {
@@ -34,8 +33,6 @@ export function LandingScreen({ onProceed }: { onProceed: () => void }) {
         </button>
       </div>
       <footer style={styles.footer}>Value Accelerator GmbH</footer>
-      {/* VALUEOS: which build am I running? Corner stamp — subtle, click-through. */}
-      <BuildStamp />
     </div>
   );
 }

@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { resolveBuildInfo, BUILD_INFO } from '@/valueos/buildInfo';
 import { BuildStamp } from '@/valueos/shell/BuildStamp';
-import { LandingScreen } from '@/valueos/shell/screens/LandingScreen';
 
 // VALUEOS: tests for OUR build-stamp feature (buildInfo resolver + BuildStamp component +
 // landing wiring). Pure logic gets exhaustive coverage; the component/landing tests prove
@@ -84,13 +83,6 @@ describe('BuildStamp component', () => {
     const el = screen.getByTestId('valueos-build-stamp');
     expect(el).toHaveTextContent(BUILD_INFO.label);
     expect(el).toHaveStyle({ pointerEvents: 'none', position: 'fixed', whiteSpace: 'nowrap' });
-  });
-});
-
-describe('LandingScreen wiring', () => {
-  it('shows the build stamp in the corner (so a stale build is obvious)', () => {
-    render(<LandingScreen onProceed={() => {}} />);
-    expect(screen.getByTestId('valueos-build-stamp')).toBeInTheDocument();
   });
 });
 

@@ -82,13 +82,17 @@ beforeEach(() => {
 });
 
 describe('ValueOS full flow', () => {
-  it('landing shows VA branding and advances to login', () => {
+  it('landing shows VA branding + a build stamp, and advances to login', () => {
     const { services } = makeServices();
     render(<ValueOsShell services={services} />);
     expect(screen.getByText('ValueOS Agent')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /value accelerator/i })).toBeInTheDocument();
+    // The build stamp renders globally (every screen), so a stale build is always visible.
+    expect(screen.getByTestId('valueos-build-stamp')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('valueos-proceed'));
     expect(screen.getByTestId('valueos-login')).toBeInTheDocument();
+    // …still visible on the login screen (where the hang happens).
+    expect(screen.getByTestId('valueos-build-stamp')).toBeInTheDocument();
   });
 
   it('entitled login proceeds through download to configuration', async () => {

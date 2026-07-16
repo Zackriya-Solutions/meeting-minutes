@@ -11,6 +11,7 @@ import { ConfigScreen } from './screens/ConfigScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { CaptureScreen } from './screens/CaptureScreen';
 import { FinalizeScreen } from './screens/FinalizeScreen';
+import { BuildStamp } from './BuildStamp';
 import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
 import type { CaptureResult } from './flowTypes';
 
@@ -78,6 +79,9 @@ function Flow() {
     <div data-testid="valueos-shell">
       {/* VALUEOS: hide upstream download/status toasts (top-right) that leak model names */}
       <style>{'[data-sonner-toaster]{display:none !important;}'}</style>
+      {/* VALUEOS: build stamp on EVERY screen (fixed corner) so the running build is always
+          identifiable — not just on the landing. Ends "which build am I on?" ambiguity. */}
+      <BuildStamp />
       {screen === 'landing' && <LandingScreen onProceed={() => setScreen('login')} />}
 
       {screen === 'login' && <LoginScreen onDone={handleLogin} />}
