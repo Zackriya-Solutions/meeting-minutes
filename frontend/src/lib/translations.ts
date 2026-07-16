@@ -1058,7 +1058,7 @@ export const RU: Record<string, string> = {
   "Action carried over from an earlier meeting": "Действие перенесено из прошлой встречи",
   "Topic remains in the parking lot": "Тема остаётся в списке отложенных вопросов",
   "Review accepted fact": "Проверить подтверждённый факт",
-  "sources": "источников",
+  "sources": "источники",
   "Review extracted standup records": "Проверить извлечённые записи стендапа",
   "pending review": "ожидают проверки",
   "Pending review": "Ожидает проверки",
