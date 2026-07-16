@@ -2,7 +2,20 @@ use anyhow::{anyhow, Result};
 use silero_rs::{VadConfig, VadSession, VadTransition};
 use log::{debug, info, warn};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// When true, VAD sessions created afterwards use more sensitive thresholds so quiet,
+/// narrowband inputs (e.g. Bluetooth headset mics in HFP mode at 16/24 kHz — AirPods as a
+/// microphone) still register as speech instead of being skipped. Fed from the
+/// `vad.high_sensitivity` app setting at recording start.
+static VAD_HIGH_SENSITIVITY: AtomicBool = AtomicBool::new(false);
+
+/// Set the high-sensitivity VAD profile. Takes effect for VAD sessions created after this
+/// call (i.e. the next recording), so set it before starting the audio pipeline.
+pub fn set_high_sensitivity(on: bool) {
+    VAD_HIGH_SENSITIVITY.store(on, Ordering::SeqCst);
+}
 
 /// Represents a complete speech segment detected by VAD
 #[derive(Debug, Clone)]
@@ -40,8 +53,19 @@ impl ContinuousVadProcessor {
         // CONTINUOUS SPEECH FIX: Tuned for capturing complete 5+ second utterances
         // Previous: 0.55/0.40 with 400ms redemption was fragmenting speech into 40ms segments
         // New: More lenient thresholds + longer redemption for continuous speech
-        config.positive_speech_threshold = 0.50;  // Silero default - good for continuous speech
-        config.negative_speech_threshold = 0.35;  // Silero default - allows natural pauses
+        //
+        // High-sensitivity profile: Bluetooth/HFP mics (16/24 kHz) deliver weak, narrowband
+        // audio that sits below Silero's default probability, so whole phrases get skipped.
+        // Lower thresholds + shorter min-speech recover them (at the cost of a few more false
+        // triggers, which the empty-transcript filter downstream drops anyway).
+        let high_sensitivity = VAD_HIGH_SENSITIVITY.load(Ordering::SeqCst);
+        let (positive_threshold, negative_threshold, min_speech_ms) = if high_sensitivity {
+            (0.35_f32, 0.20_f32, 200_u64)
+        } else {
+            (0.50_f32, 0.35_f32, 250_u64)
+        };
+        config.positive_speech_threshold = positive_threshold;  // above this prob = speech
+        config.negative_speech_threshold = negative_threshold;  // below this = silence (allows pauses)
 
         // CRITICAL FIX: Removed redemption_time capping to support long continuous speech
         // Previous: capped at 400ms, causing VAD to fragment 5-second speech into 40ms segments
@@ -53,10 +77,10 @@ impl ContinuousVadProcessor {
         // CRITICAL FIX: Increased min_speech_time to prevent tiny 40ms fragments
         // Previous: 100ms allowed too-short segments that Whisper rejects
         // New: 250ms ensures segments are substantial enough for Whisper (>100ms requirement)
-        config.min_speech_time = Duration::from_millis(250);  // Prevent tiny fragments
+        config.min_speech_time = Duration::from_millis(min_speech_ms);  // Prevent tiny fragments
 
-        debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, min_speech={}ms, input_rate={}Hz",
-               VAD_SAMPLE_RATE, redemption_time_ms, 250, input_sample_rate);
+        debug!("Creating VAD session with: sample_rate={}Hz, redemption={}ms, min_speech={}ms, input_rate={}Hz, high_sensitivity={}",
+               VAD_SAMPLE_RATE, redemption_time_ms, min_speech_ms, input_sample_rate, high_sensitivity);
 
         let session = VadSession::new(config)
             .map_err(|e| anyhow!("Failed to create VAD session: {:?}", e))?;
