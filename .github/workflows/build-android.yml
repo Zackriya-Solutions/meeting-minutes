@@ -82,12 +82,17 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          # Bump this suffix (v2, v3, ...) to force a fresh cache namespace if
-          # a build ever fails with a filesystem-level error (missing file/dir)
-          # inside a vendored C/C++ dependency's build directory — that's the
-          # signature of a corrupted cache entry, not a real source change,
-          # since Cargo.lock/source hashing alone won't invalidate it.
-          key: android-arm64-v2
+          key: android-arm64-v3
+          # whisper-rs-sys's build.rs copies the vendored whisper.cpp source
+          # tree into its OUT_DIR under target/ before invoking cmake. Caching
+          # that directory has now corrupted itself twice in a row (a fresh
+          # "v2" cache failed on its very next restore with the same CMake
+          # "examples dir missing" error a from-scratch build never hits) —
+          # this looks like a structural issue with how actions/cache
+          # archives that particular tree, not a one-off fluke. Don't cache
+          # target/ at all; still cache the Cargo registry/git download
+          # cache, which is safe and cuts dependency-fetch time.
+          cache-targets: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
