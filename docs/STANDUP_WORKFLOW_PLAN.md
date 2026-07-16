@@ -128,6 +128,14 @@ false-positive rate. Do not trade it for higher recall, auto-select Standup from
 weaken the release thresholds. Suggestions remain confirm-before-generate until a larger held-out
 set is measured and acceptable.
 
+A cloned-database Qwen experiment then required every candidate to provide a short verbatim quote
+instead of letting the application hydrate evidence from a timestamped line. It reduced scored
+outputs from 173 to 78 and improved action precision from `0.206` to `0.316`, but fact coverage
+collapsed from `0.50` to `0.185`, action recall from `0.483` to `0.207`, action F1 from
+`0.289` to `0.250`, and the overall unsupported rate increased from `0.844` to `0.872`.
+This candidate must not ship as the precision fix. Verbatim evidence remains useful, but the next
+iteration needs an explicit semantic claim/category verifier and must preserve supported recall.
+
 ## Speaker-name and alias safety
 
 - names from speech are untrusted candidates, never direct profile updates;
