@@ -16,6 +16,11 @@ import {
 } from './types';
 import { callValueOs } from '../transport/invoke';
 
+// NOTE: Tauri v2 expects command args in camelCase on the JS side and maps them to the
+// snake_case Rust parameters (e.g. `tenantId` → `tenant_id`). Sending snake_case makes a
+// REQUIRED Rust arg look missing ("missing required key tenantId"). So every key below is
+// camelCase. (The upload `request` VALUE stays snake_case — it's the API body, passed
+// through as an opaque JSON object, not renamed by Tauri.)
 export class TauriValueOsClient implements ValueOsClient {
   getAgentTenants(): Promise<AgentTenantsResult> {
     return callValueOs('valueos_api_get_agent_tenants');
@@ -24,11 +29,11 @@ export class TauriValueOsClient implements ValueOsClient {
     return callValueOs('valueos_api_get_tenants');
   }
   getEntitlement(tenantId: string): Promise<Entitlement> {
-    return callValueOs('valueos_api_get_entitlement', { tenant_id: tenantId });
+    return callValueOs('valueos_api_get_entitlement', { tenantId });
   }
   listLeads(tenantId: string, params?: ListParams): Promise<Paginated<Lead>> {
     return callValueOs('valueos_api_list_leads', {
-      tenant_id: tenantId,
+      tenantId,
       q: params?.q,
       limit: params?.limit,
       offset: params?.offset,
@@ -36,7 +41,7 @@ export class TauriValueOsClient implements ValueOsClient {
   }
   listOpportunities(tenantId: string, params?: ListParams): Promise<Paginated<Opportunity>> {
     return callValueOs('valueos_api_list_opportunities', {
-      tenant_id: tenantId,
+      tenantId,
       q: params?.q,
       limit: params?.limit,
       offset: params?.offset,
@@ -49,9 +54,9 @@ export class TauriValueOsClient implements ValueOsClient {
     req: UploadRequest,
   ): Promise<UploadResult> {
     return callValueOs('valueos_api_upload_transcript', {
-      tenant_id: tenantId,
-      activity_type: activityType,
-      target_id: targetId,
+      tenantId,
+      activityType,
+      targetId,
       request: req,
     });
   }
