@@ -1141,7 +1141,17 @@ async fn run_import<R: Runtime>(
     }
 
     let meeting_id = format!("meeting-{}", Uuid::new_v4());
-    write_import_metadata(
+    let pool = app_state.db_manager.pool();
+    create_meeting_with_transcripts(
+        pool,
+        &meeting_id,
+        &title,
+        &segments,
+        meeting_folder.to_string_lossy().to_string(),
+    )
+    .await?;
+
+    if let Err(error) = write_import_metadata(
         &meeting_folder,
         &meeting_id,
         &title,
@@ -1156,17 +1166,17 @@ async fn run_import<R: Runtime>(
         processable_count,
         transcribed_count,
         avg_confidence,
-    )
-    .map_err(|error| anyhow!("Failed to write resumable import metadata: {}", error))?;
-
-    create_meeting_with_transcripts(
-        app_state.db_manager.pool(),
-        &meeting_id,
-        &title,
-        &segments,
-        meeting_folder.to_string_lossy().to_string(),
-    )
-    .await?;
+    ) {
+        if let Err(cleanup_error) = delete_newly_imported_meeting(pool, &meeting_id).await {
+            return Err(anyhow!(
+                "Failed to write resumable import metadata: {error}; \
+                 failed to roll back imported meeting: {cleanup_error}"
+            ));
+        }
+        return Err(anyhow!(
+            "Failed to write resumable import metadata: {error}"
+        ));
+    }
     pending_folder.commit();
 
     emit_progress(&app, "complete", 100, "Import complete");
@@ -1257,6 +1267,30 @@ async fn create_meeting_with_transcripts(
         segments.len()
     );
 
+    Ok(())
+}
+
+async fn delete_newly_imported_meeting(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| anyhow!("Failed to start import cleanup transaction: {error}"))?;
+    sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| anyhow!("Failed to remove imported transcripts: {error}"))?;
+    sqlx::query("DELETE FROM meetings WHERE id = ?")
+        .bind(meeting_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| anyhow!("Failed to remove imported meeting: {error}"))?;
+    tx.commit()
+        .await
+        .map_err(|error| anyhow!("Failed to commit import cleanup: {error}"))?;
     Ok(())
 }
 
@@ -1993,6 +2027,59 @@ mod tests {
             parsed["transcription_quality"]["confidence_source"],
             "unavailable"
         );
+    }
+
+    #[tokio::test]
+    async fn test_import_cleanup_removes_committed_meeting() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE meetings(
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                folder_path TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts(
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT,
+                transcript TEXT,
+                timestamp TEXT,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        create_meeting_with_transcripts(&pool, "meeting-test", "Test", &[], "/tmp/test".into())
+            .await
+            .unwrap();
+        delete_newly_imported_meeting(&pool, "meeting-test")
+            .await
+            .unwrap();
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let transcripts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meetings, 0);
+        assert_eq!(transcripts, 0);
     }
 
     #[test]
