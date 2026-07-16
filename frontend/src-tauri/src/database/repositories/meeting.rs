@@ -315,6 +315,11 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    sqlx::query("DELETE FROM app_settings_kv WHERE key = ?")
+        .bind(format!("summary.content_window.{meeting_id}"))
+        .execute(&mut *transaction)
+        .await?;
+
     // 4. Finally, delete the meeting
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
@@ -386,5 +391,46 @@ mod tests {
             .unwrap());
         assert!(MeetingsRepository::get_diarization_prefs(&pool, "  ").await.is_err());
         assert!(MeetingsRepository::set_diarization_prefs(&pool, "", None, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn deleting_meeting_removes_content_window_preference() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE meetings(id TEXT PRIMARY KEY)",
+            "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO meetings(id) VALUES('m1')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key, value) \
+             VALUES('summary.content_window.m1', 'primary:0:1000:2000:1')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(MeetingsRepository::delete_meeting(&pool, "m1")
+            .await
+            .unwrap());
+        let preference_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM app_settings_kv \
+             WHERE key = 'summary.content_window.m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(preference_count, 0);
     }
 }
