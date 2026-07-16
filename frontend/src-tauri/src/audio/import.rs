@@ -154,6 +154,7 @@ pub struct BatchImportProgress {
     pub current_title: String,
     pub completed: usize,
     pub skipped: usize,
+    pub truncated: usize,
     pub failed: usize,
     pub state: String,
 }
@@ -163,6 +164,8 @@ pub struct BatchImportResult {
     pub total: usize,
     pub imported: Vec<ImportResult>,
     pub skipped: Vec<BatchImportItem>,
+    #[serde(default)]
+    pub truncated: Vec<BatchImportItem>,
     pub failed: Vec<BatchImportFailure>,
     pub cancelled: bool,
 }
@@ -354,7 +357,7 @@ fn deferred_audio_file_info(path: &Path) -> AudioFileInfo {
     AudioFileInfo {
         path: path.to_string_lossy().to_string(),
         filename: path
-            .file_name()
+            .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("audio")
             .to_string(),
@@ -590,7 +593,7 @@ pub async fn start_batch_import<R: Runtime>(
     let (items, over_limit) = cap_batch_items(items);
     if !over_limit.is_empty() {
         warn!(
-            "Batch contains {} files; processing the first {} and reporting {} as skipped",
+            "Batch contains {} files; processing the first {} and reporting {} as truncated",
             total,
             MAX_BATCH_AUDIO_FILES,
             over_limit.len()
@@ -605,7 +608,8 @@ pub async fn start_batch_import<R: Runtime>(
     let mut result = BatchImportResult {
         total,
         imported: Vec::new(),
-        skipped: over_limit,
+        skipped: Vec::new(),
+        truncated: over_limit,
         failed: Vec::new(),
         cancelled: false,
     };
@@ -730,6 +734,7 @@ fn emit_batch_progress<R: Runtime>(
             current_title: item.title.clone(),
             completed: result.imported.len(),
             skipped: result.skipped.len(),
+            truncated: result.truncated.len(),
             failed: result.failed.len(),
             state: state.to_string(),
         },
@@ -1729,9 +1734,10 @@ pub async fn start_batch_import_folder_command<R: Runtime>(
         {
             Ok(result) => {
                 info!(
-                    "Folder batch import complete: {} imported, {} skipped, {} failed",
+                    "Folder batch import complete: {} imported, {} skipped, {} truncated, {} failed",
                     result.imported.len(),
                     result.skipped.len(),
+                    result.truncated.len(),
                     result.failed.len()
                 );
             }
@@ -1928,7 +1934,7 @@ mod tests {
         let info = deferred_audio_file_info(&path);
 
         assert_eq!(info.path, path.to_string_lossy());
-        assert_eq!(info.filename, "broken.mp3");
+        assert_eq!(info.filename, "broken");
         assert_eq!(info.duration_seconds, 0.0);
         assert_eq!(info.size_bytes, 3);
         assert_eq!(info.format, "mp3");
