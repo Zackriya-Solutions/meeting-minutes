@@ -255,7 +255,7 @@ export function StandupWorkflowPanel({
 
   const hasPrebrief = prebrief.series.length > 0;
   const hasLiveState = liveState.enabled || liveState.completedUpdates > 0 || liveState.markers.length > 0;
-  if (loading || (!hasPrebrief && records.length === 0 && privateNotes.length === 0 && !hasLiveState)) return null;
+  if (loading) return null;
 
   const kindLabel = (kind: string) => {
     const labels: Record<string, string> = {
