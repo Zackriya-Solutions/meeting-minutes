@@ -10,8 +10,11 @@ import { PendingUploadQueue } from '../upload/pendingQueue';
 import { LocalStoragePendingUploadStore } from '../upload/localStorageQueueStore';
 import { LocalStorageTranscriptHistory } from '../history/transcriptHistory';
 
+// Real transport is now the DEFAULT (config is baked in the native module). Set
+// NEXT_PUBLIC_VALUEOS_REAL=off for mock/dev (tests inject services directly and are
+// unaffected).
 export const valueosRealTransportEnabled: boolean =
-  (process.env.NEXT_PUBLIC_VALUEOS_REAL ?? 'off') === 'on';
+  (process.env.NEXT_PUBLIC_VALUEOS_REAL ?? 'on') !== 'off';
 
 export function createRealServices(): ValueOsServices {
   const client = new TauriValueOsClient();

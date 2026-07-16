@@ -127,5 +127,7 @@ All reject with `{ status, message, scope?, feature?, fields? }` on error (TS ma
 | `valueos_validate_writable` | `path` | `boolean` |
 | `valueos_write_transcript_file` | `folder, file_name, content` | `string` (path) |
 
-Config values (client_id, hosted-UI domain, API base, callback ports) come from the
-Terraform outputs (`cognito_agent_*`) and are read by the Rust module at build/runtime.
+Config values (client_id, hosted-UI domain, API base, callback ports) are the Terraform
+outputs (`cognito_agent_*`) — **public** (public client, no secret) — and are now **baked**
+into the native module (env-overridable). Real transport is the **default**
+(`NEXT_PUBLIC_VALUEOS_REAL=off` forces mock).

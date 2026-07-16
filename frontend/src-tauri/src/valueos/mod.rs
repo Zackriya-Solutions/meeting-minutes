@@ -14,10 +14,24 @@ use tauri::{AppHandle, Runtime};
 const KEYCHAIN_SERVICE: &str = "com.valueos.io";
 const KEYCHAIN_USER: &str = "agent-tokens";
 
-// ---- config (from env; real values are Terraform outputs cognito_agent_*) --------------
-fn cfg_client_id() -> String { std::env::var("VALUEOS_CLIENT_ID").unwrap_or_default() }
-fn cfg_hosted_ui() -> String { std::env::var("VALUEOS_HOSTED_UI_BASE").unwrap_or_default() }
-fn cfg_api_base() -> String { std::env::var("VALUEOS_API_BASE").unwrap_or_default() }
+// ---- config (Terraform outputs cognito_agent_*; PUBLIC — public client, no secret) ------
+// Baked as defaults so the packaged desktop app has them (it can't read shell env); still
+// overridable via env for other deployments.
+fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| default.to_string())
+}
+fn cfg_client_id() -> String {
+    env_or("VALUEOS_CLIENT_ID", "3kjnt13ct6k25u2hkvqatkfrrm")
+}
+fn cfg_hosted_ui() -> String {
+    env_or(
+        "VALUEOS_HOSTED_UI_BASE",
+        "https://va-pptx-agents-agent.auth.eu-central-2.amazoncognito.com",
+    )
+}
+fn cfg_api_base() -> String {
+    env_or("VALUEOS_API_BASE", "https://d2luofz0a4v7f3.cloudfront.net/api/agent/v1")
+}
 fn cfg_ports() -> Vec<u16> { vec![8765, 14321] }
 const SCOPES: &str =
     "valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts";
