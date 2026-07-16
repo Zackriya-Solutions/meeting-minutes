@@ -598,15 +598,15 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
-                        THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at, 'localtime') END < \
+                        THEN julianday(source.occurred_at, 'utc') \
+                        ELSE julianday(source.created_at) END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
-                        THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at, 'localtime') END \
+                        THEN julianday(current.occurred_at, 'utc') \
+                        ELSE julianday(current.created_at) END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
              ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
-                           THEN julianday(source.occurred_at) \
-                           ELSE julianday(source.created_at, 'localtime') END DESC, ai.id DESC LIMIT 50",
+                           THEN julianday(source.occurred_at, 'utc') \
+                           ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -642,8 +642,8 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              SELECT DISTINCT sr.id, sr.kind, COALESCE(sr.reviewed_payload, sr.payload) AS payload, \
                     source.id AS source_id, source.title AS source_title, \
                     CASE WHEN source.occurred_at IS NOT NULL \
-                         THEN julianday(source.occurred_at) \
-                         ELSE julianday(source.created_at, 'localtime') END AS source_time \
+                         THEN julianday(source.occurred_at, 'utc') \
+                         ELSE julianday(source.created_at) END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -652,11 +652,11 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              JOIN meetings current ON current.id = current_mc.meeting_id \
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
-                        THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at, 'localtime') END < \
+                        THEN julianday(source.occurred_at, 'utc') \
+                        ELSE julianday(source.created_at) END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
-                        THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at, 'localtime') END \
+                        THEN julianday(current.occurred_at, 'utc') \
+                        ELSE julianday(current.created_at) END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
@@ -974,6 +974,7 @@ pub async fn get_series_digest(
         .filter_map(|(_, value)| parse_digest_datetime(value))
         .max();
     let cutoff = match window_days {
+        Some(_) if meetings.is_empty() => None,
         Some(days) => Some(
             anchor.ok_or_else(|| {
                 "Cannot apply a digest window because the series has no valid meeting dates"
@@ -1568,6 +1569,23 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.contains("no valid meeting dates"));
+    }
+
+    #[tokio::test]
+    async fn windowed_digest_allows_an_empty_series() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO collections VALUES(1, 'Empty series', 'series')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let digest = get_series_digest(&pool, 1, Some(14), Some("en"))
+            .await
+            .unwrap();
+        assert_eq!(digest.meeting_count, 0);
+        assert_eq!(digest.period_start, None);
+        assert_eq!(digest.period_end, None);
+        assert!(digest.highlights.is_empty());
     }
 
     #[tokio::test]
