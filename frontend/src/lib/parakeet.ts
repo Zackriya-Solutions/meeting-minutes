@@ -129,17 +129,6 @@ export function getModelDisplayInfo(modelName: string): ModelDisplayInfo | null 
   return MODEL_DISPLAY_CONFIG[modelName] || null;
 }
 
-export function getModelDownloadProgress(status: ModelStatus): number | null {
-  if (typeof status !== 'object' || !('Downloading' in status)) return null;
-  return typeof status.Downloading === 'number'
-    ? status.Downloading
-    : status.Downloading.progress;
-}
-
-export function getParakeetModelSizeMb(modelName: string): number {
-  return PARAKEET_MODEL_CONFIGS[modelName]?.size_mb ?? 0;
-}
-
 export function getTranscriptionLanguageCapability(
   provider?: string,
   modelName?: string

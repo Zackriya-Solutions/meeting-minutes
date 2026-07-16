@@ -1,16 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  getModelDownloadProgress,
   getTranscriptionLanguageCapability,
   supportsTranscriptionLanguage,
 } from '../../src/lib/parakeet';
 
 describe('Parakeet model metadata', () => {
-  test('reads the Rust Downloading struct variant', () => {
-    expect(getModelDownloadProgress({ Downloading: { progress: 42 } })).toBe(42);
-    expect(getModelDownloadProgress('Available')).toBeNull();
-  });
-
   test('keeps English TDT and selectable-language providers distinct', () => {
     expect(
       getTranscriptionLanguageCapability('parakeet', 'parakeet-tdt-0.6b-v3-int8')
