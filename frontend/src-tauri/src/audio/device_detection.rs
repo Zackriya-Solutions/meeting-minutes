@@ -483,7 +483,9 @@ mod tests {
             3840,
             48000,
         );
-        assert_eq!(timeout, Duration::from_millis(160));
+        // The calculation uses floating-point seconds, so permit sub-millisecond
+        // representation noise instead of requiring nanosecond equality.
+        assert!(timeout.abs_diff(Duration::from_millis(160)) < Duration::from_millis(1));
     }
 
     #[test]
