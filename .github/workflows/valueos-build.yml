@@ -1,29 +1,41 @@
 # VALUEOS: Value Accelerator cloud build pipeline for ValueOS Agent (fork of Meetily).
-# This file is intentionally named "valueos-build.yml" so it never collides with any
-# upstream workflow under .github/workflows/. It does NOT modify or depend on any of
-# upstream's workflows (build-macos.yml, build-windows.yml, build.yml, release.yml, ...).
-# It builds UNSIGNED developer installers on macOS + Windows and uploads them as
-# downloadable artifacts. See valueos/CI-BUILD.md for the plain-language guide.
+# Distinctly named so it never collides with any upstream workflow under .github/workflows/.
+# Builds UNSIGNED developer installers and uploads them as downloadable artifacts.
+# See valueos/CI-BUILD.md for the plain-language guide.
+#
+# When it builds what:
+#   - push to ANY branch (including main)   -> build ALL supported platforms (macOS + Windows)
+#   - push a version tag  v*                -> build ALL supported platforms
+#   - push the tag        macos-test        -> build macOS ONLY (fast smoke test; reuse with -f)
+#   - manual "Run workflow" (once on main)  -> choose all / macos / windows
+#
+# A tiny "setup" job computes the platform matrix from the trigger; the "build" job then
+# runs that matrix. This keeps a single source of truth for the build steps.
 
 name: "ValueOS Agent — Build (macOS + Windows)"
 
 on:
-  # Build every time stable work lands on main.
   push:
     branches:
-      - main
-    # ...and whenever we push a version tag (so we can cut releases later).
+      - "**" # every branch: main and any feature branch you keep
     tags:
-      - "v*"
-  # ...and on demand from the Actions tab ("Run workflow").
+      - "v*" # release-style version tags -> all platforms
+      - "macos-test" # fixed, reusable tag -> macOS-only quick build
   workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platforms to build"
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
+        default: all
 
-# Only keep the newest run per ref; cancel superseded in-progress runs.
 concurrency:
   group: valueos-build-${{ github.ref }}
   cancel-in-progress: true
 
-# We only read the repo and upload artifacts — no release publishing here.
 permissions:
   contents: read
 
@@ -32,38 +44,47 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Decide which platforms to build, based on how the workflow was triggered.
+  # ---------------------------------------------------------------------------
+  setup:
+    name: Select platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      mode: ${{ steps.pick.outputs.mode }}
+    steps:
+      - name: Pick build matrix
+        id: pick
+        shell: bash
+        run: |
+          # Per-platform matrix entries (kept on one line each so they're valid JSON).
+          MAC='{"os":"macos-latest","label":"macOS (Apple Silicon)","target":"aarch64-apple-darwin","artifact":"valueos-agent-macos","sidecar_features":"--features metal","sidecar_src":"target/release/llama-helper","sidecar_dst":"frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin"}'
+          WIN='{"os":"windows-latest","label":"Windows (x64)","target":"x86_64-pc-windows-msvc","artifact":"valueos-agent-windows","sidecar_features":"","sidecar_src":"target/release/llama-helper.exe","sidecar_dst":"frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe"}'
+
+          PLATFORM="${{ github.event.inputs.platform }}"
+          if [ "${{ github.ref }}" = "refs/tags/macos-test" ] || [ "$PLATFORM" = "macos" ]; then
+            MATRIX="{\"include\":[${MAC}]}"; MODE="macOS only"
+          elif [ "$PLATFORM" = "windows" ]; then
+            MATRIX="{\"include\":[${WIN}]}"; MODE="Windows only"
+          else
+            MATRIX="{\"include\":[${MAC},${WIN}]}"; MODE="all supported platforms"
+          fi
+          echo "Build mode: ${MODE}"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Build + package on each selected platform. Resilient: one platform failing
+  # does not stop the other (fail-fast: false).
+  # ---------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.label }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
-      # Resilient: if one platform fails, the other still runs to completion.
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            label: "macOS (Apple Silicon)"
-            target: aarch64-apple-darwin
-            artifact: valueos-agent-macos
-            # llama-helper sidecar: build with Metal on macOS (mirrors upstream CI).
-            sidecar_features: "--features metal"
-            sidecar_src: "target/release/llama-helper"
-            sidecar_dst: "frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin"
-            # Installer paths (relative to repo root — root Cargo workspace target dir).
-            artifact_paths: |
-              target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-              target/aarch64-apple-darwin/release/bundle/macos/*.app
-          - os: windows-latest
-            label: "Windows (x64)"
-            target: x86_64-pc-windows-msvc
-            artifact: valueos-agent-windows
-            # llama-helper sidecar: CPU-only on Windows (mirrors upstream CI; the
-            # Vulkan sidecar build has a known CMake race in llama-cpp-sys-2).
-            sidecar_features: ""
-            sidecar_src: "target/release/llama-helper.exe"
-            sidecar_dst: "frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe"
-            artifact_paths: |
-              target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-              target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
       - name: Checkout repository (with submodules)
@@ -83,14 +104,13 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9 # matches frontend/pnpm-lock.yaml (lockfileVersion 9.0)
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # Cache the pnpm store keyed on the frontend lockfile (speeds up reruns).
           cache: "pnpm"
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -132,25 +152,31 @@ jobs:
           echo "Sidecar binaries present:"
           ls -la frontend/src-tauri/binaries/
 
+      - name: Apply ValueOS branding (icons)
+        shell: bash
+        run: |
+          # Stage the ValueOS Agent icons into src-tauri/icons in the throwaway CI working
+          # tree only — never committed, no upstream file changed in git. See
+          # valueos/branding/README.md.
+          bash valueos/branding/apply-branding.sh
+
       - name: Build Tauri app (unsigned dev build)
         id: build
         shell: bash
         working-directory: frontend
         run: |
           # Direct Tauri CLI build (equivalent to `pnpm run tauri:build`, but with an
-          # explicit --target for deterministic output paths). The --config override
-          # disables updater-artifact generation so no TAURI_SIGNING_PRIVATE_KEY is
-          # needed — see valueos/CI-BUILD.md. FFmpeg is auto-downloaded by build.rs;
-          # whisper/parakeet models are downloaded at RUNTIME, not needed for the build.
+          # explicit --target for deterministic output paths). The generated overlay
+          # renames the app to "ValueOS Agent" (valueos/branding/tauri.valueos.json) AND
+          # disables updater-artifact generation so no TAURI_SIGNING_PRIVATE_KEY is needed
+          # — see valueos/CI-BUILD.md and valueos/branding/README.md. FFmpeg is
+          # auto-downloaded by build.rs; whisper/parakeet models download at RUNTIME.
           # No signing secrets are provided: macOS ad-hoc signs (signingIdentity "-")
           # and the Windows signCommand no-ops when DIGICERT_KEYPAIR_ALIAS is unset.
           #
-          # The override is written to a slash-free, relative file and passed by path
-          # rather than as inline JSON: on windows-latest this runs under Git Bash, where
-          # inline '{"..."}' can be mangled by MSYS arg conversion or the pnpm .cmd shim
-          # re-quoting. A bare filename (resolved relative to this cwd, frontend/) avoids
-          # both. It is a throwaway CI file, not a committed edit to any upstream file.
-          printf '%s' '{"bundle":{"createUpdaterArtifacts":false}}' > valueos-ci.config.json
+          # The overlay is produced by a small node script (not inline JSON) and passed by
+          # relative path, so nothing can be mangled by Git Bash / MSYS on windows-latest.
+          node ../valueos/branding/make-ci-config.js valueos-ci.config.json
           pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
 
       - name: List and verify produced installers
@@ -160,8 +186,7 @@ jobs:
           BUNDLE="target/${{ matrix.target }}/release/bundle"
           echo "Installers under ${BUNDLE}:"
           find "${BUNDLE}" -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \) 2>/dev/null || true
-          # Fail fast if the build reported success but produced no installer (e.g. a
-          # silently dropped --config override leaving updater signing to fail late).
+          # Fail fast if the build reported success but produced no installer.
           if [ -z "$(find "${BUNDLE}" -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \) 2>/dev/null)" ]; then
             echo "::error::No installer (.dmg/.msi/.exe) found under ${BUNDLE}"
             exit 1
@@ -172,7 +197,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact_paths }}
+          # Upload the whole bundle dir (installers + the .app); one path, cross-platform.
+          path: target/${{ matrix.target }}/release/bundle
           if-no-files-found: error
           retention-days: 30
 
@@ -193,6 +219,7 @@ jobs:
             echo "|----------|-------|"
             echo "| Platform | ${{ matrix.label }} (\`${{ matrix.os }}\`) |"
             echo "| Result | ${STATUS} |"
+            echo "| Build mode | ${{ needs.setup.outputs.mode }} |"
             echo "| Version | ${{ steps.version.outputs.version }} |"
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Ref | \`${{ github.ref_name }}\` |"
@@ -203,7 +230,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$OUTCOME" = "success" ]; then
             {
-              echo "### 📦 Uploaded installers (artifact: \`${{ matrix.artifact }}\`)"
+              echo "### 📦 Installers (artifact: \`${{ matrix.artifact }}\`)"
               echo ""
               echo '```'
               find "target/${{ matrix.target }}/release/bundle" -type f \
