@@ -589,10 +589,12 @@ impl SummaryService {
                             count, meeting_id
                         ),
                         Err(error) => {
-                            let message =
-                                format!("Failed to sync Standup V2 review records: {error}");
-                            Self::update_process_failed(&pool, &meeting_id, &message).await;
-                            return;
+                            // The generated summary is already valid at this point. Review sync is
+                            // a recoverable projection and must not discard that user-visible result.
+                            error!(
+                                "Failed to sync Standup V2 review records for {}: {}",
+                                meeting_id, error
+                            );
                         }
                     }
                 }
