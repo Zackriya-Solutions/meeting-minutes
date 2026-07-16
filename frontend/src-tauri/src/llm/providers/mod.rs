@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use deepseek::DeepSeekClient;
 use gigachat::{GigaChatAuth, GigaChatClient};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct DeepSeekTransport {
     pub api_key: String,
     pub base_url: String,
@@ -85,7 +85,8 @@ pub async fn resolve_deepseek_transport(pool: &SqlitePool) -> Option<DeepSeekTra
 
 #[cfg(test)]
 mod tests {
-    use super::managed_deepseek_base_url;
+    use super::{managed_deepseek_base_url, resolve_deepseek_transport};
+    use sqlx::sqlite::SqlitePoolOptions;
 
     #[test]
     fn managed_deepseek_keeps_the_gateway_that_accepted_the_token() {
@@ -93,6 +94,33 @@ mod tests {
             managed_deepseek_base_url("https://gw2.gigatool.app/"),
             "https://gw2.gigatool.app/deepseek/v1"
         );
+    }
+
+    #[tokio::test]
+    async fn configured_transport_keeps_custom_base_and_model() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO app_settings_kv VALUES \
+             ('deepseek.api_key','secret'), \
+             ('deepseek.base_url','https://deepseek.example/v1'), \
+             ('deepseek.model','deepseek-custom')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let transport = resolve_deepseek_transport(&pool).await.unwrap();
+        assert_eq!(transport.api_key, "secret");
+        assert_eq!(transport.base_url, "https://deepseek.example/v1");
+        assert_eq!(transport.model, "deepseek-custom");
     }
 }
 
