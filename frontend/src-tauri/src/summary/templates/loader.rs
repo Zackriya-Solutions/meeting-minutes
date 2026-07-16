@@ -242,6 +242,17 @@ mod tests {
         let ids = list_template_ids();
         assert!(ids.contains(&"daily_standup".to_string()));
         assert!(ids.contains(&"standard_meeting".to_string()));
+        assert!(ids.contains(&"skill_generator".to_string()));
+    }
+
+    #[test]
+    fn test_get_skill_generator_template() {
+        let template = get_template("skill_generator");
+        assert!(template.is_ok());
+
+        let template = template.unwrap();
+        assert_eq!(template.name, "Skill Generator");
+        assert!(!template.sections.is_empty());
     }
 
     #[test]

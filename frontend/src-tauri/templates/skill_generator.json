@@ -1,0 +1,41 @@
+{
+  "name": "Skill Generator",
+  "description": "Generate a reusable SKILL.md document from meeting transcripts.",
+  "sections": [
+    {
+      "title": "Skill Name",
+      "instruction": "Infer a concise lowercase-hyphenated skill name (example: deploy-staging-server). Must only use [a-z0-9-].",
+      "format": "string"
+    },
+    {
+      "title": "Description",
+      "instruction": "Write one sentence describing what this skill does and when it should be used.",
+      "format": "string"
+    },
+    {
+      "title": "When To Use",
+      "instruction": "List trigger situations and suitability conditions from the transcript. If unclear, use [Missing from transcript].",
+      "format": "list"
+    },
+    {
+      "title": "Prerequisites",
+      "instruction": "List required tools, environment setup, permissions, or dependencies. If missing, use [Missing from transcript].",
+      "format": "list"
+    },
+    {
+      "title": "Steps",
+      "instruction": "List numbered execution steps. Include concrete commands only when explicitly present in the transcript. If command details are missing, mark as [Command missing in transcript].",
+      "format": "list"
+    },
+    {
+      "title": "Pitfalls & Gotchas",
+      "instruction": "List common mistakes, caveats, and failure modes discussed. If no details are present, use [Missing from transcript].",
+      "format": "list"
+    },
+    {
+      "title": "Verification",
+      "instruction": "List checks that confirm correct execution. Use observable outcomes from transcript when available; otherwise use [Verification detail missing in transcript].",
+      "format": "list"
+    }
+  ]
+}
