@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PRIMARY_GATEWAY: &str = "https://gw.gigatool.app";
-pub const FALLBACK_GATEWAY: &str = "https://gw2.gigatool.app";
+pub const PRIMARY_GATEWAY: &str = "https://gw.multitool.works";
+pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
 const SERVICE: &str = "meetily.gateway";
 
 fn registration_key() -> Result<String, String> {
@@ -104,4 +104,16 @@ pub async fn install_token() -> Result<(String, String), String> {
         }
     }
     Err(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_gateway_domains_use_multitool_primary_and_fallback() {
+        assert_eq!(PRIMARY_GATEWAY, "https://gw.multitool.works");
+        assert_eq!(FALLBACK_GATEWAY, "https://gw2.multitool.works");
+        assert_ne!(PRIMARY_GATEWAY, FALLBACK_GATEWAY);
+    }
 }
