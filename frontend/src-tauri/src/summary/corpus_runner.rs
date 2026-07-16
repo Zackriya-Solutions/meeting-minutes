@@ -567,9 +567,10 @@ async fn process_meeting<R: Runtime>(
         }
         Err(error) => return failed_item(meeting_id, title, provenance, error),
     };
-    let completed = outcome.status == "completed"
-        && has_standup_v2(outcome.result.as_deref())
-        && result_matches_provenance(outcome.result.as_deref(), provenance);
+    let has_standup_payload = has_standup_v2(outcome.result.as_deref());
+    let provenance_matches = result_matches_provenance(outcome.result.as_deref(), provenance);
+    let completed =
+        outcome.status == "completed" && has_standup_payload && provenance_matches;
     let extracted_record_count = if completed {
         match standup_result_record_count(outcome.result.as_deref()) {
             Ok(count) => count,
@@ -590,7 +591,9 @@ async fn process_meeting<R: Runtime>(
         extracted_record_count,
         error: if completed {
             None
-        } else if outcome.status == "completed" {
+        } else if outcome.status == "completed" && !has_standup_payload {
+            Some("missing_standup_v2_payload".to_string())
+        } else if outcome.status == "completed" && !provenance_matches {
             Some("provenance_mismatch".to_string())
         } else if let Some(error) = outcome.error.as_deref() {
             report_error_category(Some(error))
