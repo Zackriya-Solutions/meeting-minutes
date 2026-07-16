@@ -261,8 +261,6 @@ pub struct StandupGenerationRequest<'a> {
     pub custom_openai_endpoint: Option<&'a str>,
     pub deepseek_base_url: Option<&'a str>,
     pub max_tokens: Option<u32>,
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
     pub app_data_dir: Option<&'a PathBuf>,
     pub cancellation_token: Option<&'a CancellationToken>,
 }
@@ -607,7 +605,14 @@ fn evidence_is_supported(reference: &EvidenceRef, lines: &HashMap<String, Vec<St
         .get(reference.timestamp.trim())
         .is_some_and(|candidates| {
             let quote = quote.to_lowercase();
-            candidates.iter().any(|line| line.contains(&quote))
+            // A second-level timestamp can contain more than one utterance. A
+            // quote is safe evidence only when it identifies exactly one line.
+            candidates
+                .iter()
+                .filter(|line| line.contains(&quote))
+                .take(2)
+                .count()
+                == 1
         })
 }
 
@@ -873,20 +878,46 @@ fn merge_text_items(target: &mut Vec<EvidencedText>, incoming: Vec<EvidencedText
     }
 }
 
-fn same_optional_identity(left: Option<&str>, right: Option<&str>) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => normalize_for_match(left) == normalize_for_match(right),
-        _ => false,
-    }
-}
-
 fn evidence_overlaps(left: &[EvidenceRef], right: &[EvidenceRef]) -> bool {
     left.iter().any(|left_ref| {
         right
             .iter()
             .any(|right_ref| left_ref.timestamp.trim() == right_ref.timestamp.trim())
     })
+}
+
+fn participant_updates_are_same_speaker(
+    existing: &ParticipantUpdate,
+    incoming: &ParticipantUpdate,
+) -> bool {
+    match (
+        existing.participant.as_deref(),
+        incoming.participant.as_deref(),
+    ) {
+        (Some(left), Some(right)) => normalize_for_match(left) == normalize_for_match(right),
+        (None, None) => {
+            let existing_evidence = existing
+                .completed_or_recent
+                .iter()
+                .chain(&existing.next)
+                .chain(&existing.blockers)
+                .flat_map(|item| &item.evidence)
+                .collect::<Vec<_>>();
+            let incoming_evidence = incoming
+                .completed_or_recent
+                .iter()
+                .chain(&incoming.next)
+                .chain(&incoming.blockers)
+                .flat_map(|item| &item.evidence)
+                .collect::<Vec<_>>();
+            existing_evidence.iter().any(|left| {
+                incoming_evidence
+                    .iter()
+                    .any(|right| left.timestamp.trim() == right.timestamp.trim())
+            })
+        }
+        _ => false,
+    }
 }
 
 fn actions_are_same_commitment(existing: &StandupAction, incoming: &StandupAction) -> bool {
@@ -911,10 +942,7 @@ pub fn merge_standup_reports(reports: impl IntoIterator<Item = StandupReport>) -
 
         for update in report.participant_updates {
             if let Some(existing) = merged.participant_updates.iter_mut().find(|existing| {
-                same_optional_identity(
-                    existing.participant.as_deref(),
-                    update.participant.as_deref(),
-                )
+                participant_updates_are_same_speaker(existing, &update)
             }) {
                 merge_text_items(
                     &mut existing.completed_or_recent,
@@ -1749,6 +1777,17 @@ mod tests {
         )
         .unwrap_err()
         .contains("must include a verbatim quote"));
+
+        let ambiguous_quote = parse_standup_extraction(
+            r#"{"schema_version":"standup_v2","overview":[{"text":"Готово","evidence":[{"timestamp":"[01:02]","quote":"готово"}]}]}"#,
+        )
+        .unwrap();
+        assert!(validate_evidence_against_transcript_chunk(
+            &ambiguous_quote,
+            "[01:02] Анна: готово\n[01:02] Борис: тоже готово",
+        )
+        .unwrap_err()
+        .contains("not verbatim"));
     }
 
     #[test]
@@ -1870,6 +1909,27 @@ mod tests {
         assert_eq!(merged.action_items.len(), 2);
         assert!(merged.action_items[0].owner.is_none());
         assert_eq!(merged.action_items[1].owner.as_deref(), Some("Анна"));
+    }
+
+    #[test]
+    fn merge_keeps_unidentified_speakers_separate_without_shared_evidence() {
+        let mut first = StandupReport::default();
+        first.participant_updates.push(ParticipantUpdate {
+            participant: None,
+            completed_or_recent: vec![item("Первый статус", "[10:00]")],
+            next: Vec::new(),
+            blockers: Vec::new(),
+        });
+        let mut second = StandupReport::default();
+        second.participant_updates.push(ParticipantUpdate {
+            participant: None,
+            completed_or_recent: vec![item("Второй статус", "[11:00]")],
+            next: Vec::new(),
+            blockers: Vec::new(),
+        });
+
+        let merged = merge_standup_reports([first, second]);
+        assert_eq!(merged.participant_updates.len(), 2);
     }
 
     #[test]

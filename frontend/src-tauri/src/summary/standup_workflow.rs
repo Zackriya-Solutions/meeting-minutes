@@ -185,10 +185,15 @@ fn record_key(kind: &str, payload: &Value) -> String {
         .get("category")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let owner = payload
+        .get("owner")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     format!(
-        "{kind}|{}|{}|{}|{}",
+        "{kind}|{}|{}|{}|{}|{}",
         normalized_identity(participant),
         category,
+        normalized_identity(owner),
         evidence_timestamps(payload),
         normalized_identity(identity)
     )
@@ -613,14 +618,14 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
                         THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at) END < \
+                        ELSE julianday(source.created_at, 'localtime') END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
                         THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at) END \
+                        ELSE julianday(current.created_at, 'localtime') END \
                AND ai.status = 'open' AND ai.standup_record_id IS NOT NULL \
              ORDER BY CASE WHEN source.occurred_at IS NOT NULL \
                            THEN julianday(source.occurred_at) \
-                           ELSE julianday(source.created_at) END DESC, ai.id DESC LIMIT 50",
+                           ELSE julianday(source.created_at, 'localtime') END DESC, ai.id DESC LIMIT 50",
         )
         .bind(meeting_id)
         .fetch_all(pool)
@@ -657,7 +662,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
                     source.id AS source_id, source.title AS source_title, \
                     CASE WHEN source.occurred_at IS NOT NULL \
                          THEN julianday(source.occurred_at) \
-                         ELSE julianday(source.created_at) END AS source_time \
+                         ELSE julianday(source.created_at, 'localtime') END AS source_time \
              FROM standup_records sr \
              JOIN meetings source ON source.id = sr.meeting_id \
              JOIN meeting_collections source_mc ON source_mc.meeting_id = source.id \
@@ -667,10 +672,10 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              WHERE current.id = ? AND source.id != current.id \
                AND CASE WHEN source.occurred_at IS NOT NULL \
                         THEN julianday(source.occurred_at) \
-                        ELSE julianday(source.created_at) END < \
+                        ELSE julianday(source.created_at, 'localtime') END < \
                    CASE WHEN current.occurred_at IS NOT NULL \
                         THEN julianday(current.occurred_at) \
-                        ELSE julianday(current.created_at) END \
+                        ELSE julianday(current.created_at, 'localtime') END \
                AND sr.review_status = 'accepted' AND sr.kind IN ('risk', 'decision') \
          ), ranked AS ( \
              SELECT *, ROW_NUMBER() OVER ( \
@@ -679,7 +684,7 @@ pub async fn get_prebrief(pool: &SqlitePool, meeting_id: &str) -> Result<Standup
              FROM eligible \
          ) \
          SELECT id, kind, payload, source_id, source_title FROM ranked \
-         WHERE kind_rank <= 40 ORDER BY source_time DESC, id DESC",
+         WHERE kind_rank <= 5 ORDER BY source_time DESC, id DESC",
     )
     .bind(meeting_id)
     .fetch_all(pool)
@@ -1208,6 +1213,10 @@ pub async fn get_series_digest(
         let Some(item) = digest_item(&row, &payload) else {
             continue;
         };
+        if row.kind == "action" && item.action_status.as_deref() == Some("cancelled") {
+            digest.cancelled_actions.push(item);
+            continue;
+        }
         accepted_meetings.insert(row.meeting_id);
         match row.kind.as_str() {
             "overview" | "unattributed_fact" => digest.highlights.push(item),
@@ -1218,7 +1227,7 @@ pub async fn get_series_digest(
             "deep_dive" => digest.deep_dives.push(item),
             "action" => match item.action_status.as_deref().unwrap_or("open") {
                 "done" => digest.done_actions.push(item),
-                "cancelled" => digest.cancelled_actions.push(item),
+                "cancelled" => unreachable!("cancelled actions are handled before coverage"),
                 _ => digest.open_actions.push(item),
             },
             _ => {}
@@ -1249,6 +1258,21 @@ pub async fn get_standup_series_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_record_keys_include_owner_identity() {
+        let anna = json!({
+            "task": "Обновить документацию",
+            "owner": "Анна",
+            "evidence": [{"timestamp": "[10:00]"}]
+        });
+        let boris = json!({
+            "task": "Обновить документацию",
+            "owner": "Борис",
+            "evidence": [{"timestamp": "[10:00]"}]
+        });
+        assert_ne!(record_key("action", &anna), record_key("action", &boris));
+    }
     use crate::summary::standup::{
         EvidenceRef, StandupAction, StandupDecision, StandupDeepDive, StandupReport, StandupRisk,
     };
