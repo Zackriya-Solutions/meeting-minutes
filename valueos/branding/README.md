@@ -10,7 +10,7 @@ applied only at **build time**, so merges from upstream (Meetily) never conflict
 |------|---------|
 | `source/valueos-agent-logo.svg` | The original VA logo (source of truth for the icon). |
 | `icons/` | Generated app icons (`icon.png` 1024² RGBA, `app_icon.icns`, `app_icon.ico`, `icon.icns`, `icon.ico`, + PNG sizes). |
-| `tauri.valueos.json` | Config **overlay** merged onto `tauri.conf.json` at build time — sets `productName`, `mainBinaryName`, the window title (*ValueOS Agent*), and the bundle **`identifier` → `com.valueos.io`** (which moves app data to `~/Library/Application Support/com.valueos.io/`). |
+| `tauri.valueos.json` | Config **overlay** merged onto `tauri.conf.json` at build time — sets `productName`, `mainBinaryName`, the window title (*ValueOS Agent*), the bundle **`identifier` → `com.valueos.io`** (which moves app data to `~/Library/Application Support/com.valueos.io/`), and the **`style-src` CSP exemption** (see below). |
 | `apply-branding.sh` | Stages `icons/` into `frontend/src-tauri/icons/` at build time (working tree only). |
 | `make-ci-config.js` | Emits the combined CI overlay (branding + `createUpdaterArtifacts:false`). |
 
@@ -25,6 +25,21 @@ applied only at **build time**, so merges from upstream (Meetily) never conflict
 
 The CI workflow [`valueos-build.yml`](../../.github/workflows/valueos-build.yml) does both
 automatically on every build.
+
+## Why the overlay also sets a `style-src` CSP exemption
+
+In a **packaged (production) build only**, Tauri injects a nonce/hash into the `style-src`
+CSP directive. Per the CSP spec, a nonce **nullifies `'unsafe-inline'`** — which silently
+strips every React inline `style=` attribute, so our ValueOS screens (which style with
+inline `style={}` objects) render **completely unstyled** (plain text on white). It never
+shows in `tauri dev` or a browser, because neither injects that nonce — so it looks like a
+"stale build" until you check.
+
+The overlay adds `app.security.dangerousDisableAssetCspModification: ["style-src"]`, telling
+Tauri to leave `style-src` exactly as authored (`'self' 'unsafe-inline'`). `script-src` is
+**not** listed, so script nonce-hardening is fully preserved (styles can't exfiltrate data,
+so exempting them is the standard, safe remedy). Regression-guarded by
+[`valueos/shell-tests/branding-config.test.ts`](../shell-tests/branding-config.test.ts).
 
 ## Build it yourself (locally, on a Mac)
 
