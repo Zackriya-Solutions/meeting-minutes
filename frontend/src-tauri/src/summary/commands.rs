@@ -81,7 +81,15 @@ fn merge_manual_summary_with_generated_fields(
         return incoming;
     };
 
-    let markdown_changed = existing_object.get("markdown") != incoming_object.get("markdown");
+    let markdown_changed = match (
+        existing_object.get("markdown").and_then(|value| value.as_str()),
+        incoming_object.get("markdown").and_then(|value| value.as_str()),
+    ) {
+        (Some(existing), Some(incoming)) => {
+            markdown_semantic_text(existing) != markdown_semantic_text(incoming)
+        }
+        _ => existing_object.get("markdown") != incoming_object.get("markdown"),
+    };
     for key in ["summary_generation", "standup_v2"] {
         if !incoming_object.contains_key(key) {
             if let Some(value) = existing_object.get(key) {
@@ -105,6 +113,24 @@ fn merge_manual_summary_with_generated_fields(
     }
 
     incoming
+}
+
+fn markdown_semantic_text(markdown: &str) -> String {
+    markdown
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 async fn save_manual_summary_preserving_generated_fields(
@@ -612,6 +638,19 @@ mod tests {
         let merged = merge_manual_summary_with_generated_fields(
             Some(&serde_json::to_string(&existing).unwrap()),
             serde_json::json!({"markdown": "same"}),
+        );
+        assert!(merged.get("standup_v2_status").is_none());
+    }
+
+    #[test]
+    fn formatting_only_markdown_round_trip_does_not_mark_standup_stale() {
+        let existing = serde_json::json!({
+            "markdown": "## Action items\n\n- **Deploy** `v2`",
+            "standup_v2": {"schema_version": "standup_v2"}
+        });
+        let merged = merge_manual_summary_with_generated_fields(
+            Some(&serde_json::to_string(&existing).unwrap()),
+            serde_json::json!({"markdown": "# Action items\r\n\r\n* Deploy v2"}),
         );
         assert!(merged.get("standup_v2_status").is_none());
     }

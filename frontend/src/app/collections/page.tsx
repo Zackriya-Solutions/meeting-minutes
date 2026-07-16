@@ -103,13 +103,9 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
     <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
       <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">{title}</h4>
       <div className="mt-3 grid gap-2">
-        {items.map((item) => (
-          <button
-            type="button"
-            key={item.record_id}
-            onClick={() => router.push(digestSourceHref(item))}
-            className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
-          >
+        {items.map((item) => {
+          const content = (
+            <>
             {item.category ? (
               <span className="mb-1 inline-flex rounded-full bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[.08em] text-[var(--gold)]">
                 {item.category === 'blockers'
@@ -126,8 +122,29 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
             <span className="mt-1 block text-xs text-[var(--fg3)]">
               {[item.owner, item.due_date, item.source_meeting_title].filter(Boolean).join(' · ')}
             </span>
-          </button>
-        ))}
+            </>
+          );
+          if (item.source_start_ms == null) {
+            return (
+              <div
+                key={item.record_id}
+                className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-sm"
+              >
+                {content}
+              </div>
+            );
+          }
+          return (
+            <button
+              type="button"
+              key={item.record_id}
+              onClick={() => router.push(digestSourceHref(item))}
+              className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
+            >
+              {content}
+            </button>
+          );
+        })}
       </div>
     </section>
   );

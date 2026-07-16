@@ -289,7 +289,12 @@ pub async fn generate_meeting_summary(
     cancellation_token: Option<&CancellationToken>,
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
-) -> Result<(String, String, i64, Option<serde_json::Value>), String> {
+) -> Result<(
+    String,
+    String,
+    i64,
+    Option<crate::summary::standup::StandupReport>,
+), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
             return Err("Summary generation was cancelled".to_string());
@@ -318,19 +323,15 @@ pub async fn generate_meeting_summary(
             custom_openai_endpoint,
             deepseek_base_url,
             max_tokens,
-            temperature,
-            top_p,
             app_data_dir,
             cancellation_token,
         })
         .await?;
-        let structured = serde_json::to_value(&generated.report)
-            .map_err(|error| format!("Failed to serialize Standup V2 result: {error}"))?;
         return Ok((
             generated.markdown,
             output_language.to_string(),
             generated.chunk_count,
-            Some(structured),
+            Some(generated.report),
         ));
     }
 
