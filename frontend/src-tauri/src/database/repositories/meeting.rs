@@ -341,10 +341,6 @@ async fn delete_meeting_with_transaction(
     // Vector rows are not foreign-key linked to chunks. Remove them before the
     // source chunks so deleting a meeting cannot leave searchable transcript
     // content behind when foreign-key enforcement is disabled.
-    let chunk_ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id = ?")
-        .bind(meeting_id)
-        .fetch_all(&mut *transaction)
-        .await?;
     let embeddings_table_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master \
          WHERE type = 'table' AND name = 'chunk_embeddings')",
@@ -352,12 +348,13 @@ async fn delete_meeting_with_transaction(
     .fetch_one(&mut *transaction)
     .await?;
     if embeddings_table_exists {
-        for chunk_id in chunk_ids {
-            sqlx::query("DELETE FROM chunk_embeddings WHERE chunk_id = ?")
-                .bind(chunk_id)
-                .execute(&mut *transaction)
-                .await?;
-        }
+        sqlx::query(
+            "DELETE FROM chunk_embeddings \
+             WHERE chunk_id IN (SELECT id FROM chunks WHERE meeting_id = ?)",
+        )
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
     }
 
     sqlx::query("DELETE FROM chunks WHERE meeting_id = ?")
