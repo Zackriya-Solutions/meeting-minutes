@@ -602,12 +602,12 @@ export default function CollectionsPage() {
                       </div>
 
                       {[
+                        seriesDigest.highlights,
+                        seriesDigest.updates,
                         seriesDigest.open_actions,
                         seriesDigest.done_actions,
                         seriesDigest.decisions,
                         seriesDigest.risks,
-                        seriesDigest.updates,
-                        seriesDigest.highlights,
                         seriesDigest.deep_dives,
                         seriesDigest.parking_lot,
                       ].every((items) => items.length === 0) ? (
@@ -616,12 +616,12 @@ export default function CollectionsPage() {
                         </div>
                       ) : (
                         <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                          <DigestSection title={t('Highlights')} items={seriesDigest.highlights} />
+                          <DigestSection title={t('Participant updates')} items={seriesDigest.updates} />
                           <DigestSection title={t('Open actions')} items={seriesDigest.open_actions} />
                           <DigestSection title={t('Completed actions')} items={seriesDigest.done_actions} />
                           <DigestSection title={t('Decisions')} items={seriesDigest.decisions} />
                           <DigestSection title={t('Risks and blockers')} items={seriesDigest.risks} />
-                          <DigestSection title={t('Participant updates')} items={seriesDigest.updates} />
-                          <DigestSection title={t('Highlights')} items={seriesDigest.highlights} />
                           <DigestSection title={t('Deep dives')} items={seriesDigest.deep_dives} />
                           <DigestSection title={t('Parking lot')} items={seriesDigest.parking_lot} />
                         </div>
