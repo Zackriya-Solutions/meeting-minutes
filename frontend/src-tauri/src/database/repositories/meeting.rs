@@ -328,6 +328,38 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    // Vector rows are not foreign-key linked to chunks. Remove them before the
+    // source chunks so deleting a meeting cannot leave searchable transcript
+    // content behind when foreign-key enforcement is disabled.
+    let chunk_ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+    let embeddings_table_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+         WHERE type = 'table' AND name = 'chunk_embeddings')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if embeddings_table_exists {
+        for chunk_id in chunk_ids {
+            sqlx::query("DELETE FROM chunk_embeddings WHERE chunk_id = ?")
+                .bind(chunk_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+    }
+
+    sqlx::query("DELETE FROM chunks WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM jobs WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
     // Delete from the older related tables in proper order.
     sqlx::query("DELETE FROM transcript_chunks WHERE meeting_id = ?")
         .bind(meeting_id)
@@ -432,6 +464,9 @@ mod tests {
             "CREATE TABLE meeting_collections(meeting_id TEXT, collection_id INTEGER)",
             "CREATE TABLE pending_merges(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE entity_mentions(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
+            "CREATE TABLE chunk_embeddings(chunk_id INTEGER PRIMARY KEY)",
+            "CREATE TABLE jobs(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
@@ -449,6 +484,9 @@ mod tests {
             "INSERT INTO meeting_collections VALUES('m1', 1)",
             "INSERT INTO pending_merges(meeting_id) VALUES('m1')",
             "INSERT INTO entity_mentions(meeting_id) VALUES('m1')",
+            "INSERT INTO chunks(id, meeting_id, text) VALUES(42, 'm1', 'private transcript')",
+            "INSERT INTO chunk_embeddings(chunk_id) VALUES(42)",
+            "INSERT INTO jobs(meeting_id) VALUES('m1')",
             "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
             "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
             "INSERT INTO transcripts(meeting_id) VALUES('m1')",
@@ -467,6 +505,9 @@ mod tests {
             "meeting_collections",
             "pending_merges",
             "entity_mentions",
+            "chunks",
+            "chunk_embeddings",
+            "jobs",
             "transcript_chunks",
             "summary_processes",
             "transcripts",
