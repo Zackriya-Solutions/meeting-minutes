@@ -14,6 +14,10 @@ const PENDING_SUMMARY: &str = "pending_confirmation:summary";
 const PENDING_BOTH: &str = "pending_confirmation:transcription,summary";
 const DEEPSEEK_MODEL: &str = crate::llm::providers::deepseek::DEFAULT_MODEL;
 const SALUTESPEECH_MODEL: &str = "salutespeech-stream-v2";
+const LOCAL_TRANSCRIPTION_PROVIDER: &str = "gigaam";
+const LOCAL_TRANSCRIPTION_MODEL: &str = "gigaam-v3-e2e-ctc";
+const LOCAL_SUMMARY_PROVIDER: &str = "builtin-ai";
+const LOCAL_SUMMARY_MODEL: &str = "qwen3.5:4b";
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
 pub struct MigrationReport {
@@ -46,7 +50,126 @@ fn pending_candidates(marker: &str) -> Option<(bool, bool)> {
     }
 }
 
+async fn configured_value(pool: &SqlitePool, key: &str, envs: &[&str]) -> bool {
+    let configured =
+        sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ? LIMIT 1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|value| !value.trim().is_empty());
+    configured
+        || envs
+            .iter()
+            .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
+}
+
+async fn direct_transcription_credentials(pool: &SqlitePool) -> bool {
+    configured_value(
+        pool,
+        "salutespeech.auth_key",
+        &["SALUTESPEECH_AUTH_KEY", "SBER_SALUTE_AUTH_KEY"],
+    )
+    .await
+}
+
+async fn direct_summary_credentials(pool: &SqlitePool) -> bool {
+    configured_value(pool, "deepseek.api_key", &["DEEPSEEK_API_KEY"]).await
+}
+
+async fn managed_capabilities(pool: &SqlitePool) -> (bool, bool) {
+    let gateway = crate::gateway_identity::managed_gateway_supported();
+    (
+        gateway || direct_transcription_credentials(pool).await,
+        gateway || direct_summary_credentials(pool).await,
+    )
+}
+
+async fn managed_targets_available(
+    pool: &SqlitePool,
+    transcription: bool,
+    summary: bool,
+) -> (bool, bool) {
+    let direct_transcription = !transcription || direct_transcription_credentials(pool).await;
+    let direct_summary = !summary || direct_summary_credentials(pool).await;
+    if direct_transcription && direct_summary {
+        return (true, true);
+    }
+    let gateway = crate::gateway_identity::install_token().await.is_ok();
+    (
+        !transcription || direct_transcription || gateway,
+        !summary || direct_summary || gateway,
+    )
+}
+
+/// Repair the exact provider values written by an earlier accepted migration
+/// when the current binary has no possible managed credentials. This is narrow
+/// by design: explicit user-selected providers and managed-capable builds are
+/// never changed.
+pub async fn repair_unavailable_managed_defaults(
+    pool: &SqlitePool,
+) -> Result<MigrationReport, sqlx::Error> {
+    let marker =
+        sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ? LIMIT 1")
+            .bind(MARKER)
+            .fetch_optional(pool)
+            .await?;
+    if marker.as_deref() != Some("applied") {
+        return Ok(MigrationReport::default());
+    }
+
+    let (transcription_capable, summary_capable) = managed_capabilities(pool).await;
+    if transcription_capable && summary_capable {
+        return Ok(MigrationReport::default());
+    }
+
+    let mut tx = pool.begin().await?;
+    let mut report = MigrationReport::default();
+    if !transcription_capable {
+        let updated = sqlx::query(
+            "UPDATE transcript_settings SET provider=?, model=? \
+             WHERE id='1' AND provider='salutespeech' AND model=?",
+        )
+        .bind(LOCAL_TRANSCRIPTION_PROVIDER)
+        .bind(LOCAL_TRANSCRIPTION_MODEL)
+        .bind(SALUTESPEECH_MODEL)
+        .execute(&mut *tx)
+        .await?;
+        report.transcription_changed = updated.rows_affected() > 0;
+    }
+    if !summary_capable {
+        let updated = sqlx::query(
+            "UPDATE settings SET provider=?, model=? \
+             WHERE id='1' AND provider='deepseek' AND model=?",
+        )
+        .bind(LOCAL_SUMMARY_PROVIDER)
+        .bind(LOCAL_SUMMARY_MODEL)
+        .bind(DEEPSEEK_MODEL)
+        .execute(&mut *tx)
+        .await?;
+        report.summary_changed = updated.rows_affected() > 0;
+    }
+    if report.transcription_changed || report.summary_changed {
+        sqlx::query(
+            "UPDATE app_settings_kv SET value='reverted_unavailable', \
+             updated_at=datetime('now') WHERE key=? AND value='applied'",
+        )
+        .bind(MARKER)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(report)
+}
+
 pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> {
+    let repair = repair_unavailable_managed_defaults(pool).await?;
+    if repair.transcription_changed || repair.summary_changed {
+        return Ok(repair);
+    }
+
+    let (transcription_capable, summary_capable) = managed_capabilities(pool).await;
     let mut tx = pool.begin().await?;
     let marker =
         sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ? LIMIT 1")
@@ -81,28 +204,29 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
         return Ok(report);
     }
 
-    let transcription_candidate = if let Some(row) =
-        sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+    let transcription_candidate = transcription_capable
+        && if let Some(row) =
+            sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+                .fetch_optional(&mut *tx)
+                .await?
+        {
+            let provider: String = row.try_get("provider")?;
+            let model: String = row.try_get("model")?;
+            is_legacy_transcription(&provider, &model)
+        } else {
+            false
+        };
+    let summary_candidate = summary_capable
+        && if let Some(row) = sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
             .fetch_optional(&mut *tx)
             .await?
-    {
-        let provider: String = row.try_get("provider")?;
-        let model: String = row.try_get("model")?;
-        is_legacy_transcription(&provider, &model)
-    } else {
-        false
-    };
-    let summary_candidate = if let Some(row) =
-        sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
-            .fetch_optional(&mut *tx)
-            .await?
-    {
-        let provider: String = row.try_get("provider")?;
-        let model: String = row.try_get("model")?;
-        is_legacy_summary(&provider, &model)
-    } else {
-        false
-    };
+        {
+            let provider: String = row.try_get("provider")?;
+            let model: String = row.try_get("model")?;
+            is_legacy_summary(&provider, &model)
+        } else {
+            false
+        };
 
     // Updating the app must never switch local processing to cloud processing.
     // Stage the exact-default migration until the renderer obtains consent.
@@ -128,6 +252,30 @@ pub async fn migrate(pool: &SqlitePool) -> Result<MigrationReport, sqlx::Error> 
 }
 
 pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport, sqlx::Error> {
+    let marker =
+        sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ? LIMIT 1")
+            .bind(MARKER)
+            .fetch_optional(pool)
+            .await?;
+    let Some((pending_transcription, pending_summary)) =
+        marker.as_deref().and_then(pending_candidates)
+    else {
+        return Ok(MigrationReport {
+            already_applied: true,
+            ..MigrationReport::default()
+        });
+    };
+
+    if accept {
+        let (transcription_available, summary_available) =
+            managed_targets_available(pool, pending_transcription, pending_summary).await;
+        if !transcription_available || !summary_available {
+            return Err(sqlx::Error::Protocol(
+                "managed providers are unavailable; local providers remain unchanged".to_string(),
+            ));
+        }
+    }
+
     let mut tx = pool.begin().await?;
     let marker =
         sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ? LIMIT 1")
@@ -265,9 +413,21 @@ mod tests {
         (row.get("provider"), row.get("model"))
     }
 
+    async fn enable_managed_providers(pool: &SqlitePool) {
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key,value) VALUES \
+             ('salutespeech.auth_key','test-salute-key'), \
+             ('deepseek.api_key','test-deepseek-key')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn migrates_only_known_legacy_defaults_after_confirmation() {
         let pool = pool().await;
+        enable_managed_providers(&pool).await;
         sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
             .execute(&pool)
             .await
@@ -344,6 +504,7 @@ mod tests {
     #[tokio::test]
     async fn preserves_local_defaults_when_local_only_is_enabled() {
         let pool = pool().await;
+        enable_managed_providers(&pool).await;
         sqlx::query("INSERT INTO app_settings_kv(key,value) VALUES('privacy.local_only','true')")
             .execute(&pool)
             .await
@@ -393,6 +554,7 @@ mod tests {
     #[tokio::test]
     async fn declining_keeps_local_defaults_and_finishes_the_migration() {
         let pool = pool().await;
+        enable_managed_providers(&pool).await;
         sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
             .execute(&pool)
             .await
@@ -421,6 +583,7 @@ mod tests {
     #[tokio::test]
     async fn confirmation_describes_and_changes_only_the_matching_default() {
         let pool = pool().await;
+        enable_managed_providers(&pool).await;
         sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
             .execute(&pool)
             .await
@@ -445,5 +608,73 @@ mod tests {
             values(&pool, "settings").await,
             ("openrouter".into(), "custom-model".into())
         );
+    }
+
+    #[tokio::test]
+    async fn unavailable_build_keeps_working_local_defaults_without_a_prompt() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings VALUES('1','builtin-ai','qwen3.5:4b','large-v3')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let report = migrate(&pool).await.unwrap();
+        assert!(!report.pending_confirmation);
+        assert_eq!(
+            values(&pool, "transcript_settings").await,
+            (
+                LOCAL_TRANSCRIPTION_PROVIDER.into(),
+                LOCAL_TRANSCRIPTION_MODEL.into()
+            )
+        );
+        assert_eq!(
+            values(&pool, "settings").await,
+            (LOCAL_SUMMARY_PROVIDER.into(), LOCAL_SUMMARY_MODEL.into())
+        );
+    }
+
+    #[tokio::test]
+    async fn repairs_managed_defaults_applied_by_an_unavailable_test_build() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO app_settings_kv(key,value) VALUES(?, 'applied')")
+            .bind(MARKER)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO transcript_settings VALUES('1','salutespeech',?1)")
+            .bind(SALUTESPEECH_MODEL)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings VALUES('1','deepseek',?1,'large-v3')")
+            .bind(DEEPSEEK_MODEL)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let report = migrate(&pool).await.unwrap();
+        assert!(report.transcription_changed);
+        assert!(report.summary_changed);
+        assert_eq!(
+            values(&pool, "transcript_settings").await,
+            (
+                LOCAL_TRANSCRIPTION_PROVIDER.into(),
+                LOCAL_TRANSCRIPTION_MODEL.into()
+            )
+        );
+        assert_eq!(
+            values(&pool, "settings").await,
+            (LOCAL_SUMMARY_PROVIDER.into(), LOCAL_SUMMARY_MODEL.into())
+        );
+        let marker: String = sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
+            .bind(MARKER)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(marker, "reverted_unavailable");
     }
 }

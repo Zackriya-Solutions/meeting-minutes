@@ -1,6 +1,11 @@
-use sqlx::{migrate::MigrateDatabase, Result, Sqlite, SqlitePool, Transaction};
+use sqlx::{
+    migrate::MigrateDatabase,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+    Result, Sqlite, SqlitePool, Transaction,
+};
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 use tauri::Manager;
 
 #[derive(Clone)]
@@ -42,7 +47,12 @@ impl DatabaseManager {
         // connection (PLAN.md Phase 0). Best-effort; failures degrade gracefully.
         crate::vector::register();
 
-        let pool = SqlitePool::connect(tauri_db_path).await?;
+        let options = SqliteConnectOptions::new()
+            .filename(tauri_db_path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(10));
+        let pool = SqlitePoolOptions::new().connect_with(options).await?;
 
         sqlx::migrate!("./migrations").run(&pool).await?;
 

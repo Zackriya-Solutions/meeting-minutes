@@ -25,6 +25,17 @@ interface PendingMigration {
   summary: boolean;
 }
 
+function migrationError(reason: unknown, t: (key: string) => string): string {
+  const message = typeof reason === 'string' ? reason : '';
+  if (message.includes('database is locked') || message.includes('code: 5')) {
+    return t('Memento is finishing background database work. Please try again in a few seconds.');
+  }
+  if (message.includes('managed providers are unavailable')) {
+    return t('Cloud services are unavailable in this build. Your local providers remain unchanged.');
+  }
+  return t('Failed to save provider choice.');
+}
+
 function pendingMigration(marker: string | undefined): PendingMigration | null {
   if (!marker?.startsWith('pending_confirmation:')) return null;
   const candidates = new Set(marker.slice('pending_confirmation:'.length).split(','));
@@ -69,7 +80,7 @@ export function ManagedDefaultsMigrationDialog() {
         window.location.reload();
       }
     } catch (reason) {
-      setError(typeof reason === 'string' ? reason : t('Failed to save provider choice.'));
+      setError(migrationError(reason, t));
     } finally {
       setSaving(false);
     }
@@ -79,14 +90,15 @@ export function ManagedDefaultsMigrationDialog() {
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
         hideClose
+        className="max-h-[calc(100vh-32px)] max-w-2xl overflow-y-auto"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>{t('Choose where meeting processing runs')}</DialogTitle>
+          <DialogTitle>{t('Choose how Memento processes meetings')}</DialogTitle>
           <DialogDescription className="space-y-3 text-left">
             <span className="block">
-              {t('Memento found historical local provider defaults that can be replaced with managed cloud providers. Nothing changes until you confirm.')}
+              {t('Your meetings are currently processed locally. You can keep this private setup or connect managed cloud services. Nothing changes until you confirm.')}
             </span>
             {pending?.transcription && (
               <span className="block font-medium text-[var(--fg1)]">
@@ -99,17 +111,32 @@ export function ManagedDefaultsMigrationDialog() {
               </span>
             )}
             <span className="block">
-              {t('Providers that do not match these historical defaults stay unchanged. You can change this choice later in Settings.')}
+              {t('Cloud services are enabled only after Memento verifies that they are available. You can change this choice later in Settings.')}
             </span>
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-        <DialogFooter>
-          <Button type="button" variant="outline" disabled={saving} onClick={() => void resolve(false)}>
-            {t('Keep current providers')}
+        {error && (
+          <p role="alert" className="rounded-2xl border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-4 py-3 text-sm leading-relaxed text-[var(--danger)]">
+            {error}
+          </p>
+        )}
+        <DialogFooter className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:space-x-0">
+          <Button
+            type="button"
+            className="h-auto min-h-11 w-full whitespace-normal px-4 py-3 text-center leading-snug"
+            disabled={saving}
+            onClick={() => void resolve(false)}
+          >
+            {t('Keep processing locally')}
           </Button>
-          <Button type="button" disabled={saving} onClick={() => void resolve(true)}>
-            {saving ? t('Saving…') : t('Apply managed provider changes')}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto min-h-11 w-full whitespace-normal px-4 py-3 text-center leading-snug"
+            disabled={saving}
+            onClick={() => void resolve(true)}
+          >
+            {saving ? t('Checking availability…') : t('Connect managed cloud services')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -18,6 +18,15 @@ fn registration_key() -> Result<String, String> {
         .ok_or_else(|| "MEMENTO_REGISTRATION_KEY is missing from this build".to_string())
 }
 
+/// Whether this binary can register with the managed Memento gateway.
+///
+/// This is a local capability check only: it does not access the network or the
+/// credential vault. Callers use it to avoid offering a cloud migration that
+/// can never succeed in a development or unsigned test build.
+pub fn managed_gateway_supported() -> bool {
+    registration_key().is_ok()
+}
+
 #[derive(Serialize)]
 struct Registration<'a> {
     #[serde(rename = "deviceId")]
