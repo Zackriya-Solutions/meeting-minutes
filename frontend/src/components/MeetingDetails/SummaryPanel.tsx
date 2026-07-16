@@ -314,7 +314,14 @@ export function SummaryPanel({
         )}
       </div>
 
-      <StandupWorkflowPanel meetingId={meeting.id} summaryStatus={summaryStatus} />
+      <StandupWorkflowPanel
+        meetingId={meeting.id}
+        summaryStatus={summaryStatus}
+        standupSelected={
+          availableTemplates.find((template) => template.id === selectedTemplate)?.name
+          === 'Daily Standup'
+        }
+      />
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">
