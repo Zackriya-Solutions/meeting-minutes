@@ -552,7 +552,11 @@ pub async fn start_batch_import<R: Runtime>(
         failed: Vec::new(),
         cancelled: false,
     };
-    let mut imported_hashes = collect_imported_hashes(&get_default_recordings_folder());
+    let recordings_folder = get_default_recordings_folder();
+    let mut imported_hashes =
+        tokio::task::spawn_blocking(move || collect_imported_hashes(&recordings_folder))
+            .await
+            .map_err(|error| anyhow!("Hash scan task join error: {}", error))?;
 
     for (index, item) in items.into_iter().enumerate() {
         if IMPORT_CANCELLED.load(Ordering::SeqCst) {
