@@ -182,8 +182,7 @@ async fn activate_model<R: Runtime>(
     let _switch_guard = embedder::model_index_write_guard().await;
     let previous_kind = selected_kind(pool).await;
     persist_selected_kind(pool, kind).await?;
-    let index_ready =
-        crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim()).await;
+    let index_ready = crate::vector::ensure_chunk_embeddings_table_for_dim(pool, kind.dim()).await;
     if !matches!(index_ready, Ok(true)) {
         if let Err(rollback_error) = persist_selected_kind(pool, previous_kind).await {
             return Err(format!(
@@ -209,17 +208,21 @@ pub async fn embedder_select_model<R: Runtime>(
 ) -> Result<(), String> {
     let kind = EmbedderKind::parse(&model);
     let loaded = activate_model(&app, state.db_manager.pool(), kind).await?;
-    if loaded {
-        let _ = crate::jobs::store::enqueue_unique(
-            state.db_manager.pool(),
-            crate::jobs::kind::BACKFILL,
-            None,
-            &serde_json::json!({ "reason": "embedding_model_changed", "model": kind.id() }),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        let _ = app.emit("embedder-ready", ());
+    if !loaded {
+        return Err(format!(
+            "embedding model {} is not downloaded or is incomplete",
+            kind.id()
+        ));
     }
+    let _ = crate::jobs::store::enqueue_unique(
+        state.db_manager.pool(),
+        crate::jobs::kind::BACKFILL,
+        None,
+        &serde_json::json!({ "reason": "embedding_model_changed", "model": kind.id() }),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let _ = app.emit("embedder-ready", ());
     Ok(())
 }
 
@@ -354,7 +357,12 @@ pub async fn embedder_download_model<R: Runtime>(
         }
     }
 
-    activate_model(&app, state.db_manager.pool(), kind).await?;
+    if !activate_model(&app, state.db_manager.pool(), kind).await? {
+        return Err(format!(
+            "embedding model {} is incomplete after download",
+            kind.id()
+        ));
+    }
 
     let _ = app.emit("embedder-ready", ());
     let outcome = crate::jobs::store::enqueue_unique(
