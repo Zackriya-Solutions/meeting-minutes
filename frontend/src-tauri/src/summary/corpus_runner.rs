@@ -121,6 +121,13 @@ struct CorpusRunProvenance {
     template_fingerprint: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingSummaryPolicy {
+    Generate,
+    SkipMatchingStandup,
+    RequireExplicitOverwrite,
+}
+
 fn normalized_ids(meeting_ids: Vec<String>) -> Result<Vec<String>, String> {
     let mut seen = HashSet::new();
     let ids = meeting_ids
@@ -163,6 +170,22 @@ fn result_matches_provenance(result: Option<&str>, expected: &CorpusRunProvenanc
         && source.get("template_id").and_then(Value::as_str) == Some(TEMPLATE_ID)
         && source.get("template_fingerprint").and_then(Value::as_str)
             == Some(expected.template_fingerprint.as_str())
+}
+
+fn existing_summary_policy(
+    status: Option<&str>,
+    result: Option<&str>,
+    overwrite: bool,
+    expected: &CorpusRunProvenance,
+) -> ExistingSummaryPolicy {
+    if overwrite || status != Some("completed") {
+        return ExistingSummaryPolicy::Generate;
+    }
+    if has_standup_v2(result) && result_matches_provenance(result, expected) {
+        ExistingSummaryPolicy::SkipMatchingStandup
+    } else {
+        ExistingSummaryPolicy::RequireExplicitOverwrite
+    }
 }
 
 fn standup_result_record_count(result: Option<&str>) -> Result<i64, String> {
@@ -214,6 +237,8 @@ fn report_error_category(value: Option<&str>) -> Option<String> {
     let value = value?.to_ascii_lowercase();
     let category = if value.contains("provenance") {
         "provenance_mismatch"
+    } else if value.contains("explicit overwrite") {
+        "overwrite_required"
     } else if value.contains("panic") {
         "pipeline_panic"
     } else if value.contains("meeting not found") {
@@ -421,34 +446,44 @@ async fn process_meeting<R: Runtime>(
         Ok(value) => value,
         Err(error) => return failed_item(meeting_id, title, provenance, error),
     };
-    if !overwrite
-        && existing.as_ref().is_some_and(|row| {
-            row.status == "completed"
-                && has_standup_v2(row.result.as_deref())
-                && result_matches_provenance(row.result.as_deref(), provenance)
-        })
-    {
-        let extracted_record_count = match standup_result_record_count(
-            existing.as_ref().and_then(|row| row.result.as_deref()),
-        ) {
-            Ok(count) => count,
-            Err(error) => return failed_item(meeting_id, title, provenance, error),
-        };
-        return StandupCorpusRunItem {
-            meeting_id: meeting_id.to_string(),
-            title,
-            status: "skipped".to_string(),
-            provider: provenance.provider.clone(),
-            model: provenance.model.clone(),
-            template_fingerprint: provenance.template_fingerprint.clone(),
-            processing_time_ms: 0,
-            chunk_count: existing
-                .as_ref()
-                .map(|row| row.chunk_count)
-                .unwrap_or_default(),
-            extracted_record_count,
-            error: None,
-        };
+    match existing_summary_policy(
+        existing.as_ref().map(|row| row.status.as_str()),
+        existing.as_ref().and_then(|row| row.result.as_deref()),
+        overwrite,
+        provenance,
+    ) {
+        ExistingSummaryPolicy::SkipMatchingStandup => {
+            let extracted_record_count = match standup_result_record_count(
+                existing.as_ref().and_then(|row| row.result.as_deref()),
+            ) {
+                Ok(count) => count,
+                Err(error) => return failed_item(meeting_id, title, provenance, error),
+            };
+            return StandupCorpusRunItem {
+                meeting_id: meeting_id.to_string(),
+                title,
+                status: "skipped".to_string(),
+                provider: provenance.provider.clone(),
+                model: provenance.model.clone(),
+                template_fingerprint: provenance.template_fingerprint.clone(),
+                processing_time_ms: 0,
+                chunk_count: existing
+                    .as_ref()
+                    .map(|row| row.chunk_count)
+                    .unwrap_or_default(),
+                extracted_record_count,
+                error: None,
+            };
+        }
+        ExistingSummaryPolicy::RequireExplicitOverwrite => {
+            return failed_item(
+                meeting_id,
+                title,
+                provenance,
+                "Existing completed summary requires explicit overwrite",
+            );
+        }
+        ExistingSummaryPolicy::Generate => {}
     }
 
     if let Err(error) = SummaryProcessesRepository::create_or_reset_process(pool, meeting_id).await
@@ -821,6 +856,49 @@ mod tests {
             Some(r#"{"standup_v2":{"schema_version":"standup_v2"}}"#),
             &expected
         ));
+    }
+
+    #[test]
+    fn completed_summary_is_never_replaced_without_explicit_overwrite() {
+        let expected = test_provenance();
+        let matching = r#"{
+          "standup_v2": {"schema_version":"standup_v2"},
+          "summary_generation": {"source": {
+            "model_provider":"builtin-ai",
+            "model_name":"qwen3.5:4b",
+            "template_id":"daily_standup",
+            "template_fingerprint":"prompt-v1"
+          }}
+        }"#;
+
+        assert_eq!(
+            existing_summary_policy(Some("completed"), Some(matching), false, &expected),
+            ExistingSummaryPolicy::SkipMatchingStandup
+        );
+        assert_eq!(
+            existing_summary_policy(
+                Some("completed"),
+                Some(r#"{"summary":"ordinary meeting"}"#),
+                false,
+                &expected,
+            ),
+            ExistingSummaryPolicy::RequireExplicitOverwrite
+        );
+        assert_eq!(
+            existing_summary_policy(Some("completed"), Some(matching), true, &expected),
+            ExistingSummaryPolicy::Generate
+        );
+        assert_eq!(
+            existing_summary_policy(Some("failed"), None, false, &expected),
+            ExistingSummaryPolicy::Generate
+        );
+        assert_eq!(
+            report_error_category(Some(
+                "Existing completed summary requires explicit overwrite"
+            ))
+            .as_deref(),
+            Some("overwrite_required")
+        );
     }
 
     #[test]

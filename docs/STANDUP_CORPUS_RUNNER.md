@@ -15,9 +15,11 @@ MEETILY_STANDUP_CORPUS_REPORT="$PWD/evals/private/qwen-run.json" \
 pnpm run tauri:dev
 ```
 
-Set `MEETILY_STANDUP_CORPUS_OVERWRITE=true` only for an intentional rerun. The same operation is
-available to local callers as `start_standup_corpus_run`, but that command is confined to the IDs,
-overwrite permission, and exact report path declared by these environment variables.
+By default, a provenance-matching Standup V2 result is skipped and any other completed summary is
+left untouched with an `overwrite_required` report item. Set
+`MEETILY_STANDUP_CORPUS_OVERWRITE=true` only for an intentional destructive rerun. The same
+operation is available to local callers as `start_standup_corpus_run`, but that command is confined
+to the IDs, overwrite permission, and exact report path declared by these environment variables.
 
 Fully quit Meetily (including its menu-bar/tray process) before starting the command. The desktop
 app enforces a single instance; if an older instance is still resident, the new corpus-mode process
