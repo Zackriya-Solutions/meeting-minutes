@@ -601,7 +601,7 @@ async fn run_import<R: Runtime>(
             let text = qwen_engine
                 .as_ref()
                 .unwrap()
-                .transcribe_audio(segment.samples.clone())
+                .transcribe_audio(segment.samples.clone(), language.clone())
                 .await
                 .map_err(|e| anyhow!("Qwen3-ASR transcription failed on segment {}: {}", i, e))?;
             (text, 0.0f32)

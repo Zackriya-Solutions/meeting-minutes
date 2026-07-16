@@ -98,7 +98,11 @@ impl QwenAsrEngine {
         self.current_model.read().await.clone()
     }
 
-    pub async fn transcribe_audio(&self, audio: Vec<f32>) -> Result<String> {
+    pub async fn transcribe_audio(
+        &self,
+        audio: Vec<f32>,
+        language: Option<String>,
+    ) -> Result<String> {
         if audio.len() < MIN_AUDIO_SAMPLES {
             return Err(anyhow!(
                 "Audio too short: {} samples (minimum {})",
@@ -114,8 +118,14 @@ impl QwenAsrEngine {
             .clone()
             .ok_or_else(|| anyhow!("No Qwen3-ASR model is loaded"))?;
 
-        tokio::task::spawn_blocking(move || {
+        let language_hint = qwen_language_name(language.as_deref());
+        let audio_duration_seconds = audio.len() as f64 / SAMPLE_RATE as f64;
+        let started = Instant::now();
+        let text = tokio::task::spawn_blocking(move || {
             let stream = recognizer.create_stream();
+            if let Some(language_hint) = language_hint {
+                stream.set_option("language", language_hint);
+            }
             stream.accept_waveform(SAMPLE_RATE, &audio);
             recognizer.decode(&stream);
             stream
@@ -124,7 +134,14 @@ impl QwenAsrEngine {
                 .ok_or_else(|| anyhow!("Qwen3-ASR returned no result"))
         })
         .await
-        .map_err(|error| anyhow!("Qwen3-ASR inference task failed: {error}"))?
+        .map_err(|error| anyhow!("Qwen3-ASR inference task failed: {error}"))??;
+        log::info!(
+            "Qwen3-ASR decoded {:.2}s of audio in {:.2}s (language: {})",
+            audio_duration_seconds,
+            started.elapsed().as_secs_f64(),
+            language_hint.unwrap_or("auto")
+        );
+        Ok(text)
     }
 
     pub async fn download_model<F>(&self, progress: F) -> Result<()>
@@ -337,7 +354,7 @@ impl TranscriptionProvider for QwenAsrEngine {
     async fn transcribe(
         &self,
         audio: Vec<f32>,
-        _language: Option<String>,
+        language: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
         if audio.len() < MIN_AUDIO_SAMPLES {
             return Err(TranscriptionError::AudioTooShort {
@@ -346,7 +363,7 @@ impl TranscriptionProvider for QwenAsrEngine {
             });
         }
         let text = self
-            .transcribe_audio(audio)
+            .transcribe_audio(audio, language)
             .await
             .map_err(|error| TranscriptionError::EngineFailed(error.to_string()))?;
         Ok(TranscriptResult {
@@ -366,5 +383,63 @@ impl TranscriptionProvider for QwenAsrEngine {
 
     fn provider_name(&self) -> &'static str {
         "Qwen3-ASR"
+    }
+}
+
+fn qwen_language_name(language: Option<&str>) -> Option<&'static str> {
+    match language {
+        None | Some("") | Some("auto") | Some("auto-translate") => None,
+        Some("en") => Some("English"),
+        Some("zh") => Some("Chinese"),
+        Some("yue") => Some("Cantonese"),
+        Some("ar") => Some("Arabic"),
+        Some("de") => Some("German"),
+        Some("fr") => Some("French"),
+        Some("es") => Some("Spanish"),
+        Some("pt") => Some("Portuguese"),
+        Some("id") => Some("Indonesian"),
+        Some("it") => Some("Italian"),
+        Some("ko") => Some("Korean"),
+        Some("ru") => Some("Russian"),
+        Some("th") => Some("Thai"),
+        Some("vi") => Some("Vietnamese"),
+        Some("ja") => Some("Japanese"),
+        Some("tr") => Some("Turkish"),
+        Some("hi") => Some("Hindi"),
+        Some("ms") => Some("Malay"),
+        Some("nl") => Some("Dutch"),
+        Some("sv") => Some("Swedish"),
+        Some("da") => Some("Danish"),
+        Some("fi") => Some("Finnish"),
+        Some("pl") => Some("Polish"),
+        Some("cs") => Some("Czech"),
+        Some("fil") => Some("Filipino"),
+        Some("fa") => Some("Persian"),
+        Some("el") => Some("Greek"),
+        Some("hu") => Some("Hungarian"),
+        Some("mk") => Some("Macedonian"),
+        Some("ro") => Some("Romanian"),
+        Some(other) => {
+            log::warn!(
+                "Qwen3-ASR does not support language hint '{}'; using automatic detection",
+                other
+            );
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::qwen_language_name;
+
+    #[test]
+    fn maps_supported_language_codes_to_qwen_prompts() {
+        assert_eq!(qwen_language_name(Some("zh")), Some("Chinese"));
+        assert_eq!(qwen_language_name(Some("en")), Some("English"));
+        assert_eq!(qwen_language_name(Some("yue")), Some("Cantonese"));
+        assert_eq!(qwen_language_name(Some("auto")), None);
+        assert_eq!(qwen_language_name(Some("auto-translate")), None);
+        assert_eq!(qwen_language_name(Some("unsupported")), None);
     }
 }

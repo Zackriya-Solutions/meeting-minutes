@@ -7,13 +7,27 @@ use log::{info, warn};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 
-const QWEN3_ASR_LIVE_SEGMENT_DURATION_MS: u32 = 5_000;
+const QWEN3_ASR_AUTO_LIVE_SEGMENT_DURATION_MS: u32 = 4_000;
+const QWEN3_ASR_HINTED_LIVE_SEGMENT_DURATION_MS: u32 = 3_000;
 
-fn max_live_segment_duration_ms(provider: &str, model: &str) -> Option<u32> {
+fn max_live_segment_duration_ms(
+    provider: &str,
+    model: &str,
+    language: Option<&str>,
+) -> Option<u32> {
     if provider == "qwen3Asr"
         && model == crate::qwen_asr_engine::QWEN3_ASR_MODEL
     {
-        Some(QWEN3_ASR_LIVE_SEGMENT_DURATION_MS)
+        match language {
+            Some(language)
+                if !language.is_empty()
+                    && language != "auto"
+                    && language != "auto-translate" =>
+            {
+                Some(QWEN3_ASR_HINTED_LIVE_SEGMENT_DURATION_MS)
+            }
+            _ => Some(QWEN3_ASR_AUTO_LIVE_SEGMENT_DURATION_MS),
+        }
     } else {
         None
     }
@@ -162,7 +176,12 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
                     crate::qwen_asr_engine::QWEN3_ASR_MODEL
                 ));
             }
-            Ok(max_live_segment_duration_ms("qwen3Asr", &model_name))
+            let language = crate::get_language_preference_internal();
+            Ok(max_live_segment_duration_ms(
+                "qwen3Asr",
+                &model_name,
+                language.as_deref(),
+            ))
         }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
@@ -181,19 +200,32 @@ mod tests {
     #[test]
     fn live_segmentation_is_limited_to_bounded_latency_models() {
         assert_eq!(
-            max_live_segment_duration_ms("parakeet", "parakeet-tdt-0.6b-v3-int8"),
+            max_live_segment_duration_ms("parakeet", "parakeet-tdt-0.6b-v3-int8", None),
             None,
         );
         assert_eq!(
-            max_live_segment_duration_ms("localWhisper", crate::qwen_asr_engine::QWEN3_ASR_MODEL),
+            max_live_segment_duration_ms(
+                "localWhisper",
+                crate::qwen_asr_engine::QWEN3_ASR_MODEL,
+                None,
+            ),
             None,
         );
         assert_eq!(
             max_live_segment_duration_ms(
                 "qwen3Asr",
                 crate::qwen_asr_engine::QWEN3_ASR_MODEL,
+                None,
             ),
-            Some(5_000),
+            Some(4_000),
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "qwen3Asr",
+                crate::qwen_asr_engine::QWEN3_ASR_MODEL,
+                Some("zh"),
+            ),
+            Some(3_000),
         );
     }
 }

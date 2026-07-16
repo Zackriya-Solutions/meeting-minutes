@@ -37,6 +37,10 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 
 interface ImportAudioDialogProps {
@@ -169,13 +173,21 @@ export function ImportAudioDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find((m) => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const usesAutomaticLanguage = selectedModel?.provider === 'parakeet' || selectedModel?.provider === 'qwen3Asr';
+  const usesAutomaticLanguage = selectedModel?.provider === 'parakeet';
+  const languageCapability = useMemo(
+    () => getTranscriptionLanguageCapability(selectedModel?.provider, selectedModel?.name),
+    [selectedModel?.provider, selectedModel?.name]
+  );
 
   useEffect(() => {
-    if (usesAutomaticLanguage && selectedLang !== 'auto') {
+    if (
+      (!languageCapability.allowsLanguageSelection
+        || !supportsTranscriptionLanguage(languageCapability, selectedLang))
+      && selectedLang !== 'auto'
+    ) {
       setSelectedLang('auto');
     }
-  }, [usesAutomaticLanguage, selectedLang]);
+  }, [languageCapability, selectedLang]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -354,7 +366,9 @@ export function ImportAudioDialog({
                               <SelectValue placeholder="Select language" />
                             </SelectTrigger>
                             <SelectContent className="max-h-60">
-                              {LANGUAGES.map((lang) => (
+                              {LANGUAGES.filter((lang) =>
+                                supportsTranscriptionLanguage(languageCapability, lang.code)
+                              ).map((lang) => (
                                 <SelectItem key={lang.code} value={lang.code}>
                                   {lang.name}
                                 </SelectItem>

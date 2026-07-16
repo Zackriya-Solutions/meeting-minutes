@@ -105,7 +105,7 @@ pub async fn qwen_asr_validate_model_ready() -> Result<String, String> {
 #[tauri::command]
 pub async fn qwen_asr_transcribe_audio(audio_data: Vec<f32>) -> Result<String, String> {
     engine()?
-        .transcribe_audio(audio_data)
+        .transcribe_audio(audio_data, crate::get_language_preference_internal())
         .await
         .map_err(|error| error.to_string())
 }

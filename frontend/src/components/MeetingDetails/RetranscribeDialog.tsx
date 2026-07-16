@@ -23,6 +23,10 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 import Analytics from '@/lib/analytics';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 interface RetranscribeDialogProps {
   open: boolean;
@@ -92,13 +96,24 @@ export function RetranscribeDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find(m => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const usesAutomaticLanguage = selectedModelDetails?.provider === 'parakeet' || selectedModelDetails?.provider === 'qwen3Asr';
+  const usesAutomaticLanguage = selectedModelDetails?.provider === 'parakeet';
+  const languageCapability = useMemo(
+    () => getTranscriptionLanguageCapability(
+      selectedModelDetails?.provider,
+      selectedModelDetails?.name
+    ),
+    [selectedModelDetails?.provider, selectedModelDetails?.name]
+  );
 
   useEffect(() => {
-    if (usesAutomaticLanguage && selectedLang !== 'auto') {
+    if (
+      (!languageCapability.allowsLanguageSelection
+        || !supportsTranscriptionLanguage(languageCapability, selectedLang))
+      && selectedLang !== 'auto'
+    ) {
       setSelectedLang('auto');
     }
-  }, [usesAutomaticLanguage, selectedLang]);
+  }, [languageCapability, selectedLang]);
 
   // Reset state only when dialog transitions from closed to open
   // This prevents re-initialization when config changes while dialog is already open
@@ -312,7 +327,9 @@ export function RetranscribeDialog({
                     <SelectValue placeholder="Select language" />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
-                    {LANGUAGES.map((lang) => (
+                    {LANGUAGES.filter((lang) =>
+                      supportsTranscriptionLanguage(languageCapability, lang.code)
+                    ).map((lang) => (
                       <SelectItem key={lang.code} value={lang.code}>
                         {lang.name}
                       </SelectItem>
