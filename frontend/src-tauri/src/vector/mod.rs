@@ -21,6 +21,7 @@ use sqlx::SqlitePool;
 /// migration) and holds no data until Phase 1, changing this constant only requires
 /// dropping/recreating the empty table.
 pub const EMBEDDING_DIM: usize = 384;
+pub const FRIDA_EMBEDDING_DIM: usize = 1536;
 
 static REGISTER: Once = Once::new();
 
@@ -47,6 +48,28 @@ pub fn register() {
 /// Returns `Ok(true)` when vector search is usable, `Ok(false)` when the extension
 /// is unavailable (logged, not fatal).
 pub async fn ensure_chunk_embeddings_table(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    let selected: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key='embedding.model'")
+            .fetch_optional(pool)
+            .await?;
+    ensure_chunk_embeddings_table_for_dim(pool, embedding_dim_for_model_id(selected.as_deref()))
+        .await
+}
+
+fn embedding_dim_for_model_id(model: Option<&str>) -> usize {
+    if model.is_some_and(|value| value.eq_ignore_ascii_case("frida")) {
+        FRIDA_EMBEDDING_DIM
+    } else {
+        EMBEDDING_DIM
+    }
+}
+
+/// Ensure the vector index matches the active embedder dimension. Vectors are derived
+/// data, so changing models rebuilds only this table and marks chunks for backfill.
+pub async fn ensure_chunk_embeddings_table_for_dim(
+    pool: &SqlitePool,
+    dim: usize,
+) -> Result<bool, sqlx::Error> {
     // Probe: is the extension actually loaded on this pool's connections?
     match sqlx::query_scalar::<_, String>("SELECT vec_version()")
         .fetch_one(pool)
@@ -62,16 +85,46 @@ pub async fn ensure_chunk_embeddings_table(pool: &SqlitePool) -> Result<bool, sq
         }
     }
 
+    let current_sql: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    let expected_marker = format!("FLOAT[{dim}]");
     let ddl = format!(
         "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings USING vec0(\
-         chunk_id INTEGER PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIM}])"
+         chunk_id INTEGER PRIMARY KEY, embedding FLOAT[{dim}])"
     );
+    if current_sql
+        .as_deref()
+        .is_some_and(|sql| !sql.contains(&expected_marker))
+    {
+        log::info!("embedding dimension changed; rebuilding vector index for dim={dim}");
+        let mut transaction = pool.begin().await?;
+        sqlx::query("DROP TABLE chunk_embeddings")
+            .execute(&mut *transaction)
+            .await?;
+        if let Err(e) = sqlx::query(&ddl).execute(&mut *transaction).await {
+            log::warn!(
+                "failed to rebuild chunk_embeddings vec0 table ({e}); preserving previous index"
+            );
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        sqlx::query("UPDATE chunks SET embedding_status='pending'")
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        log::info!("chunk_embeddings vec0 table ready (dim={dim})");
+        return Ok(true);
+    }
+
     if let Err(e) = sqlx::query(&ddl).execute(pool).await {
         log::warn!("failed to create chunk_embeddings vec0 table ({e}); vector search disabled");
         return Ok(false);
     }
 
-    log::info!("chunk_embeddings vec0 table ready (dim={EMBEDDING_DIM})");
+    log::info!("chunk_embeddings vec0 table ready (dim={dim})");
     Ok(true)
 }
 
@@ -157,6 +210,19 @@ mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
 
+    #[test]
+    fn selected_model_controls_vector_dimension() {
+        assert_eq!(embedding_dim_for_model_id(None), EMBEDDING_DIM);
+        assert_eq!(
+            embedding_dim_for_model_id(Some("multilingual-e5-small")),
+            EMBEDDING_DIM
+        );
+        assert_eq!(
+            embedding_dim_for_model_id(Some("FRIDA")),
+            FRIDA_EMBEDDING_DIM
+        );
+    }
+
     /// Mirrors evals/phase0/sqlite_vec_smoke.py: exact match ranks first, then the
     /// near-duplicate, orthogonal vector last.
     #[tokio::test]
@@ -189,12 +255,73 @@ mod tests {
 
         let results = knn(&pool, &[1.0, 0.0, 0.0, 0.0], 3).await.expect("knn");
         let ids: Vec<i64> = results.iter().map(|(id, _)| *id).collect();
-        assert_eq!(&ids[..2], &[1, 4], "expected exact match then near-duplicate");
+        assert_eq!(
+            &ids[..2],
+            &[1, 4],
+            "expected exact match then near-duplicate"
+        );
         assert!(!ids[..2].contains(&2), "orthogonal vector ranked too high");
 
         let filtered = knn_filtered(&pool, &[1.0, 0.0, 0.0, 0.0], &[2, 3, 4], 2)
             .await
             .expect("filtered knn");
-        assert_eq!(filtered.iter().map(|row| row.0).collect::<Vec<_>>(), vec![4, 2]);
+        assert_eq!(
+            filtered.iter().map(|row| row.0).collect::<Vec<_>>(),
+            vec![4, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_dimension_change_preserves_existing_index() {
+        register();
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db");
+        sqlx::query(
+            "CREATE TABLE chunks(\
+             id INTEGER PRIMARY KEY, embedding_status TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("create chunks table");
+        sqlx::query("INSERT INTO chunks(id, embedding_status) VALUES(1, 'done')")
+            .execute(&pool)
+            .await
+            .expect("insert chunk");
+        sqlx::query(
+            "CREATE VIRTUAL TABLE chunk_embeddings USING vec0(\
+             chunk_id INTEGER PRIMARY KEY, embedding FLOAT[4])",
+        )
+        .execute(&pool)
+        .await
+        .expect("create initial vec0 table");
+        upsert_embedding(&pool, 1, &[1.0, 0.0, 0.0, 0.0])
+            .await
+            .expect("insert initial embedding");
+
+        assert!(
+            !ensure_chunk_embeddings_table_for_dim(&pool, 0)
+                .await
+                .expect("invalid rebuild should degrade gracefully")
+        );
+        let schema: String =
+            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name='chunk_embeddings'")
+                .fetch_one(&pool)
+                .await
+                .expect("read preserved schema");
+        assert!(schema.contains("FLOAT[4]"));
+        let status: String = sqlx::query_scalar("SELECT embedding_status FROM chunks WHERE id=1")
+            .fetch_one(&pool)
+            .await
+            .expect("read preserved status");
+        assert_eq!(status, "done");
+        assert_eq!(
+            knn(&pool, &[1.0, 0.0, 0.0, 0.0], 1)
+                .await
+                .expect("query preserved index")[0]
+                .0,
+            1
+        );
     }
 }

@@ -672,6 +672,7 @@ pub fn run() {
             pipeline::commands::embedder_status,
             pipeline::commands::indexing_status,
             pipeline::commands::embedder_download_model,
+            pipeline::commands::embedder_select_model,
             pipeline::diarization_commands::diarization_status,
             pipeline::diarization_commands::download_diarization_models,
             pipeline::diarization_commands::diarize_meeting,

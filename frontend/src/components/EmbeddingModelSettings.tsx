@@ -12,6 +12,13 @@ interface EmbedderStatus {
   dim: number;
   model_present: boolean;
   loaded: boolean;
+  available_models: Array<{
+    id: string;
+    name: string;
+    dim: number;
+    download_mb: number;
+    present: boolean;
+  }>;
 }
 
 interface IndexingStatus {
@@ -39,12 +46,17 @@ function mb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
+function modelDownloadSize(downloadMb: number): string {
+  return downloadMb >= 1000 ? `${(downloadMb / 1000).toFixed(1)} GB` : `${downloadMb} MB`;
+}
+
 export function EmbeddingModelSettings() {
   const t = useT();
   const [status, setStatus] = useState<EmbedderStatus | null>(null);
   const [indexStatus, setIndexStatus] = useState<IndexingStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  const [selecting, setSelecting] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,19 +100,33 @@ export function EmbeddingModelSettings() {
     }
   }, [indexStatus]);
 
-  const download = useCallback(async () => {
+  const download = useCallback(async (model = status?.model ?? 'multilingual-e5-small') => {
     setError(null);
     setDownloading(true);
     setProgress(null);
     try {
-      await invoke('embedder_download_model');
+      await invoke('embedder_download_model', { model });
       // Success is also signalled by the `embedder-ready` event; refresh defensively.
       refresh();
     } catch (e) {
       setError(typeof e === 'string' ? e : t('Download failed.'));
       setDownloading(false);
     }
-  }, [refresh, t]);
+  }, [refresh, status?.model, t]);
+
+  const selectModel = useCallback(async (model: string) => {
+    if (model === status?.model || selecting || downloading) return;
+    setError(null);
+    setSelecting(true);
+    try {
+      await invoke('embedder_select_model', { model });
+      refresh();
+    } catch (e) {
+      setError(typeof e === 'string' ? e : t('Could not switch the embedding model.'));
+    } finally {
+      setSelecting(false);
+    }
+  }, [downloading, refresh, selecting, status?.model, t]);
 
   const repairIndex = useCallback(async () => {
     setError(null);
@@ -118,6 +144,12 @@ export function EmbeddingModelSettings() {
   const present = !!status?.model_present;
   const modelName = status?.model ?? 'multilingual-e5-small';
   const dim = status?.dim ?? 384;
+  const availableModels = status?.available_models ?? [
+    { id: 'multilingual-e5-small', name: 'Multilingual E5 Small', dim: 384, download_mb: 470, present },
+    { id: 'frida', name: 'FRIDA', dim: 1536, download_mb: 3300, present: false },
+  ];
+  const selectedDownloadMb =
+    availableModels.find((model) => model.id === modelName)?.download_mb ?? 470;
   const activeJobs = (indexStatus?.queued_jobs ?? 0) + (indexStatus?.running_jobs ?? 0);
   const semanticCoverage = indexStatus?.chunks_total
     ? Math.round((indexStatus.embeddings_done / indexStatus.chunks_total) * 100)
@@ -136,9 +168,48 @@ export function EmbeddingModelSettings() {
             <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Semantic search model')}</h3>
             <p className="mt-1 text-sm leading-relaxed text-[var(--fg2)]">
               {t('Powers meaning-based (vector) search and Chat with archive. Runs fully locally —')}{' '}
-              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}
-              {t('-dim), ~470 MB. Until it\'s installed, Search and Chat use keyword (FTS) matching only.')}
+              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}{' '}
+              {t('dimensions')}, ~{modelDownloadSize(selectedDownloadMb)}).{' '}
+              {t('Until it is installed, Search and Chat use keyword (FTS) matching only.')}
             </p>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {availableModels.map((model) => {
+                const selected = model.id === modelName;
+                return (
+                  <button
+                    key={model.id}
+                    type="button"
+                    disabled={selecting || downloading}
+                    onClick={() => model.present ? selectModel(model.id) : download(model.id)}
+                    className={`rounded-xl border p-3 text-left transition-colors ${
+                      selected
+                        ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
+                        : 'border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-[var(--fg1)]">{model.name}</span>
+                      {selected && <CheckCircle2 className="h-4 w-4 text-[var(--gold)]" />}
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--fg3)]">
+                      {model.dim} {t('dimensions')} · ~{modelDownloadSize(model.download_mb)}
+                    </p>
+                    <p className="mt-1 text-xs text-[var(--fg2)]">
+                      {model.id === 'frida'
+                        ? t('Russian-first retrieval model. Uses search_query/search_document prefixes and CLS pooling.')
+                        : t('Compact multilingual retrieval model. Recommended for most devices.')}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {modelName === 'frida' && (
+              <div className="mt-3 rounded-lg border border-[var(--gold-border)] bg-[var(--gold-soft)] p-3 text-xs leading-relaxed text-[var(--gold)]">
+                {t('FRIDA is optional and large (~3.3 GB ONNX). Memento downloads a community ONNX conversion of the ai-forever/FRIDA weights. Switching models rebuilds the semantic index in the background; keyword search remains available during reindexing.')}
+              </div>
+            )}
 
             <div className="mt-4">
               {downloading ? (
@@ -173,7 +244,7 @@ export function EmbeddingModelSettings() {
                     {t('Installed — restart the app to activate')}
                   </span>
                   <button
-                    onClick={download}
+                    onClick={() => download(modelName)}
                     className="flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--fg2)] hover:bg-[var(--bg-elevated)]"
                   >
                     <RotateCw className="h-3.5 w-3.5" />
@@ -182,7 +253,7 @@ export function EmbeddingModelSettings() {
                 </div>
               ) : (
                 <button
-                  onClick={download}
+                  onClick={() => download(modelName)}
                   className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
                 >
                   <Download className="h-4 w-4" />
