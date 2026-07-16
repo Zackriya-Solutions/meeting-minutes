@@ -316,7 +316,7 @@ async fn delete_meeting_with_transaction(
         .await?;
 
     sqlx::query("DELETE FROM app_settings_kv WHERE key = ?")
-        .bind(format!("summary.content_window.{meeting_id}"))
+        .bind(crate::summary::content_window::preference_key(meeting_id))
         .execute(&mut *transaction)
         .await?;
 
