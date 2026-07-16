@@ -524,15 +524,21 @@ pub fn run() {
             // Load the GigaAM transcription model in the background if downloaded.
             {
                 let app_handle = _app.handle().clone();
+                #[cfg(debug_assertions)]
                 let batch_folder = std::env::var_os("MEETILY_BATCH_IMPORT_FOLDER")
                     .map(std::path::PathBuf::from);
+                #[cfg(debug_assertions)]
                 let batch_provider = std::env::var("MEETILY_BATCH_IMPORT_PROVIDER").ok();
+                #[cfg(debug_assertions)]
                 let batch_model = std::env::var("MEETILY_BATCH_IMPORT_MODEL").ok();
+                #[cfg(debug_assertions)]
                 let batch_language = std::env::var("MEETILY_BATCH_IMPORT_LANGUAGE").ok();
+                #[cfg(debug_assertions)]
                 let batch_report = std::env::var_os("MEETILY_BATCH_IMPORT_REPORT")
                     .map(std::path::PathBuf::from);
                 tauri::async_runtime::spawn(async move {
                     gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
+                    #[cfg(debug_assertions)]
                     if let Some(folder) = batch_folder {
                         log::info!(
                             "Starting configured resumable batch import from {}",

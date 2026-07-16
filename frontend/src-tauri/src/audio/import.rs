@@ -1129,15 +1129,6 @@ async fn run_import<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
 
-    let meeting_id = create_meeting_with_transcripts(
-        app_state.db_manager.pool(),
-        &title,
-        &segments,
-        meeting_folder.to_string_lossy().to_string(),
-    )
-    .await?;
-    pending_folder.commit();
-
     // Write transcripts.json and metadata.json to the meeting folder
     emit_progress(&app, "saving", 90, "Writing transcript files...");
 
@@ -1145,7 +1136,8 @@ async fn run_import<R: Runtime>(
         warn!("Failed to write transcripts.json: {}", e);
     }
 
-    if let Err(e) = write_import_metadata(
+    let meeting_id = format!("meeting-{}", Uuid::new_v4());
+    write_import_metadata(
         &meeting_folder,
         &meeting_id,
         &title,
@@ -1160,9 +1152,18 @@ async fn run_import<R: Runtime>(
         processable_count,
         transcribed_count,
         avg_confidence,
-    ) {
-        warn!("Failed to write metadata.json: {}", e);
-    }
+    )
+    .map_err(|error| anyhow!("Failed to write resumable import metadata: {}", error))?;
+
+    create_meeting_with_transcripts(
+        app_state.db_manager.pool(),
+        &meeting_id,
+        &title,
+        &segments,
+        meeting_folder.to_string_lossy().to_string(),
+    )
+    .await?;
+    pending_folder.commit();
 
     emit_progress(&app, "complete", 100, "Import complete");
 
@@ -1194,11 +1195,11 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, stage: &str, progress: u32, mes
 /// Create a new meeting with transcripts in the database
 async fn create_meeting_with_transcripts(
     pool: &sqlx::SqlitePool,
+    meeting_id: &str,
     title: &str,
     segments: &[TranscriptSegment],
     folder_path: String,
-) -> Result<String> {
-    let meeting_id = format!("meeting-{}", Uuid::new_v4());
+) -> Result<()> {
     let now = chrono::Utc::now();
 
     // Start transaction
@@ -1215,7 +1216,7 @@ async fn create_meeting_with_transcripts(
         "INSERT INTO meetings (id, title, created_at, updated_at, folder_path)
          VALUES (?, ?, ?, ?, ?)",
     )
-    .bind(&meeting_id)
+    .bind(meeting_id)
     .bind(title)
     .bind(now)
     .bind(now)
@@ -1231,7 +1232,7 @@ async fn create_meeting_with_transcripts(
              VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&segment.id)
-        .bind(&meeting_id)
+        .bind(meeting_id)
         .bind(&segment.text)
         .bind(&segment.timestamp)
         .bind(segment.audio_start_time)
@@ -1252,7 +1253,7 @@ async fn create_meeting_with_transcripts(
         segments.len()
     );
 
-    Ok(meeting_id)
+    Ok(())
 }
 
 /// Get or initialize the Whisper engine

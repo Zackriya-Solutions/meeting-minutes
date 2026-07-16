@@ -113,7 +113,9 @@ export function ImportAudioDialog({
 
   const handleBatchImportComplete = useCallback((result: BatchImportResult) => {
     const description = `${result.imported.length} ${t('imported')}, ${result.skipped.length} ${t('skipped')}, ${result.failed.length} ${t('failed')}`;
-    if (result.failed.length > 0) {
+    if (result.cancelled) {
+      toast.info(t('Batch import cancelled'), { description });
+    } else if (result.failed.length > 0) {
       toast.warning(t('Batch import completed with errors'), { description });
     } else {
       toast.success(t('Batch import complete'), { description });
