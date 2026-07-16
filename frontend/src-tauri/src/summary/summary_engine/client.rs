@@ -37,6 +37,8 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        json_schema: Option<String>,
     },
 }
 
@@ -56,9 +58,8 @@ lazy_static::lazy_static! {
 }
 
 // Model path cache to avoid repeated filesystem I/O and model lookups
-static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> = Lazy::new(|| {
-    RwLock::new(HashMap::new())
-});
+static MODEL_PATH_CACHE: Lazy<RwLock<HashMap<String, PathBuf>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Initialize the global sidecar manager
 pub async fn init_sidecar_manager(app_data_dir: PathBuf) -> Result<()> {
@@ -119,6 +120,26 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
 // Public API
 // ============================================================================
 
+fn resolve_max_tokens(value: Option<u32>) -> i32 {
+    value
+        .map(|value| i32::try_from(value).unwrap_or(i32::MAX))
+        .unwrap_or(models::DEFAULT_MAX_TOKENS)
+        .clamp(1, models::DEFAULT_MAX_TOKENS)
+}
+
+fn resolve_temperature(value: Option<f32>, fallback: f32) -> f32 {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| value.max(0.0))
+        .unwrap_or(fallback)
+}
+
+fn resolve_top_p(value: Option<f32>, fallback: f32) -> f32 {
+    value
+        .filter(|value| value.is_finite() && *value > 0.0 && *value <= 1.0)
+        .unwrap_or(fallback)
+}
+
 /// Generate text using built-in AI
 ///
 /// # Arguments
@@ -136,6 +157,32 @@ pub async fn generate_with_builtin(
     system_prompt: &str,
     user_prompt: &str,
     cancellation_token: Option<&CancellationToken>,
+) -> Result<String> {
+    generate_with_builtin_json_schema(
+        app_data_dir,
+        model_name,
+        system_prompt,
+        user_prompt,
+        cancellation_token,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Generate text using built-in AI with an optional llama.cpp-constrained JSON schema.
+pub async fn generate_with_builtin_json_schema(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    cancellation_token: Option<&CancellationToken>,
+    json_schema: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
 ) -> Result<String> {
     // Check cancellation at start
     if let Some(token) = cancellation_token {
@@ -155,8 +202,7 @@ pub async fn generate_with_builtin(
     let model_path = get_cached_model_path(app_data_dir, model_name)?;
 
     // Apply model-specific chat template
-    let formatted_prompt =
-        models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+    let formatted_prompt = models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
     // Get or initialize sidecar manager
     let manager = {
         let mut global_manager = SIDECAR_MANAGER.lock().await;
@@ -180,19 +226,23 @@ pub async fn generate_with_builtin(
 
     // Prepare generation request with model-specific sampling parameters
     let sampling = model_def.sampling.sanitize_for_llama_helper();
+    let max_tokens = resolve_max_tokens(max_tokens);
+    let temperature = resolve_temperature(temperature, sampling.temperature);
+    let top_p = resolve_top_p(top_p, sampling.top_p);
     let request = Request::Generate {
         prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        max_tokens: Some(max_tokens),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
-        temperature: Some(sampling.temperature),
+        temperature: Some(temperature),
         top_k: Some(sampling.top_k),
-        top_p: Some(sampling.top_p),
+        top_p: Some(top_p),
         presence_penalty: Some(sampling.presence_penalty),
         frequency_penalty: Some(sampling.frequency_penalty),
         repeat_penalty: Some(sampling.repeat_penalty),
         penalty_last_n: Some(sampling.penalty_last_n),
         stop_tokens: Some(sampling.stop_tokens),
+        json_schema: json_schema.map(str::to_string),
     };
 
     let request_json = serde_json::to_string(&request)?;
@@ -317,6 +367,7 @@ mod tests {
             repeat_penalty: Some(1.05),
             penalty_last_n: Some(256),
             stop_tokens: Some(vec!["<end_of_turn>".to_string()]),
+            json_schema: Some(r#"{"type":"object"}"#.to_string()),
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -328,6 +379,20 @@ mod tests {
         assert!(json.contains("\"frequency_penalty\":0.0"));
         assert!(json.contains("\"repeat_penalty\":1.05"));
         assert!(json.contains("\"penalty_last_n\":256"));
+        assert!(json.contains("\"json_schema\":\"{\\\"type\\\":\\\"object\\\"}\""));
+    }
+
+    #[test]
+    fn constrained_generation_honors_bounded_overrides() {
+        assert_eq!(resolve_max_tokens(Some(2_048)), 2_048);
+        assert_eq!(
+            resolve_max_tokens(Some(u32::MAX)),
+            models::DEFAULT_MAX_TOKENS
+        );
+        assert_eq!(resolve_temperature(Some(0.0), 0.8), 0.0);
+        assert_eq!(resolve_temperature(Some(f32::NAN), 0.8), 0.8);
+        assert_eq!(resolve_top_p(Some(1.0), 0.8), 1.0);
+        assert_eq!(resolve_top_p(Some(0.0), 0.8), 0.8);
     }
 
     #[test]

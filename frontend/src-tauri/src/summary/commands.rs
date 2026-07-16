@@ -1,14 +1,12 @@
 use crate::database::repositories::{
-    meeting::MeetingsRepository,
-    summary::SummaryProcessesRepository, transcript_chunk::TranscriptChunksRepository,
+    meeting::MeetingsRepository, summary::SummaryProcessesRepository,
+    transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
+use crate::summary::language_detection::{detect_summary_language, SummaryLanguageDetection};
 use crate::summary::metadata::{
     read_detected_summary_language_from_metadata, read_summary_language_from_metadata,
     write_detected_summary_language_to_metadata, write_summary_language_to_metadata,
-};
-use crate::summary::language_detection::{
-    detect_summary_language, SummaryLanguageDetection,
 };
 use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
@@ -69,6 +67,122 @@ enum MeetingFolderResolution {
     NoFolder,
 }
 
+fn merge_manual_summary_with_generated_fields(
+    existing_raw: Option<&str>,
+    mut incoming: serde_json::Value,
+) -> serde_json::Value {
+    let Some(incoming_object) = incoming.as_object_mut() else {
+        return incoming;
+    };
+    let Some(existing_object) = existing_raw
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|value| value.as_object().cloned())
+    else {
+        return incoming;
+    };
+
+    let markdown_changed = match (
+        existing_object.get("markdown").and_then(|value| value.as_str()),
+        incoming_object.get("markdown").and_then(|value| value.as_str()),
+    ) {
+        (Some(existing), Some(incoming)) => {
+            markdown_semantic_text(existing) != markdown_semantic_text(incoming)
+        }
+        _ => existing_object.get("markdown") != incoming_object.get("markdown"),
+    };
+    for key in ["summary_generation", "standup_v2"] {
+        if !incoming_object.contains_key(key) {
+            if let Some(value) = existing_object.get(key) {
+                incoming_object.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+
+    if markdown_changed && incoming_object.contains_key("standup_v2") {
+        incoming_object.insert(
+            "standup_v2_status".to_string(),
+            serde_json::json!({
+                "state": "markdown_edited",
+                "structured_result_stale": true
+            }),
+        );
+    } else if !incoming_object.contains_key("standup_v2_status") {
+        if let Some(value) = existing_object.get("standup_v2_status") {
+            incoming_object.insert("standup_v2_status".to_string(), value.clone());
+        }
+    }
+
+    incoming
+}
+
+fn markdown_semantic_text(markdown: &str) -> String {
+    markdown
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+async fn save_manual_summary_preserving_generated_fields(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    incoming: serde_json::Value,
+) -> Result<bool, String> {
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+    let meeting_exists = sqlx::query("SELECT 1 FROM meetings WHERE id = ?")
+        .bind(meeting_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?
+        .is_some();
+    if !meeting_exists {
+        transaction
+            .rollback()
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(false);
+    }
+    let existing_result: Option<String> = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT result FROM summary_processes WHERE meeting_id = ?",
+    )
+    .bind(meeting_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| error.to_string())?
+    .flatten();
+    let merged = merge_manual_summary_with_generated_fields(existing_result.as_deref(), incoming);
+    let result_json = serde_json::to_string(&merged).map_err(|error| error.to_string())?;
+    let now = chrono::Utc::now();
+    sqlx::query("UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?")
+        .bind(result_json)
+        .bind(now)
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
+        .bind(now)
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
 /// Saves a meeting summary (Native SQLx implementation)
 ///
 /// Expected format: { "markdown": "...", "summary_json": [...BlockNote blocks...] }
@@ -86,7 +200,7 @@ pub async fn api_save_meeting_summary<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    match SummaryProcessesRepository::update_meeting_summary(pool, &meeting_id, &summary).await {
+    match save_manual_summary_preserving_generated_fields(pool, &meeting_id, summary).await {
         Ok(true) => {
             log_info!("Summary saved successfully for meeting_id: {}", meeting_id);
 
@@ -184,9 +298,11 @@ pub async fn api_get_meeting_detected_summary_language<R: Runtime>(
     );
 
     match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
-        MeetingFolderResolution::Folder(folder) => read_detected_summary_language_from_metadata(&folder)
-            .map(MeetingSummaryLanguagePreference::metadata)
-            .map_err(|e| e.to_string()),
+        MeetingFolderResolution::Folder(folder) => {
+            read_detected_summary_language_from_metadata(&folder)
+                .map(MeetingSummaryLanguagePreference::metadata)
+                .map_err(|e| e.to_string())
+        }
         MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
     }
 }
@@ -207,8 +323,11 @@ pub async fn api_save_meeting_detected_summary_language<R: Runtime>(
 
     match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
         MeetingFolderResolution::Folder(folder) => {
-            write_detected_summary_language_to_metadata(&folder, detected_summary_language.as_deref())
-                .map_err(|e| e.to_string())?;
+            write_detected_summary_language_to_metadata(
+                &folder,
+                detected_summary_language.as_deref(),
+            )
+            .map_err(|e| e.to_string())?;
             read_detected_summary_language_from_metadata(&folder)
                 .map(MeetingSummaryLanguagePreference::metadata)
                 .map_err(|e| e.to_string())
@@ -373,10 +492,9 @@ pub async fn api_process_transcript<R: Runtime>(
     // detection / caching / the summary itself — covers both Generate and Regenerate at once,
     // keeps renamed speaker names fresh at generation time, and leaves pre-diarization and
     // unsaved/live meetings byte-for-bit unchanged (falls back to the passed `text`).
-    let text = crate::summary::transcript_labeling::build_speaker_labeled_transcript(
-        &pool, &m_id, text,
-    )
-    .await;
+    let text =
+        crate::summary::transcript_labeling::build_speaker_labeled_transcript(&pool, &m_id, text)
+            .await;
 
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
@@ -384,7 +502,11 @@ pub async fn api_process_transcript<R: Runtime>(
     // Normalise empty / whitespace-only to None so "" and null behave identically
     let summary_language = summary_language.and_then(|s| {
         let t = s.trim();
-        if t.is_empty() { None } else { Some(t.to_string()) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
     });
 
     // Create or reset the process entry in the database
@@ -455,21 +577,81 @@ pub async fn api_cancel_summary<R: Runtime>(
     if cancelled {
         // Update database status to cancelled
         let pool = state.db_manager.pool();
-        if let Err(e) = SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await {
-            log_error!("Failed to update DB status to cancelled for {}: {}", meeting_id, e);
+        if let Err(e) =
+            SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await
+        {
+            log_error!(
+                "Failed to update DB status to cancelled for {}: {}",
+                meeting_id,
+                e
+            );
             return Err(format!("Failed to update cancellation status: {}", e));
         }
 
-        log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id);
+        log_info!(
+            "Successfully cancelled summary generation for meeting_id: {}",
+            meeting_id
+        );
         Ok(serde_json::json!({
             "message": "Summary generation cancelled successfully",
             "meeting_id": meeting_id,
         }))
     } else {
-        log_warn!("No active summary generation found for meeting_id: {}", meeting_id);
+        log_warn!(
+            "No active summary generation found for meeting_id: {}",
+            meeting_id
+        );
         Ok(serde_json::json!({
             "message": "No active summary generation to cancel",
             "meeting_id": meeting_id,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_markdown_save_preserves_generation_and_marks_standup_stale() {
+        let existing = serde_json::json!({
+            "markdown": "old",
+            "summary_generation": {"pipeline_version": 2},
+            "standup_v2": {"schema_version": "standup_v2", "action_items": []}
+        });
+        let incoming = serde_json::json!({"markdown": "edited", "summary_json": []});
+        let merged = merge_manual_summary_with_generated_fields(
+            Some(&serde_json::to_string(&existing).unwrap()),
+            incoming,
+        );
+        assert_eq!(merged["summary_generation"]["pipeline_version"], 2);
+        assert_eq!(merged["standup_v2"]["schema_version"], "standup_v2");
+        assert_eq!(merged["standup_v2_status"]["structured_result_stale"], true);
+    }
+
+    #[test]
+    fn unchanged_markdown_does_not_mark_standup_stale() {
+        let existing = serde_json::json!({
+            "markdown": "same",
+            "standup_v2": {"schema_version": "standup_v2"}
+        });
+        let merged = merge_manual_summary_with_generated_fields(
+            Some(&serde_json::to_string(&existing).unwrap()),
+            serde_json::json!({"markdown": "same"}),
+        );
+        assert!(merged.get("standup_v2_status").is_none());
+    }
+
+    #[test]
+    fn formatting_only_markdown_round_trip_does_not_mark_standup_stale() {
+        let existing = serde_json::json!({
+            "markdown": "## Action items\n\n- **Deploy** `v2`",
+            "standup_v2": {"schema_version": "standup_v2"}
+        });
+        let merged = merge_manual_summary_with_generated_fields(
+            Some(&serde_json::to_string(&existing).unwrap()),
+            serde_json::json!({"markdown": "# Action items\r\n\r\n* Deploy v2"}),
+        );
+        assert!(merged.get("standup_v2_status").is_none());
     }
 }

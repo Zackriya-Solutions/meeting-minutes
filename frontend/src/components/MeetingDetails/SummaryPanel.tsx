@@ -18,6 +18,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
+import { StandupWorkflowPanel } from './StandupWorkflowPanel';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -317,6 +318,7 @@ export function SummaryPanel({
       {transcripts.length > 0 && !isSummaryLoading && (
         <MeetingContentWindowNotice meetingId={meeting.id} />
       )}
+      <StandupWorkflowPanel meetingId={meeting.id} summaryStatus={summaryStatus} />
 
       {isSummaryLoading ? (
         <div className="flex flex-col h-full">

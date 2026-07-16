@@ -1,7 +1,7 @@
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -25,22 +25,33 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<serde_json::Value>,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
 #[derive(Deserialize, Debug)]
 pub struct ChatResponse {
     pub choices: Vec<Choice>,
+    pub usage: Option<TokenUsage>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Choice {
     pub message: MessageContent,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct MessageContent {
-    pub content: String,
+    pub content: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct TokenUsage {
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
 }
 
 // Claude-specific request structure
@@ -50,6 +61,42 @@ pub struct ClaudeRequest {
     pub max_tokens: u32,
     pub system: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+}
+
+fn openai_compatible_request(
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    json_mode: bool,
+) -> ChatRequest {
+    ChatRequest {
+        model: model_name.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_prompt.to_string(),
+            },
+        ],
+        max_tokens,
+        temperature,
+        top_p,
+        response_format: json_mode.then(|| serde_json::json!({"type": "json_object"})),
+    }
+}
+
+fn supports_structured_json(provider: &LLMProvider) -> bool {
+    !matches!(provider, LLMProvider::Claude | LLMProvider::GigaChat)
 }
 
 // Claude-specific response structure
@@ -109,9 +156,10 @@ impl LLMProvider {
 /// * `user_prompt` - User query/content to process
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
-/// * `max_tokens` - Optional max tokens (for CustomOpenAI provider)
-/// * `temperature` - Optional temperature (for CustomOpenAI provider)
-/// * `top_p` - Optional top_p (for CustomOpenAI provider)
+/// * `deepseek_base_url` - Resolved DeepSeek base URL (managed gateway or custom endpoint)
+/// * `max_tokens` - Optional provider generation limit
+/// * `temperature` - Optional provider sampling temperature
+/// * `top_p` - Optional provider nucleus-sampling threshold
 /// * `app_data_dir` - Optional app data directory (for BuiltInAI provider)
 /// * `cancellation_token` - Optional token to cancel the request
 ///
@@ -126,11 +174,50 @@ pub async fn generate_summary(
     user_prompt: &str,
     ollama_endpoint: Option<&str>,
     custom_openai_endpoint: Option<&str>,
+    deepseek_base_url: Option<&str>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
+) -> Result<String, String> {
+    generate_summary_with_builtin_json_schema(
+        client,
+        provider,
+        model_name,
+        api_key,
+        system_prompt,
+        user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        deepseek_base_url,
+        max_tokens,
+        temperature,
+        top_p,
+        app_data_dir,
+        cancellation_token,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn generate_summary_with_builtin_json_schema(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    deepseek_base_url: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+    cancellation_token: Option<&CancellationToken>,
+    builtin_json_schema: Option<&str>,
 ) -> Result<String, String> {
     // Check if cancelled before starting
     if let Some(token) = cancellation_token {
@@ -139,17 +226,31 @@ pub async fn generate_summary(
         }
     }
 
+    // These transports do not currently expose a schema/JSON-mode contract in this
+    // client. Failing visibly is safer than silently running Standup V2 as unconstrained
+    // prose and hoping its output parses as evidence-bearing JSON.
+    if builtin_json_schema.is_some() && !supports_structured_json(provider) {
+        return Err(format!(
+            "{} does not support structured JSON generation in this client",
+            provider_name(provider)
+        ));
+    }
+
     // Handle BuiltInAI provider separately (uses local sidecar, no HTTP API)
     if provider == &LLMProvider::BuiltInAI {
         let app_data_dir = app_data_dir
             .ok_or_else(|| "app_data_dir is required for BuiltInAI provider".to_string())?;
 
-        return crate::summary::summary_engine::generate_with_builtin(
+        return crate::summary::summary_engine::client::generate_with_builtin_json_schema(
             app_data_dir,
             model_name,
             system_prompt,
             user_prompt,
             cancellation_token,
+            builtin_json_schema,
+            max_tokens,
+            temperature,
+            top_p,
         )
         .await
         .map_err(|e| e.to_string());
@@ -181,7 +282,12 @@ pub async fn generate_summary(
             header::HeaderMap::new(),
         ),
         LLMProvider::DeepSeek => (
-            format!("{}/deepseek/v1/chat/completions", crate::gateway_identity::PRIMARY_GATEWAY),
+            format!(
+                "{}/chat/completions",
+                deepseek_base_url
+                    .unwrap_or(crate::llm::providers::deepseek::DEFAULT_BASE_URL)
+                    .trim_end_matches('/')
+            ),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
@@ -215,7 +321,10 @@ pub async fn generate_summary(
                     .parse()
                     .map_err(|_| "Invalid anthropic version".to_string())?,
             );
-            ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
         }
         LLMProvider::BuiltInAI => {
             // This case is handled earlier with early returns
@@ -244,45 +353,48 @@ pub async fn generate_summary(
     );
 
     // Build request body based on provider
-    let request_body = if provider != &LLMProvider::Claude {
-        // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
-
-        serde_json::json!(ChatRequest {
-            model: model_name.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                }
-            ],
-            max_tokens: max_tokens_val,
-            temperature: temperature_val,
-            top_p: top_p_val,
-        })
+    let request_body = if provider == &LLMProvider::DeepSeek {
+        crate::llm::providers::deepseek::build_request_body_with_options(
+            model_name,
+            system_prompt,
+            user_prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            builtin_json_schema.is_some(),
+        )
+    } else if provider != &LLMProvider::Claude {
+        serde_json::json!(openai_compatible_request(
+            model_name,
+            system_prompt,
+            user_prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            builtin_json_schema.is_some(),
+        ))
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
             model: model_name.to_string(),
-            max_tokens: 2048,
+            max_tokens: max_tokens.unwrap_or(2048),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: user_prompt.to_string(),
-            }]
+            }],
+            temperature,
+            top_p,
         })
     };
 
-    info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
+    info!(
+        "🐞 LLM Request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
 
     // Send request with timeout and cancellation support
+    let request_started = Instant::now();
     let request_future = client
         .post(api_url)
         .headers(headers)
@@ -296,7 +408,10 @@ pub async fn generate_summary(
             result = request_future => {
                 result.map_err(|e| {
                     if e.is_timeout() {
-                        format!("LLM request timed out after 60 seconds")
+                        format!(
+                            "LLM request timed out after {} seconds",
+                            REQUEST_TIMEOUT_DURATION.as_secs()
+                        )
                     } else {
                         format!("Failed to send request to LLM: {}", e)
                     }
@@ -309,7 +424,10 @@ pub async fn generate_summary(
     } else {
         request_future.await.map_err(|e| {
             if e.is_timeout() {
-                format!("LLM request timed out after 60 seconds")
+                format!(
+                    "LLM request timed out after {} seconds",
+                    REQUEST_TIMEOUT_DURATION.as_secs()
+                )
             } else {
                 format!("Failed to send request to LLM: {}", e)
             }
@@ -341,21 +459,92 @@ pub async fn generate_summary(
             .trim();
         Ok(content.to_string())
     } else {
-        let chat_response = response
-            .json::<ChatResponse>()
+        let response_value = response
+            .json::<serde_json::Value>()
             .await
             .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
 
-        info!("🐞 LLM Response received from {}", provider_name(provider));
+        if provider == &LLMProvider::DeepSeek {
+            let content = crate::llm::providers::deepseek::parse_response(&response_value)?;
+            let usage = response_value.get("usage");
+            info!(
+                "LLM response received from DeepSeek in {:.2}s; usage={}",
+                request_started.elapsed().as_secs_f64(),
+                usage
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "unavailable".to_string())
+            );
+            return Ok(content);
+        }
 
-        let content = chat_response
+        let chat_response: ChatResponse = serde_json::from_value(response_value)
+            .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
+
+        info!(
+            "LLM response received from {} in {:.2}s; usage={:?}",
+            provider_name(provider),
+            request_started.elapsed().as_secs_f64(),
+            chat_response.usage
+        );
+
+        let choice = chat_response
             .choices
             .get(0)
-            .ok_or("No content in LLM response")?
-            .message
-            .content
-            .trim();
+            .ok_or("No content in LLM response")?;
+
+        if let Some(reason) = choice.finish_reason.as_deref() {
+            if reason != "stop" {
+                return Err(format!("LLM response incomplete: finish_reason={reason}"));
+            }
+        }
+
+        let content = choice.message.content.as_deref().unwrap_or_default().trim();
+        if content.is_empty() {
+            return Err("No final answer content in LLM response".to_string());
+        }
         Ok(content.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_compatible_structured_request_keeps_generation_controls() {
+        let value = serde_json::to_value(openai_compatible_request(
+            "model",
+            "system",
+            "user",
+            Some(4_096),
+            Some(0.0),
+            Some(1.0),
+            true,
+        ))
+        .unwrap();
+
+        assert_eq!(value["max_tokens"], 4_096);
+        assert_eq!(value["temperature"], 0.0);
+        assert_eq!(value["top_p"], 1.0);
+        assert_eq!(value["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn ordinary_openai_compatible_request_omits_json_mode() {
+        let value = serde_json::to_value(openai_compatible_request(
+            "model", "system", "user", None, None, None, false,
+        ))
+        .unwrap();
+
+        assert!(value.get("response_format").is_none());
+    }
+
+    #[test]
+    fn unsupported_structured_transports_are_explicit() {
+        assert!(!supports_structured_json(&LLMProvider::Claude));
+        assert!(!supports_structured_json(&LLMProvider::GigaChat));
+        assert!(supports_structured_json(&LLMProvider::Ollama));
+        assert!(supports_structured_json(&LLMProvider::DeepSeek));
     }
 }
 

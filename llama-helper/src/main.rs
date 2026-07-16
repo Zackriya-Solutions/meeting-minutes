@@ -36,6 +36,8 @@ enum Request {
         repeat_penalty: Option<f32>,
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
+        #[serde(default)]
+        json_schema: Option<String>,
     },
     Ping,
     Shutdown,
@@ -59,6 +61,132 @@ struct SamplingConfig {
     frequency_penalty: f32,
     repeat_penalty: f32,
     penalty_last_n: i32,
+}
+
+#[derive(Debug, Default)]
+struct ConstrainedJsonTracker {
+    enabled: bool,
+    started: bool,
+    in_string: bool,
+    escaped: bool,
+    depth: usize,
+    scalar_fallback: bool,
+    processed_bytes: usize,
+    repairable_prefix_len: Option<usize>,
+}
+
+impl ConstrainedJsonTracker {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Self::default()
+        }
+    }
+
+    fn push(&mut self, fragment: &str, full_output: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.scalar_fallback {
+            return serde_json::from_str::<serde_json::Value>(full_output).is_ok();
+        }
+        for (offset, character) in fragment.char_indices() {
+            if !self.started {
+                if character.is_whitespace() {
+                    continue;
+                }
+                if matches!(character, '{' | '[') {
+                    self.started = true;
+                    self.depth = 1;
+                    continue;
+                }
+                self.scalar_fallback = true;
+                break;
+            }
+            if self.in_string {
+                if self.escaped {
+                    self.escaped = false;
+                } else if character == '\\' {
+                    self.escaped = true;
+                } else if character == '"' {
+                    self.in_string = false;
+                }
+                continue;
+            }
+            match character {
+                '"' => self.in_string = true,
+                '{' | '[' => self.depth += 1,
+                '}' | ']' => {
+                    self.depth = self.depth.saturating_sub(1);
+                    if self.depth == 0 {
+                        self.processed_bytes += fragment.len();
+                        return true;
+                    }
+                    if self.depth <= 2 {
+                        self.repairable_prefix_len =
+                            Some(self.processed_bytes + offset + character.len_utf8());
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.processed_bytes += fragment.len();
+        self.scalar_fallback && serde_json::from_str::<serde_json::Value>(full_output).is_ok()
+    }
+
+    fn repairable_prefix_len(&self) -> Option<usize> {
+        self.repairable_prefix_len
+    }
+}
+
+fn last_repairable_json_prefix_len(raw: &str) -> Option<usize> {
+    let mut started = false;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut depth = 0usize;
+    let mut last = None;
+    for (offset, character) in raw.char_indices() {
+        if !started {
+            if character.is_whitespace() {
+                continue;
+            }
+            if matches!(character, '{' | '[') {
+                started = true;
+                depth = 1;
+            } else {
+                return None;
+            }
+            continue;
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth <= 2 {
+                    last = Some(offset + character.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    last
+}
+
+fn guard_completed_json_grammar(grammar: String) -> String {
+    // Keep one required token on the native grammar stack after the JSON root.
+    // We stop as soon as the root parses, so this newline is never emitted.
+    format!("constrained-root ::= root \"\\n\"\n{grammar}")
 }
 
 impl SamplingConfig {
@@ -351,6 +479,7 @@ impl ModelState {
         max_tokens: i32,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
+        json_schema: Option<String>,
     ) -> Result<String> {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
@@ -410,41 +539,48 @@ impl ModelState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u32;
-        let sampler = if sampling.temperature <= 0.0 {
+        let constrained_json = json_schema.is_some();
+        let mut constrained_json_tracker = ConstrainedJsonTracker::new(constrained_json);
+        let mut constrained_json_completed = false;
+        let mut samplers = Vec::new();
+        if let Some(schema) = json_schema.as_deref() {
+            let grammar = guard_completed_json_grammar(
+                llama_cpp_2::json_schema_to_grammar(schema)
+                    .context("Failed to convert JSON schema to grammar")?,
+            );
+            samplers.push(
+                LlamaSampler::grammar(model, &grammar, "constrained-root")
+                    .context("Failed to initialize JSON grammar sampler")?,
+            );
+        }
+        if sampling.temperature <= 0.0 {
             if sampling.uses_penalties() {
-                LlamaSampler::chain_simple([
-                    LlamaSampler::penalties(
-                        sampling.penalty_last_n,
-                        sampling.repeat_penalty,
-                        sampling.frequency_penalty,
-                        sampling.presence_penalty,
-                    ),
-                    LlamaSampler::greedy(),
-                ])
-            } else {
-                LlamaSampler::chain_simple([LlamaSampler::greedy()])
-            }
-        } else if sampling.uses_penalties() {
-            LlamaSampler::chain_simple([
-                LlamaSampler::penalties(
+                samplers.push(LlamaSampler::penalties(
                     sampling.penalty_last_n,
                     sampling.repeat_penalty,
                     sampling.frequency_penalty,
                     sampling.presence_penalty,
-                ),
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
+                ));
+            }
+            samplers.push(LlamaSampler::greedy());
+        } else if sampling.uses_penalties() {
+            samplers.push(LlamaSampler::penalties(
+                sampling.penalty_last_n,
+                sampling.repeat_penalty,
+                sampling.frequency_penalty,
+                sampling.presence_penalty,
+            ));
+            samplers.push(LlamaSampler::top_k(sampling.top_k));
+            samplers.push(LlamaSampler::top_p(sampling.top_p, 1));
+            samplers.push(LlamaSampler::temp(sampling.temperature));
+            samplers.push(LlamaSampler::dist(seed));
         } else {
-            LlamaSampler::chain_simple([
-                LlamaSampler::top_k(sampling.top_k),
-                LlamaSampler::top_p(sampling.top_p, 1),
-                LlamaSampler::temp(sampling.temperature),
-                LlamaSampler::dist(seed),
-            ])
-        };
+            samplers.push(LlamaSampler::top_k(sampling.top_k));
+            samplers.push(LlamaSampler::top_p(sampling.top_p, 1));
+            samplers.push(LlamaSampler::temp(sampling.temperature));
+            samplers.push(LlamaSampler::dist(seed));
+        }
+        let sampler = LlamaSampler::chain_simple(samplers);
         let mut sampler = pin!(sampler);
 
         loop {
@@ -454,7 +590,26 @@ impl ModelState {
                 break;
             }
 
-            let token = sampler.as_mut().sample(&ctx, batch.n_tokens() - 1);
+            // Apply the CPU sampler chain to the raw logits explicitly. With GPU
+            // backend sampling enabled, llama_sampler_sample() may return a token
+            // selected by the backend and skip every CPU sampler in the chain,
+            // including the JSON grammar. Accept exactly once after selecting.
+            let mut candidates = ctx.token_data_array_ith(batch.n_tokens() - 1);
+            if constrained_json {
+                // llama.cpp's grammar sampler does not necessarily suppress
+                // special EOG tokens. An early EOG would leave a syntactically
+                // incomplete object, so keep generation inside the grammar
+                // until the tracker observes the closed root value.
+                for candidate in &mut candidates.data {
+                    if model.is_eog_token(candidate.id()) {
+                        candidate.set_logit(f32::NEG_INFINITY);
+                    }
+                }
+            }
+            sampler.as_ref().apply(&mut candidates);
+            let token = candidates
+                .selected_token()
+                .context("Sampler chain did not select a token")?;
             sampler.as_mut().accept(token);
 
             if model.is_eog_token(token) {
@@ -482,6 +637,18 @@ impl ModelState {
             let _ = decoder.decode_to_string(&output_bytes, &mut token_text, false);
             output.push_str(&token_text);
 
+            // The grammar sampler has no valid next token once the root JSON value is
+            // complete. Stop before asking llama.cpp to sample again; otherwise its
+            // empty grammar stack triggers a native assertion instead of returning EOG.
+            if constrained_json_tracker.push(&token_text, &output) {
+                constrained_json_completed = true;
+                eprintln!(
+                    "✓ Constrained JSON root completed (generated {} chars)",
+                    output.len()
+                );
+                break;
+            }
+
             // Check for model-specific stop tokens
             let mut should_stop = false;
             for stop_token in &stop_tokens {
@@ -507,6 +674,21 @@ impl ModelState {
                 .context("Failed to add generated token to batch")?;
             n_cur += 1;
             ctx.decode(&mut batch).context("failed to eval")?;
+        }
+
+        if constrained_json && !constrained_json_completed {
+            if let Some(prefix_len) = constrained_json_tracker
+                .repairable_prefix_len()
+                .or_else(|| last_repairable_json_prefix_len(&output))
+            {
+                if prefix_len < output.len() {
+                    output.truncate(prefix_len);
+                    eprintln!(
+                        "✓ Truncated constrained JSON to the last complete record ({} chars)",
+                        output.len()
+                    );
+                }
+            }
         }
 
         // Generation statistics
@@ -600,6 +782,7 @@ fn main() -> Result<()> {
                         repeat_penalty,
                         penalty_last_n,
                         stop_tokens,
+                        json_schema,
                     }) => {
                         let max_tokens = max_tokens.unwrap_or(512);
                         let context_size = context_size.unwrap_or(2048);
@@ -628,12 +811,8 @@ fn main() -> Result<()> {
                         }
 
                         // Generate response with sampling parameters
-                        match state.generate(
-                            prompt,
-                            max_tokens,
-                            sampling,
-                            stop_tokens,
-                        ) {
+                        match state.generate(prompt, max_tokens, sampling, stop_tokens, json_schema)
+                        {
                             Ok(text) => {
                                 send_response(&Response::Response { text, error: None })?;
                             }
@@ -679,7 +858,8 @@ mod tests {
 
     #[test]
     fn generate_request_defaults_penalties_when_omitted() {
-        let json = r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
+        let json =
+            r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
         let request: Request = serde_json::from_str(json).unwrap();
         let Request::Generate {
             temperature,
@@ -690,7 +870,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -724,7 +905,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -746,5 +928,79 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.05);
         assert_eq!(sampling.penalty_last_n, 256);
         assert!(sampling.uses_penalties());
+    }
+
+    #[test]
+    fn generate_request_accepts_convertible_json_schema() {
+        let json = r#"{"type":"generate","prompt":"extract","json_schema":"{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"additionalProperties\":false}"}"#;
+        let request: Request = serde_json::from_str(json).unwrap();
+        let Request::Generate { json_schema, .. } = request else {
+            panic!("expected generate request");
+        };
+        let schema = json_schema.expect("schema should be present");
+        let grammar =
+            guard_completed_json_grammar(llama_cpp_2::json_schema_to_grammar(&schema).unwrap());
+        assert!(grammar.starts_with("constrained-root ::= root \"\\n\"\n"));
+        assert!(grammar.contains("root ::="));
+    }
+
+    #[test]
+    fn generate_request_without_json_schema_remains_backward_compatible() {
+        let request: Request =
+            serde_json::from_str(r#"{"type":"generate","prompt":"summarize"}"#).unwrap();
+        let Request::Generate { json_schema, .. } = request else {
+            panic!("expected generate request");
+        };
+        assert!(json_schema.is_none());
+    }
+
+    #[test]
+    fn standup_schema_converts_to_a_nonempty_root_grammar() {
+        let source = include_str!("../../frontend/src-tauri/src/summary/standup.rs");
+        let schema = source
+            .split_once("const STANDUP_JSON_SCHEMA: &str = r##\"")
+            .and_then(|(_, remainder)| remainder.split_once("\"##;"))
+            .map(|(schema, _)| schema)
+            .expect("standup JSON schema constant should be extractable");
+        let grammar = llama_cpp_2::json_schema_to_grammar(schema).unwrap();
+        let root = grammar
+            .lines()
+            .find(|line| line.starts_with("root ::="))
+            .expect("converted grammar should define root");
+        eprintln!("{root}");
+        assert_ne!(root.trim(), "root ::= \"\"");
+    }
+
+    #[test]
+    fn constrained_json_stops_only_after_a_complete_root_value() {
+        let mut tracker = ConstrainedJsonTracker::new(true);
+        assert!(!tracker.push(r#" {"nested":{"text":"}"}"#, r#" {"nested":{"text":"}"}"#));
+        assert!(tracker.push("}", r#" {"nested":{"text":"}"}}"#));
+
+        let mut scalar = ConstrainedJsonTracker::new(true);
+        assert!(scalar.push("true", "true"));
+
+        let mut disabled = ConstrainedJsonTracker::new(false);
+        assert!(!disabled.push(r#"{"value":"complete"}"#, r#"{"value":"complete"}"#));
+    }
+
+    #[test]
+    fn constrained_json_tracks_the_last_repairable_record_boundary() {
+        let mut tracker = ConstrainedJsonTracker::new(true);
+        let complete = r#"{"items":[{"text":"first"}"#;
+        assert!(!tracker.push(complete, complete));
+        assert_eq!(tracker.repairable_prefix_len(), Some(complete.len()));
+
+        let incomplete = r#",{"text":"unfinished"#;
+        let full = format!("{complete}{incomplete}");
+        assert!(!tracker.push(incomplete, &full));
+        assert_eq!(tracker.repairable_prefix_len(), Some(complete.len()));
+        assert_eq!(&full[..tracker.repairable_prefix_len().unwrap()], complete);
+
+        let russian = format!(r#"{{"items":[{{"text":"Готово"}}{incomplete}"#);
+        assert_eq!(
+            last_repairable_json_prefix_len(&russian),
+            Some(russian.find(incomplete).unwrap())
+        );
     }
 }

@@ -342,7 +342,7 @@ pub async fn suggest_meeting_series(
     // Once a suggestion has been accepted, do not propose the same meetings
     // again on the next launch. Manual collections do not suppress discovery.
     let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT m.id, m.title, m.created_at FROM meetings m \
+        "SELECT m.id, m.title, COALESCE(m.occurred_at, m.created_at) FROM meetings m \
          WHERE NOT EXISTS ( \
            SELECT 1 FROM meeting_collections mc \
            JOIN collections c ON c.id = mc.collection_id \

@@ -3,10 +3,95 @@
 //! models `deepseek-v4-pro` / `deepseek-v4-flash` (the legacy `deepseek-chat` /
 //! `deepseek-reasoner` aliases retire 2026-07-24). Non-streaming (summary/extract/RAG).
 
-use serde_json::json;
+use serde_json::{json, Value};
+use std::time::Duration;
 
 pub const DEFAULT_BASE_URL: &str = "https://gw.gigatool.app/deepseek/v1";
 pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
+pub const DEFAULT_MAX_TOKENS: u32 = 8_192;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Summary/extraction calls need predictable latency and a complete final answer rather
+/// than a long chain-of-thought. DeepSeek V4 enables thinking by default, so disable it
+/// explicitly and use conservative sampling for stable structured output.
+pub fn build_request_body(model: &str, system: &str, user: &str, max_tokens: Option<u32>) -> Value {
+    build_request_body_with_json_mode(model, system, user, max_tokens, false)
+}
+
+pub fn build_request_body_with_json_mode(
+    model: &str,
+    system: &str,
+    user: &str,
+    max_tokens: Option<u32>,
+    json_mode: bool,
+) -> Value {
+    build_request_body_with_options(model, system, user, max_tokens, None, None, json_mode)
+}
+
+pub fn build_request_body_with_options(
+    model: &str,
+    system: &str,
+    user: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    json_mode: bool,
+) -> Value {
+    let mut body = json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "thinking": {"type": "disabled"},
+        "max_tokens": max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+        "temperature": temperature.map(f64::from).unwrap_or(0.2),
+        "top_p": top_p.map(f64::from).unwrap_or(0.9),
+        "stream": false,
+    });
+    if json_mode {
+        body["response_format"] = json!({"type": "json_object"});
+    }
+    body
+}
+
+/// Validate the OpenAI-shaped response contract used by DeepSeek. A 200 response is not
+/// necessarily a successful summary: `length`, content filtering, or an interrupted
+/// inference can all leave a plausible-looking but incomplete document.
+pub fn parse_response(v: &Value) -> Result<String, String> {
+    let choice = v
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .ok_or_else(|| "deepseek response missing choices[0]".to_string())?;
+
+    let finish_reason = choice
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "deepseek response missing finish_reason".to_string())?;
+
+    if finish_reason != "stop" {
+        let explanation = match finish_reason {
+            "length" => "output was truncated at the token limit",
+            "content_filter" => "output was blocked by the content filter",
+            "insufficient_system_resource" => "generation was interrupted by the provider",
+            "tool_calls" => "provider returned a tool call instead of a summary",
+            _ => "generation did not reach a natural stop",
+        };
+        return Err(format!(
+            "deepseek summary incomplete: finish_reason={finish_reason} ({explanation})"
+        ));
+    }
+
+    let content = choice
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+        .ok_or_else(|| "deepseek response has no final answer content".to_string())?;
+
+    Ok(content.to_string())
+}
 
 /// A configured DeepSeek client. Cheap to construct per call.
 pub struct DeepSeekClient {
@@ -33,20 +118,14 @@ impl DeepSeekClient {
     /// Run a system+user completion, returning the assistant text.
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, String> {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let body = json!({
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "stream": false,
-        });
+        let body = build_request_body(&self.model, system, user, None);
 
         let resp = self
             .client
             .post(&url)
             .bearer_auth(&self.api_key)
             .json(&body)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await
             .map_err(|e| format!("deepseek request failed: {e}"))?;
@@ -60,12 +139,11 @@ impl DeepSeekClient {
             ));
         }
 
-        let v: serde_json::Value = resp
+        let v: Value = resp
             .json()
             .await
             .map_err(|e| format!("deepseek response parse failed: {e}"))?;
-        extract_openai_content(&v)
-            .ok_or_else(|| "deepseek response missing choices[0].message.content".to_string())
+        parse_response(&v)
     }
 }
 
@@ -87,9 +165,76 @@ mod tests {
     #[test]
     fn parses_openai_shaped_response() {
         let v = serde_json::json!({
-            "choices": [{"message": {"role": "assistant", "content": "привет"}}]
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "привет"}
+            }]
         });
         assert_eq!(extract_openai_content(&v).as_deref(), Some("привет"));
+        assert_eq!(parse_response(&v).unwrap(), "привет");
         assert!(extract_openai_content(&serde_json::json!({"choices": []})).is_none());
+    }
+
+    #[test]
+    fn request_disables_thinking_and_bounds_output() {
+        let body = build_request_body("deepseek-v4-pro", "system", "user", None);
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert_eq!(body["max_tokens"], DEFAULT_MAX_TOKENS);
+        assert_eq!(body["temperature"], 0.2);
+        assert_eq!(body["top_p"], 0.9);
+        assert_eq!(body["stream"], false);
+        assert!(body.get("response_format").is_none());
+    }
+
+    #[test]
+    fn structured_request_enables_supported_json_object_mode() {
+        let body = build_request_body_with_json_mode(
+            "deepseek-v4-pro",
+            "return json",
+            "extract",
+            Some(4_096),
+            true,
+        );
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert_eq!(body["max_tokens"], 4_096);
+    }
+
+    #[test]
+    fn structured_request_honors_generation_controls() {
+        let body = build_request_body_with_options(
+            "deepseek-v4-pro",
+            "return json",
+            "extract",
+            Some(4_096),
+            Some(0.0),
+            Some(1.0),
+            true,
+        );
+        assert_eq!(body["temperature"], 0.0);
+        assert_eq!(body["top_p"], 1.0);
+        assert_eq!(body["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn rejects_truncated_or_empty_responses() {
+        let truncated = serde_json::json!({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": "# Partial"}
+            }]
+        });
+        assert!(parse_response(&truncated)
+            .unwrap_err()
+            .contains("truncated"));
+
+        let empty = serde_json::json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": "  "}
+            }]
+        });
+        assert!(parse_response(&empty)
+            .unwrap_err()
+            .contains("no final answer"));
     }
 }
