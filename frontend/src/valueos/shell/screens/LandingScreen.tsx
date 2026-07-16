@@ -6,7 +6,7 @@ export function LandingScreen({ onProceed }: { onProceed: () => void }) {
   return (
     <div data-testid="valueos-landing" style={styles.root}>
       <div style={styles.center}>
-        <VaLogo size={112} />
+        <VaLogo size={112} background={false} />
         <h1 style={styles.title}>ValueOS Agent</h1>
         <p style={styles.subtitle}>
           Your private, on-device meeting agent. Captures and transcribes meetings
@@ -45,7 +45,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    background: `linear-gradient(160deg, ${VA_BLUE} 0%, #001f7a 100%)`,
+    background: VA_BLUE,
     color: '#ffffff',
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     padding: 24,

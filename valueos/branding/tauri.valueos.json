@@ -2,6 +2,7 @@
   "$comment": "VALUEOS branding overlay — merged onto frontend/src-tauri/tauri.conf.json at BUILD TIME via `tauri build --config`. It renames the app to 'ValueOS Agent'. tauri.conf.json itself is never edited, so upstream merges stay conflict-free. Icons are applied separately by valueos/branding/apply-branding.sh. NOTE: app.windows is an ARRAY, and Tauri REPLACES arrays on merge (not element-wise) — so the full window object below mirrors upstream's values plus the new title. If upstream changes the window size/props, update this copy.",
   "productName": "ValueOS Agent",
   "mainBinaryName": "valueos-agent",
+  "identifier": "com.valueos.io",
   "app": {
     "windows": [
       {

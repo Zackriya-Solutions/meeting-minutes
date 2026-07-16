@@ -6,7 +6,7 @@ export function StopScreen({ onContinue }: { onContinue: () => void }) {
   return (
     <div data-testid="valueos-stop" style={styles.root}>
       <div style={styles.center}>
-        <VaLogo size={96} />
+        <VaLogo size={96} background={false} />
         <h1 style={styles.title}>Setup complete</h1>
         <p style={styles.subtitle}>
           ValueOS Agent is ready. Meeting capture is coming soon — you&apos;re all set for now.
@@ -43,7 +43,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    background: `linear-gradient(160deg, ${VA_BLUE} 0%, #001f7a 100%)`,
+    background: VA_BLUE,
     color: '#ffffff',
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     padding: 24,

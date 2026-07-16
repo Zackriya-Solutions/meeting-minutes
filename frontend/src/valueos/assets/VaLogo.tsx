@@ -5,7 +5,7 @@ import React from 'react';
 // (source: valueos/branding/source). Do not hand-edit the path data.
 export const VA_BLUE = '#0030BC';
 
-export function VaLogo({ size = 96, rounded = true, className }: { size?: number; rounded?: boolean; className?: string }) {
+export function VaLogo({ size = 96, rounded = true, background = true, className }: { size?: number; rounded?: boolean; background?: boolean; className?: string }) {
   return (
     <svg
       width={size}
@@ -16,7 +16,7 @@ export function VaLogo({ size = 96, rounded = true, className }: { size?: number
       className={className}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <rect x="0" y="0" width="1080" height="1080" rx={rounded ? 160 : 0} fill="#0030BC" />
+      {background && <rect x="0" y="0" width="1080" height="1080" rx={rounded ? 160 : 0} fill="#0030BC" />}
       <g transform="matrix(8.16 0 0 8.16 540 540)">
         <g>
           <g transform="matrix(1 0 0 1 -38.43 0)"><path fill="#ffffff" transform="translate(-51.37, -50)" d="M 62.42 25.81 L 76.85 25.81 L 60.06999999999999 74.2 L 42.739999999999995 74.2 L 25.89 25.81 L 40.39 25.81 L 51.44 60.739999999999995 L 62.42 25.809999999999995 Z" /></g>

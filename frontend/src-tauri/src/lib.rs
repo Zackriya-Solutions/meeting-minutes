@@ -54,6 +54,8 @@ pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
+// VALUEOS: native transport module (OAuth/PKCE login, keychain, ValueOS HTTP, digest)
+pub mod valueos;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
@@ -735,6 +737,19 @@ pub fn run() {
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
             onboarding::complete_onboarding,
+            // VALUEOS: native transport commands (see src/valueos)
+            valueos::valueos_login,
+            valueos::valueos_is_logged_in,
+            valueos::valueos_logout,
+            valueos::valueos_api_get_tenants,
+            valueos::valueos_api_get_entitlement,
+            valueos::valueos_api_list_leads,
+            valueos::valueos_api_list_opportunities,
+            valueos::valueos_api_upload_transcript,
+            valueos::valueos_generate_digest,
+            valueos::valueos_pick_folder,
+            valueos::valueos_validate_writable,
+            valueos::valueos_write_transcript_file,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,
