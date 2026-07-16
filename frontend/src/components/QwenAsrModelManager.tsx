@@ -9,6 +9,13 @@ import {
   qwenDownloadProgress,
 } from '@/lib/qwenAsr';
 import { Button } from './ui/button';
+import { LanguageSelection } from './LanguageSelection';
+import { useConfig } from '@/contexts/ConfigContext';
+import { LANGUAGES } from '@/constants/languages';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 interface QwenAsrModelManagerProps {
   selectedModel?: string;
@@ -29,6 +36,7 @@ export function QwenAsrModelManager({
   onModelSelect,
   autoSave = false,
 }: QwenAsrModelManagerProps) {
+  const { selectedLanguage, setSelectedLanguage } = useConfig();
   const [model, setModel] = useState<QwenModelInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [download, setDownload] = useState<DownloadEvent | null>(null);
@@ -141,6 +149,12 @@ export function QwenAsrModelManager({
   const available = model.status === 'Available';
   const selected = available && selectedModel === model.name;
   const failed = typeof model.status === 'object' && ('Error' in model.status || 'Corrupted' in model.status);
+  const languageCapability = getTranscriptionLanguageCapability('qwen3Asr', model.name);
+  const effectiveLanguage = supportsTranscriptionLanguage(languageCapability, selectedLanguage)
+    ? selectedLanguage
+    : 'auto';
+  const languageName = LANGUAGES.find(({ code }) => code === effectiveLanguage)?.name
+    ?? 'Auto Detect (Original Language)';
 
   return (
     <div
@@ -154,7 +168,7 @@ export function QwenAsrModelManager({
             {selected && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
           </div>
           <p className="mt-1 text-sm text-gray-600">Multilingual, Chinese dialects and code-switching</p>
-          <p className="mt-2 text-xs text-gray-500">941 MiB · CPU · Automatic language detection</p>
+          <p className="mt-2 text-xs text-gray-500">941 MiB · CPU · Recognition: {languageName}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -195,6 +209,20 @@ export function QwenAsrModelManager({
           <div className="h-2 overflow-hidden bg-gray-200">
             <div className="h-full bg-blue-600 transition-[width]" style={{ width: `${progress}%` }} />
           </div>
+        </div>
+      )}
+
+      {available && (
+        <div
+          className="mt-4 border-t border-gray-200 pt-4"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <LanguageSelection
+            selectedLanguage={effectiveLanguage}
+            onLanguageChange={setSelectedLanguage}
+            provider="qwen3Asr"
+            model={model.name}
+          />
         </div>
       )}
     </div>

@@ -31,5 +31,6 @@ describe('Parakeet model metadata', () => {
     expect(supportsTranscriptionLanguage(capability, 'auto')).toBe(true);
     expect(supportsTranscriptionLanguage(capability, 'auto-translate')).toBe(false);
     expect(supportsTranscriptionLanguage(capability, 'uk')).toBe(false);
+    expect(capability.description).toContain('Choose Chinese');
   });
 });
