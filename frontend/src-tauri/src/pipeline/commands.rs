@@ -418,14 +418,24 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
                 }
             };
         let switch_guard = embedder::model_index_write_guard().await;
-        if let Err(e) = crate::vector::ensure_chunk_embeddings_table_for_dim(
+        match crate::vector::ensure_chunk_embeddings_table_for_dim(
             state.db_manager.pool(),
             kind.dim(),
         )
         .await
         {
-            log::warn!("failed to prepare vector table for {}: {e}", kind.id());
-            return;
+            Ok(true) => {}
+            Ok(false) => {
+                log::warn!(
+                    "vector index unavailable; not activating {} at startup",
+                    kind.id()
+                );
+                return;
+            }
+            Err(e) => {
+                log::warn!("failed to prepare vector table for {}: {e}", kind.id());
+                return;
+            }
         }
         embedder::install_global(candidate);
         drop(switch_guard);
