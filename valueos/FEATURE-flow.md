@@ -16,7 +16,7 @@ upstream via imports. Delivered in phases; this doc is the living source of trut
 | **1** | Typed ValueOS client + PKCE + token store + digest + upload queue, all against interfaces + **mocks** | **none** | ✅ done, tested |
 | **2** | Screens + `ValueOsShell` wiring (login → entitlement → config → capture → finalize) + `ValueOsProvider` (service injection), mock-backed | none | ✅ done, tested |
 | **3a** | Real transport in TS: `invoke`-based wrappers behind the interfaces (client/auth/config/digest/queue-store), flag-selected (`NEXT_PUBLIC_VALUEOS_REAL=on`), error-mapping | none | ✅ done, tested |
-| **3b** | Native Rust `valueos` module implementing the command contract below + minimal `Cargo.toml`/`lib.rs` edits | **2 files** (see below) — build-verified | ⏳ pending |
+| **3b** | Native Rust `valueos` module (`src-tauri/src/valueos/mod.rs`) implementing the command contract below + `Cargo.toml`/`lib.rs` edits | **2 upstream files** touched (`// VALUEOS:`) | 🔨 written — CI build must compile-verify (Rust not buildable in authoring env); likely iteration on the `tauri-plugin-oauth` API + `FilePath` |
 
 ## Identity, scopes, least privilege
 
