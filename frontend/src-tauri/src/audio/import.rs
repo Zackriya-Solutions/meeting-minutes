@@ -35,6 +35,7 @@ static IMPORT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Global flag to signal cancellation
 static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+const MAX_BATCH_AUDIO_FILES: usize = 500;
 
 /// RAII guard for IMPORT_IN_PROGRESS flag
 /// Ensures flag is cleared even if import panics or returns early
@@ -217,13 +218,32 @@ fn collect_audio_files(root: &Path) -> Result<Vec<PathBuf>> {
             let file_type = entry.file_type()?;
             let path = entry.path();
             if file_type.is_symlink() {
-                continue;
+                match std::fs::metadata(&path) {
+                    Ok(metadata) if metadata.is_file() => {
+                        debug!("Following audio file symlink: {}", path.display());
+                    }
+                    Ok(metadata) if metadata.is_dir() => {
+                        warn!(
+                            "Skipping directory symlink during audio scan to avoid cycles: {}",
+                            path.display()
+                        );
+                        continue;
+                    }
+                    Ok(_) => {
+                        warn!("Skipping unsupported symlink target: {}", path.display());
+                        continue;
+                    }
+                    Err(error) => {
+                        warn!("Skipping unreadable symlink {}: {}", path.display(), error);
+                        continue;
+                    }
+                }
             }
-            if file_type.is_dir() {
+            if !file_type.is_symlink() && file_type.is_dir() {
                 pending.push(path);
                 continue;
             }
-            if !file_type.is_file() {
+            if !file_type.is_symlink() && !file_type.is_file() {
                 continue;
             }
             let extension = path
@@ -264,6 +284,16 @@ fn batch_items_from_folder(root: &Path) -> Result<Vec<BatchImportItem>> {
             }
         })
         .collect())
+}
+
+fn cap_batch_items(
+    mut items: Vec<BatchImportItem>,
+) -> (Vec<BatchImportItem>, Vec<BatchImportItem>) {
+    if items.len() <= MAX_BATCH_AUDIO_FILES {
+        return (items, Vec::new());
+    }
+    let over_limit = items.split_off(MAX_BATCH_AUDIO_FILES);
+    (items, over_limit)
 }
 
 fn strip_hash_suffix(stem: &str) -> String {
@@ -536,8 +566,15 @@ pub async fn start_batch_import<R: Runtime>(
     if items.is_empty() {
         return Err(anyhow!("No audio files selected"));
     }
-    if items.len() > 500 {
-        return Err(anyhow!("Batch import is limited to 500 audio files"));
+    let total = items.len();
+    let (items, over_limit) = cap_batch_items(items);
+    if !over_limit.is_empty() {
+        warn!(
+            "Batch contains {} files; processing the first {} and reporting {} as skipped",
+            total,
+            MAX_BATCH_AUDIO_FILES,
+            over_limit.len()
+        );
     }
     if provider.as_deref() == Some("gigaam") && !crate::gigaam_engine::is_loaded() {
         return Err(anyhow!(
@@ -546,9 +583,9 @@ pub async fn start_batch_import<R: Runtime>(
     }
 
     let mut result = BatchImportResult {
-        total: items.len(),
+        total,
         imported: Vec::new(),
-        skipped: Vec::new(),
+        skipped: over_limit,
         failed: Vec::new(),
         cancelled: false,
     };
@@ -1736,6 +1773,42 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].title, "b");
         assert_eq!(items[1].title, "a");
+    }
+
+    #[test]
+    fn test_batch_limit_reports_overflow_as_skipped_items() {
+        let items = (0..(MAX_BATCH_AUDIO_FILES + 3))
+            .map(|index| BatchImportItem {
+                source_path: format!("/audio/{index}.wav"),
+                title: format!("Meeting {index}"),
+            })
+            .collect();
+        let (processable, over_limit) = cap_batch_items(items);
+        assert_eq!(processable.len(), MAX_BATCH_AUDIO_FILES);
+        assert_eq!(over_limit.len(), 3);
+        assert_eq!(over_limit[0].title, "Meeting 500");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_folder_scan_follows_file_symlinks_but_not_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("original.wav");
+        let linked = dir.path().join("linked.wav");
+        let nested = dir.path().join("nested");
+        std::fs::write(&target, b"audio").unwrap();
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("hidden.wav"), b"audio").unwrap();
+        symlink(&target, &linked).unwrap();
+        symlink(&nested, dir.path().join("nested-link")).unwrap();
+
+        let files = collect_audio_files(dir.path()).unwrap();
+        assert!(files.contains(&target));
+        assert!(files.contains(&linked));
+        assert!(files.contains(&nested.join("hidden.wav")));
+        assert_eq!(files.len(), 3);
     }
 
     #[test]
