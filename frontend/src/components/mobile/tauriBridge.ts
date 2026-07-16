@@ -64,6 +64,30 @@ export async function fetchMeetingDetail(meetingId: string): Promise<MeetingDeta
 
 // ── Recording ────────────────────────────────────────────────────────────
 
+/**
+ * Resolve a real microphone device name to pass to `start_recording`.
+ *
+ * Passing no device name is NOT "use the default mic" — recording_commands.rs
+ * turns `mic_device_name: None` into `mic_device: None`, which skips the
+ * microphone stream entirely (audio/stream.rs). With no system-audio device
+ * on Android either, that leaves zero streams and start_recording fails with
+ * "No audio streams could be created". Desktop avoids this because it always
+ * has a persisted `preferred_mic_device` recording preference by the time the
+ * user can start a recording; the mobile UI has no such preference yet, so a
+ * device name must be resolved explicitly here.
+ */
+async function resolveMicDeviceName(): Promise<string | null> {
+  try {
+    const devices = await invoke<{ name: string; device_type: 'Input' | 'Output' }[]>(
+      'get_audio_devices'
+    );
+    return devices.find((d) => d.device_type === 'Input')?.name ?? null;
+  } catch (e) {
+    console.warn('[vm] get_audio_devices failed', e);
+    return null;
+  }
+}
+
 export async function startRecording(): Promise<void> {
   // Guarantee a localWhisper transcript config exists before the backend
   // ever sees the start command. The Rust recording pipeline defaults to
@@ -78,8 +102,17 @@ export async function startRecording(): Promise<void> {
     }
   }
 
-  // No devices passed: the Rust core picks the default microphone.
-  await invoke('start_recording');
+  const micDeviceName = await resolveMicDeviceName();
+  if (!micDeviceName) {
+    throw new Error(
+      'No microphone device found. Check that microphone permission is granted.'
+    );
+  }
+
+  await invoke('start_recording', {
+    mic_device_name: micDeviceName,
+    system_device_name: null,
+  });
 }
 
 export async function stopRecording(): Promise<void> {
