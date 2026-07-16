@@ -192,7 +192,10 @@ export function StandupWorkflowPanel({
       await refresh();
     } catch (error) {
       console.error('Failed to review standup record:', error);
-      toast.error(t('Failed to save standup review'));
+      const detail = error instanceof Error ? error.message : String(error);
+      toast.error(detail
+        ? `${t('Failed to save standup review')}: ${detail}`
+        : t('Failed to save standup review'));
     } finally {
       setBusyRecordId(null);
     }
