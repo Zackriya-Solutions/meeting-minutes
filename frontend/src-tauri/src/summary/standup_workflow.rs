@@ -458,7 +458,7 @@ pub async fn review_record(
                 .map_err(|error| error.to_string())?;
         if action_status.is_some_and(|status| matches!(status.as_str(), "done" | "cancelled")) {
             return Err(
-                "Completed or cancelled actions must be reopened before rejecting their source"
+                "Completed or cancelled actions must be reopened before changing their source review status"
                     .to_string(),
             );
         }
