@@ -300,6 +300,40 @@ pub async fn valueos_logout() -> Result<(), ValueOsErr> {
     clear_tokens()
 }
 
+/// DIAGNOSTIC: decode and return only the CLAIMS (payload) of the stored access token so a
+/// 401 from the API can be triaged (client_id / token_use / scope / iss / exp). Deliberately
+/// returns ONLY these claims — never the signature or the raw token — so nothing usable as a
+/// credential is exposed. Returns null if not logged in.
+#[tauri::command]
+pub async fn valueos_debug_token_claims() -> Result<serde_json::Value, ValueOsErr> {
+    let tokens = match read_tokens() {
+        Some(t) => t,
+        None => return Ok(serde_json::Value::Null),
+    };
+    // A JWT is header.payload.signature — decode ONLY the middle (payload) segment.
+    let payload_b64 = tokens
+        .access_token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| ValueOsErr::new(0, "Access token is not a JWT"))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64.as_bytes())
+        .map_err(|e| ValueOsErr::transport(format!("claims decode: {e}")))?;
+    let claims: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| ValueOsErr::transport(format!("claims parse: {e}")))?;
+    let pick = |k: &str| claims.get(k).cloned().unwrap_or(serde_json::Value::Null);
+    // Only the fields useful for diagnosing a rejected token — not the whole payload.
+    Ok(serde_json::json!({
+        "client_id": pick("client_id"),
+        "token_use": pick("token_use"),
+        "scope": pick("scope"),
+        "iss": pick("iss"),
+        "exp": pick("exp"),
+        "sub": pick("sub"),
+        "username": pick("username"),
+    }))
+}
+
 #[tauri::command]
 pub async fn valueos_login() -> Result<(), ValueOsErr> {
     // PKCE

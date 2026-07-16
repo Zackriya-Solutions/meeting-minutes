@@ -70,6 +70,7 @@ export function CaptureScreen({
   }, [client, tenantId, activityType, q]);
 
   const target = targets.find((t) => t.id === targetId) ?? null;
+  const tenantName = entitledTenants.find((t) => t.tenant.id === tenantId)?.tenant.name ?? '';
   const canStart = !!tenantId && !!activityType && !!target;
 
   const start = async () => {
@@ -82,6 +83,7 @@ export function CaptureScreen({
     const transcriptText = await rec.stop();
     onFinish({
       tenantId: tenantId!,
+      tenantName: tenantName || tenantId!,
       activityType: activityType!,
       targetId: target!.id,
       targetLabel: target!.label,

@@ -741,6 +741,7 @@ pub fn run() {
             valueos::valueos_login,
             valueos::valueos_is_logged_in,
             valueos::valueos_logout,
+            valueos::valueos_debug_token_claims,
             valueos::valueos_api_get_tenants,
             valueos::valueos_api_get_agent_tenants,
             valueos::valueos_api_get_entitlement,

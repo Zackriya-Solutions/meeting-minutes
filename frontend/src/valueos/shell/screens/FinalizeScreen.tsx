@@ -67,11 +67,14 @@ export function FinalizeScreen({
         id: key,
         targetLabel: capture.targetLabel,
         tenantId: capture.tenantId,
+        tenantName: capture.tenantName,
         activityType: capture.activityType,
         targetId: capture.targetId,
         createdAt: Date.now(),
         path,
         uploadStatus: uploaded ? 'uploaded' : failed || lostAccess ? 'failed' : 'pending',
+        digest: digestText,
+        transcript: capture.transcriptText,
       });
       if (outcome.needsReauth) setStatus('reauth');
       else if (lostAccess) setStatus('deEntitled');

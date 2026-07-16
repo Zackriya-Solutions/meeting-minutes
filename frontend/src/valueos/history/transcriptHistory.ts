@@ -7,11 +7,14 @@ export interface TranscriptRecord {
   id: string; // == idempotency key
   targetLabel: string;
   tenantId: string;
+  tenantName?: string; // display name of the tenant (for the detail pane)
   activityType: ActivityType;
   targetId: string;
   createdAt: number;
   path: string; // local transcript file path
   uploadStatus: 'uploaded' | 'pending' | 'failed';
+  digest?: string; // the high-level recap (shown in the detail pane)
+  transcript?: string; // the transcript text (shown in the detail pane)
 }
 
 export interface TranscriptHistory {

@@ -3,6 +3,7 @@ import type { ActivityType } from '../api/types';
 
 export interface CaptureResult {
   tenantId: string;
+  tenantName: string;
   activityType: ActivityType;
   targetId: string;
   targetLabel: string;
