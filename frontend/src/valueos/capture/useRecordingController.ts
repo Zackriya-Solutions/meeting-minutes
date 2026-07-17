@@ -13,6 +13,7 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { applyConfiguredSaveFolder } from './recordingLocation';
+import { labelTranscript } from './speakerLabels';
 import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
 export interface RecordingController {
@@ -33,17 +34,14 @@ export interface RecordingController {
   resume: () => Promise<void>;
 }
 
-function joinTranscripts(transcripts: { text: string }[]): string {
-  return transcripts
-    .map((t) => t.text?.trim())
-    .filter(Boolean)
-    .join('\n');
-}
+// VALUEOS: transcript text is produced via labelTranscript (speakerLabels.ts) so speaker
+// prefixes appear automatically if/when the stack ever provides a per-segment source. Today
+// segments carry none, so this is exactly a plain newline join (no regression).
 
 /** Split segments into the confirmed body and the trailing hypothesis. Only the most-recent
  *  utterance carries a tentative tail (UI_GUIDE §4): if the last segment is still partial it
  *  is the faded/italic tail; everything before it is confirmed. */
-function splitConfirmedPartial(transcripts: { text: string; is_partial?: boolean }[]): {
+function splitConfirmedPartial(transcripts: { text: string; is_partial?: boolean; source?: string | null }[]): {
   confirmed: string;
   partial: string;
 } {
@@ -51,11 +49,11 @@ function splitConfirmedPartial(transcripts: { text: string; is_partial?: boolean
   const last = transcripts[transcripts.length - 1];
   if (last?.is_partial) {
     return {
-      confirmed: joinTranscripts(transcripts.slice(0, -1)),
+      confirmed: labelTranscript(transcripts.slice(0, -1)),
       partial: last.text?.trim() ?? '',
     };
   }
-  return { confirmed: joinTranscripts(transcripts), partial: '' };
+  return { confirmed: labelTranscript(transcripts), partial: '' };
 }
 
 function countWords(s: string): number {
@@ -70,7 +68,7 @@ export function useRecordingController(): RecordingController {
 
   // Live text — recomputed on every new segment so the capture screen can show real-time
   // recognition (drives a re-render as `transcripts` grows).
-  const transcriptText = useMemo(() => joinTranscripts(transcripts), [transcripts]);
+  const transcriptText = useMemo(() => labelTranscript(transcripts), [transcripts]);
   const { confirmedText, partialText } = useMemo(() => {
     const s = splitConfirmedPartial(transcripts);
     return { confirmedText: s.confirmed, partialText: s.partial };
@@ -120,7 +118,7 @@ export function useRecordingController(): RecordingController {
     flushBuffer?.();
     await new Promise((r) => setTimeout(r, 300)); // let the flush's state update settle into the ref
     const finalSegments = transcriptsRef?.current ?? transcripts;
-    return joinTranscripts(finalSegments);
+    return labelTranscript(finalSegments);
   }, [transcriptsRef, transcripts, flushBuffer]);
 
   const pause = useCallback(async () => {
