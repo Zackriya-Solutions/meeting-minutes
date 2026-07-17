@@ -54,6 +54,7 @@ export default function Home() {
 
   useEffect(() => {
     let handled = false;
+    let pendingStopTimeout: number | undefined;
     const stopAutoListening = () => {
       if (handled || !sessionStorage.getItem('autoStopRecordingSessionId')) return;
       handled = true;
@@ -65,9 +66,14 @@ export default function Home() {
     window.addEventListener('stop-recording-from-auto-listening', stopAutoListening);
     if (sessionStorage.getItem('autoStopRecordingSessionId')) {
       // Let the recording-state providers finish their initial backend sync after navigation.
-      window.setTimeout(stopAutoListening, 250);
+      pendingStopTimeout = window.setTimeout(stopAutoListening, 250);
     }
-    return () => window.removeEventListener('stop-recording-from-auto-listening', stopAutoListening);
+    return () => {
+      window.removeEventListener('stop-recording-from-auto-listening', stopAutoListening);
+      if (pendingStopTimeout !== undefined) {
+        window.clearTimeout(pendingStopTimeout);
+      }
+    };
   }, [handleRecordingStop, setIsStopping, t]);
 
   // Recovery hook

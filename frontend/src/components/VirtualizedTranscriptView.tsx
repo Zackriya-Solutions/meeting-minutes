@@ -608,6 +608,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 try {
                                     await onCorrectTranscript(editingSegment.id, editingSegment.text);
                                     setEditingSegment(null);
+                                } catch (error) {
+                                    // The parent owns the user-facing toast; keep this async event
+                                    // handler from producing an unhandled rejection as well.
+                                    console.warn('Failed to save transcript correction:', error);
                                 } finally {
                                     setIsSavingCorrection(false);
                                 }

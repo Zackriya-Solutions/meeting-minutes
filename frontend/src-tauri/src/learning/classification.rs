@@ -464,12 +464,13 @@ pub async fn review_meeting_type(
             "interview" => "interview",
             _ => "general",
         };
+        let applied_confidence = (selected == suggested).then_some(confidence);
         sqlx::query(
             "UPDATE meetings SET meeting_type=?, meeting_type_confidence=?, \
                     meeting_type_review_status='accepted', memory_type=? WHERE id=?",
         )
         .bind(selected)
-        .bind(confidence)
+        .bind(applied_confidence)
         .bind(memory_type)
         .bind(&meeting_id)
         .execute(&mut *tx)

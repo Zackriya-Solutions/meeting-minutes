@@ -112,6 +112,19 @@ pub async fn rebuild_shadow_profiles(
         .begin()
         .await
         .map_err(|error| format!("Failed to begin advanced profile update: {error}"))?;
+    // The expensive feature calculation happens outside the write transaction, so consent
+    // must be checked again at the mutation boundary. This is the authoritative check.
+    let still_allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM speakers WHERE id=? AND is_confirmed=1 \
+         AND learning_enabled=1 AND consent_state='granted' AND deleted_at IS NULL)",
+    )
+    .bind(speaker_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| format!("Failed to recheck advanced-learning consent: {error}"))?;
+    if !still_allowed {
+        return Err("Speaker learning consent changed while profiles were being built".to_string());
+    }
     sqlx::query(
         "INSERT INTO language_profiles( \
             speaker_id, enabled, support_meetings, features_json, model_version, updated_at \

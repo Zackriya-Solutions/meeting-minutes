@@ -516,7 +516,7 @@ pub async fn run_diarization_core<R: Runtime>(
         let Some(cluster_id) = cluster_to_learning.get(&local_cluster) else {
             continue;
         };
-        crate::learning::identity::link_cluster_segment(
+        if let Err(error) = crate::learning::identity::link_cluster_segment(
             pool,
             *cluster_id,
             segment_id,
@@ -528,7 +528,11 @@ pub async fn run_diarization_core<R: Runtime>(
             ),
         )
         .await
-        .map_err(|error| DiarizeError::Other(anyhow!(error)))?;
+        {
+            // Speaker attribution has already succeeded. Provenance is valuable for
+            // learning, but a bookkeeping failure must not make the whole run look failed.
+            log::warn!("Could not persist learning provenance for segment {segment_id}: {error}");
+        }
     }
 
     let assigned_segments = assignments.len() as i64;

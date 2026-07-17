@@ -22,7 +22,8 @@ const PROCESS_LAUNCH_EVIDENCE_TTL: Duration = Duration::from_secs(90);
 // A supported native client actively owning the microphone is already a strong signal.
 // Start on the first observation (at most one poll late) so a privacy-preserving design
 // does not need to keep an ambient pre-call audio buffer.
-const REQUIRED_ACTIVE_POLLS: u8 = 1;
+const REQUIRED_ACTIVE_POLLS: u8 = 2;
+const STRONG_AUTO_LISTENING_POLLS: u8 = 1;
 const REQUIRED_QUIET_POLLS: u8 = 2;
 const AUTO_LISTENING_QUIET_POLLS: u8 = 23;
 
@@ -60,6 +61,7 @@ pub struct AutoListeningEvent {
 #[derive(Debug, Default)]
 struct AutoListeningSharedState {
     active_capture_session_id: Option<String>,
+    start_failed: bool,
 }
 
 /// Owns the background task so it is started once and can be cancelled on app exit.
@@ -213,7 +215,12 @@ impl DetectionSession {
                 return DetectionEvent::None;
             }
 
-            if !self.notified && self.active_polls >= REQUIRED_ACTIVE_POLLS {
+            let required_polls = if auto_listening {
+                STRONG_AUTO_LISTENING_POLLS
+            } else {
+                REQUIRED_ACTIVE_POLLS
+            };
+            if !self.notified && self.active_polls >= required_polls {
                 self.notified = true;
                 if auto_listening {
                     self.auto_listening_active = true;
@@ -283,6 +290,7 @@ async fn run_detection_loop(
     let mut system = System::new_all();
     let mut process_evidence = ProcessLaunchEvidence::default();
     let mut session = DetectionSession::default();
+    let mut suppress_auto_listening_until_quiet = false;
     let mut interval = tokio::time::interval(POLL_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -314,11 +322,24 @@ async fn run_detection_loop(
                     microphone_apps,
                     cfg!(target_os = "macos"),
                 );
+                if let Ok(mut shared) = auto_listening_state.lock() {
+                    if shared.start_failed {
+                        shared.start_failed = false;
+                        session = DetectionSession {
+                            active_polls: REQUIRED_ACTIVE_POLLS.saturating_sub(1),
+                            ..DetectionSession::default()
+                        };
+                        suppress_auto_listening_until_quiet = true;
+                    }
+                }
+                if candidates.is_empty() {
+                    suppress_auto_listening_until_quiet = false;
+                }
                 let recording = crate::audio::recording_commands::is_recording().await;
                 let strong_auto_listening_signal = should_auto_listen(
                     &candidates,
                     source,
-                    auto_listening_enabled,
+                    auto_listening_enabled && !suppress_auto_listening_until_quiet,
                     cfg!(target_os = "macos"),
                 );
                 match session.observe(
@@ -341,13 +362,23 @@ async fn run_detection_loop(
                     }
                     DetectionEvent::StartAutoListening => {
                         let Some(source) = source else { continue };
-                        start_auto_listening(
+                        let apps: Vec<_> = candidates.into_iter().collect();
+                        if let Err(error) = start_auto_listening(
                             &app,
                             &auto_listening_state,
-                            candidates.into_iter().collect(),
+                            apps.clone(),
                             source,
                         )
-                        .await;
+                        .await
+                        {
+                            log::warn!("Auto-listening start was rejected safely: {error}");
+                            session = DetectionSession {
+                                active_polls: REQUIRED_ACTIVE_POLLS,
+                                notified: true,
+                                ..DetectionSession::default()
+                            };
+                            deliver_detection(&app, MeetingDetectedEvent { apps, source }).await;
+                        }
                     }
                     DetectionEvent::StopAutoListening => {
                         stop_auto_listening(&app, &auto_listening_state).await;
@@ -407,56 +438,74 @@ async fn start_auto_listening(
     shared: &Arc<Mutex<AutoListeningSharedState>>,
     apps: Vec<MeetingApp>,
     source: DetectionSource,
-) {
+) -> Result<(), String> {
     let session_id = Uuid::new_v4().to_string();
-    if let Ok(mut state) = shared.lock() {
-        state.active_capture_session_id = Some(session_id.clone());
-    }
-
-    if let Some(state) = app.try_state::<AppState>() {
-        let client_kinds = serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string());
-        if let Err(error) = sqlx::query(
-            "INSERT INTO capture_sessions( \
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "application database state is unavailable".to_string())?;
+    let client_kinds = serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string());
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| format!("could not begin capture session: {error}"))?;
+    sqlx::query(
+        "INSERT INTO capture_sessions( \
                 id, source, client_kinds, status, capture_started_at, retention_expires_at \
              ) VALUES(?, ?, ?, 'start_requested', datetime('now'), \
                       datetime('now', '+' || (SELECT unpromoted_retention_minutes \
                         FROM capture_retention_policy WHERE id=1) || ' minutes'))",
-        )
-        .bind(&session_id)
-        .bind(match source {
-            DetectionSource::NativeProcess => "native_process",
-            DetectionSource::MicrophoneActivity => "microphone_activity",
-        })
-        .bind(client_kinds)
-        .execute(state.db_manager.pool())
-        .await
-        {
-            log::warn!("Could not persist auto-listening capture start: {error}");
-        } else if let Err(error) = sqlx::query(
-            "INSERT INTO capture_observations( \
+    )
+    .bind(&session_id)
+    .bind(match source {
+        DetectionSource::NativeProcess => "native_process",
+        DetectionSource::MicrophoneActivity => "microphone_activity",
+    })
+    .bind(client_kinds)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("could not persist capture session: {error}"))?;
+    sqlx::query(
+        "INSERT INTO capture_observations( \
                 capture_session_id, offset_ms, signal_kind, signal_state, source, confidence \
              ) VALUES(?, 0, 'client', 'active', ?, 0.95)",
-        )
-        .bind(&session_id)
-        .bind(match source {
-            DetectionSource::NativeProcess => "native_process",
-            DetectionSource::MicrophoneActivity => "microphone_activity",
-        })
-        .execute(state.db_manager.pool())
+    )
+    .bind(&session_id)
+    .bind(match source {
+        DetectionSource::NativeProcess => "native_process",
+        DetectionSource::MicrophoneActivity => "microphone_activity",
+    })
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("could not persist capture transition: {error}"))?;
+    tx.commit()
         .await
-        {
-            log::warn!("Could not persist capture transition: {error}");
-        }
+        .map_err(|error| format!("could not commit capture session: {error}"))?;
+    if let Ok(mut shared) = shared.lock() {
+        shared.active_capture_session_id = Some(session_id.clone());
     }
-
-    let _ = app.emit(
+    if let Err(error) = app.emit(
         "auto-listening-start-requested",
         AutoListeningEvent {
-            session_id,
+            session_id: session_id.clone(),
             apps,
             source,
         },
-    );
+    ) {
+        if let Ok(mut shared) = shared.lock() {
+            shared.active_capture_session_id = None;
+        }
+        let _ = sqlx::query(
+            "UPDATE capture_sessions SET status='failed', failure_reason='start_failed', \
+                    updated_at=datetime('now') WHERE id=?",
+        )
+        .bind(&session_id)
+        .execute(state.db_manager.pool())
+        .await;
+        return Err(format!("could not request recording start: {error}"));
+    }
+    Ok(())
 }
 
 async fn stop_auto_listening(app: &AppHandle<Wry>, shared: &Arc<Mutex<AutoListeningSharedState>>) {
@@ -511,8 +560,19 @@ pub struct AutoListeningStartResult {
 pub async fn report_auto_listening_start(
     input: AutoListeningStartResult,
     state: State<'_, AppState>,
+    detector: State<'_, AutoMeetingDetectionState>,
 ) -> Result<(), String> {
-    persist_auto_listening_start(state.db_manager.pool(), input).await
+    let failed_session = (!input.success).then(|| input.session_id.clone());
+    let persisted = persist_auto_listening_start(state.db_manager.pool(), input).await;
+    if let Some(session_id) = failed_session {
+        if let Ok(mut shared) = detector.auto_listening.lock() {
+            if shared.active_capture_session_id.as_deref() == Some(session_id.as_str()) {
+                shared.active_capture_session_id = None;
+            }
+            shared.start_failed = true;
+        }
+    }
+    persisted
 }
 
 async fn persist_auto_listening_start(
@@ -526,7 +586,7 @@ async fn persist_auto_listening_start(
             "model_unavailable" | "permission_denied" | "start_failed"
         )
     });
-    sqlx::query(
+    let update = sqlx::query(
         "UPDATE capture_sessions \
          SET status=?, \
              recording_started_at=CASE WHEN ? THEN datetime('now') ELSE recording_started_at END, \
@@ -540,6 +600,9 @@ async fn persist_auto_listening_start(
     .execute(pool)
     .await
     .map_err(|error| error.to_string())?;
+    if update.rows_affected() != 1 {
+        return Err(format!("Capture session {} not found", input.session_id));
+    }
     if input.success {
         sqlx::query(
             "INSERT INTO capture_observations( \
@@ -1456,6 +1519,10 @@ mod tests {
         let mut session = DetectionSession::default();
         assert_eq!(
             session.observe(true, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
             DetectionEvent::SuggestRecording
         );
         assert_eq!(
@@ -1468,6 +1535,10 @@ mod tests {
         );
         assert_eq!(
             session.observe(false, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
             DetectionEvent::None
         );
         assert_eq!(
@@ -1498,10 +1569,14 @@ mod tests {
         let mut session = DetectionSession::default();
         assert_eq!(
             session.observe(true, false, true, false),
-            DetectionEvent::SuggestRecording
+            DetectionEvent::None
         );
         assert_eq!(
             session.observe(true, false, false, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
             DetectionEvent::None
         );
         assert_eq!(
@@ -1546,12 +1621,6 @@ mod tests {
     #[test]
     fn disabling_detection_stops_an_active_auto_listening_session() {
         let mut session = DetectionSession::default();
-        for _ in 0..REQUIRED_ACTIVE_POLLS - 1 {
-            assert_eq!(
-                session.observe(true, false, true, true),
-                DetectionEvent::None
-            );
-        }
         assert_eq!(
             session.observe(true, false, true, true),
             DetectionEvent::StartAutoListening

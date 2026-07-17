@@ -179,6 +179,10 @@ CREATE TABLE IF NOT EXISTS voice_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_voice_samples_speaker_eligibility
     ON voice_samples(speaker_id, eligibility, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_voice_samples_cluster
+    ON voice_samples(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_voice_samples_assertion
+    ON voice_samples(assertion_id);
 
 CREATE TABLE IF NOT EXISTS voice_centroids (
     id INTEGER PRIMARY KEY,
@@ -205,6 +209,7 @@ CREATE TABLE IF NOT EXISTS speaker_profile_versions (
     build_reason TEXT NOT NULL,
     evidence_cutoff_id INTEGER,
     snapshot_json TEXT NOT NULL,
+    published_embedding BLOB NOT NULL,
     model_version TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -246,6 +251,20 @@ CREATE INDEX IF NOT EXISTS idx_terminology_terms_review
     ON terminology_terms(status, support_count DESC, last_seen_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_terminology_terms_scope_unique
     ON terminology_terms(scope_kind, COALESCE(scope_id, -1), normalized_canonical);
+
+CREATE TABLE IF NOT EXISTS terminology_term_versions (
+    id INTEGER PRIMARY KEY,
+    term_id INTEGER NOT NULL REFERENCES terminology_terms(id) ON DELETE CASCADE,
+    previous_canonical TEXT NOT NULL,
+    new_canonical TEXT NOT NULL,
+    previous_status TEXT NOT NULL,
+    new_status TEXT NOT NULL,
+    previous_version INTEGER NOT NULL CHECK (previous_version >= 1),
+    new_version INTEGER NOT NULL CHECK (new_version > previous_version),
+    actor_kind TEXT NOT NULL DEFAULT 'user' CHECK (actor_kind IN ('user', 'system')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(term_id, new_version)
+);
 
 CREATE TABLE IF NOT EXISTS terminology_aliases (
     id INTEGER PRIMARY KEY,

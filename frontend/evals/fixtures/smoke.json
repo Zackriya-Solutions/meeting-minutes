@@ -23,6 +23,15 @@
   ],
   "identity": [
     {
+      "id": "known-auto-assign",
+      "expected_speaker": "anna",
+      "predicted_speaker": "anna",
+      "decision": "auto_assign",
+      "final_speaker": "anna",
+      "added_to_profile": false,
+      "channel": "microphone"
+    },
+    {
       "id": "known-high-margin",
       "expected_speaker": "anna",
       "predicted_speaker": "anna",

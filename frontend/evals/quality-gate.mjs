@@ -163,7 +163,9 @@ function identityMetrics(rows) {
     auto_assign_count: autoAssignments.length,
     correct_auto_assignments: correctAuto,
     false_auto_assignments: falseAuto,
-    auto_assignment_precision: autoAssignments.length ? correctAuto / autoAssignments.length : 1,
+    auto_assignment_precision: autoAssignments.length
+      ? correctAuto / autoAssignments.length
+      : null,
     unknown_false_accept_rate: unknown.length ? falseUnknownAccepts / unknown.length : null,
     reviewed_known_resolution_rate: known.length ? resolvedKnown / known.length : null,
     training_sample_count: trainingSamples.length,

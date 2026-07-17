@@ -24,6 +24,7 @@
     "retrieval.answerable_count": 1,
     "identity.known_count": 2,
     "identity.unknown_count": 1,
+    "identity.auto_assign_count": 1,
     "identity.auto_assignment_precision": 0.99,
     "identity.reviewed_known_resolution_rate": 0.9,
     "retrieval.unanswerable_count": 1,

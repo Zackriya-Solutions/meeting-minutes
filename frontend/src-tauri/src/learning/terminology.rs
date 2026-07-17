@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -96,18 +96,21 @@ fn changed_phrase(before: &str, after: &str) -> Option<(String, String)> {
     Some((alias, canonical))
 }
 
-async fn terminology_scope(pool: &SqlitePool, meeting_id: &str) -> (String, Option<i64>) {
+async fn terminology_scope(
+    tx: &mut Transaction<'_, Sqlite>,
+    meeting_id: &str,
+) -> Result<(String, Option<i64>), String> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT c.id, c.kind FROM meeting_collections mc \
          JOIN collections c ON c.id=mc.collection_id \
          WHERE mc.meeting_id=? ORDER BY CASE c.kind WHEN 'series' THEN 0 ELSE 1 END, c.id",
     )
     .bind(meeting_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **tx)
     .await
-    .unwrap_or_default();
+    .map_err(|error| format!("Failed to resolve terminology scope: {error}"))?;
     if let Some((id, kind)) = rows.first() {
-        return (
+        return Ok((
             if kind == "series" {
                 "series"
             } else {
@@ -115,26 +118,26 @@ async fn terminology_scope(pool: &SqlitePool, meeting_id: &str) -> (String, Opti
             }
             .to_string(),
             Some(*id),
-        );
+        ));
     }
-    ("global".to_string(), None)
+    Ok(("global".to_string(), None))
 }
 
 async fn upsert_terminology_candidate(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     meeting_id: &str,
     transcript_id: &str,
     correction_id: i64,
     alias: &str,
     canonical: &str,
 ) -> Result<i64, String> {
-    let (scope_kind, scope_id) = terminology_scope(pool, meeting_id).await;
+    let (scope_kind, scope_id) = terminology_scope(tx, meeting_id).await?;
     let normalized_canonical = normalize(canonical);
     let term_id: i64 = sqlx::query_scalar(
         "INSERT INTO terminology_terms( \
             scope_kind, scope_id, canonical, normalized_canonical, confidence, support_count \
          ) VALUES(?, ?, ?, ?, 0.60, 1) \
-         ON CONFLICT DO UPDATE SET \
+         ON CONFLICT(scope_kind, COALESCE(scope_id, -1), normalized_canonical) DO UPDATE SET \
             support_count=terminology_terms.support_count+1, \
             confidence=MIN(0.95, terminology_terms.confidence+0.08), \
             last_seen_at=datetime('now') \
@@ -144,7 +147,7 @@ async fn upsert_terminology_candidate(
     .bind(scope_id)
     .bind(canonical.trim())
     .bind(&normalized_canonical)
-    .fetch_one(pool)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|error| format!("Failed to store terminology candidate: {error}"))?;
     let normalized_alias = normalize(alias);
@@ -158,7 +161,7 @@ async fn upsert_terminology_candidate(
     .bind(term_id)
     .bind(alias.trim())
     .bind(normalized_alias)
-    .fetch_one(pool)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|error| format!("Failed to store terminology alias: {error}"))?;
     sqlx::query(
@@ -172,7 +175,7 @@ async fn upsert_terminology_candidate(
     .bind(meeting_id)
     .bind(transcript_id)
     .bind(correction_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await
     .map_err(|error| format!("Failed to store terminology evidence: {error}"))?;
     Ok(term_id)
@@ -180,6 +183,21 @@ async fn upsert_terminology_candidate(
 
 pub async fn correct_transcript(
     pool: &SqlitePool,
+    input: TranscriptCorrectionInput,
+) -> Result<TranscriptCorrectionResult, String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin transcript correction: {error}"))?;
+    let result = correct_transcript_in_transaction(&mut tx, input).await?;
+    tx.commit()
+        .await
+        .map_err(|error| format!("Failed to commit transcript correction: {error}"))?;
+    Ok(result)
+}
+
+pub(crate) async fn correct_transcript_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
     input: TranscriptCorrectionInput,
 ) -> Result<TranscriptCorrectionResult, String> {
     let corrected = input.corrected_text.trim();
@@ -191,7 +209,7 @@ pub async fn correct_transcript(
                 transcript_version FROM transcripts WHERE id=?",
     )
     .bind(&input.transcript_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|error| format!("Failed to load transcript: {error}"))?
     .ok_or_else(|| format!("Transcript {} not found", input.transcript_id))?;
@@ -212,20 +230,23 @@ pub async fn correct_transcript(
     }
     let new_version = previous_version + 1;
     let correction_uuid = Uuid::new_v4().to_string();
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("Failed to begin transcript correction: {error}"))?;
-    sqlx::query(
+    let update = sqlx::query(
         "UPDATE transcripts SET raw_transcript=COALESCE(raw_transcript, transcript), \
-                transcript=?, transcript_version=? WHERE id=?",
+                transcript=?, transcript_version=? WHERE id=? AND transcript_version=?",
     )
     .bind(corrected)
     .bind(new_version)
     .bind(&input.transcript_id)
-    .execute(&mut *tx)
+    .bind(previous_version)
+    .execute(&mut **tx)
     .await
     .map_err(|error| format!("Failed to apply transcript correction: {error}"))?;
+    if update.rows_affected() != 1 {
+        return Err(
+            "Transcript changed while this correction was being saved; reload and try again"
+                .to_string(),
+        );
+    }
     let correction_id: i64 = sqlx::query_scalar(
         "INSERT INTO transcript_corrections( \
             correction_uuid, transcript_id, meeting_id, previous_text, corrected_text, \
@@ -239,7 +260,7 @@ pub async fn correct_transcript(
     .bind(corrected)
     .bind(previous_version)
     .bind(new_version)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|error| format!("Failed to log transcript correction: {error}"))?;
     sqlx::query(
@@ -260,7 +281,7 @@ pub async fn correct_transcript(
         })
         .to_string(),
     )
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| format!("Failed to append correction event: {error}"))?;
     sqlx::query(
@@ -268,7 +289,7 @@ pub async fn correct_transcript(
          AND artifact_kind IN ('summary', 'embedding', 'glossary')",
     )
     .bind(&meeting_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| format!("Failed to mark derived artifacts stale: {error}"))?;
     sqlx::query(
@@ -280,17 +301,13 @@ pub async fn correct_transcript(
     .bind(&meeting_id)
     .bind(new_version)
     .bind(json!({"correction_uuid": correction_uuid}).to_string())
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|error| format!("Failed to version transcript artifact: {error}"))?;
-    tx.commit()
-        .await
-        .map_err(|error| format!("Failed to commit transcript correction: {error}"))?;
-
     let terminology_candidate_id = match changed_phrase(&previous, corrected) {
         Some((alias, canonical)) => Some(
             upsert_terminology_candidate(
-                pool,
+                tx,
                 &meeting_id,
                 &input.transcript_id,
                 correction_id,
@@ -361,29 +378,91 @@ pub async fn review_term(pool: &SqlitePool, input: ReviewTerminologyInput) -> Re
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin terminology review: {error}"))?;
+    let existing =
+        sqlx::query("SELECT canonical, status, version FROM terminology_terms WHERE id=?")
+            .bind(input.term_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|error| format!("Failed to load terminology term: {error}"))?
+            .ok_or_else(|| format!("Terminology term {} not found", input.term_id))?;
+    let previous_canonical: String = existing.get("canonical");
+    let previous_status: String = existing.get("status");
+    let previous_version: i64 = existing.get("version");
+    let next_canonical = canonical.unwrap_or(&previous_canonical);
+    let new_version = previous_version + 1;
     let result = sqlx::query(
         "UPDATE terminology_terms SET status=?, canonical=COALESCE(?, canonical), \
                 normalized_canonical=COALESCE(?, normalized_canonical), \
                 confirmed_at=CASE WHEN ?='confirmed' THEN datetime('now') ELSE NULL END, \
-                version=version+1, last_seen_at=datetime('now') WHERE id=?",
+                version=?, last_seen_at=datetime('now') WHERE id=? AND version=?",
     )
     .bind(&input.status)
     .bind(canonical)
     .bind(canonical.map(normalize))
     .bind(&input.status)
+    .bind(new_version)
     .bind(input.term_id)
-    .execute(pool)
+    .bind(previous_version)
+    .execute(&mut *tx)
     .await
     .map_err(|error| format!("Failed to review terminology: {error}"))?;
-    if result.rows_affected() == 0 {
-        return Err(format!("Terminology term {} not found", input.term_id));
+    if result.rows_affected() != 1 {
+        return Err(
+            "Terminology changed while it was being reviewed; reload and retry".to_string(),
+        );
     }
+    sqlx::query(
+        "INSERT INTO terminology_term_versions( \
+            term_id, previous_canonical, new_canonical, previous_status, new_status, \
+            previous_version, new_version \
+         ) VALUES(?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(input.term_id)
+    .bind(&previous_canonical)
+    .bind(next_canonical)
+    .bind(&previous_status)
+    .bind(&input.status)
+    .bind(previous_version)
+    .bind(new_version)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("Failed to version terminology review: {error}"))?;
     sqlx::query("UPDATE terminology_aliases SET status=? WHERE term_id=? AND status='pending'")
         .bind(&input.status)
         .bind(input.term_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| format!("Failed to review terminology aliases: {error}"))?;
+    sqlx::query(
+        "INSERT INTO learning_events( \
+            event_uuid, event_kind, target_type, target_id, actor_kind, trust_tier, \
+            scope, payload_json \
+         ) VALUES(?, 'terminology_reviewed', 'terminology_term', ?, 'user', 'trusted', \
+                  'terminology', ?)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(input.term_id.to_string())
+    .bind(
+        json!({
+            "previous_canonical": previous_canonical,
+            "new_canonical": next_canonical,
+            "previous_status": previous_status,
+            "new_status": &input.status,
+            "previous_version": previous_version,
+            "new_version": new_version
+        })
+        .to_string(),
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("Failed to audit terminology review: {error}"))?;
+    tx.commit()
+        .await
+        .map_err(|error| format!("Failed to commit terminology review: {error}"))?;
     if input.status == "confirmed" {
         if let Err(error) =
             crate::learning::reconciliation::propose_terminology_backfill(pool, input.term_id).await

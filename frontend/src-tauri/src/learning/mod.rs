@@ -226,4 +226,236 @@ mod integration_tests {
                 .unwrap();
         assert_eq!(unchanged, "проверили гига тул вчера");
     }
+
+    #[tokio::test]
+    async fn global_terminology_deduplicates_and_failed_candidate_rolls_back_correction() {
+        let pool = migrated_pool().await;
+        for (meeting_id, transcript_id, text) in [
+            ("term-one", "segment-one", "обновили гига тул сегодня"),
+            ("term-two", "segment-two", "проверили гига тул вчера"),
+        ] {
+            insert_meeting(&pool, meeting_id, "Product sync").await;
+            insert_transcript(&pool, transcript_id, meeting_id, text, 0.0, 3.0).await;
+            super::terminology::correct_transcript(
+                &pool,
+                super::terminology::TranscriptCorrectionInput {
+                    transcript_id: transcript_id.to_string(),
+                    corrected_text: text.replace("гига тул", "GigaTool"),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let terms: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT id, support_count FROM terminology_terms \
+             WHERE scope_kind='global' AND scope_id IS NULL AND normalized_canonical='gigatool'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(terms.len(), 1);
+        assert_eq!(terms[0].1, 2);
+
+        insert_meeting(&pool, "term-failure", "Product sync").await;
+        insert_transcript(
+            &pool,
+            "segment-failure",
+            "term-failure",
+            "обновили альфа тул",
+            0.0,
+            3.0,
+        )
+        .await;
+        sqlx::raw_sql(
+            "CREATE TRIGGER reject_terminology_candidate \
+             BEFORE INSERT ON terminology_terms BEGIN SELECT RAISE(ABORT, 'forced failure'); END;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let result = super::terminology::correct_transcript(
+            &pool,
+            super::terminology::TranscriptCorrectionInput {
+                transcript_id: "segment-failure".to_string(),
+                corrected_text: "обновили AlphaTool".to_string(),
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        let transcript: (String, i64) = sqlx::query_as(
+            "SELECT transcript, transcript_version FROM transcripts WHERE id='segment-failure'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(transcript, ("обновили альфа тул".to_string(), 1));
+        let corrections: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM transcript_corrections WHERE transcript_id='segment-failure'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(corrections, 0);
+    }
+
+    #[tokio::test]
+    async fn profile_rollback_restores_the_exact_published_embedding() {
+        let pool = migrated_pool().await;
+        let version_one: Vec<u8> = [0.25_f32, 0.75_f32]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        let version_two: Vec<u8> = [0.9_f32, 0.1_f32]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        let speaker_id: i64 = sqlx::query_scalar(
+            "INSERT INTO speakers(display_name, voice_embedding, is_confirmed, profile_version) \
+             VALUES('Anna', ?, 1, 2) RETURNING id",
+        )
+        .bind(&version_two)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        for (version, parent, embedding, active) in [
+            (1_i64, None, version_one.clone(), 0_i64),
+            (2_i64, Some(1_i64), version_two.clone(), 1_i64),
+        ] {
+            sqlx::query(
+                "INSERT INTO speaker_profile_versions( \
+                    speaker_id, version, parent_version, build_reason, snapshot_json, \
+                    published_embedding, model_version, is_active \
+                 ) VALUES(?, ?, ?, 'test', '{}', ?, 'test-v1', ?)",
+            )
+            .bind(speaker_id)
+            .bind(version)
+            .bind(parent)
+            .bind(embedding)
+            .bind(active)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        super::identity::rollback_profile(&pool, speaker_id, 1)
+            .await
+            .unwrap();
+        let restored: (Vec<u8>, i64) =
+            sqlx::query_as("SELECT voice_embedding, profile_version FROM speakers WHERE id=?")
+                .bind(speaker_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(restored, (version_one, 1));
+    }
+
+    #[tokio::test]
+    async fn identity_reconciliation_rollback_supersedes_trust_without_rolling_back_the_run() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "reconcile-meeting", "Team sync").await;
+        let previous_speaker: i64 = sqlx::query_scalar(
+            "INSERT INTO speakers(display_name, is_confirmed) VALUES('Speaker old', 0) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let proposed_speaker: i64 = sqlx::query_scalar(
+            "INSERT INTO speakers(display_name, is_confirmed) VALUES('Anna', 1) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let cluster_id: i64 = sqlx::query_scalar(
+            "INSERT INTO speaker_clusters( \
+                meeting_id, diarization_run_id, local_cluster_id, placeholder_speaker_id, \
+                operational_speaker_id, speech_duration_ms, model_version \
+             ) VALUES('reconcile-meeting', 'run-1', 0, ?, ?, 20000, 'voice-v1') RETURNING id",
+        )
+        .bind(previous_speaker)
+        .bind(previous_speaker)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO identity_assertions( \
+                assertion_uuid, cluster_id, polarity, scope, actor_kind, trust_tier, reason \
+             ) VALUES('initial-unknown', ?, 'unknown', 'cluster', 'policy', 'operational', 'initial')",
+        )
+        .bind(cluster_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let run_id: i64 = sqlx::query_scalar(
+            "INSERT INTO reconciliation_runs( \
+                run_uuid, trigger_kind, input_snapshot_json, status \
+             ) VALUES('reconcile-run', 'speaker_profile_updated', '{}', 'proposed') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let suggestion_id: i64 = sqlx::query_scalar(
+            "INSERT INTO reconciliation_suggestions( \
+                run_id, meeting_id, target_type, target_id, suggestion_kind, \
+                previous_value_json, proposed_value_json, confidence \
+             ) VALUES(?, 'reconcile-meeting', 'speaker_cluster', ?, 'identity_backfill', \
+                       ?, ?, 0.95) RETURNING id",
+        )
+        .bind(run_id)
+        .bind(cluster_id.to_string())
+        .bind(serde_json::json!({"speaker_id": previous_speaker}).to_string())
+        .bind(serde_json::json!({"speaker_id": proposed_speaker}).to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO reconciliation_suggestions( \
+                run_id, meeting_id, target_type, target_id, suggestion_kind, \
+                previous_value_json, proposed_value_json, confidence, status \
+             ) VALUES(?, 'reconcile-meeting', 'transcript', 'already-applied', \
+                       'terminology_backfill', '{}', '{}', 0.9, 'applied')",
+        )
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::reconciliation::review_suggestion(
+            &pool,
+            super::reconciliation::ReviewReconciliationInput {
+                suggestion_id,
+                decision: "accepted".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        super::reconciliation::rollback_suggestion(&pool, suggestion_id)
+            .await
+            .unwrap();
+
+        let cluster_speaker: i64 =
+            sqlx::query_scalar("SELECT operational_speaker_id FROM speaker_clusters WHERE id=?")
+                .bind(cluster_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cluster_speaker, previous_speaker);
+        let assertion: (String, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT polarity, speaker_id, supersedes_id FROM identity_assertions \
+             WHERE cluster_id=? ORDER BY id DESC LIMIT 1",
+        )
+        .bind(cluster_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(assertion.0, "unknown");
+        assert_eq!(assertion.1, None);
+        assert!(assertion.2.is_some());
+        let run_status: String =
+            sqlx::query_scalar("SELECT status FROM reconciliation_runs WHERE id=?")
+                .bind(run_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(run_status, "applied");
+    }
 }

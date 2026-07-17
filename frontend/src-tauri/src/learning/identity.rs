@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -15,6 +16,8 @@ const NEW_MODE_THRESHOLD: f32 = 0.78;
 const MIN_TRUSTED_DURATION_MS: i64 = 15_000;
 const MIN_TRUSTED_QUALITY: f64 = 0.65;
 const MAX_TRUSTED_OVERLAP: f64 = 0.10;
+static PROFILE_BUILD_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityPolicy {
@@ -73,9 +76,49 @@ impl IdentityPolicy {
                         policy.auto_assign_threshold = parsed;
                     }
                 }
+                "identity.min_confirm_margin" => {
+                    if let Ok(parsed) = value.parse::<f32>() {
+                        if (0.0..=1.0).contains(&parsed) {
+                            policy.min_confirm_margin = parsed;
+                        }
+                    }
+                }
+                "identity.min_auto_margin" => {
+                    if let Ok(parsed) = value.parse::<f32>() {
+                        if (0.0..=1.0).contains(&parsed) {
+                            policy.min_auto_margin = parsed;
+                        }
+                    }
+                }
+                "identity.min_duration_ms" => {
+                    if let Ok(parsed) = value.parse::<i64>() {
+                        if (1_000..=600_000).contains(&parsed) {
+                            policy.min_duration_ms = parsed;
+                        }
+                    }
+                }
+                "identity.min_quality" => {
+                    if let Ok(parsed) = value.parse::<f64>() {
+                        if (0.0..=1.0).contains(&parsed) {
+                            policy.min_quality = parsed;
+                        }
+                    }
+                }
+                "identity.max_context_boost" => {
+                    if let Ok(parsed) = value.parse::<f32>() {
+                        if (0.0..=0.10).contains(&parsed) {
+                            policy.max_context_boost = parsed;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
+        policy.voice_floor = policy.voice_floor.clamp(0.0, 1.0);
+        policy.confirm_threshold = policy.confirm_threshold.clamp(policy.voice_floor, 1.0);
+        policy.auto_assign_threshold = policy
+            .auto_assign_threshold
+            .clamp(policy.confirm_threshold, 1.0);
         policy
     }
 }
@@ -167,10 +210,10 @@ fn l2_normalize(values: &mut [f32]) {
     }
 }
 
-fn confidence_band(score: f32, margin: f32) -> String {
-    if score >= 0.90 && margin >= 0.08 {
+fn confidence_band(policy: &IdentityPolicy, score: f32, margin: f32) -> String {
+    if score >= policy.auto_assign_threshold && margin >= policy.min_auto_margin {
         "high"
-    } else if score >= 0.76 && margin >= 0.03 {
+    } else if score >= policy.confirm_threshold && margin >= policy.min_confirm_margin {
         "medium"
     } else {
         "low"
@@ -348,7 +391,7 @@ async fn score_candidates(
         .unwrap_or(0.0);
     for candidate in &mut candidates {
         let margin = candidate.combined_score - second_score;
-        candidate.confidence_band = confidence_band(candidate.combined_score, margin);
+        candidate.confidence_band = confidence_band(policy, candidate.combined_score, margin);
         candidate
             .explanation_factors
             .push("voice_match".to_string());
@@ -362,15 +405,21 @@ async fn score_candidates(
     Ok(candidates)
 }
 
-async fn insert_placeholder(tx: &mut Transaction<'_, Sqlite>, ordinal: i64) -> Result<i64, String> {
-    sqlx::query_scalar(
+async fn insert_placeholder(tx: &mut Transaction<'_, Sqlite>) -> Result<i64, String> {
+    let speaker_id: i64 = sqlx::query_scalar(
         "INSERT INTO speakers(display_name, voice_embedding, is_confirmed) \
-         VALUES(?, NULL, 0) RETURNING id",
+         VALUES('Unknown', NULL, 0) RETURNING id",
     )
-    .bind(format!("Speaker {ordinal}"))
     .fetch_one(&mut **tx)
     .await
-    .map_err(|error| format!("Failed to create Unknown speaker: {error}"))
+    .map_err(|error| format!("Failed to create Unknown speaker: {error}"))?;
+    sqlx::query("UPDATE speakers SET display_name=? WHERE id=?")
+        .bind(format!("Speaker {speaker_id}"))
+        .bind(speaker_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| format!("Failed to name Unknown speaker: {error}"))?;
+    Ok(speaker_id)
 }
 
 /// Persist diarized clusters and return the operational speaker used for transcript labels.
@@ -385,12 +434,7 @@ pub async fn resolve_clusters(
 ) -> Result<HashMap<i64, (i64, i64)>, String> {
     let policy = IdentityPolicy::load(pool).await;
     let mut mapping = HashMap::new();
-    let base_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM speakers")
-        .fetch_one(pool)
-        .await
-        .map_err(|error| format!("Failed to count speakers: {error}"))?;
-
-    for (index, (local_cluster_id, embedding)) in cluster_embeddings.iter().enumerate() {
+    for (local_cluster_id, embedding) in cluster_embeddings {
         let duration_ms = cluster_duration_ms(*local_cluster_id, turns);
         let quality = quality_from_duration(duration_ms);
         let embedding_blob = encode_embedding(embedding);
@@ -480,7 +524,7 @@ pub async fn resolve_clusters(
             .begin()
             .await
             .map_err(|error| format!("Failed to begin identity transaction: {error}"))?;
-        let placeholder_id = insert_placeholder(&mut tx, base_count + index as i64 + 1).await?;
+        let placeholder_id = insert_placeholder(&mut tx).await?;
         let operational_id = if decision == IdentityDecision::AutoAssign {
             candidates
                 .first()
@@ -980,6 +1024,7 @@ pub async fn build_profile(
     speaker_id: i64,
     reason: &str,
 ) -> Result<i64, String> {
+    let _build_guard = PROFILE_BUILD_LOCK.lock().await;
     let rows = sqlx::query(
         "SELECT embedding, speech_quality, channel_kind FROM voice_samples \
          WHERE speaker_id=? AND eligibility='trusted' ORDER BY id",
@@ -1017,15 +1062,19 @@ pub async fn build_profile(
     if modes.is_empty() {
         return Err("Trusted samples contain no valid embeddings".to_string());
     }
-
-    let current_version: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(version), 0) FROM speaker_profile_versions WHERE speaker_id=?",
-    )
-    .bind(speaker_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|error| format!("Failed to load profile version: {error}"))?;
-    let new_version = current_version + 1;
+    let mut published_embedding = vec![0.0f32; modes[0].centroid.len()];
+    let mut published_weight = 0.0f32;
+    for mode in &modes {
+        let weight = mode.samples.len() as f32;
+        for (target, value) in published_embedding.iter_mut().zip(mode.centroid.iter()) {
+            *target += value * weight;
+        }
+        published_weight += weight;
+    }
+    for value in &mut published_embedding {
+        *value /= published_weight.max(1.0);
+    }
+    l2_normalize(&mut published_embedding);
     let snapshot = json!({
         "mode_count": modes.len(),
         "sample_count": modes.iter().map(|mode| mode.samples.len()).sum::<usize>(),
@@ -1036,6 +1085,14 @@ pub async fn build_profile(
         .begin()
         .await
         .map_err(|error| format!("Failed to begin profile build: {error}"))?;
+    let current_version: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(version), 0) FROM speaker_profile_versions WHERE speaker_id=?",
+    )
+    .bind(speaker_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| format!("Failed to load profile version: {error}"))?;
+    let new_version = current_version + 1;
     sqlx::query("UPDATE voice_centroids SET is_active=0 WHERE speaker_id=?")
         .bind(speaker_id)
         .execute(&mut *tx)
@@ -1048,21 +1105,21 @@ pub async fn build_profile(
         .map_err(|error| format!("Failed to retire old profile: {error}"))?;
     sqlx::query(
         "INSERT INTO speaker_profile_versions( \
-            speaker_id, version, parent_version, build_reason, snapshot_json, model_version \
-         ) VALUES(?, ?, ?, ?, ?, ?)",
+            speaker_id, version, parent_version, build_reason, snapshot_json, \
+            published_embedding, model_version \
+         ) VALUES(?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(speaker_id)
     .bind(new_version)
     .bind((current_version > 0).then_some(current_version))
     .bind(reason)
     .bind(snapshot.to_string())
+    .bind(encode_embedding(&published_embedding))
     .bind(VOICE_MODEL_VERSION)
     .execute(&mut *tx)
     .await
     .map_err(|error| format!("Failed to persist profile version: {error}"))?;
 
-    let mut legacy = vec![0.0f32; modes[0].centroid.len()];
-    let mut total_weight = 0.0f32;
     for (index, mode) in modes.iter().enumerate() {
         sqlx::query(
             "INSERT INTO voice_centroids( \
@@ -1081,20 +1138,11 @@ pub async fn build_profile(
         .execute(&mut *tx)
         .await
         .map_err(|error| format!("Failed to persist centroid: {error}"))?;
-        let weight = mode.samples.len() as f32;
-        for (target, value) in legacy.iter_mut().zip(mode.centroid.iter()) {
-            *target += value * weight;
-        }
-        total_weight += weight;
     }
-    for value in &mut legacy {
-        *value /= total_weight.max(1.0);
-    }
-    l2_normalize(&mut legacy);
     sqlx::query(
         "UPDATE speakers SET voice_embedding=?, profile_version=?, is_confirmed=1 WHERE id=?",
     )
-    .bind(encode_embedding(&legacy))
+    .bind(encode_embedding(&published_embedding))
     .bind(new_version)
     .bind(speaker_id)
     .execute(&mut *tx)
@@ -1152,17 +1200,17 @@ pub async fn rollback_profile(
         .execute(&mut *tx)
         .await
         .map_err(|error| format!("Failed to rollback profile version: {error}"))?;
-    let centroid_blob: Vec<u8> = sqlx::query_scalar(
-        "SELECT embedding FROM voice_centroids WHERE speaker_id=? AND profile_version=? \
-         ORDER BY sample_count DESC, mode_index LIMIT 1",
+    let published_embedding: Vec<u8> = sqlx::query_scalar(
+        "SELECT published_embedding FROM speaker_profile_versions \
+         WHERE speaker_id=? AND version=?",
     )
     .bind(speaker_id)
     .bind(version)
     .fetch_one(&mut *tx)
     .await
-    .map_err(|error| format!("Failed to load rollback centroid: {error}"))?;
+    .map_err(|error| format!("Failed to load historical profile embedding: {error}"))?;
     sqlx::query("UPDATE speakers SET voice_embedding=?, profile_version=? WHERE id=?")
-        .bind(centroid_blob)
+        .bind(published_embedding)
         .bind(version)
         .bind(speaker_id)
         .execute(&mut *tx)
@@ -1463,5 +1511,39 @@ mod tests {
             modes.push(ModeAccumulator::new(sample, 1.0, "system".into()));
         }
         assert_eq!(modes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn policy_loads_all_runtime_thresholds() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (key, value) in [
+            ("identity.min_confirm_margin", "0.07"),
+            ("identity.min_auto_margin", "0.12"),
+            ("identity.min_duration_ms", "22000"),
+            ("identity.min_quality", "0.81"),
+            ("identity.max_context_boost", "0.09"),
+        ] {
+            sqlx::query("INSERT INTO app_settings_kv(key, value) VALUES(?, ?)")
+                .bind(key)
+                .bind(value)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let policy = IdentityPolicy::load(&pool).await;
+        assert!((policy.min_confirm_margin - 0.07).abs() < f32::EPSILON);
+        assert!((policy.min_auto_margin - 0.12).abs() < f32::EPSILON);
+        assert_eq!(policy.min_duration_ms, 22_000);
+        assert!((policy.min_quality - 0.81).abs() < f64::EPSILON);
+        assert!((policy.max_context_boost - 0.09).abs() < f32::EPSILON);
     }
 }

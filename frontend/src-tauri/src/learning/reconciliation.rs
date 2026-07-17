@@ -126,6 +126,8 @@ pub async fn propose_identity_backfill(
          WHERE sc.embedding IS NOT NULL \
            AND NOT EXISTS( \
              SELECT 1 FROM identity_assertions ia WHERE ia.cluster_id=sc.id \
+               AND ia.id=(SELECT MAX(latest.id) FROM identity_assertions latest \
+                          WHERE latest.cluster_id=sc.id) \
                AND ia.trust_tier='trusted' AND ia.polarity='positive' \
            ) ORDER BY sc.id DESC LIMIT 2000",
     )
@@ -380,6 +382,13 @@ async fn refresh_run_status(pool: &SqlitePool, run_id: i64) -> Result<(), String
     .fetch_one(pool)
     .await
     .map_err(|error| format!("Failed to count applied reconciliation: {error}"))?;
+    let rolled_back: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM reconciliation_suggestions WHERE run_id=? AND status='rolled_back'",
+    )
+    .bind(run_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| format!("Failed to count rolled-back reconciliation: {error}"))?;
     let status = if pending > 0 {
         if applied > 0 {
             "partially_applied"
@@ -388,6 +397,8 @@ async fn refresh_run_status(pool: &SqlitePool, run_id: i64) -> Result<(), String
         }
     } else if applied > 0 {
         "applied"
+    } else if rolled_back > 0 {
+        "rolled_back"
     } else {
         "rejected"
     };
@@ -412,12 +423,17 @@ pub async fn review_suggestion(
     if !matches!(input.decision.as_str(), "accepted" | "rejected") {
         return Err("decision must be accepted or rejected".to_string());
     }
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin reconciliation review: {error}"))?;
     let row = sqlx::query(
-        "SELECT run_id, target_type, target_id, suggestion_kind, proposed_value_json \
+        "SELECT run_id, meeting_id, target_type, target_id, suggestion_kind, \
+                proposed_value_json \
          FROM reconciliation_suggestions WHERE id=? AND status='pending'",
     )
     .bind(input.suggestion_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|error| format!("Failed to load reconciliation suggestion: {error}"))?
     .ok_or_else(|| format!("Pending suggestion {} not found", input.suggestion_id))?;
@@ -434,26 +450,77 @@ pub async fn review_suggestion(
                 let speaker_id = proposed["speaker_id"]
                     .as_i64()
                     .ok_or_else(|| "Identity proposal has no speaker_id".to_string())?;
-                crate::learning::identity::review_identity(
-                    pool,
-                    crate::learning::identity::ReviewIdentityInput {
-                        cluster_id,
-                        decision: "confirm".to_string(),
-                        speaker_id: Some(speaker_id),
-                        display_name: None,
-                        rejected_speaker_id: None,
-                        allow_learning: false,
-                        scope: "cluster".to_string(),
-                    },
+                let speaker_exists: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM speakers WHERE id=? AND deleted_at IS NULL)",
                 )
-                .await?;
+                .bind(speaker_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|error| format!("Failed to validate proposed speaker: {error}"))?;
+                if !speaker_exists {
+                    return Err(format!("Speaker {speaker_id} is unavailable"));
+                }
+                let latest_assertion: Option<i64> = sqlx::query_scalar(
+                    "SELECT id FROM identity_assertions WHERE cluster_id=? ORDER BY id DESC LIMIT 1",
+                )
+                .bind(cluster_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|error| format!("Failed to load prior identity assertion: {error}"))?;
+                sqlx::query(
+                    "INSERT INTO identity_assertions( \
+                        assertion_uuid, cluster_id, speaker_id, polarity, scope, actor_kind, \
+                        trust_tier, confidence, reason, supersedes_id \
+                     ) VALUES(?, ?, ?, 'positive', 'cluster', 'user', 'trusted', 1.0, \
+                              'reconciliation_confirmed_identity', ?)",
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(cluster_id)
+                .bind(speaker_id)
+                .bind(latest_assertion)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| format!("Failed to apply identity reconciliation: {error}"))?;
+                sqlx::query("UPDATE speaker_clusters SET operational_speaker_id=? WHERE id=?")
+                    .bind(speaker_id)
+                    .bind(cluster_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| format!("Failed to update reconciled cluster: {error}"))?;
+                sqlx::query(
+                    "UPDATE transcripts SET speaker_id=? WHERE id IN( \
+                        SELECT transcript_id FROM speaker_cluster_segments WHERE cluster_id=? \
+                     )",
+                )
+                .bind(speaker_id)
+                .bind(cluster_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| format!("Failed to update reconciled transcripts: {error}"))?;
+                sqlx::query(
+                    "INSERT INTO learning_events( \
+                        event_uuid, meeting_id, event_kind, target_type, target_id, actor_kind, \
+                        trust_tier, scope, payload_json \
+                     ) VALUES(?, ?, 'reconciliation_applied', 'speaker_cluster', ?, 'user', \
+                              'trusted', 'cluster', ?)",
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(row.get::<Option<String>, _>("meeting_id"))
+                .bind(cluster_id.to_string())
+                .bind(
+                    json!({"speaker_id": speaker_id, "suggestion_id": input.suggestion_id})
+                        .to_string(),
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| format!("Failed to audit identity reconciliation: {error}"))?;
             }
             "terminology_backfill" => {
                 let corrected_text = proposed["text"]
                     .as_str()
                     .ok_or_else(|| "Terminology proposal has no text".to_string())?;
-                crate::learning::terminology::correct_transcript(
-                    pool,
+                crate::learning::terminology::correct_transcript_in_transaction(
+                    &mut tx,
                     crate::learning::terminology::TranscriptCorrectionInput {
                         transcript_id: row.get("target_id"),
                         corrected_text: corrected_text.to_string(),
@@ -473,19 +540,26 @@ pub async fn review_suggestion(
         "rejected"
     })
     .bind(input.suggestion_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|error| format!("Failed to save reconciliation review: {error}"))?;
+    tx.commit()
+        .await
+        .map_err(|error| format!("Failed to commit reconciliation review: {error}"))?;
     refresh_run_status(pool, run_id).await
 }
 
 pub async fn rollback_suggestion(pool: &SqlitePool, suggestion_id: i64) -> Result<(), String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin reconciliation rollback: {error}"))?;
     let row = sqlx::query(
-        "SELECT run_id, target_id, suggestion_kind, previous_value_json \
+        "SELECT run_id, meeting_id, target_id, suggestion_kind, previous_value_json \
          FROM reconciliation_suggestions WHERE id=? AND status='applied'",
     )
     .bind(suggestion_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|error| format!("Failed to load applied suggestion: {error}"))?
     .ok_or_else(|| format!("Applied suggestion {suggestion_id} not found"))?;
@@ -496,8 +570,8 @@ pub async fn rollback_suggestion(pool: &SqlitePool, suggestion_id: i64) -> Resul
             let text = previous["text"]
                 .as_str()
                 .ok_or_else(|| "Previous transcript text missing".to_string())?;
-            crate::learning::terminology::correct_transcript(
-                pool,
+            crate::learning::terminology::correct_transcript_in_transaction(
+                &mut tx,
                 crate::learning::terminology::TranscriptCorrectionInput {
                     transcript_id: row.get("target_id"),
                     corrected_text: text.to_string(),
@@ -515,17 +589,35 @@ pub async fn rollback_suggestion(pool: &SqlitePool, suggestion_id: i64) -> Resul
                 "SELECT placeholder_speaker_id FROM speaker_clusters WHERE id=?",
             )
             .bind(cluster_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|error| format!("Failed to load Unknown speaker: {error}"))?
             .flatten();
             let restored = speaker_id.or(fallback).ok_or_else(|| {
                 "Cannot restore identity because its previous speaker was deleted".to_string()
             })?;
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|error| format!("Failed to begin identity rollback: {error}"))?;
+            let latest_assertion: Option<(i64, Option<i64>)> = sqlx::query_as(
+                "SELECT id, supersedes_id FROM identity_assertions \
+                 WHERE cluster_id=? ORDER BY id DESC LIMIT 1",
+            )
+            .bind(cluster_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|error| format!("Failed to load applied identity assertion: {error}"))?;
+            let prior_assertion: Option<(Option<i64>, String, String)> =
+                if let Some((_, Some(prior_id))) = latest_assertion {
+                    sqlx::query_as(
+                        "SELECT speaker_id, polarity, scope FROM identity_assertions WHERE id=?",
+                    )
+                    .bind(prior_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(|error| format!("Failed to load superseded identity: {error}"))?
+                } else {
+                    None
+                };
+            let (asserted_speaker, polarity, scope) = prior_assertion
+                .unwrap_or_else(|| (None, "unknown".to_string(), "cluster".to_string()));
             sqlx::query("UPDATE speaker_clusters SET operational_speaker_id=? WHERE id=?")
                 .bind(restored)
                 .bind(cluster_id)
@@ -543,13 +635,30 @@ pub async fn rollback_suggestion(pool: &SqlitePool, suggestion_id: i64) -> Resul
             .await
             .map_err(|error| format!("Failed to restore transcript identity: {error}"))?;
             sqlx::query(
+                "INSERT INTO identity_assertions( \
+                    assertion_uuid, cluster_id, speaker_id, polarity, scope, actor_kind, \
+                    trust_tier, confidence, reason, supersedes_id \
+                 ) VALUES(?, ?, ?, ?, ?, 'user', 'trusted', 1.0, \
+                          'reconciliation_identity_rolled_back', ?)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(cluster_id)
+            .bind(asserted_speaker)
+            .bind(polarity)
+            .bind(scope)
+            .bind(latest_assertion.map(|(id, _)| id))
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("Failed to supersede reconciled identity: {error}"))?;
+            sqlx::query(
                 "INSERT INTO learning_events( \
-                    event_uuid, event_kind, target_type, target_id, actor_kind, trust_tier, \
+                    event_uuid, meeting_id, event_kind, target_type, target_id, actor_kind, trust_tier, \
                     scope, payload_json \
-                 ) VALUES(?, 'reconciliation_rolled_back', 'speaker_cluster', ?, \
+                 ) VALUES(?, ?, 'reconciliation_rolled_back', 'speaker_cluster', ?, \
                           'user', 'trusted', 'cluster', ?)",
             )
             .bind(Uuid::new_v4().to_string())
+            .bind(row.get::<Option<String>, _>("meeting_id"))
             .bind(cluster_id.to_string())
             .bind(
                 json!({"restored_speaker_id": restored, "suggestion_id": suggestion_id})
@@ -558,9 +667,6 @@ pub async fn rollback_suggestion(pool: &SqlitePool, suggestion_id: i64) -> Resul
             .execute(&mut *tx)
             .await
             .map_err(|error| format!("Failed to log identity rollback: {error}"))?;
-            tx.commit()
-                .await
-                .map_err(|error| format!("Failed to commit identity rollback: {error}"))?;
         }
         other => return Err(format!("Unsupported reconciliation kind: {other}")),
     }
@@ -570,17 +676,13 @@ pub async fn rollback_suggestion(pool: &SqlitePool, suggestion_id: i64) -> Resul
          WHERE id=?",
     )
     .bind(suggestion_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|error| format!("Failed to mark reconciliation rollback: {error}"))?;
-    sqlx::query(
-        "UPDATE reconciliation_runs SET status='rolled_back', completed_at=datetime('now') WHERE id=?",
-    )
-    .bind(run_id)
-    .execute(pool)
-    .await
-    .map_err(|error| format!("Failed to mark reconciliation run rollback: {error}"))?;
-    Ok(())
+    tx.commit()
+        .await
+        .map_err(|error| format!("Failed to commit reconciliation rollback: {error}"))?;
+    refresh_run_status(pool, run_id).await
 }
 
 #[tauri::command]
