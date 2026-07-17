@@ -319,8 +319,13 @@ fn build_session(model_path: &Path) -> Result<ort::session::Session> {
         .map_err(|e| anyhow!("ort builder: {e}"))?
         // Inputs have dynamic sequence lengths. Memory patterns and the CPU arena retain
         // peak allocations between archive-backfill batches, which can exhaust RAM+swap.
+        // Prepacking also keeps transformed copies of MatMul weights for the lifetime of
+        // the session. That is a useful speed tradeoff for small models, but FRIDA's 3.3 GB
+        // weights can expand into tens of GiB of MALLOC_LARGE regions on a 16 GB Mac.
         .with_memory_pattern(false)
         .map_err(|e| anyhow!("ort memory pattern: {e}"))?
+        .with_prepacking(false)
+        .map_err(|e| anyhow!("ort prepacking: {e}"))?
         .with_execution_providers([CPUExecutionProvider::default()
             .with_arena_allocator(false)
             .build()])
