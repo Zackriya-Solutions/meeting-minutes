@@ -21,14 +21,17 @@ use std::io::{BufReader, Read};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
 use super::audio_processing::create_meeting_folder;
-use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
+use super::common::{
+    create_transcript_segments, process_bounded_ordered, split_segment_at_silence,
+    write_transcripts_json, CLOUD_TRANSCRIPTION_MAX_CONCURRENCY,
+};
 use super::constants::AUDIO_EXTENSIONS;
 use super::ffmpeg::find_ffmpeg_path;
 use super::recording_preferences::get_default_recordings_folder;
@@ -1293,6 +1296,81 @@ async fn run_import<R: Runtime>(
         processable_count
     );
 
+    // SaluteSpeech is an independent HTTP request per segment, so it benefits from
+    // bounded concurrency. Keep local engines sequential: they share mutable model
+    // state and parallel calls would add contention (or exceed GPU/RAM capacity).
+    let salute_results = if use_salutespeech {
+        use crate::audio::transcription::TranscriptionProvider;
+
+        let provider = salute_provider
+            .as_ref()
+            .expect("SaluteSpeech provider built above when use_salutespeech");
+        let completed = Arc::new(AtomicUsize::new(0));
+        let segment_indices: Vec<usize> = (0..processable_count).collect();
+        let segments = &processable_segments;
+        info!(
+            "Transcribing {} SaluteSpeech segments with up to {} concurrent requests",
+            processable_count, CLOUD_TRANSCRIPTION_MAX_CONCURRENCY
+        );
+
+        Some(
+            process_bounded_ordered(segment_indices, CLOUD_TRANSCRIPTION_MAX_CONCURRENCY, {
+                let app = app.clone();
+                let language = language.clone();
+                let completed = completed.clone();
+                move |index, segment_index| {
+                    let app = app.clone();
+                    let language = language.clone();
+                    let completed = completed.clone();
+                    // Clone only when this future enters the bounded active window.
+                    let samples = segments[segment_index].samples.clone();
+                    async move {
+                        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+                            return Err(anyhow!("Import cancelled"));
+                        }
+
+                        let result =
+                            if samples.len() < 1600 {
+                                debug!(
+                                    "Skipping short segment {} with {} samples",
+                                    index,
+                                    samples.len()
+                                );
+                                None
+                            } else {
+                                Some(provider.transcribe(samples, language).await.map_err(
+                                    |error| {
+                                        anyhow!(
+                                            "SaluteSpeech transcription failed on segment {}: {}",
+                                            index + 1,
+                                            error
+                                        )
+                                    },
+                                )?)
+                            };
+
+                        let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                        let progress =
+                            30 + ((done as f32 / processable_count.max(1) as f32) * 50.0) as u32;
+                        emit_progress(
+                            &app,
+                            "transcribing",
+                            progress,
+                            &format!(
+                                "Transcribed {} of {} segments (up to {} in parallel)...",
+                                done, processable_count, CLOUD_TRANSCRIPTION_MAX_CONCURRENCY
+                            ),
+                        );
+                        Ok(result.map(|result| (result.text, result.confidence)))
+                    }
+                }
+            })
+            .await?,
+        )
+    } else {
+        None
+    };
+
     // Process each speech segment
     let mut all_transcripts: Vec<(String, f64, f64)> = Vec::new();
     let mut total_confidence = 0.0f32;
@@ -1303,19 +1381,21 @@ async fn run_import<R: Runtime>(
             return Err(anyhow!("Import cancelled"));
         }
 
-        let progress = 30 + ((i as f32 / processable_count.max(1) as f32) * 50.0) as u32;
         let segment_duration_sec = (segment.end_timestamp_ms - segment.start_timestamp_ms) / 1000.0;
-        emit_progress(
-            &app,
-            "transcribing",
-            progress,
-            &format!(
-                "Transcribing segment {} of {} ({:.1}s)...",
-                i + 1,
-                processable_count,
-                segment_duration_sec
-            ),
-        );
+        if !use_salutespeech {
+            let progress = 30 + ((i as f32 / processable_count.max(1) as f32) * 50.0) as u32;
+            emit_progress(
+                &app,
+                "transcribing",
+                progress,
+                &format!(
+                    "Transcribing segment {} of {} ({:.1}s)...",
+                    i + 1,
+                    processable_count,
+                    segment_duration_sec
+                ),
+            );
+        }
 
         // Skip very short segments
         if segment.samples.len() < 1600 {
@@ -1328,23 +1408,10 @@ async fn run_import<R: Runtime>(
         }
 
         // Transcribe
-        let (text, conf) = if use_salutespeech {
-            use crate::audio::transcription::TranscriptionProvider;
-            let provider = salute_provider
-                .as_ref()
-                .expect("SaluteSpeech provider built above when use_salutespeech");
-            match provider
-                .transcribe(segment.samples.clone(), language.clone())
-                .await
-            {
-                Ok(r) => (r.text, None),
-                Err(e) => {
-                    return Err(anyhow!(
-                        "SaluteSpeech transcription failed on segment {}: {}",
-                        i,
-                        e
-                    ))
-                }
+        let (text, conf) = if let Some(results) = &salute_results {
+            match &results[i] {
+                Some((text, confidence)) => (text.clone(), *confidence),
+                None => continue,
             }
         } else if use_gigaam {
             match crate::gigaam_engine::transcribe(segment.samples.clone()).await {

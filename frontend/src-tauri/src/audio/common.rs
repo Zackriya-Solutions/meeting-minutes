@@ -1,7 +1,9 @@
 use crate::api::TranscriptSegment;
 use anyhow::Result;
+use futures_util::StreamExt;
 use log::{debug, info};
 use once_cell::sync::Lazy;
+use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -9,6 +11,40 @@ use uuid::Uuid;
 
 static ENGINE_LIFECYCLE_LOCK: Lazy<Arc<AsyncMutex<()>>> =
     Lazy::new(|| Arc::new(AsyncMutex::new(())));
+
+/// Keep cloud batch transcription fast without creating an unbounded request burst.
+/// Local engines intentionally remain sequential because they share mutable model state.
+pub(crate) const CLOUD_TRANSCRIPTION_MAX_CONCURRENCY: usize = 4;
+
+/// Run independent async jobs with bounded concurrency and restore input order.
+///
+/// Cloud transcription responses can complete out of order, but transcript timestamps
+/// must remain chronological. The callback receives the stable input index so callers
+/// can report completion-based progress while this helper handles ordering.
+pub(crate) async fn process_bounded_ordered<T, O, E, F, Fut>(
+    items: Vec<T>,
+    max_concurrency: usize,
+    process: F,
+) -> std::result::Result<Vec<O>, E>
+where
+    F: Fn(usize, T) -> Fut + Clone,
+    Fut: Future<Output = std::result::Result<O, E>>,
+{
+    let limit = max_concurrency.max(1);
+    let mut pending = futures_util::stream::iter(items.into_iter().enumerate())
+        .map(move |(index, item)| {
+            let process = process.clone();
+            async move { process(index, item).await.map(|output| (index, output)) }
+        })
+        .buffer_unordered(limit);
+
+    let mut completed = Vec::new();
+    while let Some(result) = pending.next().await {
+        completed.push(result?);
+    }
+    completed.sort_unstable_by_key(|(index, _)| *index);
+    Ok(completed.into_iter().map(|(_, output)| output).collect())
+}
 
 pub(crate) async fn acquire_engine_lifecycle_lock() -> OwnedMutexGuard<()> {
     ENGINE_LIFECYCLE_LOCK.clone().lock_owned().await
@@ -216,6 +252,7 @@ pub(crate) fn split_segment_at_silence(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test]
     async fn test_engine_lifecycle_lock_serializes_acquirers() {
@@ -234,5 +271,32 @@ mod tests {
 
         acquired_rx.await.unwrap();
         waiter.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounded_processing_limits_concurrency_and_preserves_order() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let output = process_bounded_ordered((0..10).collect(), 3, {
+            let active = active.clone();
+            let peak = peak.clone();
+            move |index, value| {
+                let active = active.clone();
+                let peak = peak.clone();
+                async move {
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    // Finish later inputs first to prove that output ordering is restored.
+                    tokio::time::sleep(std::time::Duration::from_millis((10 - index) as u64)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok::<_, ()>(value)
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(output, (0..10).collect::<Vec<_>>());
+        assert_eq!(peak.load(Ordering::SeqCst), 3);
     }
 }
