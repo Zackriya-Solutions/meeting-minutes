@@ -1,0 +1,155 @@
+# VALUEOS: branch CI for ValueOS Agent (fork of Meetily). Fast feedback on feature branches.
+#   - push to ANY branch EXCEPT main  -> build macOS only, NO tests
+#   - manual "Run workflow"           -> same
+# The test suite + the full 3-OS matrix run on `main` (see valueos-main.yml). Distinctly
+# named so it never collides with any upstream workflow. See valueos/CI.md.
+name: "ValueOS Agent — Branch build (macOS, no tests)"
+
+on:
+  push:
+    branches:
+      - "**"
+      - "!main"
+  workflow_dispatch:
+
+concurrency:
+  group: valueos-branch-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: "macOS (Apple Silicon)"
+            target: aarch64-apple-darwin
+            artifact: valueos-agent-macos
+            sidecar_features: "--features metal"
+            sidecar_src: target/release/llama-helper
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read app version from tauri.conf.json
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' frontend/src-tauri/tauri.conf.json | head -1 | cut -d'"' -f4)
+          echo "Application version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9 # matches frontend/pnpm-lock.yaml (lockfileVersion 9.0)
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + build (workspace target dir)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: |
+          cd frontend
+          # Upstream's committed pnpm-lock.yaml lacks the package.json `overrides` block, so a
+          # frozen (CI-default) install fails; --no-frozen-lockfile reconciles it in the CI
+          # working tree only (nothing committed, no upstream file changed).
+          pnpm install --no-frozen-lockfile
+
+      - name: Build llama-helper sidecar
+        shell: bash
+        run: |
+          # The Tauri bundle declares binaries/llama-helper as an externalBin, so the sidecar
+          # must exist (named with the target triple) BEFORE `tauri build`.
+          cargo build --release -p llama-helper ${{ matrix.sidecar_features }}
+          mkdir -p frontend/src-tauri/binaries
+          cp "${{ matrix.sidecar_src }}" "${{ matrix.sidecar_dst }}"
+          ls -la frontend/src-tauri/binaries/
+
+      - name: Apply ValueOS branding (icons)
+        shell: bash
+        run: bash valueos/branding/apply-branding.sh
+
+      - name: Build Tauri app (unsigned dev build)
+        id: build
+        shell: bash
+        working-directory: frontend
+        run: |
+          # Stamp the build identity + force REAL transport, then build with the ValueOS
+          # overlay (renames the app + disables updater artifacts so no signing key is needed).
+          export NEXT_PUBLIC_VALUEOS_BUILD="${GITHUB_SHA:0:7}"
+          export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export NEXT_PUBLIC_VALUEOS_REAL="on"
+          echo "Stamping build: ${NEXT_PUBLIC_VALUEOS_BUILD} @ ${NEXT_PUBLIC_VALUEOS_BUILD_TIME}"
+          node ../valueos/branding/make-ci-config.js valueos-ci.config.json
+          pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
+
+      - name: List and verify produced installers
+        if: success()
+        shell: bash
+        run: |
+          BUNDLE="target/${{ matrix.target }}/release/bundle"
+          find "${BUNDLE}" -type f \( -name "*.dmg" -o -name "*.app" \) 2>/dev/null || true
+          if [ -z "$(find "${BUNDLE}" -type f -name '*.dmg' 2>/dev/null)" ]; then
+            echo "::error::No .dmg installer found under ${BUNDLE}"
+            exit 1
+          fi
+
+      - name: Upload installers
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/bundle
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write build summary
+        if: always()
+        shell: bash
+        run: |
+          OUTCOME="${{ steps.build.outcome }}"
+          [ "$OUTCOME" = "success" ] && STATUS="✅ Success" || STATUS="❌ Failed"
+          {
+            echo "## ${{ matrix.label }} — ValueOS Agent branch build"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| Platform | ${{ matrix.label }} (\`${{ matrix.os }}\`) |"
+            echo "| Result | ${STATUS} |"
+            echo "| Version | ${{ steps.version.outputs.version }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Ref | \`${{ github.ref_name }}\` |"
+            echo "| Note | Branch build — tests + Windows/Linux run on main (valueos-main.yml) |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"

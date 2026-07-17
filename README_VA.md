@@ -3,12 +3,12 @@
 How to compile the **ValueOS Agent** desktop app (our fork of Meetily) **locally**.
 This is a new, VA-specific file; it does not replace upstream's `README.md`. For the
 fork's overall docs see [`valueos/README.md`](valueos/README.md); for cloud builds (no
-local toolchain needed) see [`valueos/CI-BUILD.md`](valueos/CI-BUILD.md); for the
+local toolchain needed) see [`valueos/CI.md`](valueos/CI.md); for the
 name/icon rebrand see [`valueos/branding/README.md`](valueos/branding/README.md).
 
-> **You usually don't need this.** The GitHub Actions pipeline builds macOS + Windows
-> installers in the cloud on every push. Build locally only when you want to iterate fast
-> or debug. See [CI-BUILD.md](valueos/CI-BUILD.md).
+> **You usually don't need this.** The GitHub Actions pipeline builds installers in the
+> cloud (macOS on every branch; Linux + macOS + Windows on `main`). Build locally only when
+> you want to iterate fast or debug. See [CI.md](valueos/CI.md).
 
 The app is a **Tauri 2** desktop app: a Rust core (`frontend/src-tauri`) + a Next.js 14
 frontend (`frontend/`), plus a `llama-helper` Rust sidecar. The repo root is a **Cargo
