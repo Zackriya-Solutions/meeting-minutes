@@ -117,21 +117,28 @@ export interface UploadRequest {
   title?: string;
 }
 
-/** Body for POST /api/agent/v1/tenants/{tenantId}/calls (VALUEOS_AGENT_API.md §4) — creates a
- *  call activity AND attaches its transcript+digest in one atomic op. FLAT body: raw_content +
- *  digest at the top level. The link is EXACTLY ONE of lead_id / opportunity_id (XOR; both or
- *  neither → 422 {fields.link}). name, raw_content, digest are required; digest is generated
- *  LOCALLY by the agent (ValueOS does not generate it). */
-export interface CreateCallRequest {
-  name: string; // required — the call activity's title (user-chosen at capture time)
+/** The transcript sub-object of POST /calls — a REQUIRED NESTED object (VALUEOS_AGENT_API.md
+ *  §4 explicitly: "do NOT flatten these"). raw_content + digest are required; digest is
+ *  generated LOCALLY by the agent (ValueOS does not generate it). */
+export interface CallTranscript {
   raw_content: string; // required — the transcript text
   digest: string; // required — the high-level recap (agent-generated)
+  digest_source?: string; // default 'ai_generated'
+  content_type?: TranscriptContentType; // must be in the allowed set (else 422)
+  file_name?: string; // default transcript.txt
+  title?: string; // defaults to name/file_name
+}
+
+/** Body for POST /api/agent/v1/tenants/{tenantId}/calls (VALUEOS_AGENT_API.md §4) — creates a
+ *  call activity AND attaches its transcript+digest in one atomic op. The transcript is a
+ *  NESTED object (do NOT flatten). The link is EXACTLY ONE of lead_id / opportunity_id (XOR;
+ *  both or neither → 422 {fields.link}). */
+export interface CreateCallRequest {
+  name: string; // required — the call activity's title (user-chosen at capture time)
   lead_id?: string; // XOR with opportunity_id
   opportunity_id?: string;
-  title?: string; // defaults to the call name
-  file_name?: string; // default transcript.txt
-  content_type?: TranscriptContentType;
-  occurred_at?: string; // optional (default: now)
+  transcript: CallTranscript; // required, nested
+  occurred_at?: string; // optional (must start yyyy-mm-dd, else ignored)
   notes?: string; // optional → stored on the call activity
   idempotency_key?: string; // optional here; if sent, reuse the SAME key on every retry
 }

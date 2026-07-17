@@ -10,8 +10,7 @@ function makeItem(id: string, leadId = 'lead-1') {
     request: {
       name: 'Call with Ada Lovelace',
       lead_id: leadId,
-      raw_content: 'hello',
-      digest: 'recap',
+      transcript: { raw_content: 'hello', digest: 'recap' },
       idempotency_key: id,
     },
   };

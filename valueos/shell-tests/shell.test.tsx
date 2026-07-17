@@ -269,8 +269,8 @@ describe('ValueOS redesigned flow', () => {
     expect(req.name).toBe('Discovery Call — Ada Lovelace'); // wizard default name
     expect(req.lead_id).toBe('lead-1');
     expect(req.opportunity_id).toBeUndefined();
-    expect(req.raw_content).toBe('We discussed pricing and agreed next steps.');
-    expect(req.digest.length).toBeGreaterThan(0);
+    expect(req.transcript.raw_content).toBe('We discussed pricing and agreed next steps.');
+    expect(req.transcript.digest.length).toBeGreaterThan(0);
     expect(req.idempotency_key).toBeTruthy();
     // the captured transcript now appears in the list
     expect(screen.getByTestId('valueos-transcripts')).toHaveTextContent('Ada Lovelace');

@@ -163,8 +163,8 @@ export class MockValueOsClient implements ValueOsClient {
     const hasOpp = !!req.opportunity_id;
     const fields: Record<string, string> = {};
     if (!req.name) fields.name = 'required';
-    if (!req.raw_content) fields.raw_content = 'required';
-    if (!req.digest) fields.digest = 'required';
+    if (!req.transcript?.raw_content) fields['transcript.raw_content'] = 'required';
+    if (!req.transcript?.digest) fields['transcript.digest'] = 'required';
     if (hasLead === hasOpp) fields.link = 'exactly one of lead_id / opportunity_id is required';
     if (Object.keys(fields).length) throw new ValueOsApiError(422, 'Invalid request body', { fields });
 
