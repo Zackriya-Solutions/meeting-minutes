@@ -77,7 +77,9 @@ ps -axo pid=,ppid=,%cpu=,rss=,vsz=,state=,etime=,comm= \
 if [[ -n "$selected_pid" ]]; then
   echo "Found Memento PID $selected_pid (RSS $((largest_rss / 1024)) MB)."
 
-  ps -p "$selected_pid" -o pid=,ppid=,user=,%cpu=,%mem=,rss=,vsz=,state=,etime=,command= \
+  # comm reports the executable path without argv, so deep-link or opened-file
+  # arguments cannot leak into the diagnostic archive.
+  ps -p "$selected_pid" -o pid=,ppid=,user=,%cpu=,%mem=,rss=,vsz=,state=,etime=,comm= \
     > "$bundle_dir/memento-process.txt" 2>&1 || true
 
   executable_path="$(ps -p "$selected_pid" -o comm= 2>/dev/null | sed 's/^[[:space:]]*//')"
@@ -190,7 +192,7 @@ fi
 for diagnostic_file in "$bundle_dir"/*.txt "$bundle_dir"/*.csv; do
   [[ -f "$diagnostic_file" ]] || continue
   sed "s|$user_home|<HOME>|g" "$diagnostic_file" \
-    | sed -E 's#<HOME>/[^[:space:]\]\)\}\",;]+#<HOME>/<REDACTED_PATH>#g' \
+    | sed -E 's#<HOME>/.*#<HOME>/<REDACTED_PATH>#g' \
     > "$diagnostic_file.redacted"
   mv "$diagnostic_file.redacted" "$diagnostic_file"
 done
