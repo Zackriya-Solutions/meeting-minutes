@@ -8,7 +8,8 @@ those were all manual (`workflow_dispatch`) and are not needed for our fork.
 | Workflow | Fires on | What it does |
 |---|---|---|
 | **`valueos-branch.yml`** | push to any branch **except `main`**, or a manual run | Builds a **macOS** installer only. **No tests.** Fast feedback while you iterate on a feature branch. |
-| **`valueos-main.yml`** | push to **`main`**, a **`v*`** tag, or a manual run | **Stage 1:** runs all ValueOS tests (must pass). **Stage 2:** builds **Linux + macOS + Windows** installers. The build only runs if the tests pass. |
+| **`valueos-main.yml`** | push to **`main`**, or a manual run | **Stage 1:** runs all ValueOS tests (must pass). **Stage 2:** builds **Linux + macOS + Windows** installers. The build only runs if the tests pass. |
+| **`publish-agent.yml`** | push a **`v*`** tag, or a manual run | **Publishes a release** (VALUEOS_AGENT_API.md §8): tests → build all three → upload each installer to the private S3 bucket → register with ValueOS. See below. |
 
 ## Why this split
 
@@ -55,12 +56,35 @@ This is a **GitHub UI setting, not a workflow change**:
 
 Neither of these is controlled by the YAML in `.github/workflows/`.
 
-## Deferred: publish-to-S3 CI (not built yet)
+## Publishing a release (`publish-agent.yml` + `scripts/publish-agent-release.sh`)
 
-A future workflow will publish signed release artifacts to the ValueOS distribution bucket so
-the in-app updater (see `valueos/FEATURE-updater.md`) can serve them. Publishing is **CI-only**
-and authenticated with an `x-api-key` on the ValueOS side (not a user/agent OAuth token). It
-is **intentionally not implemented here** — it's a one-paragraph placeholder pending the
-publish key and the publish interface/contract. When that lands, it becomes a third
-`valueos-`named workflow (triggered on `v*` tags) that uploads the built installers +
-`latest.json` manifest to the bucket.
+Publishing is **CI-only, machine-to-machine** — authenticated with an `x-api-key`
+(`AGENT_API_KEY`), **not** a user/agent OAuth token (VALUEOS_AGENT_API.md §8).
+
+Flow, on a `v*` tag (or a manual run):
+1. **Tests** run (same gate as `main`) — a failing suite blocks the publish.
+2. **Build** macOS + Windows + Linux installers (`.dmg` / `.msi` / `.AppImage`).
+3. **Upload** each installer to the private S3 bucket
+   `va-pptx-agents-agent-releases-018326344230` under
+   `agent-releases/<git-sha>/<platform>/<filename>`.
+4. **Register** with ValueOS: `scripts/publish-agent-release.sh` POSTs
+   `https://d2luofz0a4v7f3.cloudfront.net/api/agent/releases` with header `x-api-key` and body
+   `{ git_ref, notes?, artifacts:[{ platform, s3_key, size_bytes, checksum, content_type }] }`.
+   ValueOS assigns the version (calendar `YYYY.MM.DD.<seq>`), marks it current, and the release
+   is **immutable**. Once published, the Sales download button + admin Agent Usage tab light up
+   for `feat_agent` tenants.
+
+The self-updater downloads + opens these plain installers via a short-lived presigned URL from
+`updates/check` (see `valueos/FEATURE-updater.md`) — it does **not** use Tauri's signed updater
+bundles, so no minisign signing key is needed; integrity is the SHA-256 recorded on the release.
+
+**To publish the first build:** set the three CI secrets (below), then push a `v*` tag (e.g.
+`git tag v0.0.1 && git push value-accelerator v0.0.1`) or run the workflow manually.
+
+**Required GitHub Actions secrets** (already provisioned on the ValueOS side; never commit):
+- `AGENT_API_KEY` — the publish `x-api-key`.
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — AWS creds with `s3:PutObject` on the bucket
+  (region `eu-central-2`).
+
+`scripts/publish-agent-release.sh` supports `DRY_RUN=1` to print the exact request body without
+posting — handy for verifying wiring before the first real publish.

@@ -9,9 +9,8 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   workflow_dispatch:
+# Note: v* tags are handled by publish-agent.yml (build → S3 → register the release), not here.
 
 concurrency:
   group: valueos-main-${{ github.ref }}

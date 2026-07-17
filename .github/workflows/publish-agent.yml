@@ -1,0 +1,225 @@
+# VALUEOS: publish an agent release (VALUEOS_AGENT_API.md §8). Machine-to-machine, NOT a user
+# token. On a v* tag (or manual run): run the tests, build installers for macOS/Windows/Linux,
+# upload each to the private S3 bucket, then POST /api/agent/releases with the x-api-key so
+# ValueOS assigns the version + marks it current. Once published, the Sales download button +
+# admin Agent Usage tab light up for feat_agent tenants. See valueos/CI.md.
+#
+# Required CI secrets (never commit): AGENT_API_KEY (the x-api-key),
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (with s3:PutObject on the release bucket).
+name: "ValueOS Agent — Publish release"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Release notes (optional)"
+        type: string
+        default: ""
+
+concurrency:
+  group: valueos-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: always
+  AWS_REGION: eu-central-2
+  RELEASE_BUCKET: va-pptx-agents-agent-releases-018326344230
+
+jobs:
+  # Gate: publish only builds that pass our tests.
+  test:
+    name: ValueOS tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: valueos/shell-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: valueos/shell-tests/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  # Build each platform's installer, upload it to S3, and emit its release metadata.
+  build:
+    name: Build + upload ${{ matrix.label }}
+    needs: [test]
+    if: ${{ needs.test.result == 'success' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true # a partial release is worse than none — all platforms or nothing
+      matrix:
+        include:
+          - os: macos-latest
+            label: "macOS (Apple Silicon)"
+            platform: macos
+            target: aarch64-apple-darwin
+            sidecar_features: "--features metal"
+            sidecar_src: target/release/llama-helper
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin
+            bundle_args: ""
+            installer_glob: "*.dmg"
+            content_type: application/x-apple-diskimage
+          - os: windows-latest
+            label: "Windows (x64)"
+            platform: windows
+            target: x86_64-pc-windows-msvc
+            sidecar_features: ""
+            sidecar_src: target/release/llama-helper.exe
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe
+            bundle_args: ""
+            installer_glob: "*.msi"
+            content_type: application/x-msdownload
+          - os: ubuntu-22.04
+            label: "Linux (x64)"
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+            sidecar_features: ""
+            sidecar_src: target/release/llama-helper
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+            bundle_args: "--bundles deb,appimage"
+            installer_glob: "*.AppImage"
+            content_type: application/octet-stream
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libopenblas-dev \
+            libx11-dev libxtst-dev libxrandr-dev fuse libfuse2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache cargo registry + build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: cd frontend && pnpm install --no-frozen-lockfile
+
+      - name: Build llama-helper sidecar
+        shell: bash
+        run: |
+          cargo build --release -p llama-helper ${{ matrix.sidecar_features }}
+          mkdir -p frontend/src-tauri/binaries
+          cp "${{ matrix.sidecar_src }}" "${{ matrix.sidecar_dst }}"
+
+      - name: Apply ValueOS branding (icons)
+        shell: bash
+        run: bash valueos/branding/apply-branding.sh
+
+      - name: Build Tauri app (unsigned installer)
+        shell: bash
+        working-directory: frontend
+        run: |
+          # Plain installers (dmg/msi/AppImage). The self-updater downloads + opens these via
+          # a presigned URL — it does NOT use Tauri's signed updater bundles — so no minisign
+          # signing key is needed here (integrity via the SHA-256 recorded on the release).
+          export NEXT_PUBLIC_VALUEOS_BUILD="${GITHUB_SHA:0:7}"
+          export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export NEXT_PUBLIC_VALUEOS_REAL="on"
+          node ../valueos/branding/make-ci-config.js valueos-ci.config.json
+          pnpm exec tauri build --target ${{ matrix.target }} ${{ matrix.bundle_args }} --config valueos-ci.config.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload installer to S3 + emit release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="frontend/src-tauri/target/${{ matrix.target }}/release/bundle"
+          INSTALLER="$(find "$BUNDLE" -type f -name '${{ matrix.installer_glob }}' | head -1)"
+          if [ -z "$INSTALLER" ]; then
+            echo "::error::no installer matching ${{ matrix.installer_glob }} under $BUNDLE"; exit 1
+          fi
+          FNAME="$(basename "$INSTALLER")"
+          S3_KEY="agent-releases/${GITHUB_SHA}/${{ matrix.platform }}/${FNAME}"
+          echo "Uploading $INSTALLER -> s3://${RELEASE_BUCKET}/${S3_KEY}"
+          aws s3 cp "$INSTALLER" "s3://${RELEASE_BUCKET}/${S3_KEY}"
+          # Portable size + sha256 via node (consistent across macOS/Windows/Linux runners).
+          node -e "const fs=require('fs'),c=require('crypto');const f=process.argv[1];const b=fs.readFileSync(f);const m={platform:process.argv[2],s3_key:process.argv[3],size_bytes:b.length,checksum:c.createHash('sha256').update(b).digest('hex'),content_type:process.argv[4]};fs.writeFileSync(process.argv[2]+'.json',JSON.stringify(m));console.log(JSON.stringify(m));" \
+            "$INSTALLER" "${{ matrix.platform }}" "$S3_KEY" "${{ matrix.content_type }}"
+
+      - name: Upload release metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-meta-${{ matrix.platform }}
+          path: ${{ matrix.platform }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Register the release with ValueOS (single POST with all platforms' artifacts).
+  publish:
+    name: Register release with ValueOS
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all release metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-meta-*
+          path: meta
+          merge-multiple: true
+      - name: Publish to ValueOS
+        shell: bash
+        env:
+          AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+          META_DIR: meta
+          GIT_REF: ${{ github.ref_name }}
+          NOTES: ${{ github.event.inputs.notes }}
+        run: bash scripts/publish-agent-release.sh
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## ValueOS Agent — release publish"
+            echo ""
+            echo "| | |"
+            echo "|--|--|"
+            echo "| Ref | \`${{ github.ref_name }}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Bucket | \`${{ env.RELEASE_BUCKET }}\` |"
+            echo "| Result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
