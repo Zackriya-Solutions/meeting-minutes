@@ -26,6 +26,8 @@ interface CollectionRow {
   meeting_count: number;
   auto_add: boolean;
   match_rule?: string | null;
+  is_system: boolean;
+  system_key?: string | null;
 }
 
 interface CollectionMeeting {
@@ -764,24 +766,26 @@ export default function CollectionsPage() {
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border-subtle)] p-6">
                 <div className="min-w-0">
                   <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[.12em] text-[var(--fg3)]">
-                    <Icon name={selected.kind === 'series' ? 'refresh' : 'folder'} size={14} />
-                    {selected.kind === 'series' ? t('Recurring series') : t('Manual collection')}
+                    <Icon name={selected.system_key === 'inbox' ? 'spark' : selected.kind === 'series' ? 'refresh' : 'folder'} size={14} />
+                    {selected.system_key === 'inbox' ? t('Learning Inbox') : selected.kind === 'series' ? t('Recurring series') : t('Manual collection')}
                   </div>
                   <h2 className="truncate text-3xl font-semibold tracking-[-.04em]">{selected.name}</h2>
                   <p className="mt-2 text-sm text-[var(--fg3)]">
                     {selected.meeting_count} {t('meetings in this collection')}
                   </p>
                   <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--fg2)]">
-                    {selected.kind === 'series'
+                    {selected.system_key === 'inbox'
+                      ? t('Automatically captured meetings wait here until you review their type, people, terminology, and destination. Open a meeting to review it.')
+                      : selected.kind === 'series'
                       ? t('A recurring series combines repeated meetings and builds a cross-meeting digest. Automatic additions are controlled below.')
                       : t('A manual collection contains only the meetings you select. Use it for a project, client, or topic, then search or ask questions within that scope.')}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" onClick={openMembership} icon={<Icon name="plus" size={16} />}>
+                  {!selected.is_system && <Button variant="secondary" onClick={openMembership} icon={<Icon name="plus" size={16} />}>
                     {t('Manage meetings')}
-                  </Button>
-                  {selected.kind === 'manual' && selected.meeting_count >= 3 && (
+                  </Button>}
+                  {!selected.is_system && selected.kind === 'manual' && selected.meeting_count >= 3 && (
                     <Button
                       variant="secondary"
                       onClick={() => setConvertOpen(true)}
@@ -803,12 +807,12 @@ export default function CollectionsPage() {
                   >
                     {t('Ask this collection')}
                   </Button>
-                  <button onClick={openRename} className="mm-icon-button" aria-label={t('Rename collection')}>
+                  {!selected.is_system && <button onClick={openRename} className="mm-icon-button" aria-label={t('Rename collection')}>
                     <Icon name="edit" size={17} />
-                  </button>
-                  <button onClick={() => setDeleteOpen(true)} className="mm-icon-button hover:text-[var(--danger)]" aria-label={t('Delete collection')}>
+                  </button>}
+                  {!selected.is_system && <button onClick={() => setDeleteOpen(true)} className="mm-icon-button hover:text-[var(--danger)]" aria-label={t('Delete collection')}>
                     <Icon name="trash" size={17} />
-                  </button>
+                  </button>}
                 </div>
               </div>
 

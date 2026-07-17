@@ -45,6 +45,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod jobs;
+pub mod learning;
 pub mod llm;
 pub mod meeting_detection;
 pub mod notifications;
@@ -472,8 +473,9 @@ pub fn run() {
                     }
                 });
 
-                // Start the privacy-preserving process/microphone signal detector. It remains
-                // active while the app is hidden in the tray and never starts recording itself.
+                // Start the privacy-preserving process/microphone signal detector. On platforms
+                // with a strong microphone-session signal it can request the normal recording
+                // lifecycle when auto-listening is enabled.
                 _app
                     .state::<meeting_detection::AutoMeetingDetectionState>()
                     .start(_app.handle().clone());
@@ -537,6 +539,20 @@ pub fn run() {
                         }
                         Ok(_) => {}
                         Err(error) => log::warn!("Could not enforce Interview Memory retention: {error}"),
+                    }
+                    match meeting_detection::purge_expired_capture_data(&pool).await {
+                        Ok(count) if count > 0 => {
+                            log::info!("Discarded {count} expired unpromoted capture session(s)")
+                        }
+                        Ok(_) => {}
+                        Err(error) => log::warn!("Could not enforce capture metadata retention: {error}"),
+                    }
+                    match meeting_detection::purge_expired_saved_captures(&pool).await {
+                        Ok(ids) if !ids.is_empty() => {
+                            log::info!("Purged {} expired auto-captured meeting(s)", ids.len())
+                        }
+                        Ok(_) => {}
+                        Err(error) => log::warn!("Could not enforce auto-capture audio retention: {error}"),
                     }
                 });
             }
@@ -692,6 +708,25 @@ pub fn run() {
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
             pipeline::diarization_commands::set_meeting_diarization_prefs,
+            learning::identity::get_identity_review,
+            learning::identity::review_speaker_identity,
+            learning::identity::list_speaker_profile_versions,
+            learning::identity::rollback_speaker_profile,
+            learning::identity::purge_speaker_learning_data,
+            learning::advanced::get_speaker_advanced_learning,
+            learning::advanced::set_speaker_advanced_learning,
+            learning::classification::classify_meeting,
+            learning::classification::get_meeting_classification_review,
+            learning::classification::get_collection_classification_review,
+            learning::classification::list_learning_inbox,
+            learning::classification::review_meeting_classification,
+            learning::classification::review_collection_classification,
+            learning::terminology::correct_transcript_segment,
+            learning::terminology::list_terminology_memory,
+            learning::terminology::review_terminology_memory,
+            learning::reconciliation::list_reconciliation_suggestions,
+            learning::reconciliation::review_reconciliation_suggestion,
+            learning::reconciliation::rollback_reconciliation_suggestion,
             pipeline::speaker_names::scan_speaker_name_candidates,
             pipeline::speaker_names::list_speaker_name_candidates,
             pipeline::speaker_names::review_speaker_name_candidate,
@@ -722,6 +757,14 @@ pub fn run() {
             is_recording,
             get_transcription_status,
             meeting_detection::get_auto_meeting_detection_status,
+            meeting_detection::report_auto_listening_start,
+            meeting_detection::link_auto_listening_meeting,
+            meeting_detection::get_capture_retention_policy,
+            meeting_detection::update_capture_retention_policy,
+            meeting_detection::list_meeting_windows,
+            meeting_detection::review_meeting_window,
+            meeting_detection::split_meeting_window,
+            meeting_detection::merge_meeting_windows,
             audio::export::get_meeting_audio_path,
             audio::export::get_meeting_audio_playback_info,
             audio::export::export_meeting_audio_mp3,

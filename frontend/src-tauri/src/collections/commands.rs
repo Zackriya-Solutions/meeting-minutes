@@ -19,6 +19,8 @@ pub struct CollectionRow {
     pub meeting_count: i64,
     pub auto_add: bool,
     pub match_rule: Option<String>,
+    pub is_system: bool,
+    pub system_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,6 +75,16 @@ pub async fn rename_collection(
     collection_id: i64,
     name: String,
 ) -> Result<(), String> {
+    let is_system: bool =
+        sqlx::query_scalar("SELECT COALESCE(is_system, 0)<>0 FROM collections WHERE id=?")
+            .bind(collection_id)
+            .fetch_optional(state.db_manager.pool())
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Collection not found".to_string())?;
+    if is_system {
+        return Err("System collections cannot be renamed".to_string());
+    }
     let name = normalize_collection_name(name)?;
     let result = sqlx::query("UPDATE collections SET name = ? WHERE id = ?")
         .bind(name)
@@ -91,6 +103,16 @@ pub async fn delete_collection(
     state: tauri::State<'_, AppState>,
     collection_id: i64,
 ) -> Result<(), String> {
+    let is_system: bool =
+        sqlx::query_scalar("SELECT COALESCE(is_system, 0)<>0 FROM collections WHERE id=?")
+            .bind(collection_id)
+            .fetch_optional(state.db_manager.pool())
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Collection not found".to_string())?;
+    if is_system {
+        return Err("System collections cannot be deleted".to_string());
+    }
     let mut tx = state
         .db_manager
         .pool()
@@ -139,12 +161,22 @@ pub async fn list_collections(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<CollectionRow>, String> {
     let pool = state.db_manager.pool();
-    let rows: Vec<(i64, String, String, i64, i64, Option<String>)> = sqlx::query_as(
-        "SELECT c.id, c.name, c.kind, COUNT(mc.meeting_id), c.auto_add, c.match_rule \
+    let rows: Vec<(
+        i64,
+        String,
+        String,
+        i64,
+        i64,
+        Option<String>,
+        i64,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT c.id, c.name, c.kind, COUNT(mc.meeting_id), c.auto_add, c.match_rule, \
+                c.is_system, c.system_key \
          FROM collections c \
          LEFT JOIN meeting_collections mc ON mc.collection_id = c.id \
-         GROUP BY c.id, c.name, c.kind, c.auto_add, c.match_rule \
-         ORDER BY lower(c.name), c.id",
+         GROUP BY c.id, c.name, c.kind, c.auto_add, c.match_rule, c.is_system, c.system_key \
+         ORDER BY c.is_system DESC, lower(c.name), c.id",
     )
     .fetch_all(pool)
     .await
@@ -152,13 +184,17 @@ pub async fn list_collections(
     Ok(rows
         .into_iter()
         .map(
-            |(id, name, kind, meeting_count, auto_add, match_rule)| CollectionRow {
-                id,
-                name,
-                kind,
-                meeting_count,
-                auto_add: auto_add != 0,
-                match_rule,
+            |(id, name, kind, meeting_count, auto_add, match_rule, is_system, system_key)| {
+                CollectionRow {
+                    id,
+                    name,
+                    kind,
+                    meeting_count,
+                    auto_add: auto_add != 0,
+                    match_rule,
+                    is_system: is_system != 0,
+                    system_key,
+                }
             },
         )
         .collect())
@@ -234,6 +270,15 @@ pub async fn set_collection_meetings(
             .map_err(|e| e.to_string())?;
     if collection_exists == 0 {
         return Err("Collection not found".into());
+    }
+    let is_system: bool =
+        sqlx::query_scalar("SELECT COALESCE(is_system, 0)<>0 FROM collections WHERE id=?")
+            .bind(collection_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    if is_system {
+        return Err("System collection membership is managed by its review workflow".to_string());
     }
     let collection_kind: String = sqlx::query_scalar("SELECT kind FROM collections WHERE id = ?")
         .bind(collection_id)

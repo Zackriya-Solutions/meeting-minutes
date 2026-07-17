@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -70,6 +70,18 @@ pub fn start_transcription_task<R: Runtime>(
             }
         };
 
+        let asr_vocabulary_prompt = if let Some(state) = app.try_state::<crate::state::AppState>() {
+            match crate::learning::terminology::asr_vocabulary_prompt(state.db_manager.pool()).await {
+                Ok(prompt) => prompt,
+                Err(error) => {
+                    warn!("Could not load reviewed ASR terminology hints: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
@@ -95,6 +107,7 @@ pub fn start_transcription_task<R: Runtime>(
             let chunks_completed_clone = chunks_completed.clone();
             let input_finished_clone = input_finished.clone();
             let chunks_queued_clone = chunks_queued.clone();
+            let asr_vocabulary_prompt = asr_vocabulary_prompt.clone();
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
@@ -157,6 +170,7 @@ pub fn start_transcription_task<R: Runtime>(
                                 &engine_clone,
                                 chunk,
                                 &app_clone,
+                                asr_vocabulary_prompt.as_deref(),
                             )
                             .await
                             {
@@ -419,6 +433,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
     engine: &TranscriptionEngine,
     chunk: AudioChunk,
     app: &AppHandle<R>,
+    asr_vocabulary_prompt: Option<&str>,
 ) -> std::result::Result<(String, Option<f32>, bool), TranscriptionError> {
     // Convert to 16kHz mono for transcription
     let transcription_data = if chunk.sample_rate != 16000 {
@@ -459,7 +474,11 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             let language = crate::get_language_preference_internal();
 
             match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language)
+                .transcribe_audio_with_confidence_prompt(
+                    speech_samples,
+                    language,
+                    asr_vocabulary_prompt,
+                )
                 .await
             {
                 Ok((text, confidence, is_partial)) => {

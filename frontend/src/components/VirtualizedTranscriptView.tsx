@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -50,6 +51,8 @@ export interface VirtualizedTranscriptViewProps {
     onPlayTimestamp?: (seconds: number) => void;
     /** Current saved-audio playback position, used to highlight the active segment. */
     playbackTime?: number | null;
+    /** Persist a reviewed correction while retaining the original ASR text. */
+    onCorrectTranscript?: (transcriptId: string, correctedText: string) => Promise<void> | void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -108,6 +111,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onSpeakerClick,
     onPlayTimestamp,
     playbackActive = false,
+    onEdit,
 }: {
     id: string;
     timestamp: number;
@@ -122,6 +126,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onSpeakerClick?: (speakerId: number) => void;
     onPlayTimestamp?: (timestamp: number) => void;
     playbackActive?: boolean;
+    onEdit?: () => void;
 }) {
     const t = useT();
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
@@ -175,13 +180,22 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         </TooltipContent>
                     </Tooltip>
                 </div>
-                <div className="flex-1">
+                <div className="group/text flex-1">
                     {isStreaming ? (
                         <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg px-3 py-2">
                             <p className="text-base text-[var(--fg1)] leading-relaxed">{displayText}</p>
                         </div>
                     ) : (
                         <p className="text-base text-[var(--fg1)] leading-relaxed">{displayText}</p>
+                    )}
+                    {onEdit && !isStreaming && (
+                        <button
+                            type="button"
+                            onClick={onEdit}
+                            className="mt-1 text-[10px] text-[var(--fg3)] opacity-0 transition-opacity hover:text-[var(--gold)] group-hover/text:opacity-100 focus:opacity-100"
+                        >
+                            {t('Correct transcript')}
+                        </button>
                     )}
                 </div>
             </div>
@@ -208,6 +222,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     onRenameSpeaker,
     onPlayTimestamp,
     playbackTime = null,
+    onCorrectTranscript,
 }) => {
     const t = useT();
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
@@ -216,6 +231,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     // Diarized speaker being renamed (null when the rename dialog is closed).
     const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string } | null>(null);
+    const [editingSegment, setEditingSegment] = useState<{ id: string; text: string } | null>(null);
+    const [isSavingCorrection, setIsSavingCorrection] = useState(false);
 
     // Stable so memoized segments don't re-render on every parent render.
     const handleSpeakerClick = useCallback((speakerId: number) => {
@@ -443,6 +460,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         onSpeakerClick={handleSpeakerClick}
                                         onPlayTimestamp={onPlayTimestamp}
                                         playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
+                                        onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
                                     />
                                 </div>
                             );
@@ -510,6 +528,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         onSpeakerClick={handleSpeakerClick}
                                         onPlayTimestamp={onPlayTimestamp}
                                         playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
+                                        onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
                                     />
                                 </motion.div>
                             );
@@ -557,6 +576,49 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
                 />
             )}
+            <Dialog open={editingSegment != null} onOpenChange={(open) => { if (!open && !isSavingCorrection) setEditingSegment(null); }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{t('Correct transcript')}</DialogTitle>
+                    </DialogHeader>
+                    <textarea
+                        value={editingSegment?.text ?? ''}
+                        onChange={(event) => setEditingSegment((current) => current ? { ...current, text: event.target.value } : current)}
+                        rows={7}
+                        className="w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-3 text-sm text-[var(--fg1)] outline-none focus:border-[var(--gold-border)]"
+                    />
+                    <p className="text-xs text-[var(--fg3)]">
+                        {t('The original ASR text is preserved. Repeated corrections may become reviewable terminology suggestions.')}
+                    </p>
+                    <DialogFooter>
+                        <button
+                            type="button"
+                            disabled={isSavingCorrection}
+                            onClick={() => setEditingSegment(null)}
+                            className="rounded-md border border-[var(--border-strong)] px-3 py-2 text-sm"
+                        >
+                            {t('Cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={isSavingCorrection || !editingSegment?.text.trim()}
+                            onClick={async () => {
+                                if (!editingSegment || !onCorrectTranscript) return;
+                                setIsSavingCorrection(true);
+                                try {
+                                    await onCorrectTranscript(editingSegment.id, editingSegment.text);
+                                    setEditingSegment(null);
+                                } finally {
+                                    setIsSavingCorrection(false);
+                                }
+                            }}
+                            className="rounded-md bg-[var(--gold)] px-3 py-2 text-sm text-[var(--fg-inverse)] disabled:opacity-50"
+                        >
+                            {isSavingCorrection ? t('Saving...') : t('Save correction')}
+                        </button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

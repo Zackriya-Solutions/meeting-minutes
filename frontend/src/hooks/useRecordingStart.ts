@@ -52,7 +52,27 @@ export function useRecordingStart(
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
-    return `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+    const prefix = typeof window !== 'undefined' && sessionStorage.getItem('autoListeningStart') === 'true'
+      ? 'Auto meeting'
+      : 'Meeting';
+    return `${prefix} ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
+  }, []);
+
+  const reportAutoListeningFailure = useCallback(async (
+    failureReason: 'model_unavailable' | 'permission_denied' | 'start_failed',
+  ) => {
+    const sessionId = sessionStorage.getItem('autoListeningSessionId');
+    if (!sessionId || sessionStorage.getItem('autoListeningStart') !== 'true') return;
+    try {
+      await invoke('report_auto_listening_start', {
+        input: { session_id: sessionId, success: false, failure_reason: failureReason },
+      });
+    } catch (error) {
+      console.warn('Failed to persist auto-listening failure:', error);
+    }
+    sessionStorage.removeItem('autoListeningSessionId');
+    sessionStorage.removeItem('autoListeningStartReported');
+    sessionStorage.removeItem('autoListeningStart');
   }, []);
 
   // Check whether the CONFIGURED transcription model is ready (provider-aware).
@@ -178,6 +198,7 @@ export function useRecordingStart(
           const readiness = await checkTranscriptionReadiness();
           if (!readiness.ready) {
             await showTranscriptionReadinessError(readiness, 'sidebar_auto');
+            await reportAutoListeningFailure('model_unavailable');
             setStatus(RecordingStatus.IDLE);
             setIsAutoStarting(false);
             return;
@@ -209,11 +230,13 @@ export function useRecordingStart(
 
             // Show recording notification if enabled
             await showRecordingNotification();
+            sessionStorage.removeItem('autoListeningStart');
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
             setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
             alert(t('Failed to start recording. Check console for details.'));
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
+            await reportAutoListeningFailure('start_failed');
           } finally {
             setIsAutoStarting(false);
           }
@@ -234,6 +257,7 @@ export function useRecordingStart(
     checkTranscriptionReadiness,
     showTranscriptionReadinessError,
     setStatus,
+    reportAutoListeningFailure,
   ]);
 
   // Listen for direct recording trigger from sidebar when already on home page
@@ -251,6 +275,7 @@ export function useRecordingStart(
       const readiness = await checkTranscriptionReadiness();
       if (!readiness.ready) {
         await showTranscriptionReadinessError(readiness, 'sidebar_direct');
+        await reportAutoListeningFailure('model_unavailable');
         setStatus(RecordingStatus.IDLE);
         setIsAutoStarting(false);
         return;
@@ -281,11 +306,13 @@ export function useRecordingStart(
 
         // Show recording notification if enabled
         await showRecordingNotification();
+        sessionStorage.removeItem('autoListeningStart');
       } catch (error) {
         console.error('Failed to start recording from sidebar:', error);
         setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording from sidebar');
         alert(t('Failed to start recording. Check console for details.'));
         Analytics.trackButtonClick('start_recording_error', 'sidebar_direct');
+        await reportAutoListeningFailure('start_failed');
       } finally {
         setIsAutoStarting(false);
       }
@@ -308,6 +335,7 @@ export function useRecordingStart(
     checkTranscriptionReadiness,
     showTranscriptionReadinessError,
     setStatus,
+    reportAutoListeningFailure,
   ]);
 
   return {
