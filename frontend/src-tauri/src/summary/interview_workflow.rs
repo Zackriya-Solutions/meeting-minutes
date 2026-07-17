@@ -573,7 +573,7 @@ pub async fn review_record(
     if let Some(edited) = input.edited_payload.as_ref() {
         valid_edited_payload(&original, edited)?;
     }
-    sqlx::query("UPDATE interview_records SET review_status=?,reviewed_payload=?,updated_at=datetime('now') WHERE id=?")
+    sqlx::query("UPDATE interview_records SET review_status=?,reviewed_payload=COALESCE(?,reviewed_payload),updated_at=datetime('now') WHERE id=?")
         .bind(&input.status).bind(input.edited_payload.as_ref().map(Value::to_string))
         .bind(input.record_id).execute(pool).await.map_err(|e| e.to_string())?;
     audit(
@@ -1044,6 +1044,55 @@ mod tests {
             rows.iter().filter(|r| r.review_status == "pending").count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn rereview_without_a_new_edit_preserves_human_correction() {
+        let pool = pool().await;
+        let report = InterviewReport {
+            evidence: vec![InterviewEvidence {
+                competency: "Architecture".into(),
+                evidence_type: "candidate_claim".into(),
+                observation: "machine text".into(),
+                evidence: vec![EvidenceRef {
+                    timestamp: "[00:10]".into(),
+                    quote: Some("quote".into()),
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        sync_records(&pool, "m1", &report).await.unwrap();
+        let record = list_records(&pool, "m1").await.unwrap().remove(0);
+        let mut corrected = record.payload.clone();
+        corrected["observation"] = Value::String("human correction".into());
+
+        review_record(
+            &pool,
+            ReviewInterviewRecordInput {
+                record_id: record.id,
+                status: "accepted".into(),
+                edited_payload: Some(corrected.clone()),
+            },
+        )
+        .await
+        .unwrap();
+        for status in ["rejected", "accepted"] {
+            review_record(
+                &pool,
+                ReviewInterviewRecordInput {
+                    record_id: record.id,
+                    status: status.into(),
+                    edited_payload: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let rereviewed = list_records(&pool, "m1").await.unwrap().remove(0);
+        assert_eq!(rereviewed.review_status, "accepted");
+        assert_eq!(rereviewed.reviewed_payload, Some(corrected));
     }
 
     #[tokio::test]
