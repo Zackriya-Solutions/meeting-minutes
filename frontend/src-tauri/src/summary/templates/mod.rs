@@ -31,9 +31,11 @@
 //! # Custom Templates
 //!
 //! Users can add custom templates to:
-//! - macOS: `~/Library/Application Support/Meetily/templates/`
-//! - Windows: `%APPDATA%\Meetily\templates\`
-//! - Linux: `~/.config/Meetily/templates/`
+//! - macOS: `~/Library/Application Support/Memento/templates/`
+//! - Windows: `%APPDATA%\Memento\templates\`
+//! - Linux: `~/.config/Memento/templates/`
+//!
+//! The retired `Meetily/templates` location remains a read-only compatibility fallback.
 //!
 //! Custom templates must follow the JSON schema defined in `types::Template`.
 

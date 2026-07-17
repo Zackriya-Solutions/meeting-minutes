@@ -1,4 +1,5 @@
 use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::interview::{generate_interview_report, InterviewGenerationRequest, InterviewReport};
 use crate::summary::standup::{generate_standup_report, StandupGenerationRequest};
 use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
@@ -7,6 +8,12 @@ use reqwest::Client;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
+
+#[derive(Debug, Clone)]
+pub enum StructuredSummaryReport {
+    Standup(crate::summary::standup::StandupReport),
+    Interview(InterviewReport),
+}
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
 static THINKING_TAG_REGEX: Lazy<Regex> =
@@ -293,7 +300,7 @@ pub async fn generate_meeting_summary(
     String,
     String,
     i64,
-    Option<crate::summary::standup::StandupReport>,
+    Option<StructuredSummaryReport>,
 ), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -331,7 +338,34 @@ pub async fn generate_meeting_summary(
             generated.markdown,
             output_language.to_string(),
             generated.chunk_count,
-            Some(generated.report),
+            Some(StructuredSummaryReport::Standup(generated.report)),
+        ));
+    }
+
+    if template.pipeline.as_deref() == Some("interview_v1") {
+        let generated = generate_interview_report(InterviewGenerationRequest {
+            client,
+            provider,
+            model_name,
+            api_key,
+            meeting_id,
+            transcript: text,
+            custom_prompt,
+            token_threshold,
+            output_language,
+            ollama_endpoint,
+            custom_openai_endpoint,
+            deepseek_base_url,
+            max_tokens,
+            app_data_dir,
+            cancellation_token,
+        })
+        .await?;
+        return Ok((
+            generated.markdown,
+            output_language.to_string(),
+            generated.chunk_count,
+            Some(StructuredSummaryReport::Interview(generated.report)),
         ));
     }
 

@@ -34,6 +34,31 @@ impl JobHandler for ChunkEmbedHandler {
             meeting_id.ok_or_else(|| anyhow::anyhow!("chunk_embed requires a meeting_id"))?;
         let pool = &ctx.pool;
 
+        let indexing_allowed: Option<i64> = sqlx::query_scalar(
+            "SELECT indexing_allowed FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
+        if indexing_allowed == Some(0) {
+            let old_ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id = ?")
+                .bind(meeting_id)
+                .fetch_all(pool)
+                .await?;
+            for id in old_ids {
+                let _ = sqlx::query("DELETE FROM chunk_embeddings WHERE chunk_id = ?")
+                    .bind(id)
+                    .execute(pool)
+                    .await;
+            }
+            sqlx::query("DELETE FROM chunks WHERE meeting_id = ?")
+                .bind(meeting_id)
+                .execute(pool)
+                .await?;
+            log::info!("[chunk_embed] meeting {meeting_id}: indexing disabled by memory privacy policy");
+            return Ok(());
+        }
+
         // Load segments (ordered). Timing is seconds (REAL) -> ms; NULLs degrade to 0.
         let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
             "SELECT id, transcript, audio_start_time, audio_end_time FROM transcripts \

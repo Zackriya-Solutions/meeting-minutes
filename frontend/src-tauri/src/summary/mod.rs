@@ -34,6 +34,8 @@ pub mod commands;
 pub mod content_window;
 pub mod corpus_runner;
 pub(crate) mod language_detection;
+pub mod interview;
+pub mod interview_workflow;
 pub mod llm_client;
 pub(crate) mod metadata;
 pub mod processor;

@@ -1,0 +1,44 @@
+{
+  "name": "Interview Memory",
+  "description": "Evidence-focused interview memory with candidate claims, case reasoning, open questions, and next steps. It never makes a hiring decision.",
+  "pipeline": "interview_v1",
+  "sections": [
+    {
+      "title": "Interview Context",
+      "instruction": "Summarize only context explicitly present in the transcript: role, interview stage, participants and their roles. Use 'not stated' for missing context. Do not infer protected or personal characteristics.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Conversation Map",
+      "instruction": "List the main interview blocks in chronological order with transcript timestamps: introduction, candidate background, technical topics, case exercises, candidate questions and closing.",
+      "format": "list"
+    },
+    {
+      "title": "Candidate Evidence",
+      "instruction": "Capture job-relevant evidence only. For every item distinguish measured result, detailed example, candidate claim, technical opinion, case reasoning, or answer evolution. Include a timestamp and a short supporting transcript fragment. Never convert a claim into a verified fact and never score personality, emotion, confidence, truthfulness, accent, age, gender, health or family status.",
+      "format": "list",
+      "item_format": "| **Area** | Evidence type | Observation | Evidence timestamp | Follow-up needed |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Case Exercises",
+      "instruction": "For each practical case, capture the task, clarifying questions, initial approach, new constraints, trade-offs, risks and how the answer changed. Keep hypothetical reasoning separate from past experience.",
+      "format": "list"
+    },
+    {
+      "title": "Open Questions",
+      "instruction": "List competencies that were not assessed, claims that need evidence, contradictions that need clarification and suggested questions for the next stage. Do not fill gaps with assumptions.",
+      "format": "list"
+    },
+    {
+      "title": "Candidate Questions",
+      "instruction": "List questions the candidate asked about the role, team, product or process. Do not infer motivation or personality from the absence or wording of questions.",
+      "format": "list"
+    },
+    {
+      "title": "Next Steps",
+      "instruction": "List only explicitly agreed follow-up actions, owners and dates. If the next step, owner or date was not stated, say so. Do not recommend hire or reject; the hiring decision belongs to human reviewers.",
+      "format": "list",
+      "item_format": "| **Action** | Owner | Due | Evidence timestamp |\n| --- | --- | --- | --- |"
+    }
+  ]
+}

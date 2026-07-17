@@ -11,6 +11,33 @@ type TemplateSuggestion = {
   reasons: string[];
 };
 
+export type MeetingMemoryConfig = {
+  meeting_id: string;
+  memory_type: 'general' | 'standup' | 'interview';
+  sensitivity: 'standard' | 'sensitive';
+};
+
+function templateForMemoryType(memoryType: MeetingMemoryConfig['memory_type']): string {
+  if (memoryType === 'standup') return 'daily_standup';
+  if (memoryType === 'interview') return 'interview_memory';
+  return 'standard_meeting';
+}
+
+function memoryConfigForTemplate(templateId: string): Pick<MeetingMemoryConfig, 'memory_type' | 'sensitivity'> {
+  if (templateId === 'daily_standup') {
+    return { memory_type: 'standup', sensitivity: 'standard' };
+  }
+  if (templateId === 'interview_memory') {
+    return { memory_type: 'interview', sensitivity: 'sensitive' };
+  }
+  return { memory_type: 'general', sensitivity: 'standard' };
+}
+
+export type VisibleTemplateSuggestion = {
+  templateId: string;
+  title: string;
+  description: string;
+};
 const suggestionReasonKeys: Record<string, string> = {
   standup_title: 'standup-like title',
   reviewed_series_history: 'reviewed standups in this series',
@@ -28,6 +55,8 @@ export function useTemplates(meetingId?: string) {
     description: string;
   }>>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
+  const [memoryConfig, setMemoryConfig] = useState<MeetingMemoryConfig | null>(null);
+  const [templateSuggestion, setTemplateSuggestion] = useState<VisibleTemplateSuggestion | null>(null);
 
   // Fetch available templates on mount
   useEffect(() => {
@@ -50,14 +79,43 @@ export function useTemplates(meetingId?: string) {
   // Handle template selection
   const handleTemplateSelection = useCallback((templateId: string, templateName: string) => {
     setSelectedTemplate(templateId);
+    if (templateId === 'daily_standup' || templateId === 'interview_memory') {
+      setTemplateSuggestion(null);
+      if (meetingId) toast.dismiss(`standup-template-suggestion-${meetingId}`);
+    }
+    if (meetingId) {
+      const memory = memoryConfigForTemplate(templateId);
+      setMemoryConfig({ meeting_id: meetingId, ...memory });
+      invokeTauri<MeetingMemoryConfig>('api_set_meeting_memory_config', {
+        meetingId,
+        memoryType: memory.memory_type,
+        sensitivity: memory.sensitivity,
+      }).catch((error) => console.error('Failed to persist Memento memory type:', error));
+    }
     toast.success(t('Template selected'), {
       description: `${t('Using')} "${t(templateName)}" ${t('template for summary generation')}`,
     });
     Analytics.trackFeatureUsed('template_selected');
-  }, [t]);
+  }, [meetingId, t]);
 
   useEffect(() => {
     setSelectedTemplate('standard_meeting');
+    setMemoryConfig(null);
+    setTemplateSuggestion(null);
+    if (!meetingId) return;
+
+    let cancelled = false;
+    invokeTauri<MeetingMemoryConfig>('api_get_meeting_memory_config', { meetingId })
+      .then((config) => {
+        if (!cancelled) {
+          setMemoryConfig(config);
+          setSelectedTemplate(templateForMemoryType(config.memory_type));
+        }
+      })
+      .catch((error) => console.warn('Could not restore Memento memory type:', error));
+    return () => {
+      cancelled = true;
+    };
   }, [meetingId]);
 
   useEffect(() => {
@@ -75,10 +133,16 @@ export function useTemplates(meetingId?: string) {
           .filter((reason): reason is string => Boolean(reason))
           .map((reason) => t(reason))
           .join(' · ');
+        const description = explanation || t('Local signals suggest Standup V2. Confirm before generating.');
+        setTemplateSuggestion({
+          templateId: suggestion.templateId,
+          title: t('Standup template suggested'),
+          description,
+        });
         toast.info(t('Standup template suggested'), {
           id: toastId,
-          description: explanation || t('Local signals suggest Standup V2. Confirm before generating.'),
-          duration: 12000,
+          description,
+          duration: Infinity,
           action: {
             label: t('Use Standup V2'),
             onClick: () => handleTemplateSelection('daily_standup', 'Daily Standup'),
@@ -95,6 +159,12 @@ export function useTemplates(meetingId?: string) {
   return {
     availableTemplates,
     selectedTemplate,
+    memoryConfig,
+    templateSuggestion,
+    dismissTemplateSuggestion: () => {
+      setTemplateSuggestion(null);
+      if (meetingId) toast.dismiss(`standup-template-suggestion-${meetingId}`);
+    },
     handleTemplateSelection,
   };
 }

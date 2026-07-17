@@ -113,7 +113,7 @@ impl TranscriptsRepository {
                 "SELECT m.id, m.title, t.transcript, t.timestamp
                  FROM meetings m
                  JOIN transcripts t ON m.id = t.meeting_id
-                 WHERE LOWER(t.transcript) LIKE ? ESCAPE '\\'
+                 WHERE m.indexing_allowed = 1 AND LOWER(t.transcript) LIKE ? ESCAPE '\\'
                  ORDER BY m.created_at DESC, t.audio_start_time ASC",
             )
             .bind(format!("%{}%", escaped_query))
@@ -126,6 +126,7 @@ impl TranscriptsRepository {
                 "SELECT m.id, m.title, t.transcript, t.timestamp
                  FROM meetings m
                  JOIN transcripts t ON m.id = t.meeting_id
+                 WHERE m.indexing_allowed = 1
                  ORDER BY m.created_at DESC, t.audio_start_time ASC",
             )
             .fetch_all(pool)
@@ -229,7 +230,8 @@ mod tests {
             "CREATE TABLE meetings(
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                indexing_allowed INTEGER NOT NULL DEFAULT 1
             )",
         )
         .execute(&pool)

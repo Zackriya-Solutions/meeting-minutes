@@ -189,19 +189,16 @@ async fn fts_branch(
     Ok(candidates.into_iter().map(|(id, _)| id).collect())
 }
 
-/// Compute the set of chunk ids permitted by the filters, or `None` when no filter is
-/// active. Integer id lists are inlined (they are i64, never user strings); dates are
-/// bound parameters.
+/// Compute the set of chunk ids permitted by privacy and optional filters. This always
+/// returns a set: a sensitive memory with indexing disabled must never enter an unfiltered
+/// FTS/vector branch.
 async fn allowed_chunk_ids(
     pool: &sqlx::SqlitePool,
     filters: &SearchFilters,
 ) -> Result<Option<std::collections::HashSet<i64>>, sqlx::Error> {
-    if filters.is_empty() {
-        return Ok(None);
-    }
-
     let mut sql = String::from(
-        "SELECT DISTINCT c.id FROM chunks c JOIN meetings m ON m.id = c.meeting_id WHERE 1=1",
+        "SELECT DISTINCT c.id FROM chunks c JOIN meetings m ON m.id = c.meeting_id \
+         WHERE m.indexing_allowed = 1",
     );
     if filters.date_from.is_some() {
         sql.push_str(" AND m.created_at >= ?");
@@ -341,13 +338,13 @@ mod tests {
     async fn scoped_search_is_not_crowded_out_by_global_top_k() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1).connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT, created_at TEXT)")
+        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT, created_at TEXT, indexing_allowed INTEGER NOT NULL DEFAULT 1)")
             .execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, start_ms INTEGER, text TEXT)")
             .execute(&pool).await.unwrap();
         sqlx::query("CREATE VIRTUAL TABLE chunks_fts USING fts5(text)")
             .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO meetings VALUES('outside','Outside','2026-01-01'),('inside','Inside','2026-01-01')")
+        sqlx::query("INSERT INTO meetings(id,title,created_at) VALUES('outside','Outside','2026-01-01'),('inside','Inside','2026-01-01')")
             .execute(&pool).await.unwrap();
         for id in 1..=25_i64 {
             sqlx::query("INSERT INTO chunks VALUES(?,'outside',0,'бюджет')")
@@ -362,5 +359,37 @@ mod tests {
         let filters = SearchFilters { meeting_ids: vec!["inside".into()], ..Default::default() };
         let hits = HybridSearch::search(&pool, "бюджет", None, &filters, 5).await.unwrap();
         assert_eq!(hits.iter().map(|hit| hit.chunk_id).collect::<Vec<_>>(), vec![99]);
+    }
+
+    #[tokio::test]
+    async fn privacy_filter_excludes_non_indexed_memories_without_other_filters() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO meetings VALUES('public',1),('sensitive',0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO chunks VALUES(1,'public'),(2,'sensitive')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let allowed = allowed_chunk_ids(&pool, &SearchFilters::default())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(allowed.contains(&1));
+        assert!(!allowed.contains(&2));
     }
 }

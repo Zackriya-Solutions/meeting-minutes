@@ -35,6 +35,15 @@ pub struct Meeting {
     pub created_at: String,
     pub occurred_at: Option<String>,
     pub folder_path: Option<String>,
+    pub memory_type: String,
+    pub sensitivity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MeetingMemoryConfig {
+    pub meeting_id: String,
+    pub memory_type: String,
+    pub sensitivity: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -359,6 +368,8 @@ pub async fn api_get_meetings<R: Runtime>(
                     created_at: m.created_at.0.to_rfc3339(),
                     occurred_at: m.occurred_at,
                     folder_path: m.folder_path,
+                    memory_type: m.memory_type.unwrap_or_else(|| "general".to_string()),
+                    sensitivity: m.sensitivity.unwrap_or_else(|| "standard".to_string()),
                 })
                 .collect();
             Ok(result)
@@ -368,6 +379,53 @@ pub async fn api_get_meetings<R: Runtime>(
             Err(e.to_string())
         }
     }
+}
+
+#[tauri::command]
+pub async fn api_get_meeting_memory_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<MeetingMemoryConfig, String> {
+    let pool = state.db_manager.pool();
+    let config = MeetingsRepository::get_memory_config(pool, &meeting_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
+
+    Ok(MeetingMemoryConfig {
+        meeting_id,
+        memory_type: config.0,
+        sensitivity: config.1,
+    })
+}
+
+#[tauri::command]
+pub async fn api_set_meeting_memory_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    memory_type: String,
+    sensitivity: String,
+) -> Result<MeetingMemoryConfig, String> {
+    let pool = state.db_manager.pool();
+    let updated = MeetingsRepository::set_memory_config(
+        pool,
+        &meeting_id,
+        &memory_type,
+        &sensitivity,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    if !updated {
+        return Err(format!("Meeting not found: {meeting_id}"));
+    }
+
+    Ok(MeetingMemoryConfig {
+        meeting_id,
+        memory_type,
+        sensitivity,
+    })
 }
 
 #[tauri::command]
@@ -840,7 +898,7 @@ pub async fn api_delete_meeting<R: Runtime>(
     }
 }
 
-fn delete_recording_folder(folder_path: &Path) -> Result<(), String> {
+pub(crate) fn delete_recording_folder(folder_path: &Path) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(folder_path)
         .map_err(|error| format!("Recording folder is unavailable: {}", error))?;
     if metadata.file_type().is_symlink() {

@@ -286,6 +286,10 @@ async fn recover_running_requeues_interrupted_jobs() {
 async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
     let pool = test_pool().await;
     // Tables the chunk_embed handler touches.
+    sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL DEFAULT 1)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO meetings(id) VALUES('m1')")
+        .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, audio_start_time REAL, audio_end_time REAL)")
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE chunks (id INTEGER PRIMARY KEY, meeting_id TEXT, first_segment_id TEXT, last_segment_id TEXT, start_ms INTEGER, end_ms INTEGER, text TEXT, token_count INTEGER, embedding_status TEXT DEFAULT 'pending')")

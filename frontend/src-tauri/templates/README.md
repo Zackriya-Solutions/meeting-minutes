@@ -24,6 +24,11 @@ General-purpose meeting notes template focusing on key outcomes and actions.
 - Action Items
 - Discussion Highlights
 
+### 3. `interview_memory.json`
+Evidence-focused candidate interview memory. It separates candidate claims, detailed
+examples, technical opinions and case reasoning; preserves transcript evidence; and never
+makes a hiring decision.
+
 ## Template Structure
 
 Each template JSON file follows this schema:
@@ -47,9 +52,12 @@ Each template JSON file follows this schema:
 
 Users can add custom templates to the application data directory:
 
-- **macOS**: `~/Library/Application Support/Meetily/templates/`
-- **Windows**: `%APPDATA%\Meetily\templates\`
-- **Linux**: `~/.config/Meetily/templates/`
+- **macOS**: `~/Library/Application Support/Memento/templates/`
+- **Windows**: `%APPDATA%\Memento\templates\`
+- **Linux**: `~/.config/Memento/templates/`
+
+Existing templates under the retired `Meetily/templates` path remain readable as a
+compatibility fallback. New templates should use the Memento path.
 
 Custom templates override built-in templates with the same filename.
 

@@ -90,7 +90,7 @@ fn merge_manual_summary_with_generated_fields(
         }
         _ => existing_object.get("markdown") != incoming_object.get("markdown"),
     };
-    for key in ["summary_generation", "standup_v2"] {
+    for key in ["summary_generation", "standup_v2", "interview_v1"] {
         if !incoming_object.contains_key(key) {
             if let Some(value) = existing_object.get(key) {
                 incoming_object.insert(key.to_string(), value.clone());
@@ -109,6 +109,19 @@ fn merge_manual_summary_with_generated_fields(
     } else if !incoming_object.contains_key("standup_v2_status") {
         if let Some(value) = existing_object.get("standup_v2_status") {
             incoming_object.insert("standup_v2_status".to_string(), value.clone());
+        }
+    }
+    if markdown_changed && incoming_object.contains_key("interview_v1") {
+        incoming_object.insert(
+            "interview_v1_status".to_string(),
+            serde_json::json!({
+                "state": "markdown_edited",
+                "structured_result_stale": true
+            }),
+        );
+    } else if !incoming_object.contains_key("interview_v1_status") {
+        if let Some(value) = existing_object.get("interview_v1_status") {
+            incoming_object.insert("interview_v1_status".to_string(), value.clone());
         }
     }
 

@@ -55,7 +55,7 @@ impl Template {
         }
 
         if let Some(pipeline) = self.pipeline.as_deref() {
-            if pipeline != "standup_v2" {
+            if !matches!(pipeline, "standup_v2" | "interview_v1") {
                 return Err(format!("Unsupported template pipeline '{pipeline}'"));
             }
         }
@@ -190,6 +190,8 @@ mod tests {
         };
         assert!(template.validate().is_err());
         template.pipeline = Some("standup_v2".to_string());
+        assert!(template.validate().is_ok());
+        template.pipeline = Some("interview_v1".to_string());
         assert!(template.validate().is_ok());
     }
 }

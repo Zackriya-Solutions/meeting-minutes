@@ -19,6 +19,7 @@ import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
 import { StandupWorkflowPanel } from './StandupWorkflowPanel';
+import { InterviewWorkflowPanel } from './InterviewWorkflowPanel';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -330,6 +331,11 @@ export function SummaryPanel({
         meetingId={meeting.id}
         summaryStatus={summaryStatus}
         standupSelected={selectedTemplate === 'daily_standup'}
+      />
+      <InterviewWorkflowPanel
+        meetingId={meeting.id}
+        summaryStatus={summaryStatus}
+        interviewSelected={selectedTemplate === 'interview_memory'}
       />
 
       {isSummaryLoading ? (
