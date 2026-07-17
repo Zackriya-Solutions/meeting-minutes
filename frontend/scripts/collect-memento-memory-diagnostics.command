@@ -107,14 +107,16 @@ if [[ -n "$selected_pid" ]]; then
     } > "$bundle_dir/app-identity.txt"
   fi
 
-  echo "Capturing a 7-second stack sample..."
-  sample "$selected_pid" 7 1 -file "$bundle_dir/memento-sample.txt" \
-    > "$bundle_dir/sample-command.txt" 2>&1 || true
-
+  # Memory maps come first: `sample` can take several seconds, and an app already under
+  # extreme pressure may disappear before the most important allocation evidence is saved.
   echo "Capturing virtual-memory maps..."
   vmmap -summary "$selected_pid" > "$bundle_dir/memento-vmmap-summary.txt" 2>&1 || true
   vmmap "$selected_pid" > "$bundle_dir/memento-vmmap.txt" 2>&1 || true
   footprint "$selected_pid" > "$bundle_dir/memento-footprint.txt" 2>&1 || true
+
+  echo "Capturing a 7-second stack sample..."
+  sample "$selected_pid" 7 1 -file "$bundle_dir/memento-sample.txt" \
+    > "$bundle_dir/sample-command.txt" 2>&1 || true
 
   echo "Capturing a 20-second memory trend..."
   echo "timestamp_utc,rss_kb,vsz_kb,cpu_percent,state,elapsed" \
@@ -177,7 +179,6 @@ SELECT kind, status, attempts, COUNT(*) AS jobs,
        MIN(updated_at) AS oldest_update,
        MAX(updated_at) AS newest_update
 FROM jobs
-WHERE kind IN ('chunk_embed', 'embedding_repair', 'backfill')
 GROUP BY kind, status, attempts
 ORDER BY kind, status, attempts;
 SQL

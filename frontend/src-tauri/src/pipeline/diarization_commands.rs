@@ -312,24 +312,33 @@ async fn resolve_cloud_speakers(
 /// Decode a recording to 16 kHz mono 16-bit LE PCM (for cloud upload). CPU-bound — call
 /// under `spawn_blocking`.
 fn decode_to_pcm16_16k(path: &Path) -> anyhow::Result<Vec<u8>> {
-    let decoded = crate::audio::decoder::decode_audio_file(path)?;
-    let mono: Vec<f32> = if decoded.channels > 1 {
-        let ch = decoded.channels as usize;
-        decoded.samples.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect()
-    } else {
-        decoded.samples
-    };
-    let s16k = if decoded.sample_rate != 16_000 {
-        crate::audio::audio_processing::resample_audio(&mono, decoded.sample_rate, 16_000)
-    } else {
-        mono
-    };
-    let mut pcm = Vec::with_capacity(s16k.len() * 2);
-    for s in s16k {
-        let v = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
-        pcm.extend_from_slice(&v.to_le_bytes());
-    }
-    Ok(pcm)
+    crate::audio::decoder::decode_audio_file_to_pcm16(path).or_else(|direct_error| {
+        log::warn!(
+            "[diarize] direct FFmpeg PCM decode failed; falling back to the in-process decoder: {direct_error}"
+        );
+        let decoded = crate::audio::decoder::decode_audio_file(path)?;
+        let mono: Vec<f32> = if decoded.channels > 1 {
+            let channels = decoded.channels as usize;
+            decoded
+                .samples
+                .chunks(channels)
+                .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+                .collect()
+        } else {
+            decoded.samples
+        };
+        let samples_16k = if decoded.sample_rate != 16_000 {
+            crate::audio::audio_processing::resample_audio(&mono, decoded.sample_rate, 16_000)
+        } else {
+            mono
+        };
+        let mut pcm = Vec::with_capacity(samples_16k.len() * std::mem::size_of::<i16>());
+        for sample in samples_16k {
+            let value = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+            pcm.extend_from_slice(&value.to_le_bytes());
+        }
+        Ok(pcm)
+    })
 }
 
 /// Shared diarization core, called by both the `diarize_meeting` command and the `diarize`

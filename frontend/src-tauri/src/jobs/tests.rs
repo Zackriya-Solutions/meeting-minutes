@@ -117,6 +117,40 @@ async fn enqueue_and_claim_is_exclusive() {
 }
 
 #[tokio::test]
+async fn search_index_jobs_are_prioritized_over_optional_audio_work() {
+    let pool = test_pool().await;
+    store::enqueue(&pool, kind::DIARIZE, Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
+    store::enqueue(&pool, kind::EXTRACT, Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
+    store::enqueue(&pool, kind::BACKFILL, None, &serde_json::json!({}))
+        .await
+        .unwrap();
+    store::enqueue(
+        &pool,
+        kind::EMBEDDING_REPAIR,
+        Some("m1"),
+        &serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+
+    let eligible = store::fetch_eligible(&pool, 10).await.unwrap();
+    let kinds: Vec<&str> = eligible.iter().map(|job| job.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            kind::BACKFILL,
+            kind::EMBEDDING_REPAIR,
+            kind::EXTRACT,
+            kind::DIARIZE,
+        ]
+    );
+}
+
+#[tokio::test]
 async fn unique_enqueue_reuses_active_job_and_allows_later_retry() {
     let pool = test_pool().await;
     let first = store::enqueue_unique(&pool, kind::CHUNK_EMBED, Some("m1"), &serde_json::json!({}))

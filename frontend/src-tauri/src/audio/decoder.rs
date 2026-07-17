@@ -46,6 +46,53 @@ pub struct WhisperAudio {
     pub duration_seconds: f64,
 }
 
+/// Decode directly to mono 16 kHz signed 16-bit PCM through the bundled FFmpeg.
+///
+/// Cloud diarization uploads this exact format. Producing it directly avoids retaining
+/// the original 48 kHz multi-channel `Vec<f32>`, a mono copy, the sinc resampler's input
+/// copy, and its float output at the same time. For long archive recordings those
+/// intermediates can consume multiple GiB per concurrent background job.
+pub fn decode_audio_file_to_pcm16(path: &Path) -> Result<Vec<u8>> {
+    let ffmpeg_path = find_ffmpeg_path()
+        .ok_or_else(|| anyhow!("FFmpeg is not available for direct PCM decoding"))?;
+    let output = Command::new(ffmpeg_path)
+        .arg("-nostdin")
+        .arg("-v")
+        .arg("error")
+        .arg("-i")
+        .arg(path)
+        .arg("-vn")
+        .arg("-ac")
+        .arg("1")
+        .arg("-ar")
+        .arg("16000")
+        .arg("-f")
+        .arg("s16le")
+        .arg("pipe:1")
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| anyhow!("Failed to start FFmpeg: {}", error))?;
+
+    if !output.status.success() {
+        let details = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!(
+            "FFmpeg direct PCM decode failed: {}",
+            details.trim()
+        ));
+    }
+    if output.stdout.is_empty() {
+        return Err(anyhow!("FFmpeg decoded no PCM audio"));
+    }
+    if output.stdout.len() % std::mem::size_of::<i16>() != 0 {
+        return Err(anyhow!(
+            "FFmpeg returned an incomplete i16 sample ({} bytes)",
+            output.stdout.len()
+        ));
+    }
+    Ok(output.stdout)
+}
+
 /// Decode directly to mono 16 kHz float samples through the bundled FFmpeg.
 ///
 /// This avoids materializing the original multi-channel stream and then
@@ -669,6 +716,41 @@ pub fn decode_audio_file_with_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn test_direct_pcm16_decode_downmixes_and_resamples() {
+        const SAMPLE_RATE: u32 = 48_000;
+        const CHANNELS: u16 = 2;
+        const FRAMES: u32 = 4_800;
+        const BITS_PER_SAMPLE: u16 = 16;
+
+        let data_len = FRAMES * CHANNELS as u32 * (BITS_PER_SAMPLE as u32 / 8);
+        let mut wav = Vec::with_capacity(44 + data_len as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&CHANNELS.to_le_bytes());
+        wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+        wav.extend_from_slice(
+            &(SAMPLE_RATE * CHANNELS as u32 * (BITS_PER_SAMPLE as u32 / 8)).to_le_bytes(),
+        );
+        wav.extend_from_slice(&(CHANNELS * (BITS_PER_SAMPLE / 8)).to_le_bytes());
+        wav.extend_from_slice(&BITS_PER_SAMPLE.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.resize(44 + data_len as usize, 0);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input = temp_dir.path().join("stereo-48k.wav");
+        std::fs::write(&input, wav).unwrap();
+
+        let pcm = decode_audio_file_to_pcm16(&input).unwrap();
+        assert_eq!(pcm.len(), 1_600 * std::mem::size_of::<i16>());
+        assert!(pcm.iter().all(|byte| *byte == 0));
+    }
 
     #[test]
     fn test_to_whisper_format_mono_16k() {

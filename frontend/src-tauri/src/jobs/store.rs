@@ -128,14 +128,20 @@ pub async fn recover_running(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
     Ok(res.rows_affected())
 }
 
-/// Fetch up to `limit` jobs eligible to run now (queued and past their backoff),
-/// oldest first. Claiming is a separate, atomic step (`try_claim`).
+/// Fetch up to `limit` jobs eligible to run now (queued and past their backoff).
+/// Search-critical chunking/embedding work runs before optional extraction and
+/// diarization, so a model switch cannot sit behind hours of archive audio processing.
+/// Claiming is a separate, atomic step (`try_claim`).
 pub async fn fetch_eligible(pool: &SqlitePool, limit: i64) -> Result<Vec<JobRow>, sqlx::Error> {
     sqlx::query_as::<_, JobRow>(
         "SELECT id, kind, meeting_id, payload, status, attempts, last_error, run_after \
          FROM jobs \
          WHERE status='queued' AND (run_after IS NULL OR run_after <= datetime('now')) \
-         ORDER BY id ASC LIMIT ?",
+         ORDER BY CASE \
+             WHEN kind IN ('chunk_embed', 'embedding_repair', 'backfill') THEN 0 \
+             WHEN kind = 'extract' THEN 1 \
+             WHEN kind = 'diarize' THEN 2 \
+             ELSE 3 END, id ASC LIMIT ?",
     )
     .bind(limit)
     .fetch_all(pool)
