@@ -16,7 +16,7 @@ user_home="${HOME:?Could not resolve the current user home directory}"
 temp_root="${TMPDIR:-/tmp}"
 work_dir="$(mktemp -d "$temp_root/memento-memory-diagnostics.XXXXXX")" || exit 1
 bundle_dir="$work_dir/memento-memory-diagnostics-$timestamp"
-mkdir -p "$bundle_dir"
+mkdir -p "$bundle_dir" || exit 1
 
 cleanup() {
   case "$work_dir" in
@@ -93,9 +93,17 @@ if [[ -n "$selected_pid" ]]; then
       defaults read "$app_bundle/Contents/Info.plist" CFBundleIdentifier 2>&1
       defaults read "$app_bundle/Contents/Info.plist" CFBundleShortVersionString 2>&1
       codesign -dv --verbose=4 "$app_bundle" 2>&1 \
-        | grep -E '^(Identifier|Format|CodeDirectory|Signature|Authority|TeamIdentifier|Runtime Version)='
-      spctl -a -t exec -vv "$app_bundle" 2>&1
-      xcrun stapler validate "$app_bundle" 2>&1
+        | grep -E '^(Identifier|Format|CodeDirectory|Signature|TeamIdentifier|Runtime Version)='
+      if spctl -a -t exec "$app_bundle" >/dev/null 2>&1; then
+        echo "gatekeeper_status=accepted"
+      else
+        echo "gatekeeper_status=rejected_or_unavailable"
+      fi
+      if xcrun stapler validate "$app_bundle" >/dev/null 2>&1; then
+        echo "stapler_status=valid"
+      else
+        echo "stapler_status=invalid_or_unavailable"
+      fi
     } > "$bundle_dir/app-identity.txt"
   fi
 
@@ -181,15 +189,23 @@ fi
 # not heap contents, but their path columns can still contain private filenames.
 for diagnostic_file in "$bundle_dir"/*.txt "$bundle_dir"/*.csv; do
   [[ -f "$diagnostic_file" ]] || continue
-  MEMENTO_DIAGNOSTICS_HOME="$user_home" /usr/bin/perl -pe '
+  if ! MEMENTO_DIAGNOSTICS_HOME="$user_home" /usr/bin/perl -pe '
     BEGIN { $home = quotemeta($ENV{"MEMENTO_DIAGNOSTICS_HOME"}) }
     s/$home/<HOME>/g;
     s{<HOME>/.*}{<HOME>/<REDACTED_PATH>}g;
-  ' "$diagnostic_file" > "$diagnostic_file.redacted"
-  mv "$diagnostic_file.redacted" "$diagnostic_file"
+  ' "$diagnostic_file" > "$diagnostic_file.redacted"; then
+    rm -f -- "$diagnostic_file.redacted"
+    echo "error: failed to redact $diagnostic_file" >&2
+    exit 1
+  fi
+  mv "$diagnostic_file.redacted" "$diagnostic_file" || exit 1
 done
 
-ditto -c -k --norsrc --keepParent "$bundle_dir" "$archive_path"
+if ! ditto -c -k --norsrc --keepParent "$bundle_dir" "$archive_path"; then
+  echo "error: failed to create diagnostic archive" >&2
+  exit 1
+fi
+[[ -s "$archive_path" ]] || { echo "error: diagnostic archive is empty" >&2; exit 1; }
 
 echo ""
 echo "Diagnostics saved to:"
