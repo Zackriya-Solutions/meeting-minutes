@@ -149,7 +149,7 @@ if [[ -n "$app_data_dir" ]]; then
   model_dir="$app_data_dir/models/embedding"
   if [[ -d "$model_dir" ]]; then
     find "$model_dir" -maxdepth 2 -type f -exec stat -f '%N|%z bytes' {} \; 2>/dev/null \
-      | sed "s|$user_home|<HOME>|g" \
+      | sed "s|^$model_dir/||" \
       | sort > "$bundle_dir/embedding-model-files.txt"
   fi
 
@@ -180,21 +180,18 @@ FROM jobs
 WHERE kind IN ('chunk_embed', 'embedding_repair', 'backfill')
 GROUP BY kind, status, attempts
 ORDER BY kind, status, attempts;
-
-SELECT id, kind, status, attempts, run_after, updated_at,
-       CASE WHEN last_error IS NULL THEN '' ELSE substr(last_error, 1, 300) END AS last_error
-FROM jobs
-WHERE kind IN ('chunk_embed', 'embedding_repair', 'backfill')
-  AND status IN ('queued', 'running', 'failed')
-ORDER BY id DESC LIMIT 50;
 SQL
   fi
 fi
 
-# Redact the current home path from every textual diagnostic after all tools finish.
+# Redact the current home path and its user-controlled suffix from every textual
+# diagnostic after all tools finish. Stack/memory tools report mappings and symbols,
+# not heap contents, but their path columns can still contain private filenames.
 for diagnostic_file in "$bundle_dir"/*.txt "$bundle_dir"/*.csv; do
   [[ -f "$diagnostic_file" ]] || continue
-  sed "s|$user_home|<HOME>|g" "$diagnostic_file" > "$diagnostic_file.redacted"
+  sed "s|$user_home|<HOME>|g" "$diagnostic_file" \
+    | sed -E 's#<HOME>/[^[:space:]\]\)\}\",;]+#<HOME>/<REDACTED_PATH>#g' \
+    > "$diagnostic_file.redacted"
   mv "$diagnostic_file.redacted" "$diagnostic_file"
 done
 
