@@ -125,13 +125,6 @@ if [[ -n "$selected_pid" ]]; then
     sleep 2
   done
 
-  # Release GUI applications usually write little or nothing to the unified log. Keep only
-  # indexing/memory-related lines and redact the home path if any are available.
-  log show --style compact --last 2h \
-    --predicate 'process == "Memento" OR process == "memento"' 2>/dev/null \
-    | grep -Ei 'embed|index|backfill|chunk|job|onnx|vector|memory|malloc|model' \
-    | sed "s|$user_home|<HOME>|g" \
-    | tail -5000 > "$bundle_dir/memento-filtered-system-log.txt" || true
 else
   echo "Memento process was not found." | tee "$bundle_dir/process-not-found.txt"
 fi
