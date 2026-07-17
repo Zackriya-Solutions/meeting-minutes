@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use sysinfo::{ProcessesToUpdate, System};
 use tauri::async_runtime::JoinHandle;
-use tauri::{AppHandle, Emitter, Manager, State, Wry};
+use tauri::{AppHandle, Emitter, Manager, State, UserAttentionType, Wry};
 use tokio_util::sync::CancellationToken;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -286,6 +286,16 @@ async fn deliver_detection(app: &AppHandle<Wry>, event: MeetingDetectedEvent) {
 
     if main_is_focused {
         return;
+    }
+
+    // Native notifications can be hidden by Focus mode, denied permissions, or quiet
+    // delivery. Request OS-level attention as a second, non-focus-stealing signal. On macOS
+    // this bounces the Dock icon until Memento becomes active; on Windows it flashes the
+    // taskbar entry. Activating the app clears the signal automatically.
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(error) = window.request_user_attention(Some(UserAttentionType::Critical)) {
+            log::warn!("Failed to request meeting detection attention: {error}");
+        }
     }
 
     // Desktop notification actions are not consistently available across platforms.
