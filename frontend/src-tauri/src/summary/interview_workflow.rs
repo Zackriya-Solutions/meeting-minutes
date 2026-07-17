@@ -477,10 +477,40 @@ fn normalized(value: &str) -> String {
 }
 
 fn record_key(kind: &str, payload: &Value) -> String {
+    if kind == "question_answer" {
+        let question = payload
+            .get("question")
+            .and_then(Value::as_str)
+            .map(normalized)
+            .unwrap_or_default();
+        let answer = payload
+            .get("answer")
+            .and_then(Value::as_str)
+            .map(normalized)
+            .unwrap_or_default();
+        return format!(
+            "{kind}:{}",
+            serde_json::to_string(&(question, answer)).unwrap_or_default()
+        );
+    }
+    if kind == "evidence" {
+        let competency = payload
+            .get("competency")
+            .and_then(Value::as_str)
+            .map(normalized)
+            .unwrap_or_default();
+        let observation = payload
+            .get("observation")
+            .and_then(Value::as_str)
+            .map(normalized)
+            .unwrap_or_default();
+        return format!(
+            "{kind}:{}",
+            serde_json::to_string(&(competency, observation)).unwrap_or_default()
+        );
+    }
     let text = match kind {
         "conversation_block" => payload.get("topic"),
-        "question_answer" => payload.get("question"),
-        "evidence" => payload.get("observation"),
         "case_exercise" => payload.get("prompt"),
         "open_question" | "candidate_question" => payload.get("question"),
         "next_step" => payload.get("action"),
@@ -964,7 +994,7 @@ pub async fn purge_expired_interview_memories(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::summary::interview::{InterviewEvidence, OpenQuestion};
+    use crate::summary::interview::{InterviewEvidence, OpenQuestion, QuestionAnswer};
     use crate::summary::standup::EvidenceRef;
 
     async fn pool() -> SqlitePool {
@@ -1151,5 +1181,50 @@ mod tests {
             record_key("open_question", &flatten(&report).unwrap()[0].1),
             "open_question:what was your personal contribution?"
         );
+    }
+
+    #[tokio::test]
+    async fn persistence_keys_keep_distinct_answers_and_competencies() {
+        let pool = pool().await;
+        let evidence = vec![EvidenceRef {
+            timestamp: "[00:10]".into(),
+            quote: Some("quote".into()),
+        }];
+        let report = InterviewReport {
+            question_answers: vec![
+                QuestionAnswer {
+                    question: "Tell me more".into(),
+                    answer: "First answer".into(),
+                    evidence: evidence.clone(),
+                    ..Default::default()
+                },
+                QuestionAnswer {
+                    question: "Tell me more".into(),
+                    answer: "Second answer".into(),
+                    evidence: evidence.clone(),
+                    ..Default::default()
+                },
+            ],
+            evidence: vec![
+                InterviewEvidence {
+                    competency: "Architecture".into(),
+                    observation: "Used a trade-off matrix".into(),
+                    evidence: evidence.clone(),
+                    ..Default::default()
+                },
+                InterviewEvidence {
+                    competency: "Communication".into(),
+                    observation: "Used a trade-off matrix".into(),
+                    evidence,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(sync_records(&pool, "m1", &report).await.unwrap(), 4);
+        let rows = list_records(&pool, "m1").await.unwrap();
+        assert_eq!(rows.iter().filter(|row| row.kind == "question_answer").count(), 2);
+        assert_eq!(rows.iter().filter(|row| row.kind == "evidence").count(), 2);
     }
 }
