@@ -140,6 +140,41 @@ function diarizationMetrics(rows, frameMs = 100) {
   };
 }
 
+function identityMetrics(rows) {
+  const known = rows.filter((row) => row.expected_speaker != null);
+  const unknown = rows.filter((row) => row.expected_speaker == null);
+  const autoAssignments = rows.filter((row) => row.decision === 'auto_assign');
+  const correctAuto = autoAssignments.filter(
+    (row) => row.expected_speaker != null && row.predicted_speaker === row.expected_speaker,
+  ).length;
+  const falseAuto = autoAssignments.length - correctAuto;
+  const falseUnknownAccepts = unknown.filter(
+    (row) => row.decision === 'auto_assign' || row.final_speaker != null,
+  ).length;
+  const resolvedKnown = known.filter((row) => row.final_speaker === row.expected_speaker).length;
+  const trainingSamples = rows.filter((row) => row.added_to_profile === true);
+  const contaminatedSamples = trainingSamples.filter(
+    (row) => row.expected_speaker == null || row.final_speaker !== row.expected_speaker,
+  ).length;
+  return {
+    count: rows.length,
+    known_count: known.length,
+    unknown_count: unknown.length,
+    auto_assign_count: autoAssignments.length,
+    correct_auto_assignments: correctAuto,
+    false_auto_assignments: falseAuto,
+    auto_assignment_precision: autoAssignments.length
+      ? correctAuto / autoAssignments.length
+      : null,
+    unknown_false_accept_rate: unknown.length ? falseUnknownAccepts / unknown.length : null,
+    reviewed_known_resolution_rate: known.length ? resolvedKnown / known.length : null,
+    training_sample_count: trainingSamples.length,
+    profile_contamination_rate: trainingSamples.length
+      ? contaminatedSamples / trainingSamples.length
+      : 0,
+  };
+}
+
 function retrievalMetrics(rows) {
   const answerable = rows.filter((row) => row.answerable !== false);
   const unanswerable = rows.filter((row) => row.answerable === false);
@@ -424,6 +459,7 @@ function runCli() {
     const metrics = {
       transcription: transcriptionMetrics(dataset.transcription ?? []),
       diarization: diarizationMetrics(dataset.diarization ?? [], dataset.frame_ms ?? 100),
+      identity: identityMetrics(dataset.identity ?? []),
       retrieval: retrievalMetrics(dataset.retrieval ?? []),
       summary: summaryMetrics(dataset.summary ?? []),
       standup: standupMetrics(dataset.standup ?? []),

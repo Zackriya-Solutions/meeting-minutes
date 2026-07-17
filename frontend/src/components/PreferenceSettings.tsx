@@ -23,6 +23,13 @@ export function PreferenceSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
+  const [capturePolicy, setCapturePolicy] = useState<{
+    unpromoted_retention_minutes: number;
+    saved_audio_retention_days?: number | null;
+    local_only: boolean;
+  } | null>(null);
+  const [identityAutoAssign, setIdentityAutoAssign] = useState(false);
+  const [isSavingLearningPolicy, setIsSavingLearningPolicy] = useState(false);
   const hasTrackedViewRef = useRef(false);
 
   // Lazy load preferences on mount (only loads if not already cached)
@@ -31,6 +38,22 @@ export function PreferenceSettings() {
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
   }, [loadPreferences]);
+
+  useEffect(() => {
+    Promise.all([
+      invoke<{
+        unpromoted_retention_minutes: number;
+        saved_audio_retention_days?: number | null;
+        local_only: boolean;
+      }>('get_capture_retention_policy'),
+      invoke<Record<string, string>>('get_app_settings'),
+    ]).then(([policy, settings]) => {
+      setCapturePolicy(policy);
+      setIdentityAutoAssign(settings['identity.auto_assign_enabled'] === 'true');
+    }).catch((error) => {
+      console.warn('Failed to load local learning policy:', error);
+    });
+  }, []);
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {
@@ -164,6 +187,51 @@ export function PreferenceSettings() {
     }
   };
 
+  const handleAutoListeningChange = async (enabled: boolean) => {
+    if (!notificationSettings) return;
+    try {
+      await updateNotificationSettings({
+        ...notificationSettings,
+        auto_listening: enabled,
+      });
+      await Analytics.track('auto_listening_setting_changed', {
+        enabled: enabled.toString(),
+      });
+    } catch (error) {
+      console.error('Failed to update auto-listening:', error);
+    }
+  };
+
+  const saveLearningPolicy = async () => {
+    if (!capturePolicy) return;
+    setIsSavingLearningPolicy(true);
+    try {
+      await invoke('update_capture_retention_policy', {
+        input: {
+          unpromotedRetentionMinutes: capturePolicy.unpromoted_retention_minutes,
+          savedAudioRetentionDays: capturePolicy.saved_audio_retention_days ?? null,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to save capture retention policy:', error);
+    } finally {
+      setIsSavingLearningPolicy(false);
+    }
+  };
+
+  const handleIdentityAutoAssign = async (enabled: boolean) => {
+    setIdentityAutoAssign(enabled);
+    try {
+      await invoke('set_app_setting', {
+        key: 'identity.auto_assign_enabled',
+        value: enabled ? 'true' : 'false',
+      });
+    } catch (error) {
+      setIdentityAutoAssign(!enabled);
+      console.error('Failed to save identity policy:', error);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Уведомления Section */}
@@ -177,13 +245,13 @@ export function PreferenceSettings() {
         </div>
       </div>
 
-      {/* Automatic meeting detection stores only the preference; observed signals stay in memory. */}
+      {/* Detection evidence remains in memory; only normalized auto-listening lifecycle is stored. */}
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <div className="flex items-start justify-between gap-4 sm:gap-6">
           <div className="min-w-0">
             <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Automatic meeting detection')}</h3>
             <p className="text-sm text-[var(--fg2)]">
-              {t('Suggest recording when a supported meeting app or browser call becomes active. Detection signals stay in memory and recording never starts without your confirmation.')}
+              {t('Detect supported meeting apps and browser calls locally. Raw process names, window titles, and URLs are not stored.')}
             </p>
           </div>
           <Switch
@@ -193,6 +261,74 @@ export function PreferenceSettings() {
             onCheckedChange={handleAutoMeetingDetectionChange}
           />
         </div>
+      </div>
+
+      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+        <div className="flex items-start justify-between gap-4 sm:gap-6">
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Auto-listening')}</h3>
+            <p className="text-sm text-[var(--fg2)]">
+              {t('Start a normal local recording when a supported native meeting client begins using the microphone, then stop and save it after the signal has been absent for about 45 seconds. Browser, Telegram, and process-only signals still require confirmation.')}
+            </p>
+          </div>
+          <Switch
+            className="shrink-0"
+            checked={notificationSettings?.auto_listening ?? true}
+            disabled={!notificationSettings || !notificationSettings.auto_meeting_detection}
+            onCheckedChange={handleAutoListeningChange}
+          />
+        </div>
+      </div>
+
+      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Local learning and retention')}</h3>
+        <p className="text-sm text-[var(--fg2)]">
+          {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
+        </p>
+        <div className="mt-4 flex items-start justify-between gap-6 border-t border-[var(--border-subtle)] pt-4">
+          <div>
+            <div className="text-sm font-medium text-[var(--fg1)]">{t('Automatic assignment for very high-confidence known voices')}</div>
+            <p className="mt-1 text-xs text-[var(--fg3)]">{t('Off by default. Voice floor and top-two margin still apply; uncertain voices remain Unknown.')}</p>
+          </div>
+          <Switch checked={identityAutoAssign} onCheckedChange={handleIdentityAutoAssign} />
+        </div>
+        {capturePolicy && (
+          <div className="mt-4 grid gap-3 border-t border-[var(--border-subtle)] pt-4 sm:grid-cols-2">
+            <label className="text-xs text-[var(--fg2)]">
+              {t('Unpromoted capture metadata, minutes')}
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={capturePolicy.unpromoted_retention_minutes}
+                onChange={(event) => setCapturePolicy({ ...capturePolicy, unpromoted_retention_minutes: Number(event.target.value) })}
+                className="mt-1 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-sheet)] px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-xs text-[var(--fg2)]">
+              {t('Saved audio retention, days (blank keeps it)')}
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                value={capturePolicy.saved_audio_retention_days ?? ''}
+                onChange={(event) => setCapturePolicy({ ...capturePolicy, saved_audio_retention_days: event.target.value ? Number(event.target.value) : null })}
+                className="mt-1 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-sheet)] px-3 py-2 text-sm"
+              />
+            </label>
+            <div className="sm:col-span-2 flex items-center justify-between gap-3">
+              <span className="text-xs text-[var(--fg3)]">{t('Local-only is enforced for capture evidence and learning profiles.')}</span>
+              <button
+                type="button"
+                disabled={isSavingLearningPolicy}
+                onClick={() => void saveLearningPolicy()}
+                className="rounded-md bg-[var(--gold)] px-3 py-2 text-xs text-[var(--fg-inverse)] disabled:opacity-50"
+              >
+                {isSavingLearningPolicy ? t('Saving...') : t('Save policy')}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Хранение данных Section */}

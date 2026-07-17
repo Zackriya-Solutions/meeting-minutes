@@ -21,6 +21,53 @@
       ]
     }
   ],
+  "identity": [
+    {
+      "id": "known-auto-assign",
+      "expected_speaker": "anna",
+      "predicted_speaker": "anna",
+      "decision": "auto_assign",
+      "final_speaker": "anna",
+      "added_to_profile": false,
+      "channel": "microphone"
+    },
+    {
+      "id": "known-high-margin",
+      "expected_speaker": "anna",
+      "predicted_speaker": "anna",
+      "decision": "confirm",
+      "final_speaker": "anna",
+      "added_to_profile": true,
+      "channel": "microphone"
+    },
+    {
+      "id": "known-other-channel",
+      "expected_speaker": "anna",
+      "predicted_speaker": "anna",
+      "decision": "confirm",
+      "final_speaker": "anna",
+      "added_to_profile": false,
+      "channel": "system"
+    },
+    {
+      "id": "open-set-unknown",
+      "expected_speaker": null,
+      "predicted_speaker": "anna",
+      "decision": "unknown",
+      "final_speaker": null,
+      "added_to_profile": false,
+      "channel": "system"
+    },
+    {
+      "id": "ambiguous-known",
+      "expected_speaker": "boris",
+      "predicted_speaker": "anna",
+      "decision": "unknown",
+      "final_speaker": "boris",
+      "added_to_profile": false,
+      "channel": "mixed"
+    }
+  ],
   "retrieval": [
     {
       "id": "search-smoke-answerable",

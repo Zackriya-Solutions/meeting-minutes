@@ -11,6 +11,12 @@ pub struct NotificationSettings {
     #[serde(default = "default_auto_meeting_detection")]
     pub auto_meeting_detection: bool,
 
+    /// Automatically start and stop a normal meeting recording when a strong local call
+    /// signal is present. Currently enabled only where an OS microphone-session signal is
+    /// available; weaker process-launch evidence remains suggestion-only.
+    #[serde(default = "default_auto_listening")]
+    pub auto_listening: bool,
+
     /// Enable recording lifecycle notifications (start/stop/pause/resume)
     pub recording_notifications: bool,
 
@@ -70,6 +76,7 @@ impl Default for NotificationSettings {
     fn default() -> Self {
         Self {
             auto_meeting_detection: true,
+            auto_listening: true,
             recording_notifications: true,
             time_based_reminders: true,
             meeting_reminders: true,
@@ -84,6 +91,10 @@ impl Default for NotificationSettings {
 }
 
 const fn default_auto_meeting_detection() -> bool {
+    true
+}
+
+const fn default_auto_listening() -> bool {
     true
 }
 
@@ -277,6 +288,7 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
 
     NotificationSettings {
         auto_meeting_detection: partial.auto_meeting_detection,
+        auto_listening: partial.auto_listening,
         recording_notifications: partial.recording_notifications,
         time_based_reminders: partial.time_based_reminders,
         meeting_reminders: partial.meeting_reminders,
@@ -309,12 +321,14 @@ mod tests {
 
         let settings: NotificationSettings = serde_json::from_value(legacy).unwrap();
         assert!(settings.auto_meeting_detection);
+        assert!(settings.auto_listening);
     }
 
     #[test]
     fn fresh_settings_enable_detection_by_default() {
         let settings = NotificationSettings::default();
         assert!(settings.auto_meeting_detection);
+        assert!(settings.auto_listening);
         assert!(settings.notification_preferences.show_recording_started);
         assert!(settings.notification_preferences.show_recording_stopped);
     }

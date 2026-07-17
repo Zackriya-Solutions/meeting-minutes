@@ -533,7 +533,7 @@ impl SummaryService {
             }
         };
         let workflow = crate::summary::memory_workflow::MemoryWorkflow::from_template(&template);
-        let effective_custom_prompt = match workflow.preparation_context(&pool, &meeting_id).await {
+        let mut effective_custom_prompt = match workflow.preparation_context(&pool, &meeting_id).await {
             Ok(context) if custom_prompt.trim().is_empty() => context,
             Ok(context) if context.trim().is_empty() => custom_prompt.clone(),
             Ok(context) => format!("{}\n{}", context, custom_prompt.trim()),
@@ -542,6 +542,19 @@ impl SummaryService {
                 workflow.preparation_error_context(&custom_prompt)
             }
         };
+        match crate::learning::terminology::context_for_meeting(&pool, &meeting_id).await {
+            Ok(Some(glossary_context)) if effective_custom_prompt.trim().is_empty() => {
+                effective_custom_prompt = glossary_context;
+            }
+            Ok(Some(glossary_context)) => {
+                effective_custom_prompt =
+                    format!("{}\n\n{}", effective_custom_prompt.trim(), glossary_context);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                warn!("Failed to load reviewed terminology context: {error}");
+            }
+        }
         let template_fingerprint = template_cache_fingerprint(&template);
 
         let cache_source = build_summary_cache_source(

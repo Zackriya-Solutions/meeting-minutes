@@ -23,6 +23,7 @@ export interface StorageLocations {
 
 export interface NotificationSettings {
   auto_meeting_detection: boolean;
+  auto_listening: boolean;
   recording_notifications: boolean;
   time_based_reminders: boolean;
   meeting_reminders: boolean;

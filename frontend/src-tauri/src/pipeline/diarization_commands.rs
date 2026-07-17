@@ -21,8 +21,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::speaker::SpeakersRepository;
 use crate::pipeline::diarization::{
-    assign_segment, fold_embedding, match_speaker, DiarizationParams, Diarizer, DiarizerConfig,
-    SpeakerTurn, DEFAULT_SPEAKER_TAU, EMBEDDING_FILE, MIN_OVERLAP_RATIO, SEGMENTATION_FILE,
+    assign_segment, DiarizationParams, Diarizer, DiarizerConfig, SpeakerTurn, EMBEDDING_FILE,
+    MIN_OVERLAP_RATIO, SEGMENTATION_FILE,
 };
 use crate::state::AppState;
 
@@ -185,6 +185,21 @@ fn secs_to_ms(secs: f64) -> i64 {
     (secs * 1000.0).round() as i64
 }
 
+fn cluster_overlap_ratio(
+    start_ms: i64,
+    end_ms: i64,
+    cluster_id: i64,
+    turns: &[SpeakerTurn],
+) -> f64 {
+    let duration = (end_ms - start_ms).max(1) as f64;
+    let overlap: i64 = turns
+        .iter()
+        .filter(|turn| turn.cluster_id == cluster_id)
+        .map(|turn| (end_ms.min(turn.end_ms) - start_ms.max(turn.start_ms)).max(0))
+        .sum();
+    (overlap as f64 / duration).clamp(0.0, 1.0)
+}
+
 /// Pure assignment glue (unit-tested): map each meeting segment to a resolved speaker id.
 ///
 /// For every segment with known start+end timing, convert seconds→ms, pick the dominant
@@ -218,60 +233,6 @@ fn should_preserve_existing_assignments(
     assigned_segments: usize,
 ) -> bool {
     had_existing_assignments && total_segments > 0 && assigned_segments == 0
-}
-
-/// Resolve each diarized cluster to a persisted speaker profile (cross-meeting identity),
-/// returning a `cluster_id -> speakers.id` map for transcript attribution.
-///
-/// For each cluster mean embedding: cosine-match against known profiles (≥
-/// [`DEFAULT_SPEAKER_TAU`]) → fold the observation into the matched profile; else insert a
-/// new unconfirmed `Speaker N` (N = speaker count captured at run start + running index).
-/// NOTE on folding: `speakers` has no per-profile sample-count column (no migration is
-/// permitted for this stage), so [`fold_embedding`] is called with `count = 1` — an
-/// equal-weight blend of the stored profile and the new observation.
-async fn resolve_cluster_speakers(
-    pool: &SqlitePool,
-    cluster_embeddings: &[(i64, Vec<f32>)],
-) -> anyhow::Result<HashMap<i64, i64>> {
-    let mut known = SpeakersRepository::list_with_embeddings(pool).await?;
-    let base_count = SpeakersRepository::count(pool).await?;
-
-    // Dimension guard: known profiles whose dim differs from these embeddings can never
-    // match (cosine_similarity returns 0 for mismatched lengths), so they yield new
-    // speakers. Warn once rather than silently.
-    if let Some((_, sample)) = cluster_embeddings.first() {
-        let dim = sample.len();
-        let mismatched = known.iter().filter(|(_, e)| e.len() != dim).count();
-        if mismatched > 0 {
-            log::warn!(
-                "[diarize] {mismatched} existing speaker profile(s) have an embedding dim != {dim}; \
-                 they will not match and new speakers may be created"
-            );
-        }
-    }
-
-    let mut map = HashMap::new();
-    let mut new_index: i64 = 0;
-    for (cluster_id, emb) in cluster_embeddings {
-        match match_speaker(emb, &known, DEFAULT_SPEAKER_TAU) {
-            Some(speaker_id) => {
-                if let Some(slot) = known.iter_mut().find(|(id, _)| *id == speaker_id) {
-                    let folded = fold_embedding(&slot.1, 1, emb);
-                    SpeakersRepository::update_embedding(pool, speaker_id, &folded).await?;
-                    slot.1 = folded; // keep in-memory profiles current for later clusters
-                }
-                map.insert(*cluster_id, speaker_id);
-            }
-            None => {
-                new_index += 1;
-                let name = format!("Speaker {}", base_count + new_index);
-                let id = SpeakersRepository::insert(pool, &name, emb, false).await?;
-                known.push((id, emb.clone())); // distinct later clusters from this one
-                map.insert(*cluster_id, id);
-            }
-        }
-    }
-    Ok(map)
 }
 
 /// Diarization engine selection: `"salutespeech"` (Sber cloud, default) or `"local"`.
@@ -352,9 +313,10 @@ fn decode_to_pcm16_16k(path: &Path) -> anyhow::Result<Vec<u8>> {
 async fn run_local_diarization<R: Runtime>(
     app: &AppHandle<R>,
     pool: &SqlitePool,
+    meeting_id: &str,
     audio_path: &Path,
     expected_speakers: Option<usize>,
-) -> Result<(Vec<SpeakerTurn>, HashMap<i64, i64>), DiarizeError> {
+) -> Result<(Vec<SpeakerTurn>, HashMap<i64, i64>, HashMap<i64, i64>), DiarizeError> {
     let model_dir = resolve_model_dir(app).map_err(|e| DiarizeError::Other(anyhow!(e)))?;
     let config = DiarizerConfig { model_dir };
     if !config.is_available() {
@@ -372,10 +334,25 @@ async fn run_local_diarization<R: Runtime>(
     .await
     .map_err(|e| DiarizeError::Other(anyhow!("diarize task panicked: {e}")))?
     .map_err(DiarizeError::Other)?;
-    let cluster_to_speaker = resolve_cluster_speakers(pool, &result.cluster_embeddings)
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let resolved = crate::learning::identity::resolve_clusters(
+        pool,
+        meeting_id,
+        &run_id,
+        &result.turns,
+        &result.cluster_embeddings,
+    )
         .await
-        .map_err(DiarizeError::Other)?;
-    Ok((result.turns, cluster_to_speaker))
+        .map_err(|error| DiarizeError::Other(anyhow!(error)))?;
+    let cluster_to_speaker = resolved
+        .iter()
+        .map(|(local_cluster, (speaker_id, _))| (*local_cluster, *speaker_id))
+        .collect();
+    let cluster_to_learning = resolved
+        .into_iter()
+        .map(|(local_cluster, (_, cluster_id))| (local_cluster, cluster_id))
+        .collect();
+    Ok((result.turns, cluster_to_speaker, cluster_to_learning))
 }
 
 /// Shared diarization core, called by both the `diarize_meeting` command and the `diarize`
@@ -411,7 +388,11 @@ pub async fn run_diarization_core<R: Runtime>(
     }
 
     // 2) Produce speaker turns + a cluster->speaker map from the configured engine.
-    let (turns, cluster_to_speaker): (Vec<SpeakerTurn>, HashMap<i64, i64>) =
+    let (turns, cluster_to_speaker, cluster_to_learning): (
+        Vec<SpeakerTurn>,
+        HashMap<i64, i64>,
+        HashMap<i64, i64>,
+    ) =
         if resolve_diarization_provider(pool).await == "salutespeech" {
             // Cloud: SaluteSpeech async recognition with speaker separation.
             log::info!("[diarize] using SaluteSpeech cloud engine");
@@ -442,7 +423,7 @@ pub async fn run_diarization_core<R: Runtime>(
                     return Err(anyhow!("SaluteSpeech returned no speaker turns"));
                 }
                 let cts = resolve_cloud_speakers(pool, &turns).await?;
-                Ok::<_, anyhow::Error>((turns, cts))
+                Ok::<_, anyhow::Error>((turns, cts, HashMap::new()))
             }
             .await;
 
@@ -454,7 +435,15 @@ pub async fn run_diarization_core<R: Runtime>(
                         "diarization-fallback",
                         serde_json::json!({ "meeting_id": meeting_id }),
                     );
-                    match run_local_diarization(app, pool, &audio_path, expected_speakers).await {
+                    match run_local_diarization(
+                        app,
+                        pool,
+                        meeting_id,
+                        &audio_path,
+                        expected_speakers,
+                    )
+                    .await
+                    {
                         Ok(result) => result,
                         Err(DiarizeError::ModelsUnavailable) => return Err(DiarizeError::Other(anyhow!(
                             "SaluteSpeech is unavailable ({cloud_error}); local diarization models are not downloaded"
@@ -468,7 +457,7 @@ pub async fn run_diarization_core<R: Runtime>(
             }
         } else {
             // Local: pyannote-style ONNX cascade (segmentation + CAM++ + clustering).
-            run_local_diarization(app, pool, &audio_path, expected_speakers).await?
+            run_local_diarization(app, pool, meeting_id, &audio_path, expected_speakers).await?
         };
 
     // 5) Attribute transcript segments. Reset first so re-runs are idempotent (only
@@ -511,6 +500,39 @@ pub async fn run_diarization_core<R: Runtime>(
         SpeakersRepository::set_segment_speaker(pool, segment_id, *speaker_id)
             .await
             .map_err(|e| DiarizeError::Other(e.into()))?;
+    }
+    for (segment_id, start_s, end_s) in &segments {
+        let (Some(start_s), Some(end_s)) = (start_s, end_s) else {
+            continue;
+        };
+        let Some(local_cluster) = assign_segment(
+            secs_to_ms(*start_s),
+            secs_to_ms(*end_s),
+            &turns,
+            MIN_OVERLAP_RATIO,
+        ) else {
+            continue;
+        };
+        let Some(cluster_id) = cluster_to_learning.get(&local_cluster) else {
+            continue;
+        };
+        if let Err(error) = crate::learning::identity::link_cluster_segment(
+            pool,
+            *cluster_id,
+            segment_id,
+            cluster_overlap_ratio(
+                secs_to_ms(*start_s),
+                secs_to_ms(*end_s),
+                local_cluster,
+                &turns,
+            ),
+        )
+        .await
+        {
+            // Speaker attribution has already succeeded. Provenance is valuable for
+            // learning, but a bookkeeping failure must not make the whole run look failed.
+            log::warn!("Could not persist learning provenance for segment {segment_id}: {error}");
+        }
     }
 
     let assigned_segments = assignments.len() as i64;
@@ -657,6 +679,14 @@ mod tests {
         assert_eq!(secs_to_ms(1.5), 1500);
         assert_eq!(secs_to_ms(2.3006), 2301); // rounds to nearest ms
         assert_eq!(secs_to_ms(0.0004), 0);
+    }
+
+    #[test]
+    fn cluster_provenance_records_actual_overlap() {
+        let turns = vec![turn(0, 600, 0), turn(600, 1000, 1)];
+        assert!((cluster_overlap_ratio(0, 1000, 0, &turns) - 0.6).abs() < f64::EPSILON);
+        assert!((cluster_overlap_ratio(200, 700, 0, &turns) - 0.8).abs() < f64::EPSILON);
+        assert_eq!(cluster_overlap_ratio(0, 1000, 2, &turns), 0.0);
     }
 
     #[test]

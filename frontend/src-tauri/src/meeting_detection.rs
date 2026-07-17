@@ -1,23 +1,31 @@
 //! Privacy-preserving meeting detection.
 //!
-//! The detector keeps process/audio evidence in memory only. It never records audio,
-//! inspects browser URLs or window titles, or starts a recording without an explicit
-//! user action.
+//! Process/audio evidence stays in memory. When auto-listening is enabled, a strong OS-level
+//! microphone-session signal may request the existing recording pipeline to start and stop;
+//! raw process names, browser URLs, and window titles are never persisted.
 
 use crate::notifications::commands::NotificationManagerState;
-use serde::Serialize;
+use crate::state::AppState;
+use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use sysinfo::{ProcessesToUpdate, System};
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Manager, State, UserAttentionType, Wry};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const PROCESS_LAUNCH_EVIDENCE_TTL: Duration = Duration::from_secs(90);
-const REQUIRED_ACTIVE_POLLS: u8 = 3;
+// A supported native client actively owning the microphone is already a strong signal.
+// Start on the first observation (at most one poll late) so a privacy-preserving design
+// does not need to keep an ambient pre-call audio buffer.
+const REQUIRED_ACTIVE_POLLS: u8 = 2;
+const STRONG_AUTO_LISTENING_POLLS: u8 = 1;
 const REQUIRED_QUIET_POLLS: u8 = 2;
+const AUTO_LISTENING_QUIET_POLLS: u8 = 23;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,9 +51,23 @@ pub struct MeetingDetectedEvent {
     pub source: DetectionSource,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoListeningEvent {
+    pub session_id: String,
+    pub apps: Vec<MeetingApp>,
+    pub source: DetectionSource,
+}
+
+#[derive(Debug, Default)]
+struct AutoListeningSharedState {
+    active_capture_session_id: Option<String>,
+    start_failed: bool,
+}
+
 /// Owns the background task so it is started once and can be cancelled on app exit.
 pub struct AutoMeetingDetectionState {
     runtime: Mutex<DetectionRuntime>,
+    auto_listening: Arc<Mutex<AutoListeningSharedState>>,
 }
 
 struct DetectionRuntime {
@@ -60,6 +82,7 @@ impl Default for AutoMeetingDetectionState {
                 cancellation: CancellationToken::new(),
                 task: None,
             }),
+            auto_listening: Arc::new(Mutex::new(AutoListeningSharedState::default())),
         }
     }
 }
@@ -81,8 +104,9 @@ impl AutoMeetingDetectionState {
         }
 
         let cancellation = Self::cancellation_for_start(&mut runtime);
+        let auto_listening = self.auto_listening.clone();
         runtime.task = Some(tauri::async_runtime::spawn(async move {
-            run_detection_loop(app, cancellation).await;
+            run_detection_loop(app, cancellation, auto_listening).await;
         }));
     }
 
@@ -108,6 +132,9 @@ pub struct AutoMeetingDetectionStatus {
     pub enabled: bool,
     pub running: bool,
     pub microphone_signal_supported: bool,
+    pub auto_listening_enabled: bool,
+    pub auto_listening_supported: bool,
+    pub active_capture_session_id: Option<String>,
     pub poll_interval_seconds: u64,
 }
 
@@ -117,14 +144,25 @@ pub async fn get_auto_meeting_detection_status(
     detector: State<'_, AutoMeetingDetectionState>,
     notifications: State<'_, NotificationManagerState<Wry>>,
 ) -> Result<AutoMeetingDetectionStatus, String> {
-    let enabled = match notifications.read().await.as_ref() {
-        Some(manager) => manager.get_settings().await.auto_meeting_detection,
-        None => false,
+    let (enabled, auto_listening_enabled) = match notifications.read().await.as_ref() {
+        Some(manager) => {
+            let settings = manager.get_settings().await;
+            (settings.auto_meeting_detection, settings.auto_listening)
+        }
+        None => (false, false),
     };
+    let active_capture_session_id = detector
+        .auto_listening
+        .lock()
+        .ok()
+        .and_then(|state| state.active_capture_session_id.clone());
     Ok(AutoMeetingDetectionStatus {
         enabled,
         running: detector.is_running(),
         microphone_signal_supported: cfg!(target_os = "macos"),
+        auto_listening_enabled,
+        auto_listening_supported: cfg!(target_os = "macos"),
+        active_capture_session_id,
         poll_interval_seconds: POLL_INTERVAL.as_secs(),
     })
 }
@@ -134,41 +172,79 @@ struct DetectionSession {
     active_polls: u8,
     quiet_polls: u8,
     notified: bool,
+    auto_listening_active: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DetectionEvent {
+    None,
+    SuggestRecording,
+    StartAutoListening,
+    StopAutoListening,
 }
 
 impl DetectionSession {
-    /// Returns true exactly once for one continuous meeting signal.
-    fn observe(&mut self, active: bool, recording: bool, enabled: bool) -> bool {
+    fn observe(
+        &mut self,
+        active: bool,
+        recording: bool,
+        enabled: bool,
+        auto_listening: bool,
+    ) -> DetectionEvent {
         if !enabled {
+            if self.auto_listening_active {
+                *self = Self::default();
+                return DetectionEvent::StopAutoListening;
+            }
             *self = Self::default();
-            return false;
+            return DetectionEvent::None;
         }
 
         if active {
             self.quiet_polls = 0;
             self.active_polls = self.active_polls.saturating_add(1);
 
+            if self.auto_listening_active {
+                return DetectionEvent::None;
+            }
+
             // A call already being recorded is a consumed detection session. This prevents
             // an immediate prompt if the user stops recording while the call is still open.
             if recording {
                 self.notified = true;
-                return false;
+                return DetectionEvent::None;
             }
 
-            if !self.notified && self.active_polls >= REQUIRED_ACTIVE_POLLS {
+            let required_polls = if auto_listening {
+                STRONG_AUTO_LISTENING_POLLS
+            } else {
+                REQUIRED_ACTIVE_POLLS
+            };
+            if !self.notified && self.active_polls >= required_polls {
                 self.notified = true;
-                return true;
+                if auto_listening {
+                    self.auto_listening_active = true;
+                    return DetectionEvent::StartAutoListening;
+                }
+                return DetectionEvent::SuggestRecording;
             }
-            return false;
+            return DetectionEvent::None;
         }
 
         self.active_polls = 0;
         self.quiet_polls = self.quiet_polls.saturating_add(1);
+        if self.auto_listening_active {
+            if self.quiet_polls >= AUTO_LISTENING_QUIET_POLLS {
+                *self = Self::default();
+                return DetectionEvent::StopAutoListening;
+            }
+            return DetectionEvent::None;
+        }
         if self.quiet_polls >= REQUIRED_QUIET_POLLS {
             self.notified = false;
             self.quiet_polls = 0;
         }
-        false
+        DetectionEvent::None
     }
 }
 
@@ -201,10 +277,20 @@ impl ProcessLaunchEvidence {
     }
 }
 
-async fn run_detection_loop(app: AppHandle<Wry>, cancellation: CancellationToken) {
+async fn run_detection_loop(
+    app: AppHandle<Wry>,
+    cancellation: CancellationToken,
+    auto_listening_state: Arc<Mutex<AutoListeningSharedState>>,
+) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(error) = recover_interrupted_capture_sessions(state.db_manager.pool()).await {
+            log::warn!("Could not recover interrupted capture sessions: {error}");
+        }
+    }
     let mut system = System::new_all();
     let mut process_evidence = ProcessLaunchEvidence::default();
     let mut session = DetectionSession::default();
+    let mut suppress_auto_listening_until_quiet = false;
     let mut interval = tokio::time::interval(POLL_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -212,10 +298,17 @@ async fn run_detection_loop(app: AppHandle<Wry>, cancellation: CancellationToken
         tokio::select! {
             _ = cancellation.cancelled() => break,
             _ = interval.tick() => {
-                let enabled = detection_enabled(&app).await;
+                let (enabled, auto_listening_enabled) = detection_settings(&app).await;
                 if !enabled {
-                    // Opt-out means no process or microphone inspection, not merely no prompt.
+                    if session.observe(false, false, false, false) == DetectionEvent::StopAutoListening {
+                        stop_auto_listening(&app, &auto_listening_state).await;
+                    }
+                    process_evidence = ProcessLaunchEvidence::default();
+                    continue;
+                }
+                if session.auto_listening_active && !auto_listening_enabled {
                     session = DetectionSession::default();
+                    stop_auto_listening(&app, &auto_listening_state).await;
                     process_evidence = ProcessLaunchEvidence::default();
                     continue;
                 }
@@ -229,21 +322,86 @@ async fn run_detection_loop(app: AppHandle<Wry>, cancellation: CancellationToken
                     microphone_apps,
                     cfg!(target_os = "macos"),
                 );
+                if let Ok(mut shared) = auto_listening_state.lock() {
+                    if shared.start_failed {
+                        shared.start_failed = false;
+                        session = DetectionSession {
+                            active_polls: REQUIRED_ACTIVE_POLLS.saturating_sub(1),
+                            ..DetectionSession::default()
+                        };
+                        suppress_auto_listening_until_quiet = true;
+                    }
+                }
+                if candidates.is_empty() {
+                    suppress_auto_listening_until_quiet = false;
+                }
                 let recording = crate::audio::recording_commands::is_recording().await;
-                if session.observe(!candidates.is_empty(), recording, true) {
-                    let Some(source) = source else { continue };
-                    deliver_detection(
-                        &app,
-                        MeetingDetectedEvent {
-                            apps: candidates.into_iter().collect(),
+                let strong_auto_listening_signal = should_auto_listen(
+                    &candidates,
+                    source,
+                    auto_listening_enabled && !suppress_auto_listening_until_quiet,
+                    cfg!(target_os = "macos"),
+                );
+                match session.observe(
+                    !candidates.is_empty(),
+                    recording,
+                    true,
+                    strong_auto_listening_signal,
+                ) {
+                    DetectionEvent::None => {}
+                    DetectionEvent::SuggestRecording => {
+                        let Some(source) = source else { continue };
+                        deliver_detection(
+                            &app,
+                            MeetingDetectedEvent {
+                                apps: candidates.into_iter().collect(),
+                                source,
+                            },
+                        )
+                        .await;
+                    }
+                    DetectionEvent::StartAutoListening => {
+                        let Some(source) = source else { continue };
+                        let apps: Vec<_> = candidates.into_iter().collect();
+                        if let Err(error) = start_auto_listening(
+                            &app,
+                            &auto_listening_state,
+                            apps.clone(),
                             source,
-                        },
-                    )
-                    .await;
+                        )
+                        .await
+                        {
+                            log::warn!("Auto-listening start was rejected safely: {error}");
+                            session = DetectionSession {
+                                active_polls: REQUIRED_ACTIVE_POLLS,
+                                notified: true,
+                                ..DetectionSession::default()
+                            };
+                            deliver_detection(&app, MeetingDetectedEvent { apps, source }).await;
+                        }
+                    }
+                    DetectionEvent::StopAutoListening => {
+                        stop_auto_listening(&app, &auto_listening_state).await;
+                    }
                 }
             }
         }
     }
+}
+
+fn should_auto_listen(
+    candidates: &BTreeSet<MeetingApp>,
+    source: Option<DetectionSource>,
+    enabled: bool,
+    microphone_signal_supported: bool,
+) -> bool {
+    enabled
+        && microphone_signal_supported
+        && source == Some(DetectionSource::MicrophoneActivity)
+        // A browser or Telegram may own the microphone for dictation or a voice message.
+        // Until call-specific evidence exists, keep those as confirmation prompts.
+        && !candidates.contains(&MeetingApp::BrowserCall)
+        && !candidates.contains(&MeetingApp::Telegram)
 }
 
 fn select_detection_signal(
@@ -263,13 +421,711 @@ fn select_detection_signal(
     (BTreeSet::new(), None)
 }
 
-async fn detection_enabled(app: &AppHandle<Wry>) -> bool {
+async fn detection_settings(app: &AppHandle<Wry>) -> (bool, bool) {
     let state = app.state::<NotificationManagerState<Wry>>();
     let manager = state.read().await;
     match manager.as_ref() {
-        Some(manager) => manager.get_settings().await.auto_meeting_detection,
-        None => false,
+        Some(manager) => {
+            let settings = manager.get_settings().await;
+            (settings.auto_meeting_detection, settings.auto_listening)
+        }
+        None => (false, false),
     }
+}
+
+async fn start_auto_listening(
+    app: &AppHandle<Wry>,
+    shared: &Arc<Mutex<AutoListeningSharedState>>,
+    apps: Vec<MeetingApp>,
+    source: DetectionSource,
+) -> Result<(), String> {
+    let session_id = Uuid::new_v4().to_string();
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "application database state is unavailable".to_string())?;
+    let client_kinds = serde_json::to_string(&apps).unwrap_or_else(|_| "[]".to_string());
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| format!("could not begin capture session: {error}"))?;
+    sqlx::query(
+        "INSERT INTO capture_sessions( \
+                id, source, client_kinds, status, capture_started_at, retention_expires_at \
+             ) VALUES(?, ?, ?, 'start_requested', datetime('now'), \
+                      datetime('now', '+' || (SELECT unpromoted_retention_minutes \
+                        FROM capture_retention_policy WHERE id=1) || ' minutes'))",
+    )
+    .bind(&session_id)
+    .bind(match source {
+        DetectionSource::NativeProcess => "native_process",
+        DetectionSource::MicrophoneActivity => "microphone_activity",
+    })
+    .bind(client_kinds)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("could not persist capture session: {error}"))?;
+    sqlx::query(
+        "INSERT INTO capture_observations( \
+                capture_session_id, offset_ms, signal_kind, signal_state, source, confidence \
+             ) VALUES(?, 0, 'client', 'active', ?, 0.95)",
+    )
+    .bind(&session_id)
+    .bind(match source {
+        DetectionSource::NativeProcess => "native_process",
+        DetectionSource::MicrophoneActivity => "microphone_activity",
+    })
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("could not persist capture transition: {error}"))?;
+    tx.commit()
+        .await
+        .map_err(|error| format!("could not commit capture session: {error}"))?;
+    if let Ok(mut shared) = shared.lock() {
+        shared.active_capture_session_id = Some(session_id.clone());
+    }
+    if let Err(error) = app.emit(
+        "auto-listening-start-requested",
+        AutoListeningEvent {
+            session_id: session_id.clone(),
+            apps,
+            source,
+        },
+    ) {
+        if let Ok(mut shared) = shared.lock() {
+            shared.active_capture_session_id = None;
+        }
+        let _ = sqlx::query(
+            "UPDATE capture_sessions SET status='failed', failure_reason='start_failed', \
+                    updated_at=datetime('now') WHERE id=?",
+        )
+        .bind(&session_id)
+        .execute(state.db_manager.pool())
+        .await;
+        return Err(format!("could not request recording start: {error}"));
+    }
+    Ok(())
+}
+
+async fn stop_auto_listening(app: &AppHandle<Wry>, shared: &Arc<Mutex<AutoListeningSharedState>>) {
+    let session_id = shared
+        .lock()
+        .ok()
+        .and_then(|mut state| state.active_capture_session_id.take());
+    let Some(session_id) = session_id else { return };
+
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(error) = sqlx::query(
+            "UPDATE capture_sessions \
+             SET signal_ended_at=datetime('now'), ended_at=datetime('now'), \
+                 status=CASE WHEN status='failed' THEN status ELSE 'stop_requested' END, \
+                 end_reason=COALESCE(end_reason, 'call_signal_ended'), \
+                 updated_at=datetime('now') \
+             WHERE id=?",
+        )
+        .bind(&session_id)
+        .execute(state.db_manager.pool())
+        .await
+        {
+            log::warn!("Could not persist auto-listening capture stop: {error}");
+        } else if let Err(error) = sqlx::query(
+            "INSERT INTO capture_observations( \
+                capture_session_id, offset_ms, signal_kind, signal_state, source, confidence \
+             ) SELECT id, MAX(0, CAST((julianday('now')-julianday(detected_at))*86400000 AS INTEGER)), \
+                      'client', 'inactive', source, 0.95 FROM capture_sessions WHERE id=?",
+        )
+        .bind(&session_id)
+        .execute(state.db_manager.pool())
+        .await
+        {
+            log::warn!("Could not persist capture end transition: {error}");
+        }
+    }
+
+    let _ = app.emit(
+        "auto-listening-stop-requested",
+        serde_json::json!({ "session_id": session_id }),
+    );
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AutoListeningStartResult {
+    pub session_id: String,
+    pub success: bool,
+    pub failure_reason: Option<String>,
+}
+
+#[tauri::command]
+pub async fn report_auto_listening_start(
+    input: AutoListeningStartResult,
+    state: State<'_, AppState>,
+    detector: State<'_, AutoMeetingDetectionState>,
+) -> Result<(), String> {
+    let failed_session = (!input.success).then(|| input.session_id.clone());
+    let persisted = persist_auto_listening_start(state.db_manager.pool(), input).await;
+    if let Some(session_id) = failed_session {
+        if let Ok(mut shared) = detector.auto_listening.lock() {
+            if shared.active_capture_session_id.as_deref() == Some(session_id.as_str()) {
+                shared.active_capture_session_id = None;
+            }
+            shared.start_failed = true;
+        }
+    }
+    persisted
+}
+
+async fn persist_auto_listening_start(
+    pool: &sqlx::SqlitePool,
+    input: AutoListeningStartResult,
+) -> Result<(), String> {
+    let status = if input.success { "recording" } else { "failed" };
+    let failure_reason = input.failure_reason.filter(|reason| {
+        matches!(
+            reason.as_str(),
+            "model_unavailable" | "permission_denied" | "start_failed"
+        )
+    });
+    let update = sqlx::query(
+        "UPDATE capture_sessions \
+         SET status=?, \
+             recording_started_at=CASE WHEN ? THEN datetime('now') ELSE recording_started_at END, \
+             failure_reason=?, updated_at=datetime('now') \
+         WHERE id=?",
+    )
+    .bind(status)
+    .bind(input.success)
+    .bind(failure_reason)
+    .bind(&input.session_id)
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    if update.rows_affected() != 1 {
+        return Err(format!("Capture session {} not found", input.session_id));
+    }
+    if input.success {
+        sqlx::query(
+            "INSERT INTO capture_observations( \
+                capture_session_id, offset_ms, signal_kind, signal_state, source, confidence \
+             ) SELECT id, MAX(0, CAST((julianday('now')-julianday(detected_at))*86400000 AS INTEGER)), \
+                      'recording', 'started', 'recording_pipeline', 1.0 \
+               FROM capture_sessions WHERE id=?",
+        )
+        .bind(&input.session_id)
+        .execute(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn link_auto_listening_meeting(
+    session_id: String,
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    persist_auto_listening_meeting(state.db_manager.pool(), &session_id, &meeting_id).await
+}
+
+async fn persist_auto_listening_meeting(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    meeting_id: &str,
+) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE capture_sessions \
+         SET meeting_id=?, status='saved', ended_at=COALESCE(ended_at, datetime('now')), \
+             updated_at=datetime('now') \
+         WHERE id=?",
+    )
+    .bind(meeting_id)
+    .bind(session_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE meetings SET \
+            retention_days=COALESCE(retention_days, (SELECT saved_audio_retention_days \
+                FROM capture_retention_policy WHERE id=1)), \
+            retention_expires_at=COALESCE(retention_expires_at, CASE WHEN (SELECT \
+                saved_audio_retention_days FROM capture_retention_policy WHERE id=1) IS NULL \
+                THEN NULL ELSE datetime('now', '+' || (SELECT saved_audio_retention_days \
+                FROM capture_retention_policy WHERE id=1) || ' days') END) \
+         WHERE id=?",
+    )
+    .bind(meeting_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let end_offset_ms: Option<i64> = sqlx::query_scalar(
+        "SELECT CAST(MAX(audio_end_time) * 1000.0 AS INTEGER) \
+         FROM transcripts WHERE meeting_id=?",
+    )
+    .bind(meeting_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    let existing_call_window: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM meeting_windows WHERE capture_session_id=? AND meeting_id=? \
+         AND boundary_source='call_signal' ORDER BY id LIMIT 1",
+    )
+    .bind(session_id)
+    .bind(meeting_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    if let Some(window_id) = existing_call_window {
+        sqlx::query(
+            "UPDATE meeting_windows SET end_offset_ms=?, updated_at=datetime('now') WHERE id=?",
+        )
+        .bind(end_offset_ms)
+        .bind(window_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    } else {
+        sqlx::query(
+            "INSERT INTO meeting_windows( \
+                 capture_session_id, meeting_id, start_offset_ms, end_offset_ms, \
+                 boundary_source, confidence \
+             ) VALUES(?, ?, 0, ?, 'call_signal', 0.8)",
+        )
+        .bind(session_id)
+        .bind(meeting_id)
+        .bind(end_offset_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    // A long transcript gap is a reviewable split candidate, never an automatic
+    // destructive split. Multiple content windows can refer to the same saved audio.
+    sqlx::query(
+        "DELETE FROM meeting_windows WHERE capture_session_id=? AND meeting_id=? \
+         AND boundary_source='content_window' AND review_status='pending'",
+    )
+    .bind(session_id)
+    .bind(meeting_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    let segments: Vec<(f64, f64)> = sqlx::query_as(
+        "SELECT audio_start_time, audio_end_time FROM transcripts WHERE meeting_id=? \
+         ORDER BY audio_start_time",
+    )
+    .bind(meeting_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    let mut content_windows = Vec::new();
+    if let Some((first_start, first_end)) = segments.first().copied() {
+        let mut window_start = (first_start * 1000.0).max(0.0) as i64;
+        let mut window_end = (first_end * 1000.0).max(0.0) as i64;
+        for (start, end) in segments.iter().copied().skip(1) {
+            let start_ms = (start * 1000.0).max(0.0) as i64;
+            let end_ms = (end * 1000.0).max(0.0) as i64;
+            if start_ms.saturating_sub(window_end) >= 300_000 {
+                content_windows.push((window_start, window_end));
+                window_start = start_ms;
+            }
+            window_end = window_end.max(end_ms);
+        }
+        content_windows.push((window_start, window_end));
+    }
+    if content_windows.len() > 1 {
+        for (start_ms, end_ms) in content_windows {
+            sqlx::query(
+                "INSERT INTO meeting_windows( \
+                    capture_session_id, meeting_id, start_offset_ms, end_offset_ms, \
+                    suggested_start_ms, suggested_end_ms, boundary_source, confidence \
+                 ) VALUES(?, ?, ?, ?, ?, ?, 'content_window', 0.72)",
+            )
+            .bind(session_id)
+            .bind(meeting_id)
+            .bind(start_ms)
+            .bind(end_ms)
+            .bind(start_ms)
+            .bind(end_ms)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    tx.commit().await.map_err(|error| error.to_string())?;
+    // Every automatically captured meeting enters the reviewable Inbox first. Type and
+    // series placement are suggestions; a classifier failure must never make saving fail.
+    if let Err(error) =
+        crate::learning::classification::prepare_saved_meeting(pool, meeting_id).await
+    {
+        log::warn!(
+            "Could not prepare auto-listening meeting {meeting_id} for classification: {error}"
+        );
+    }
+    Ok(())
+}
+
+async fn recover_interrupted_capture_sessions(pool: &sqlx::SqlitePool) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE capture_sessions SET \
+            status=CASE WHEN meeting_id IS NULL THEN 'failed' ELSE 'recovered' END, \
+            failure_reason=CASE WHEN meeting_id IS NULL THEN 'start_failed' ELSE failure_reason END, \
+            end_reason='app_interrupted', ended_at=COALESCE(ended_at, datetime('now')), \
+            updated_at=datetime('now') \
+         WHERE status IN ('candidate', 'start_requested', 'recording', 'stop_requested')",
+    )
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub async fn purge_expired_capture_data(pool: &sqlx::SqlitePool) -> Result<usize, String> {
+    let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
+    let expired: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM capture_sessions WHERE meeting_id IS NULL \
+         AND retention_expires_at IS NOT NULL \
+         AND datetime(retention_expires_at)<=datetime('now')",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    for session_id in &expired {
+        sqlx::query("DELETE FROM capture_observations WHERE capture_session_id=?")
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        sqlx::query(
+            "UPDATE capture_sessions SET status='discarded', end_reason='retention_expired', \
+             updated_at=datetime('now') WHERE id=?",
+        )
+        .bind(session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(expired.len())
+}
+
+pub async fn purge_expired_saved_captures(pool: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT DISTINCT m.id, m.folder_path FROM meetings m \
+         JOIN capture_sessions cs ON cs.meeting_id=m.id AND cs.capture_mode='auto' \
+         WHERE m.retention_expires_at IS NOT NULL \
+           AND datetime(m.retention_expires_at)<=datetime('now') \
+         ORDER BY m.retention_expires_at",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let mut deleted = Vec::new();
+    for (meeting_id, folder_path) in rows {
+        if let Some(folder_path) = folder_path.filter(|value| !value.trim().is_empty()) {
+            if let Err(error) =
+                crate::api::api::delete_recording_folder(std::path::Path::new(&folder_path))
+            {
+                log::warn!(
+                    "Expired auto-capture {meeting_id} retained because its folder could not be safely deleted: {error}"
+                );
+                continue;
+            }
+        }
+        if crate::database::repositories::meeting::MeetingsRepository::delete_meeting(
+            pool,
+            &meeting_id,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        {
+            deleted.push(meeting_id);
+        }
+    }
+    Ok(deleted)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CaptureRetentionPolicy {
+    pub unpromoted_retention_minutes: i64,
+    pub saved_audio_retention_days: Option<i64>,
+    pub local_only: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCaptureRetentionPolicy {
+    pub unpromoted_retention_minutes: i64,
+    pub saved_audio_retention_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MeetingWindowRow {
+    pub id: i64,
+    pub capture_session_id: String,
+    pub meeting_id: String,
+    pub start_offset_ms: i64,
+    pub end_offset_ms: Option<i64>,
+    pub suggested_start_ms: Option<i64>,
+    pub suggested_end_ms: Option<i64>,
+    pub confirmed_start_ms: Option<i64>,
+    pub confirmed_end_ms: Option<i64>,
+    pub boundary_source: String,
+    pub confidence: Option<f64>,
+    pub review_status: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewMeetingWindowInput {
+    pub window_id: i64,
+    pub status: String,
+    pub start_offset_ms: Option<i64>,
+    pub end_offset_ms: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitMeetingWindowInput {
+    pub window_id: i64,
+    pub split_offset_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeMeetingWindowsInput {
+    pub first_window_id: i64,
+    pub second_window_id: i64,
+}
+
+#[tauri::command]
+pub async fn get_capture_retention_policy(
+    state: State<'_, AppState>,
+) -> Result<CaptureRetentionPolicy, String> {
+    let row = sqlx::query(
+        "SELECT unpromoted_retention_minutes, saved_audio_retention_days, local_only \
+         FROM capture_retention_policy WHERE id=1",
+    )
+    .fetch_one(state.db_manager.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(CaptureRetentionPolicy {
+        unpromoted_retention_minutes: row.get("unpromoted_retention_minutes"),
+        saved_audio_retention_days: row.get("saved_audio_retention_days"),
+        local_only: row.get::<i64, _>("local_only") != 0,
+    })
+}
+
+#[tauri::command]
+pub async fn update_capture_retention_policy(
+    input: UpdateCaptureRetentionPolicy,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !(1..=1440).contains(&input.unpromoted_retention_minutes)
+        || input
+            .saved_audio_retention_days
+            .is_some_and(|days| !(1..=3650).contains(&days))
+    {
+        return Err("Capture retention values are outside supported bounds".to_string());
+    }
+    sqlx::query(
+        "UPDATE capture_retention_policy SET unpromoted_retention_minutes=?, \
+            saved_audio_retention_days=?, local_only=1, \
+            updated_at=datetime('now') WHERE id=1",
+    )
+    .bind(input.unpromoted_retention_minutes)
+    .bind(input.saved_audio_retention_days)
+    .execute(state.db_manager.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_meeting_windows(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<MeetingWindowRow>, String> {
+    let rows = sqlx::query(
+        "SELECT id, capture_session_id, meeting_id, start_offset_ms, end_offset_ms, \
+                suggested_start_ms, suggested_end_ms, confirmed_start_ms, confirmed_end_ms, \
+                boundary_source, confidence, review_status FROM meeting_windows \
+         WHERE meeting_id=? AND review_status<>'superseded' ORDER BY start_offset_ms, id",
+    )
+    .bind(meeting_id)
+    .fetch_all(state.db_manager.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|row| MeetingWindowRow {
+            id: row.get("id"),
+            capture_session_id: row.get("capture_session_id"),
+            meeting_id: row.get("meeting_id"),
+            start_offset_ms: row.get("start_offset_ms"),
+            end_offset_ms: row.get("end_offset_ms"),
+            suggested_start_ms: row.get("suggested_start_ms"),
+            suggested_end_ms: row.get("suggested_end_ms"),
+            confirmed_start_ms: row.get("confirmed_start_ms"),
+            confirmed_end_ms: row.get("confirmed_end_ms"),
+            boundary_source: row.get("boundary_source"),
+            confidence: row.get("confidence"),
+            review_status: row.get("review_status"),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn review_meeting_window(
+    input: ReviewMeetingWindowInput,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !matches!(input.status.as_str(), "accepted" | "rejected") {
+        return Err("status must be accepted or rejected".to_string());
+    }
+    let row = sqlx::query("SELECT start_offset_ms, end_offset_ms FROM meeting_windows WHERE id=?")
+        .bind(input.window_id)
+        .fetch_optional(state.db_manager.pool())
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Meeting window {} not found", input.window_id))?;
+    let start = input
+        .start_offset_ms
+        .unwrap_or_else(|| row.get("start_offset_ms"));
+    let end = input
+        .end_offset_ms
+        .or_else(|| row.get::<Option<i64>, _>("end_offset_ms"));
+    if start < 0 || end.is_some_and(|value| value < start) {
+        return Err("Meeting window bounds are invalid".to_string());
+    }
+    sqlx::query(
+        "UPDATE meeting_windows SET review_status=?, is_confirmed=?, \
+            confirmed_start_ms=CASE WHEN ?='accepted' THEN ? ELSE NULL END, \
+            confirmed_end_ms=CASE WHEN ?='accepted' THEN ? ELSE NULL END, \
+            updated_at=datetime('now') WHERE id=?",
+    )
+    .bind(&input.status)
+    .bind(i64::from(input.status == "accepted"))
+    .bind(&input.status)
+    .bind(start)
+    .bind(&input.status)
+    .bind(end)
+    .bind(input.window_id)
+    .execute(state.db_manager.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn split_meeting_window(
+    input: SplitMeetingWindowInput,
+    state: State<'_, AppState>,
+) -> Result<i64, String> {
+    let row = sqlx::query(
+        "SELECT capture_session_id, meeting_id, start_offset_ms, end_offset_ms \
+         FROM meeting_windows WHERE id=? AND review_status<>'superseded'",
+    )
+    .bind(input.window_id)
+    .fetch_optional(state.db_manager.pool())
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| format!("Meeting window {} not found", input.window_id))?;
+    let start: i64 = row.get("start_offset_ms");
+    let end: Option<i64> = row.get("end_offset_ms");
+    if input.split_offset_ms <= start || end.is_none_or(|value| input.split_offset_ms >= value) {
+        return Err("Split point must be inside the meeting window".to_string());
+    }
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE meeting_windows SET end_offset_ms=?, boundary_source='manual', \
+            review_status='pending', is_confirmed=0, updated_at=datetime('now') WHERE id=?",
+    )
+    .bind(input.split_offset_ms)
+    .bind(input.window_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    let new_id: i64 = sqlx::query_scalar(
+        "INSERT INTO meeting_windows( \
+            capture_session_id, meeting_id, start_offset_ms, end_offset_ms, \
+            boundary_source, confidence \
+         ) VALUES(?, ?, ?, ?, 'manual', 1.0) RETURNING id",
+    )
+    .bind(row.get::<String, _>("capture_session_id"))
+    .bind(row.get::<String, _>("meeting_id"))
+    .bind(input.split_offset_ms)
+    .bind(end)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(new_id)
+}
+
+#[tauri::command]
+pub async fn merge_meeting_windows(
+    input: MergeMeetingWindowsInput,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let rows = sqlx::query(
+        "SELECT id, capture_session_id, meeting_id, start_offset_ms, end_offset_ms \
+         FROM meeting_windows WHERE id IN (?, ?) AND review_status<>'superseded'",
+    )
+    .bind(input.first_window_id)
+    .bind(input.second_window_id)
+    .fetch_all(state.db_manager.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    if rows.len() != 2
+        || rows[0].get::<String, _>("capture_session_id")
+            != rows[1].get::<String, _>("capture_session_id")
+        || rows[0].get::<String, _>("meeting_id") != rows[1].get::<String, _>("meeting_id")
+    {
+        return Err("Windows must belong to the same capture and meeting".to_string());
+    }
+    let start = rows
+        .iter()
+        .map(|row| row.get::<i64, _>("start_offset_ms"))
+        .min()
+        .unwrap_or(0);
+    let end = rows
+        .iter()
+        .filter_map(|row| row.get::<Option<i64>, _>("end_offset_ms"))
+        .max();
+    let mut tx = state
+        .db_manager
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE meeting_windows SET start_offset_ms=?, end_offset_ms=?, \
+            boundary_source='manual', review_status='pending', is_confirmed=0, \
+            updated_at=datetime('now') WHERE id=?",
+    )
+    .bind(start)
+    .bind(end)
+    .bind(input.first_window_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE meeting_windows SET review_status='superseded', updated_at=datetime('now') WHERE id=?",
+    )
+    .bind(input.second_window_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 async fn deliver_detection(app: &AppHandle<Wry>, event: MeetingDetectedEvent) {
@@ -437,9 +1293,130 @@ fn active_microphone_apps() -> BTreeSet<MeetingApp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     fn apps(values: &[MeetingApp]) -> BTreeSet<MeetingApp> {
         values.iter().copied().collect()
+    }
+
+    async fn auto_listening_test_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for statement in [
+            "CREATE TABLE meetings(id TEXT PRIMARY KEY, retention_days INTEGER, retention_expires_at TEXT)",
+            "CREATE TABLE transcripts(meeting_id TEXT, audio_start_time REAL DEFAULT 0, audio_end_time REAL)",
+            "CREATE TABLE capture_sessions(\
+                id TEXT PRIMARY KEY, status TEXT NOT NULL, recording_started_at TEXT, \
+                failure_reason TEXT, meeting_id TEXT, detected_at TEXT DEFAULT CURRENT_TIMESTAMP, \
+                source TEXT DEFAULT 'microphone_activity', end_reason TEXT, ended_at TEXT, updated_at TEXT\
+            )",
+            "CREATE TABLE capture_observations(\
+                id INTEGER PRIMARY KEY, capture_session_id TEXT, offset_ms INTEGER, \
+                signal_kind TEXT, signal_state TEXT, source TEXT, confidence REAL\
+            )",
+            "CREATE TABLE capture_retention_policy(\
+                id INTEGER PRIMARY KEY, unpromoted_retention_minutes INTEGER, \
+                saved_audio_retention_days INTEGER, local_only INTEGER\
+            )",
+            "CREATE TABLE meeting_windows(\
+                id INTEGER PRIMARY KEY, capture_session_id TEXT NOT NULL, meeting_id TEXT NOT NULL, \
+                start_offset_ms INTEGER NOT NULL, end_offset_ms INTEGER, \
+                suggested_start_ms INTEGER, suggested_end_ms INTEGER, confirmed_start_ms INTEGER, \
+                confirmed_end_ms INTEGER, boundary_source TEXT NOT NULL, confidence REAL, \
+                is_confirmed INTEGER DEFAULT 0, review_status TEXT DEFAULT 'pending', \
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP\
+            )",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO capture_retention_policy VALUES(1, 15, NULL, 1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn persisted_auto_listening_session_links_to_saved_meeting_window() {
+        let pool = auto_listening_test_pool().await;
+        sqlx::query(
+            "INSERT INTO capture_sessions(id, status) VALUES('capture-1', 'start_requested')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        persist_auto_listening_start(
+            &pool,
+            AutoListeningStartResult {
+                session_id: "capture-1".into(),
+                success: true,
+                failure_reason: None,
+            },
+        )
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO meetings(id) VALUES('meeting-1')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts(meeting_id, audio_end_time) VALUES('meeting-1', 12.345)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        persist_auto_listening_meeting(&pool, "capture-1", "meeting-1")
+            .await
+            .unwrap();
+
+        let capture: (String, Option<String>, bool) = sqlx::query_as(
+            "SELECT status, meeting_id, recording_started_at IS NOT NULL \
+             FROM capture_sessions WHERE id='capture-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(capture, ("saved".into(), Some("meeting-1".into()), true));
+        let window: (i64, Option<i64>, String) = sqlx::query_as(
+            "SELECT start_offset_ms, end_offset_ms, boundary_source \
+             FROM meeting_windows WHERE capture_session_id='capture-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(window, (0, Some(12_345), "call_signal".into()));
+    }
+
+    #[tokio::test]
+    async fn persisted_start_failure_keeps_only_bounded_reason_codes() {
+        let pool = auto_listening_test_pool().await;
+        sqlx::query(
+            "INSERT INTO capture_sessions(id, status) VALUES('capture-2', 'start_requested')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        persist_auto_listening_start(
+            &pool,
+            AutoListeningStartResult {
+                session_id: "capture-2".into(),
+                success: false,
+                failure_reason: Some("raw provider error with sensitive context".into()),
+            },
+        )
+        .await
+        .unwrap();
+        let failure: (String, Option<String>) = sqlx::query_as(
+            "SELECT status, failure_reason FROM capture_sessions WHERE id='capture-2'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(failure, ("failed".into(), None));
     }
 
     #[test]
@@ -508,6 +1485,28 @@ mod tests {
     }
 
     #[test]
+    fn browser_microphone_activity_remains_confirmation_only() {
+        assert!(!should_auto_listen(
+            &apps(&[MeetingApp::BrowserCall]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+        assert!(should_auto_listen(
+            &apps(&[MeetingApp::Zoom]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+        assert!(!should_auto_listen(
+            &apps(&[MeetingApp::Telegram]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+    }
+
+    #[test]
     fn unsupported_platforms_keep_bounded_native_process_fallback() {
         let (candidates, source) =
             select_detection_signal(apps(&[MeetingApp::Zoom]), BTreeSet::new(), false);
@@ -516,35 +1515,120 @@ mod tests {
     }
 
     #[test]
-    fn detector_requires_stable_evidence_and_coalesces_one_notification_per_session() {
+    fn detector_coalesces_one_notification_per_active_session() {
         let mut session = DetectionSession::default();
-        assert!(!session.observe(true, false, true));
-        assert!(!session.observe(true, false, true));
-        assert!(session.observe(true, false, true));
-        assert!(!session.observe(true, false, true));
-        assert!(!session.observe(false, false, true));
-        assert!(!session.observe(false, false, true));
-        assert!(!session.observe(true, false, true));
-        assert!(!session.observe(true, false, true));
-        assert!(session.observe(true, false, true));
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::SuggestRecording
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(false, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(false, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::SuggestRecording
+        );
     }
 
     #[test]
     fn recording_consumes_the_detection_session() {
         let mut session = DetectionSession::default();
-        assert!(!session.observe(true, true, true));
-        assert!(!session.observe(true, true, true));
-        assert!(!session.observe(true, false, true));
+        assert_eq!(
+            session.observe(true, true, true, true),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, true, true, true),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, true),
+            DetectionEvent::None
+        );
     }
 
     #[test]
     fn disabled_detection_resets_pending_evidence() {
         let mut session = DetectionSession::default();
-        assert!(!session.observe(true, false, true));
-        assert!(!session.observe(true, false, false));
-        assert!(!session.observe(true, false, true));
-        assert!(!session.observe(true, false, true));
-        assert!(session.observe(true, false, true));
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, false, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::None
+        );
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::SuggestRecording
+        );
+    }
+
+    #[test]
+    fn auto_listening_starts_once_and_waits_through_short_signal_gaps() {
+        let mut session = DetectionSession::default();
+        assert_eq!(
+            session.observe(true, false, true, true),
+            DetectionEvent::StartAutoListening
+        );
+        assert_eq!(
+            session.observe(true, true, true, true),
+            DetectionEvent::None
+        );
+        for _ in 0..AUTO_LISTENING_QUIET_POLLS - 1 {
+            assert_eq!(
+                session.observe(false, true, true, true),
+                DetectionEvent::None
+            );
+        }
+        assert_eq!(
+            session.observe(true, true, true, true),
+            DetectionEvent::None
+        );
+        for _ in 0..AUTO_LISTENING_QUIET_POLLS - 1 {
+            assert_eq!(
+                session.observe(false, true, true, true),
+                DetectionEvent::None
+            );
+        }
+        assert_eq!(
+            session.observe(false, true, true, true),
+            DetectionEvent::StopAutoListening
+        );
+    }
+
+    #[test]
+    fn disabling_detection_stops_an_active_auto_listening_session() {
+        let mut session = DetectionSession::default();
+        assert_eq!(
+            session.observe(true, false, true, true),
+            DetectionEvent::StartAutoListening
+        );
+        assert_eq!(
+            session.observe(false, true, false, false),
+            DetectionEvent::StopAutoListening
+        );
     }
 
     #[test]

@@ -52,6 +52,30 @@ export default function Home() {
     setIsRecordingDisabled
   );
 
+  useEffect(() => {
+    let handled = false;
+    let pendingStopTimeout: number | undefined;
+    const stopAutoListening = () => {
+      if (handled || !sessionStorage.getItem('autoStopRecordingSessionId')) return;
+      handled = true;
+      toast.info(t('Call signal ended — saving the meeting'));
+      setIsStopping(true);
+      void handleRecordingStop(true);
+    };
+
+    window.addEventListener('stop-recording-from-auto-listening', stopAutoListening);
+    if (sessionStorage.getItem('autoStopRecordingSessionId')) {
+      // Let the recording-state providers finish their initial backend sync after navigation.
+      pendingStopTimeout = window.setTimeout(stopAutoListening, 250);
+    }
+    return () => {
+      window.removeEventListener('stop-recording-from-auto-listening', stopAutoListening);
+      if (pendingStopTimeout !== undefined) {
+        window.clearTimeout(pendingStopTimeout);
+      }
+    };
+  }, [handleRecordingStop, setIsStopping, t]);
+
   // Recovery hook
   const {
     recoverableMeetings,

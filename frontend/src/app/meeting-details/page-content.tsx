@@ -9,6 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { LearningReviewPanel } from '@/components/MeetingDetails/LearningReviewPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
@@ -269,6 +270,14 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex h-screen flex-col bg-[var(--bg-canvas)]"
     >
+      <LearningReviewPanel
+        meetingId={meeting.id}
+        onChanged={async () => {
+          await onRefetchTranscripts?.();
+          await onSpeakersDetected?.();
+          await onMeetingUpdated?.();
+        }}
+      />
       <div
         ref={splitContainerRef}
         className="m-4 flex flex-1 overflow-hidden rounded-[24px] border border-[var(--border-subtle)] bg-[var(--bg-sheet)]"

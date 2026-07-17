@@ -295,6 +295,24 @@ export function useRecordingStop(
             throw new Error(t('No meeting ID received from save operation'));
           }
 
+          const autoListeningSessionId = sessionStorage.getItem('autoListeningSessionId');
+          if (autoListeningSessionId) {
+            try {
+              await invoke('link_auto_listening_meeting', {
+                sessionId: autoListeningSessionId,
+                meetingId,
+              });
+              sessionStorage.removeItem('autoListeningSessionId');
+              sessionStorage.removeItem('autoListeningStartReported');
+              sessionStorage.removeItem('autoListeningStart');
+              sessionStorage.removeItem('autoStopRecordingSessionId');
+            } catch (error) {
+              // The meeting itself is already safe. Keep the local session id so a later
+              // repair flow can reconnect provenance instead of losing it silently.
+              console.warn('Failed to link auto-listening provenance:', error);
+            }
+          }
+
           let shouldDetectSummaryLanguage = false;
           try {
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));

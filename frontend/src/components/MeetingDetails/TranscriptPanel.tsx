@@ -132,6 +132,23 @@ export function TranscriptPanel({
     onSeekToMoment?.(seconds);
     handlePlayTimestamp(seconds);
   }, [handlePlayTimestamp, onSeekToMoment]);
+  const handleCorrectTranscript = useCallback(async (transcriptId: string, correctedText: string) => {
+    try {
+      const result = await invoke<{ terminology_candidate_id?: number | null }>('correct_transcript_segment', {
+        input: { transcriptId, correctedText },
+      });
+      await onRefetchTranscripts?.();
+      toast.success(
+        result.terminology_candidate_id
+          ? t('Correction saved and terminology suggested')
+          : t('Transcript correction saved'),
+      );
+    } catch (error) {
+      console.error('Failed to correct transcript:', error);
+      toast.error(`${t('Failed to save transcript correction')}: ${String(error)}`);
+      throw error;
+    }
+  }, [onRefetchTranscripts, t]);
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -229,6 +246,7 @@ export function TranscriptPanel({
           onRenameSpeaker={onRenameSpeaker}
           onPlayTimestamp={handlePlayTimestamp}
           playbackTime={audioPath && (audio.isPlaying || audio.currentTime > 0) ? audio.currentTime : null}
+          onCorrectTranscript={meetingId ? handleCorrectTranscript : undefined}
         />
       </div>
 
