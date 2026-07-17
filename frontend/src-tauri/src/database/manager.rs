@@ -79,6 +79,13 @@ impl DatabaseManager {
         // runtime; jobs are claimed atomically so this is safe even if a second
         // runner were ever started against the same database.
         if start_background_jobs {
+            match super::repositories::audio_identity::enqueue_missing_backfill(&pool).await {
+                Ok(0) => {}
+                Ok(count) => log::info!("Queued {count} meeting audio identity backfill job(s)"),
+                Err(error) => {
+                    log::warn!("Could not queue meeting audio identity backfill jobs: {error}")
+                }
+            }
             crate::jobs::JobRunner::new(
                 pool.clone(),
                 crate::jobs::JobRegistry::with_defaults(),
@@ -281,5 +288,64 @@ impl DatabaseManager {
         log::info!("Database connection pool closed");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn audio_identity_migration_and_backfill_queue_work_on_a_fresh_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("meeting_minutes.sqlite");
+        let legacy_path = directory.path().join("missing.db");
+        let manager = DatabaseManager::new_with_background_jobs(
+            database_path.to_str().unwrap(),
+            legacy_path.to_str().unwrap(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        for table in [
+            "audio_identities",
+            "meeting_audio_identities",
+            "audio_duplicate_reviews",
+        ] {
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
+            )
+            .bind(table)
+            .fetch_one(manager.pool())
+            .await
+            .unwrap();
+            assert_eq!(exists, 1, "missing migrated table {table}");
+        }
+
+        sqlx::query(
+            "INSERT INTO meetings(id, title, created_at, updated_at, folder_path) \
+             VALUES ('legacy-meeting', 'Legacy', datetime('now'), datetime('now'), '/tmp/legacy')",
+        )
+        .execute(manager.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            crate::database::repositories::audio_identity::enqueue_missing_backfill(manager.pool())
+                .await
+                .unwrap(),
+            1
+        );
+        let queued: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs \
+             WHERE kind = ? AND meeting_id = 'legacy-meeting'",
+        )
+        .bind(crate::jobs::kind::AUDIO_IDENTITY_BACKFILL)
+        .fetch_one(manager.pool())
+        .await
+        .unwrap();
+        assert_eq!(queued, 1);
+
+        manager.cleanup().await.unwrap();
     }
 }

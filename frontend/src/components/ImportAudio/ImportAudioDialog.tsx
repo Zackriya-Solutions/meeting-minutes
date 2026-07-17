@@ -33,7 +33,7 @@ import {
 } from '../ui/select';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useImportAudio, BatchImportResult, ImportResult } from '@/hooks/useImportAudio';
+import { useImportAudio, BatchImportResult, ExistingAudioMeeting, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
@@ -111,6 +111,15 @@ export function ImportAudioDialog({
     toast.error(t('Import failed'), { description: error });
   }, [t]);
 
+  const handleDuplicate = useCallback((existing: ExistingAudioMeeting) => {
+    toast.info(t('Audio already imported'), {
+      description: `${t('Opening existing meeting')}: ${existing.title}`,
+    });
+    refetchMeetings();
+    onOpenChange(false);
+    router.push(`/meeting-details?id=${existing.meeting_id}`);
+  }, [t, router, refetchMeetings, onOpenChange]);
+
   const handleBatchImportComplete = useCallback((result: BatchImportResult) => {
     const description = `${result.imported.length} ${t('imported')}, ${result.skipped.length} ${t('skipped')}, ${result.truncated.length} ${t('not attempted')}, ${result.failed.length} ${t('failed')}`;
     if (result.cancelled) {
@@ -143,6 +152,7 @@ export function ImportAudioDialog({
     reset,
   } = useImportAudio({
     onComplete: handleImportComplete,
+    onDuplicate: handleDuplicate,
     onBatchComplete: handleBatchImportComplete,
     onError: handleImportError,
   });
@@ -207,6 +217,11 @@ export function ImportAudioDialog({
         : 0),
     100,
   );
+  const importableBatchFiles = useMemo(
+    () => batchFiles.filter((file) => !file.existing_meeting && !file.duplicate_source_path),
+    [batchFiles],
+  );
+  const duplicateBatchCount = batchFiles.length - importableBatchFiles.length;
 
   useEffect(() => {
     if (languageAutoOnly && selectedLang !== 'auto') {
@@ -228,7 +243,7 @@ export function ImportAudioDialog({
   const handleStartImport = async () => {
     if (batchFiles.length > 0) {
       await startBatchImport(
-        batchFiles.map((file) => ({
+        importableBatchFiles.map((file) => ({
           source_path: file.path,
           title: file.filename.replace(/__[0-9a-f]{8}$/i, ''),
         })),
@@ -329,6 +344,10 @@ export function ImportAudioDialog({
                       <p className="font-medium text-[var(--fg1)]">
                         {batchFiles.length} {t('audio files selected')}
                       </p>
+                      <p className="mt-1 text-xs text-[var(--fg2)]">
+                        {importableBatchFiles.length} {t('new files')}
+                        {duplicateBatchCount > 0 && ` · ${duplicateBatchCount} ${t('already imported or duplicated')}`}
+                      </p>
                       <div className="flex items-center gap-4 text-sm text-[var(--fg2)] mt-1">
                         <span className="flex items-center gap-1">
                           <Clock className="h-3.5 w-3.5" />
@@ -343,7 +362,12 @@ export function ImportAudioDialog({
                   </div>
                   <div className="max-h-28 overflow-y-auto text-xs text-[var(--fg2)] space-y-1">
                     {batchFiles.slice(0, 20).map((file) => (
-                      <div key={file.path} className="truncate">{file.filename}</div>
+                      <div key={file.path} className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate">{file.filename}</span>
+                        {(file.existing_meeting || file.duplicate_source_path) && (
+                          <span className="flex-none text-[var(--gold)]">{t('duplicate')}</span>
+                        )}
+                      </div>
                     ))}
                     {batchFiles.length > 20 && (
                       <div>{t('and')} {batchFiles.length - 20} {t('more files')}</div>
@@ -373,6 +397,21 @@ export function ImportAudioDialog({
                     </div>
                   </div>
 
+                  {fileInfo.existing_meeting && (
+                    <div className="rounded-lg border border-[color-mix(in_srgb,var(--gold)_45%,transparent)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)] p-3">
+                      <p className="text-sm font-medium text-[var(--fg1)]">{t('Audio already imported')}</p>
+                      <p className="mt-1 text-xs text-[var(--fg2)]">{fileInfo.existing_meeting.title}</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full"
+                        onClick={() => handleDuplicate(fileInfo.existing_meeting!)}
+                      >
+                        {t('Open existing meeting')}
+                      </Button>
+                    </div>
+                  )}
+
                   {/* Editable title */}
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-[var(--fg2)]">{t('Meeting Title')}</label>
@@ -383,6 +422,7 @@ export function ImportAudioDialog({
                         setTitleModifiedByUser(true);
                       }}
                       placeholder={t('Enter meeting title')}
+                      disabled={Boolean(fileInfo.existing_meeting)}
                     />
                   </div>
 
@@ -547,10 +587,14 @@ export function ImportAudioDialog({
               <Button
                 onClick={handleStartImport}
                 className="min-w-0 whitespace-normal bg-[var(--gold)] hover:bg-[var(--gold-active)]"
-                disabled={!fileInfo && batchFiles.length === 0}
+                disabled={
+                  (!fileInfo && batchFiles.length === 0)
+                  || Boolean(fileInfo?.existing_meeting)
+                  || (batchFiles.length > 0 && importableBatchFiles.length === 0)
+                }
               >
                 <Upload className="h-4 w-4 mr-2" />
-                {batchFiles.length > 0 ? `${t('Import')} ${batchFiles.length}` : t('Import')}
+                {batchFiles.length > 0 ? `${t('Import')} ${importableBatchFiles.length}` : t('Import')}
               </Button>
             </>
           )}

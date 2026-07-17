@@ -1017,7 +1017,7 @@ export default function CollectionsPage() {
       </Dialog>
 
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogContent className="max-h-[80vh] max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto]">
+        <DialogContent className="max-h-[80vh] max-w-2xl grid-rows-[auto_auto_minmax(0,1fr)_auto]">
           <DialogHeader>
             <DialogTitle>{t('Manage meetings')}</DialogTitle>
             <DialogDescription>

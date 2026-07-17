@@ -12,6 +12,7 @@
 //! blocks extraction).
 
 use async_trait::async_trait;
+use std::path::PathBuf;
 
 use super::{kind, JobContext, JobHandler};
 use crate::pipeline::chunker::{approx_token_count, chunk_segments, ChunkConfig, Segment};
@@ -475,7 +476,8 @@ impl JobHandler for ExtractHandler {
             pool,
             meeting_id,
             &extraction,
-        ).await?;
+        )
+        .await?;
         log::info!(
             "[extract] meeting {meeting_id}: persisted {} entities, {} mentions, {} reviews, {} actions",
             persisted.entities_created,
@@ -488,6 +490,63 @@ impl JobHandler for ExtractHandler {
 }
 
 pub struct BackfillHandler;
+
+pub struct AudioIdentityBackfillHandler;
+
+#[async_trait]
+impl JobHandler for AudioIdentityBackfillHandler {
+    fn kind(&self) -> &'static str {
+        kind::AUDIO_IDENTITY_BACKFILL
+    }
+
+    async fn run(
+        &self,
+        ctx: &JobContext,
+        meeting_id: Option<&str>,
+        _payload: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let meeting_id = meeting_id
+            .ok_or_else(|| anyhow::anyhow!("audio_identity_backfill requires a meeting_id"))?;
+        let folder_path: Option<String> =
+            sqlx::query_scalar("SELECT folder_path FROM meetings WHERE id = ?")
+                .bind(meeting_id)
+                .fetch_optional(&ctx.pool)
+                .await?
+                .flatten();
+        let Some(folder_path) = folder_path else {
+            log::info!("[audio_identity_backfill] meeting {meeting_id} has no recording folder");
+            return Ok(());
+        };
+
+        let folder = PathBuf::from(folder_path);
+        let audio_path = match crate::audio::retranscription::find_audio_file(&folder) {
+            Ok(path) => path,
+            Err(error) => {
+                log::warn!(
+                    "[audio_identity_backfill] meeting {meeting_id} has no readable audio: {error}"
+                );
+                return Ok(());
+            }
+        };
+        let (sha256, byte_size) = tokio::task::spawn_blocking(move || {
+            let byte_size = std::fs::metadata(&audio_path)?.len();
+            let sha256 = crate::audio::import::sha256_file(&audio_path)?;
+            Ok::<_, anyhow::Error>((sha256, byte_size))
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("audio identity hash task failed: {error}"))??;
+
+        let mut tx = ctx.pool.begin().await?;
+        let registration =
+            crate::database::repositories::audio_identity::register_backfilled_identity(
+                &mut tx, meeting_id, &sha256, byte_size, None,
+            )
+            .await?;
+        tx.commit().await?;
+        log::info!("[audio_identity_backfill] meeting {meeting_id} registered as {registration:?}");
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl JobHandler for BackfillHandler {

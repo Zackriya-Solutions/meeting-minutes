@@ -312,6 +312,16 @@ async fn delete_meeting_with_transaction(
         return Ok(false);
     }
 
+    // Preserve exact-audio identity when deleting the canonical meeting by
+    // promoting an existing legacy duplicate before removing this row.
+    let mut identity_tx = transaction.begin().await?;
+    crate::database::repositories::audio_identity::release_meeting_identity(
+        &mut identity_tx,
+        meeting_id,
+    )
+    .await?;
+    identity_tx.commit().await?;
+
     // SQLite foreign-key enforcement is not guaranteed on every existing app
     // connection, so meeting-scoped data is removed explicitly.
     sqlx::query("DELETE FROM action_items WHERE meeting_id = ?")

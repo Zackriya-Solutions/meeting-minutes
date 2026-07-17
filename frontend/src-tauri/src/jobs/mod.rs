@@ -37,6 +37,7 @@ pub mod kind {
     pub const DIARIZE: &str = "diarize";
     pub const EXTRACT: &str = "extract";
     pub const BACKFILL: &str = "backfill";
+    pub const AUDIO_IDENTITY_BACKFILL: &str = "audio_identity_backfill";
 }
 
 /// Context handed to a handler when its job runs. Handlers use it to reach the DB and
@@ -114,7 +115,8 @@ impl JobRegistry {
             .register(Arc::new(handlers::EmbeddingRepairHandler))
             .register(Arc::new(handlers::DiarizeHandler))
             .register(Arc::new(handlers::ExtractHandler))
-            .register(Arc::new(handlers::BackfillHandler));
+            .register(Arc::new(handlers::BackfillHandler))
+            .register(Arc::new(handlers::AudioIdentityBackfillHandler));
         r
     }
 }
