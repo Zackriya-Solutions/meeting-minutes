@@ -6,6 +6,7 @@ use crate::audio::decoder::{
 };
 use crate::audio::vad::{get_speech_chunks_with_progress, ContinuousVadProcessor, SpeechSegment};
 use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
+use crate::database::repositories::audio_identity::{ExistingAudioMeeting, IdentityRegistration};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -14,7 +15,7 @@ use futures_util::FutureExt;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::panic::AssertUnwindSafe;
@@ -232,6 +233,10 @@ pub struct AudioFileInfo {
     pub duration_seconds: f64,
     pub size_bytes: u64,
     pub format: String,
+    #[serde(default)]
+    pub existing_meeting: Option<ExistingAudioMeeting>,
+    #[serde(default)]
+    pub duplicate_source_path: Option<String>,
 }
 
 /// Progress update emitted during import
@@ -270,6 +275,13 @@ pub struct BatchImportFailure {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchImportSkipped {
+    pub source_path: String,
+    pub title: String,
+    pub existing_meeting: ExistingAudioMeeting,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchImportProgress {
     pub current_index: usize,
     pub total: usize,
@@ -285,11 +297,23 @@ pub struct BatchImportProgress {
 pub struct BatchImportResult {
     pub total: usize,
     pub imported: Vec<ImportResult>,
-    pub skipped: Vec<BatchImportItem>,
+    pub skipped: Vec<BatchImportSkipped>,
     #[serde(default)]
     pub truncated: Vec<BatchImportItem>,
     pub failed: Vec<BatchImportFailure>,
     pub cancelled: bool,
+}
+
+#[derive(Debug, Clone)]
+enum ImportRunOutcome {
+    Imported(ImportResult),
+    AlreadyImported(ExistingAudioMeeting),
+}
+
+#[derive(Debug)]
+enum CreateMeetingOutcome {
+    Created,
+    AlreadyImported(ExistingAudioMeeting),
 }
 
 /// Error during import
@@ -311,7 +335,7 @@ pub struct ImportStarted {
     pub message: String,
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
+pub(crate) fn sha256_file(path: &Path) -> Result<String> {
     let file = File::open(path)
         .map_err(|error| anyhow!("Failed to open {} for hashing: {}", path.display(), error))?;
     let mut reader = BufReader::new(file);
@@ -452,29 +476,6 @@ fn write_batch_report(path: &Path, result: &BatchImportResult) -> Result<()> {
     Ok(())
 }
 
-fn collect_imported_hashes(recordings_folder: &Path) -> HashSet<String> {
-    let mut hashes = HashSet::new();
-    let Ok(entries) = std::fs::read_dir(recordings_folder) else {
-        return hashes;
-    };
-    for entry in entries.flatten() {
-        let metadata_path = entry.path().join("metadata.json");
-        let Ok(contents) = std::fs::read_to_string(metadata_path) else {
-            continue;
-        };
-        let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&contents) else {
-            continue;
-        };
-        if let Some(hash) = metadata
-            .get("source_sha256")
-            .and_then(|value| value.as_str())
-        {
-            hashes.insert(hash.to_string());
-        }
-    }
-    hashes
-}
-
 fn deferred_audio_file_info(path: &Path) -> AudioFileInfo {
     AudioFileInfo {
         path: path.to_string_lossy().to_string(),
@@ -492,6 +493,8 @@ fn deferred_audio_file_info(path: &Path) -> AudioFileInfo {
             .and_then(|value| value.to_str())
             .unwrap_or("")
             .to_ascii_lowercase(),
+        existing_meeting: None,
+        duplicate_source_path: None,
     }
 }
 
@@ -571,7 +574,98 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
         duration_seconds,
         size_bytes,
         format: extension.to_uppercase(),
+        existing_meeting: None,
+        duplicate_source_path: None,
     })
+}
+
+async fn inspect_audio_identity(
+    pool: &sqlx::SqlitePool,
+    path: &Path,
+) -> Result<(String, Option<ExistingAudioMeeting>)> {
+    let hash_path = path.to_path_buf();
+    let sha256 = tokio::task::spawn_blocking(move || sha256_file(&hash_path))
+        .await
+        .map_err(|error| anyhow!("Hash task join error: {error}"))??;
+    let existing = find_existing_audio_meeting(pool, &sha256).await?;
+    Ok((sha256, existing))
+}
+
+async fn find_existing_audio_meeting(
+    pool: &sqlx::SqlitePool,
+    sha256: &str,
+) -> Result<Option<ExistingAudioMeeting>> {
+    if let Some(existing) =
+        crate::database::repositories::audio_identity::find_canonical_meeting(pool, sha256).await?
+    {
+        return Ok(Some(existing));
+    }
+
+    // Close the upgrade race before the background backfill has completed. Old
+    // imported meetings carry source_sha256 in metadata.json, so only the
+    // matching candidate needs to be verified here. Native recordings without
+    // an import hash stay on the low-priority background audit; hashing an
+    // entire archive synchronously would make the file picker appear frozen.
+    let candidates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT m.id, m.folder_path FROM meetings m \
+         WHERE m.folder_path IS NOT NULL AND length(trim(m.folder_path)) > 0 \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM meeting_audio_identities mai WHERE mai.meeting_id = m.id \
+           ) \
+         ORDER BY m.created_at, m.id",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for (meeting_id, folder_path) in candidates {
+        let folder = PathBuf::from(folder_path);
+        let requested_sha256 = sha256.to_string();
+        let candidate = tokio::task::spawn_blocking(move || -> Result<Option<(String, u64)>> {
+            let metadata_hash = std::fs::read_to_string(folder.join("metadata.json"))
+                .ok()
+                .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+                .and_then(|metadata| {
+                    metadata
+                        .get("source_sha256")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                });
+            if metadata_hash.as_deref() != Some(requested_sha256.as_str()) {
+                return Ok(None);
+            }
+            let audio_path = super::retranscription::find_audio_file(&folder)?;
+            let byte_size = std::fs::metadata(&audio_path)?.len();
+            Ok(Some((sha256_file(&audio_path)?, byte_size)))
+        })
+        .await
+        .map_err(|error| anyhow!("Legacy audio audit task failed: {error}"))?;
+        let (actual_hash, byte_size) = match candidate {
+            Ok(Some(identity)) => identity,
+            Ok(None) => continue,
+            Err(error) => {
+                warn!("Cannot audit audio identity for meeting {meeting_id}: {error}");
+                continue;
+            }
+        };
+        let mut tx = pool.begin().await?;
+        crate::database::repositories::audio_identity::register_backfilled_identity(
+            &mut tx,
+            &meeting_id,
+            &actual_hash,
+            byte_size,
+            None,
+        )
+        .await?;
+        tx.commit().await?;
+        if actual_hash == sha256 {
+            return Ok(
+                crate::database::repositories::audio_identity::find_canonical_meeting(pool, sha256)
+                    .await?,
+            );
+        }
+    }
+
+    Ok(None)
 }
 
 /// Extract duration from audio file metadata without full decode
@@ -636,14 +730,14 @@ pub(crate) fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
 }
 
 /// Start import of an audio file
-pub async fn start_import<R: Runtime>(
+async fn start_import<R: Runtime>(
     app: AppHandle<R>,
     source_path: String,
     title: String,
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
-) -> Result<ImportResult> {
+) -> Result<ImportRunOutcome> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
 
@@ -669,7 +763,7 @@ pub async fn start_import<R: Runtime>(
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
 
     match &result {
-        Ok(res) => {
+        Ok(ImportRunOutcome::Imported(res)) => {
             let _ = app.emit(
                 "import-complete",
                 serde_json::json!({
@@ -684,6 +778,9 @@ pub async fn start_import<R: Runtime>(
                     "average_confidence": res.average_confidence
                 }),
             );
+        }
+        Ok(ImportRunOutcome::AlreadyImported(existing)) => {
+            let _ = app.emit("import-duplicate", existing);
         }
         Err(e) => {
             let _ = app.emit(
@@ -735,11 +832,10 @@ pub async fn start_batch_import<R: Runtime>(
         failed: Vec::new(),
         cancelled: false,
     };
-    let recordings_folder = get_default_recordings_folder();
-    let mut imported_hashes =
-        tokio::task::spawn_blocking(move || collect_imported_hashes(&recordings_folder))
-            .await
-            .map_err(|error| anyhow!("Hash scan task join error: {}", error))?;
+    let app_state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| anyhow!("App state not available"))?;
+    let pool = app_state.db_manager.pool();
 
     for (index, item) in items.into_iter().enumerate() {
         if IMPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -766,11 +862,31 @@ pub async fn start_batch_import<R: Runtime>(
             }
         };
 
-        if imported_hashes.contains(&source_sha256) {
-            info!("Skipping already imported audio: {}", item.source_path);
-            result.skipped.push(item.clone());
-            emit_batch_progress(&app, index + 1, &item, &result, "skipped");
-            continue;
+        match find_existing_audio_meeting(pool, &source_sha256).await {
+            Ok(Some(existing_meeting)) => {
+                info!("Skipping already imported audio: {}", item.source_path);
+                result.skipped.push(BatchImportSkipped {
+                    source_path: item.source_path.clone(),
+                    title: item.title.clone(),
+                    existing_meeting,
+                });
+                emit_batch_progress(&app, index + 1, &item, &result, "skipped");
+                continue;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                warn!(
+                    "Could not check audio identity for '{}': {}",
+                    item.source_path, error
+                );
+                result.failed.push(BatchImportFailure {
+                    source_path: item.source_path.clone(),
+                    title: item.title.clone(),
+                    error: format!("Duplicate check failed: {error}"),
+                });
+                emit_batch_progress(&app, index + 1, &item, &result, "failed");
+                continue;
+            }
         }
 
         emit_batch_progress(&app, index + 1, &item, &result, "importing");
@@ -794,10 +910,17 @@ pub async fn start_batch_import<R: Runtime>(
         });
 
         match import_result {
-            Ok(imported) => {
-                imported_hashes.insert(source_sha256);
+            Ok(ImportRunOutcome::Imported(imported)) => {
                 result.imported.push(imported);
                 emit_batch_progress(&app, index + 1, &item, &result, "completed");
+            }
+            Ok(ImportRunOutcome::AlreadyImported(existing_meeting)) => {
+                result.skipped.push(BatchImportSkipped {
+                    source_path: item.source_path.clone(),
+                    title: item.title.clone(),
+                    existing_meeting,
+                });
+                emit_batch_progress(&app, index + 1, &item, &result, "skipped");
             }
             Err(_) if IMPORT_CANCELLED.load(Ordering::SeqCst) => {
                 result.cancelled = true;
@@ -872,7 +995,7 @@ async fn run_import<R: Runtime>(
     model: Option<String>,
     provider: Option<String>,
     source_sha256: Option<String>,
-) -> Result<ImportResult> {
+) -> Result<ImportRunOutcome> {
     let source = PathBuf::from(&source_path);
 
     // Validate source file
@@ -888,6 +1011,20 @@ async fn run_import<R: Runtime>(
                 .map_err(|error| anyhow!("Hash task join error: {}", error))??
         }
     };
+    let source_size = std::fs::metadata(&source)
+        .map_err(|error| anyhow!("Cannot read source audio metadata: {error}"))?
+        .len();
+    let app_state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| anyhow!("App state not available"))?;
+    let pool = app_state.db_manager.pool();
+    if let Some(existing) = find_existing_audio_meeting(pool, &source_sha256).await? {
+        info!(
+            "Audio '{}' is already imported as meeting {}",
+            source_path, existing.meeting_id
+        );
+        return Ok(ImportRunOutcome::AlreadyImported(existing));
+    }
 
     info!(
         "Starting import for '{}' from {} with language {:?}, model {:?}, provider {:?}",
@@ -1305,11 +1442,6 @@ async fn run_import<R: Runtime>(
     // Create transcript segments
     let segments = create_transcript_segments(&all_transcripts);
 
-    // Save to database
-    let app_state = app
-        .try_state::<AppState>()
-        .ok_or_else(|| anyhow!("App state not available"))?;
-
     // Write transcripts.json and metadata.json to the meeting folder
     emit_progress(&app, "saving", 90, "Writing transcript files...");
 
@@ -1318,15 +1450,20 @@ async fn run_import<R: Runtime>(
     }
 
     let meeting_id = format!("meeting-{}", Uuid::new_v4());
-    let pool = app_state.db_manager.pool();
-    create_meeting_with_transcripts(
+    let create_outcome = create_meeting_with_transcripts(
         pool,
         &meeting_id,
         &title,
         &segments,
         meeting_folder.to_string_lossy().to_string(),
+        &source_sha256,
+        source_size,
+        Some((duration_seconds * 1000.0).round().max(0.0) as i64),
     )
     .await?;
+    if let CreateMeetingOutcome::AlreadyImported(existing) = create_outcome {
+        return Ok(ImportRunOutcome::AlreadyImported(existing));
+    }
 
     if let Err(error) = write_import_metadata(
         &meeting_folder,
@@ -1361,7 +1498,7 @@ async fn run_import<R: Runtime>(
 
     emit_progress(&app, "complete", 100, "Import complete");
 
-    Ok(ImportResult {
+    Ok(ImportRunOutcome::Imported(ImportResult {
         meeting_id,
         title,
         segments_count: segments.len(),
@@ -1371,7 +1508,7 @@ async fn run_import<R: Runtime>(
         empty_segments,
         transcription_coverage,
         average_confidence: avg_confidence,
-    })
+    }))
 }
 
 /// Emit progress event
@@ -1393,7 +1530,10 @@ async fn create_meeting_with_transcripts(
     title: &str,
     segments: &[TranscriptSegment],
     folder_path: String,
-) -> Result<()> {
+    source_sha256: &str,
+    source_size: u64,
+    duration_ms: Option<i64>,
+) -> Result<CreateMeetingOutcome> {
     let now = chrono::Utc::now();
 
     // Start transaction
@@ -1437,9 +1577,54 @@ async fn create_meeting_with_transcripts(
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
     }
 
+    let identity_registration =
+        crate::database::repositories::audio_identity::register_import_identity(
+            &mut tx,
+            meeting_id,
+            source_sha256,
+            source_size,
+            duration_ms,
+        )
+        .await;
+    match identity_registration {
+        Ok(IdentityRegistration::Canonical) => {}
+        Ok(IdentityRegistration::DuplicateCandidate { .. }) => {
+            tx.rollback()
+                .await
+                .map_err(|error| anyhow!("Failed to roll back duplicate import: {error}"))?;
+            drop(conn);
+            let existing = crate::database::repositories::audio_identity::find_canonical_meeting(
+                pool,
+                source_sha256,
+            )
+            .await?
+            .ok_or_else(|| anyhow!("Duplicate audio identity lost its canonical meeting"))?;
+            return Ok(CreateMeetingOutcome::AlreadyImported(existing));
+        }
+        Err(error) => {
+            tx.rollback().await.map_err(|rollback_error| {
+                anyhow!(
+                    "Failed to register audio identity: {error}; rollback failed: {rollback_error}"
+                )
+            })?;
+            drop(conn);
+            if let Some(existing) =
+                crate::database::repositories::audio_identity::find_canonical_meeting(
+                    pool,
+                    source_sha256,
+                )
+                .await?
+            {
+                return Ok(CreateMeetingOutcome::AlreadyImported(existing));
+            }
+            return Err(anyhow!("Failed to register audio identity: {error}"));
+        }
+    }
+
     tx.commit()
         .await
         .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+    drop(conn);
     if let Err(error) = crate::collections::auto_assign_meeting(pool, meeting_id, title).await {
         warn!(
             "Could not apply automatic series rules to imported meeting {}: {}",
@@ -1453,7 +1638,7 @@ async fn create_meeting_with_transcripts(
         segments.len()
     );
 
-    Ok(())
+    Ok(CreateMeetingOutcome::Created)
 }
 
 async fn delete_newly_imported_meeting(pool: &sqlx::SqlitePool, meeting_id: &str) -> Result<()> {
@@ -1461,6 +1646,9 @@ async fn delete_newly_imported_meeting(pool: &sqlx::SqlitePool, meeting_id: &str
         .begin()
         .await
         .map_err(|error| anyhow!("Failed to start import cleanup transaction: {error}"))?;
+    crate::database::repositories::audio_identity::release_meeting_identity(&mut tx, meeting_id)
+        .await
+        .map_err(|error| anyhow!("Failed to release imported audio identity: {error}"))?;
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *tx)
@@ -1694,14 +1882,21 @@ pub async fn select_and_validate_audio_command<R: Runtime>(
         Some(path) => {
             let path_str = path.to_string();
             info!("User selected: {}", path_str);
-
-            match validate_audio_file(Path::new(&path_str)) {
-                Ok(info) => Ok(Some(info)),
-                Err(e) => {
-                    error!("Validation failed: {}", e);
-                    Err(e.to_string())
-                }
-            }
+            let validation_path = PathBuf::from(&path_str);
+            let mut info =
+                tokio::task::spawn_blocking(move || validate_audio_file(&validation_path))
+                    .await
+                    .map_err(|error| format!("Validation task failed: {error}"))?
+                    .map_err(|error| error.to_string())?;
+            let state = app
+                .try_state::<AppState>()
+                .ok_or_else(|| "App state not available".to_string())?;
+            let (_, existing) =
+                inspect_audio_identity(state.db_manager.pool(), Path::new(&path_str))
+                    .await
+                    .map_err(|error| error.to_string())?;
+            info.existing_meeting = existing;
+            Ok(Some(info))
         }
         None => {
             info!("User cancelled file selection");
@@ -1727,7 +1922,7 @@ pub async fn select_and_validate_audio_folder_command<R: Runtime>(
         return Ok(None);
     };
     let folder = PathBuf::from(folder_path.to_string());
-    let files = tokio::task::spawn_blocking(move || -> Result<Vec<AudioFileInfo>> {
+    let mut files = tokio::task::spawn_blocking(move || -> Result<Vec<AudioFileInfo>> {
         Ok(collect_audio_files(&folder)?
             .iter()
             .map(|path| match validate_audio_file(path) {
@@ -1753,14 +1948,47 @@ pub async fn select_and_validate_audio_folder_command<R: Runtime>(
     if files.is_empty() {
         return Err("No supported audio files found in the selected folder".to_string());
     }
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "App state not available".to_string())?;
+    let mut first_source_by_hash: HashMap<String, String> = HashMap::new();
+    for info in &mut files {
+        match inspect_audio_identity(state.db_manager.pool(), Path::new(&info.path)).await {
+            Ok((sha256, existing)) => {
+                if let Some(existing) = existing {
+                    info.existing_meeting = Some(existing);
+                } else if let Some(first_source) = first_source_by_hash.get(&sha256) {
+                    info.duplicate_source_path = Some(first_source.clone());
+                } else {
+                    first_source_by_hash.insert(sha256, info.path.clone());
+                }
+            }
+            Err(error) => warn!("Could not preflight {}: {error}", info.path),
+        }
+    }
     Ok(Some(files))
 }
 
 /// Validate an audio file from a given path (for drag-drop)
 #[tauri::command]
-pub async fn validate_audio_file_command(path: String) -> Result<AudioFileInfo, String> {
+pub async fn validate_audio_file_command<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<AudioFileInfo, String> {
     info!("Validating audio file: {}", path);
-    validate_audio_file(Path::new(&path)).map_err(|e| e.to_string())
+    let validation_path = PathBuf::from(&path);
+    let mut info = tokio::task::spawn_blocking(move || validate_audio_file(&validation_path))
+        .await
+        .map_err(|error| format!("Validation task failed: {error}"))?
+        .map_err(|error| error.to_string())?;
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "App state not available".to_string())?;
+    let (_, existing) = inspect_audio_identity(state.db_manager.pool(), Path::new(&path))
+        .await
+        .map_err(|error| error.to_string())?;
+    info.existing_meeting = existing;
+    Ok(info)
 }
 
 /// Start importing an audio file (Beta gated using configContext.betaFeatures)
@@ -1898,6 +2126,57 @@ pub async fn is_import_in_progress_command() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn import_identity_test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for statement in [
+            "CREATE TABLE meetings(
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                folder_path TEXT
+            )",
+            "CREATE TABLE transcripts(
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT,
+                transcript TEXT,
+                timestamp TEXT,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL
+            )",
+            "CREATE TABLE audio_identities(
+                sha256 TEXT PRIMARY KEY,
+                canonical_meeting_id TEXT NOT NULL UNIQUE,
+                byte_size INTEGER NOT NULL,
+                duration_ms INTEGER,
+                verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            "CREATE TABLE meeting_audio_identities(
+                meeting_id TEXT PRIMARY KEY,
+                sha256 TEXT NOT NULL,
+                role TEXT NOT NULL,
+                detected_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )",
+            "CREATE TABLE audio_duplicate_reviews(
+                duplicate_meeting_id TEXT PRIMARY KEY,
+                canonical_meeting_id TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                status TEXT NOT NULL,
+                detected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TEXT
+            )",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        pool
+    }
 
     #[test]
     fn test_audio_extensions() {
@@ -2310,41 +2589,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_import_cleanup_removes_committed_meeting() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query(
-            "CREATE TABLE meetings(
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                created_at TEXT,
-                updated_at TEXT,
-                folder_path TEXT
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "CREATE TABLE transcripts(
-                id TEXT PRIMARY KEY,
-                meeting_id TEXT,
-                transcript TEXT,
-                timestamp TEXT,
-                audio_start_time REAL,
-                audio_end_time REAL,
-                duration REAL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        let pool = import_identity_test_pool().await;
 
-        create_meeting_with_transcripts(&pool, "meeting-test", "Test", &[], "/tmp/test".into())
-            .await
-            .unwrap();
+        create_meeting_with_transcripts(
+            &pool,
+            "meeting-test",
+            "Test",
+            &[],
+            "/tmp/test".into(),
+            "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf",
+            7,
+            Some(1_000),
+        )
+        .await
+        .unwrap();
         delete_newly_imported_meeting(&pool, "meeting-test")
             .await
             .unwrap();
@@ -2359,6 +2617,56 @@ mod tests {
             .unwrap();
         assert_eq!(meetings, 0);
         assert_eq!(transcripts, 0);
+    }
+
+    #[tokio::test]
+    async fn duplicate_import_is_rejected_atomically() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+
+        let first = create_meeting_with_transcripts(
+            &pool,
+            "meeting-first",
+            "First",
+            &[],
+            "/tmp/first".into(),
+            HASH,
+            7,
+            Some(1_000),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(first, CreateMeetingOutcome::Created));
+
+        let second = create_meeting_with_transcripts(
+            &pool,
+            "meeting-second",
+            "Second",
+            &[],
+            "/tmp/second".into(),
+            HASH,
+            7,
+            Some(1_000),
+        )
+        .await
+        .unwrap();
+        let CreateMeetingOutcome::AlreadyImported(existing) = second else {
+            panic!("duplicate import unexpectedly created a meeting");
+        };
+        assert_eq!(existing.meeting_id, "meeting-first");
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meetings, 1);
+        let duplicate_mapping: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM meeting_audio_identities WHERE meeting_id='meeting-second'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(duplicate_mapping, 0);
     }
 
     #[test]

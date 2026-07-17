@@ -1,3 +1,4 @@
+pub mod audio_identity;
 pub mod meeting;
 pub mod setting;
 pub mod speaker;

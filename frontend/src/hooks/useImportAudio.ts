@@ -12,6 +12,14 @@ export interface AudioFileInfo {
   duration_seconds: number;
   size_bytes: number;
   format: string;
+  existing_meeting: ExistingAudioMeeting | null;
+  duplicate_source_path: string | null;
+}
+
+export interface ExistingAudioMeeting {
+  meeting_id: string;
+  title: string;
+  created_at: string;
 }
 
 export interface ImportProgress {
@@ -55,7 +63,7 @@ export interface BatchImportProgress {
 export interface BatchImportResult {
   total: number;
   imported: ImportResult[];
-  skipped: BatchImportItem[];
+  skipped: Array<BatchImportItem & { existing_meeting: ExistingAudioMeeting }>;
   truncated: BatchImportItem[];
   failed: Array<BatchImportItem & { error: string }>;
   cancelled: boolean;
@@ -65,6 +73,7 @@ export type ImportStatus = 'idle' | 'validating' | 'processing' | 'complete' | '
 
 export interface UseImportAudioOptions {
   onComplete?: (result: ImportResult) => void;
+  onDuplicate?: (existing: ExistingAudioMeeting) => void;
   onBatchComplete?: (result: BatchImportResult) => void;
   onError?: (error: string) => void;
 }
@@ -100,6 +109,7 @@ export interface UseImportAudioReturn {
 
 export function useImportAudio({
   onComplete,
+  onDuplicate,
   onBatchComplete,
   onError,
 }: UseImportAudioOptions = {}): UseImportAudioReturn {
@@ -113,9 +123,11 @@ export function useImportAudio({
 
   // Stable refs for callbacks to avoid listener re-registration on every render
   const onCompleteRef = useRef(onComplete);
+  const onDuplicateRef = useRef(onDuplicate);
   const onBatchCompleteRef = useRef(onBatchComplete);
   const onErrorRef = useRef(onError);
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
+  useEffect(() => { onDuplicateRef.current = onDuplicate; }, [onDuplicate]);
   useEffect(() => { onBatchCompleteRef.current = onBatchComplete; }, [onBatchComplete]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
 
@@ -174,6 +186,22 @@ export function useImportAudio({
         return;
       }
       unlisteners.push(unlistenComplete);
+
+      const unlistenDuplicate = await listen<ExistingAudioMeeting>(
+        'import-duplicate',
+        (event) => {
+          if (isCancelledRef.current) return;
+          setStatus('complete');
+          setProgress(null);
+          onDuplicateRef.current?.(event.payload);
+        }
+      );
+      if (cleanedUpRef.current) {
+        unlistenDuplicate();
+        unlisteners.forEach(u => u());
+        return;
+      }
+      unlisteners.push(unlistenDuplicate);
 
       const unlistenBatchProgress = await listen<BatchImportProgress>(
         'batch-import-progress',
