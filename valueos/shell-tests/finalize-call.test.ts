@@ -74,4 +74,18 @@ describe('finalizeCall', () => {
     expect(recs[0].transcript).toBe(capture.transcriptText);
     expect(recs[0].path).toBe('');
   });
+
+  it('records the server failure reason (status + message) on a terminal reject', async () => {
+    const s = makeServices();
+    // Link to a record that does not exist → the API rejects with 404 (terminal).
+    const out = await finalizeCall(
+      { digest: s.digest, config: s.config, uploadQueue: s.uploadQueue, history: s.history },
+      { ...capture, targetId: 'does-not-exist' },
+      'key-3',
+    );
+    expect(out.status).toBe('error');
+    expect(out.record.uploadStatus).toBe('failed');
+    expect(out.record.error).toMatch(/404/);
+    expect(out.record.error).toMatch(/does not exist/i);
+  });
 });

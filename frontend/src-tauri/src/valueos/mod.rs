@@ -559,6 +559,17 @@ pub async fn valueos_write_transcript_file(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Delete a local transcript file (best-effort). A missing file is NOT an error — the user
+/// just wants it gone. Only touches the local file; never the ValueOS cloud copy.
+#[tauri::command]
+pub async fn valueos_delete_file(path: String) -> Result<(), ValueOsErr> {
+    match std::fs::remove_file(&path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(ValueOsErr::transport(format!("delete file: {e}"))),
+    }
+}
+
 // ---- WS4: updater + telemetry -----------------------------------------------------------
 // Prompt-first, notify-only. The webview never sees the token: check + telemetry go through
 // the same authenticated api_get/api_post as every other ValueOS call, and the presigned

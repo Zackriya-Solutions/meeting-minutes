@@ -86,6 +86,13 @@ export async function finalizeCall(
     uploadStatus: uploaded ? 'uploaded' : failed || lostAccess ? 'failed' : 'pending',
     digest: digestText,
     transcript: capture.transcriptText,
+    // Capture the concrete server reason so the reader can show WHY an upload failed
+    // (e.g. "422 …" / "404 …"), instead of a generic message.
+    error: failed
+      ? `${failed.status ? failed.status + ' · ' : ''}${failed.message}`
+      : lostAccess
+        ? 'This workspace no longer has ValueOS Agent access.'
+        : undefined,
   };
   await history.add(record);
 

@@ -349,4 +349,26 @@ describe('ValueOS redesigned flow', () => {
     expect(within(reader).getByText(/Digest/i)).toBeInTheDocument();
     expect(reader).toHaveTextContent('We discussed pricing and agreed next steps.');
   });
+
+  it('deletes a local transcript (list entry + stored file), keeping the ValueOS copy', async () => {
+    const { services } = makeServices('active');
+    const removeSpy = vi.spyOn(services.history, 'remove');
+    const deleteFileSpy = vi.spyOn(services.config, 'deleteTranscriptFile');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    await openWizardToRecord();
+    fireEvent.click(screen.getByTestId('valueos-wizard-start'));
+    await screen.findByTestId('valueos-recording');
+    fireEvent.click(screen.getByTestId('valueos-recording-end'));
+    await screen.findByTestId('valueos-transcripts-reader');
+
+    // delete → inline confirm → gone
+    fireEvent.click(screen.getByTestId('valueos-transcript-delete'));
+    fireEvent.click(screen.getByTestId('valueos-transcript-delete-confirm'));
+    await screen.findByTestId('valueos-transcripts-placeholder'); // reader cleared
+
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(deleteFileSpy).toHaveBeenCalledTimes(1); // stored .txt removed too
+  });
 });

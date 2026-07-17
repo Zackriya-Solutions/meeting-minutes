@@ -28,5 +28,9 @@ export function createTauriConfigService(): ConfigService {
         content,
       });
     },
+    async deleteTranscriptFile(path: string) {
+      if (!path) return;
+      await callValueOs<void>('valueos_delete_file', { path });
+    },
   };
 }

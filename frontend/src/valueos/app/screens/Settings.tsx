@@ -15,7 +15,7 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
   const { config, updater } = useValueOs();
   const [folder, setFolder] = useState('');
   const [saved, setSaved] = useState<'idle' | 'saved' | 'error'>('idle');
-  const [account, setAccount] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [updateMsg, setUpdateMsg] = useState('');
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
@@ -23,9 +23,12 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
 
   useEffect(() => {
     void config.getTranscriptFolder().then((f) => f && setFolder(f));
+    // The access token carries only `sub` (a uuid) — no name/email (those need the profile/email
+    // OIDC scopes + userInfo/id_token). Keep a short id for support reference until we wire the
+    // real profile name.
     void getAccessTokenClaims()
-      .then((c) => setAccount(c?.username ?? null))
-      .catch(() => setAccount(null));
+      .then((c) => setAccountId(c?.sub ?? c?.username ?? null))
+      .catch(() => setAccountId(null));
   }, [config]);
 
   const pick = async () => {
@@ -153,10 +156,12 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
       {/* account */}
       <Card title="Account" desc="">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Avatar name={account ?? 'ValueOS'} size={40} />
+          <Avatar name="ValueOS" size={40} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700 }}>{account ?? 'Signed in'}</div>
-            <div className="va-muted" style={{ fontSize: 13 }}>Signed in to ValueOS</div>
+            <div style={{ fontWeight: 700 }}>ValueOS account</div>
+            <div className="va-muted" style={{ fontSize: 13 }}>
+              Signed in to ValueOS{accountId ? ` · ${accountId.slice(0, 8)}` : ''}
+            </div>
           </div>
           <button className="va-btn va-btn-danger-outline va-btn-sm" data-testid="valueos-settings-logout" onClick={onLogout}>
             <IcLogout size={15} /> Log out

@@ -181,6 +181,22 @@ export function AppFlow() {
     setRoute('transcripts');
   };
 
+  // Delete a transcript from LOCAL history + its stored file. Never touches the ValueOS cloud
+  // copy (an already-uploaded transcript stays in ValueOS).
+  const deleteTranscript = async (id: string) => {
+    const rec = records.find((r) => r.id === id);
+    await history.remove(id);
+    if (rec?.path) {
+      try {
+        await config.deleteTranscriptFile(rec.path);
+      } catch {
+        /* file already gone / unwritable — the history entry is removed regardless */
+      }
+    }
+    await refreshRecords();
+    setSelectedId((cur) => (cur === id ? null : cur));
+  };
+
   const navigate = (r: MainRoute) => {
     setGuardError(null);
     setFileWarning(null);
@@ -272,6 +288,7 @@ export function AppFlow() {
           onSelect={setSelectedId}
           onNew={requestNew}
           onOpenRecording={() => setRoute('recording')}
+          onDelete={deleteTranscript}
         />
       )}
 
