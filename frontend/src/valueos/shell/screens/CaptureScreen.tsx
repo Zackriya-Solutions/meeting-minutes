@@ -36,6 +36,8 @@ export function CaptureScreen({
   const [targets, setTargets] = useState<TargetItem[]>([]);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState('');
+  const [callName, setCallName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
   const liveRef = useRef<HTMLDivElement>(null);
 
   // Keep the live transcript scrolled to the newest line as speech is recognized.
@@ -76,9 +78,17 @@ export function CaptureScreen({
     };
   }, [client, tenantId, activityType, q]);
 
+  // Default the call name from the chosen target (user can edit it) — reused verbatim as
+  // the /calls `name`. Once the user types, we stop overwriting it.
+  useEffect(() => {
+    if (nameTouched) return;
+    const t = targets.find((x) => x.id === targetId);
+    setCallName(t ? `Call with ${t.label}` : '');
+  }, [targetId, targets, nameTouched]);
+
   const target = targets.find((t) => t.id === targetId) ?? null;
   const tenantName = entitledTenants.find((t) => t.tenant.id === tenantId)?.tenant.name ?? '';
-  const canStart = !!tenantId && !!activityType && !!target;
+  const canStart = !!tenantId && !!activityType && !!target && callName.trim().length > 0;
 
   const start = async () => {
     if (!canStart) return;
@@ -101,6 +111,7 @@ export function CaptureScreen({
       activityType: activityType!,
       targetId: target!.id,
       targetLabel: target!.label,
+      callName: callName.trim(),
       transcriptText,
     });
   };
@@ -149,8 +160,8 @@ export function CaptureScreen({
       <div style={{ ...ui.card, maxWidth: 560, alignItems: 'stretch' }}>
         <h1 style={{ ...ui.h1, textAlign: 'center' }}>Attach this meeting</h1>
         <p style={{ ...ui.sub, textAlign: 'center' }}>
-          Recording can&apos;t start until you choose the tenant, the type, and the exact
-          lead or opportunity to attach the transcript to.
+          Recording can&apos;t start until you choose the tenant, the type, the exact lead or
+          opportunity, and a name for the call.
         </p>
 
         <label style={label}>Tenant</label>
@@ -218,6 +229,22 @@ export function CaptureScreen({
               ))}
               {targets.length === 0 && <p style={ui.sub}>No matches.</p>}
             </div>
+
+            {target && (
+              <>
+                <label style={label}>Call name</label>
+                <input
+                  data-testid="valueos-capture-callname"
+                  style={field}
+                  value={callName}
+                  placeholder="Name this call"
+                  onChange={(e) => {
+                    setCallName(e.target.value);
+                    setNameTouched(true);
+                  }}
+                />
+              </>
+            )}
           </>
         )}
 

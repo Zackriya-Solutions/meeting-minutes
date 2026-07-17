@@ -113,6 +113,29 @@ export interface UploadRequest {
   title?: string;
 }
 
+/** The transcript sub-object of the composite POST /calls request. */
+export interface CallTranscript {
+  raw_content: string; // the transcript text (required)
+  digest: string; // the high-level recap — generated LOCALLY by the agent (required)
+  title?: string; // defaults to the call name
+  digest_source?: string; // default 'ai_generated'
+  file_name?: string; // default transcript.txt
+  content_type?: TranscriptContentType;
+}
+
+/** Body for POST /api/agent/v1/tenants/{tenantId}/calls — creates a call activity AND
+ *  attaches its transcript+digest in one atomic op. The link is in the body: EXACTLY ONE
+ *  of lead_id / opportunity_id (XOR). */
+export interface CreateCallRequest {
+  name: string; // required — the call activity's title (user-chosen at capture time)
+  lead_id?: string; // XOR with opportunity_id
+  opportunity_id?: string;
+  transcript: CallTranscript;
+  notes?: string; // optional → stored on the call activity
+  occurred_at?: string; // optional (default: now)
+  idempotency_key?: string; // optional here; if sent, reuse the SAME key on every retry
+}
+
 export interface UploadResult {
   idempotent: boolean;
   activity_id: string;

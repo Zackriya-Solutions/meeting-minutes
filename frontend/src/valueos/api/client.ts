@@ -5,6 +5,7 @@
 import type {
   ActivityType,
   AgentTenantsResult,
+  CreateCallRequest,
   Entitlement,
   Lead,
   ListParams,
@@ -29,8 +30,11 @@ export interface ValueOsClient {
   listLeads(tenantId: string, params?: ListParams): Promise<Paginated<Lead>>;
   /** Existing opportunities (read-only, searchable). scope read:opportunities */
   listOpportunities(tenantId: string, params?: ListParams): Promise<Paginated<Opportunity>>;
-  /** Attach transcript + digest to an EXISTING lead/opportunity (write-only, idempotent).
-   *  scope write:transcripts */
+  /** PRIMARY write path: create a call activity AND attach its transcript+digest in one
+   *  atomic op (link in the body — XOR lead_id/opportunity_id). scope write:transcripts */
+  createCall(tenantId: string, req: CreateCallRequest): Promise<UploadResult>;
+  /** Fallback write path: attach transcript + digest to an EXISTING lead/opportunity (link
+   *  in the path, idempotency_key required). Prefer createCall(). scope write:transcripts */
   uploadTranscript(
     tenantId: string,
     activityType: ActivityType,

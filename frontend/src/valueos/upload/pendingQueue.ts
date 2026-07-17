@@ -4,14 +4,12 @@
 // attempt count) for later retry; on 401 the flush stops and signals re-auth; items are
 // removed ONLY on a confirmed successful (or idempotent-replay) upload.
 import type { ValueOsClient } from '../api/client';
-import { ActivityType, UploadRequest, ValueOsApiError } from '../api/types';
+import { CreateCallRequest, ValueOsApiError } from '../api/types';
 
 export interface PendingUpload {
   id: string; // == request.idempotency_key
   tenantId: string;
-  activityType: ActivityType;
-  targetId: string;
-  request: UploadRequest;
+  request: CreateCallRequest; // the composite /calls body (name + XOR link + transcript)
   transcriptPath: string; // local file already written at the configured folder
   createdAt: number;
   attempts: number;
@@ -92,12 +90,7 @@ export class PendingUploadQueue {
     };
     for (const item of await this.store.list()) {
       try {
-        await this.client.uploadTranscript(
-          item.tenantId,
-          item.activityType,
-          item.targetId,
-          item.request,
-        );
+        await this.client.createCall(item.tenantId, item.request);
         await this.store.remove(item.id); // success (incl. idempotent replay) → done
         outcome.uploaded.push(item.id);
       } catch (e) {

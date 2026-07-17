@@ -57,8 +57,11 @@ the single upload destination for BOTH the transcript and the digest.
 ## Finalize
 
 On finish: write the transcript file to the configured folder; generate the **digest**
-(readable HIGH-LEVEL recap, not a hash); upload **both** to the pre-selected tenant +
-lead/opportunity with a client `idempotency_key`. Resilience via the pending-upload queue:
+(readable HIGH-LEVEL recap, not a hash); then **create the call WITH its transcript in one
+atomic op** via the composite `POST /tenants/{tid}/calls` (contract §5) — the body carries
+the user-chosen call **`name`** (entered at capture time and reused verbatim), the XOR link
+(`lead_id` **or** `opportunity_id`), the `transcript` (`raw_content` + agent-generated
+`digest`), and a client `idempotency_key`. Resilience via the pending-upload queue:
 401 → re-auth; network/503 → keep the local file + retry; success (incl. idempotent
 replay) → dequeue. **Write-only** (transcripts are never read back).
 
@@ -126,7 +129,8 @@ All reject with `{ status, message, scope?, feature?, fields? }` on error (TS ma
 | `valueos_api_get_entitlement` | `tenant_id` | `Entitlement` (optional detail; not the gate) |
 | `valueos_api_list_leads` | `tenant_id, q?, limit?, offset?` | `{ items: Lead[], total, … }` |
 | `valueos_api_list_opportunities` | `tenant_id, q?, limit?, offset?` | `{ items: Opportunity[], total, … }` |
-| `valueos_api_upload_transcript` | `tenant_id, activity_type, target_id, request` | `UploadResult` |
+| `valueos_api_create_call` | `tenant_id, request` (name + XOR lead_id/opportunity_id + transcript) | `UploadResult` — **PRIMARY write** (composite call + transcript) |
+| `valueos_api_upload_transcript` | `tenant_id, activity_type, target_id, request` | `UploadResult` — fallback (link in path) |
 | `valueos_generate_digest` | `transcript, title?, max_chars?` | `string` (recap) |
 | `valueos_pick_folder` | — | `string \| null` |
 | `valueos_validate_writable` | `path` | `boolean` |

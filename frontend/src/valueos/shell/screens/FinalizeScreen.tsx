@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useValueOs } from '../../context/ValueOsProvider';
+import type { CreateCallRequest } from '../../api/types';
 import type { CaptureResult } from '../flowTypes';
 import * as ui from './ui';
 
@@ -39,24 +40,26 @@ export function FinalizeScreen({
       if (!idemRef.current) idemRef.current = newIdempotencyKey();
       const key = idemRef.current; // stable across retries → idempotent, no duplicates
       const digestText = await digest.generate(capture.transcriptText, {
-        title: capture.targetLabel,
+        title: capture.callName,
       });
-      const fileName = `${sanitize(capture.targetLabel)}-${key.slice(0, 8)}.txt`;
+      const fileName = `${sanitize(capture.callName)}-${key.slice(0, 8)}.txt`;
       const path = await config.writeTranscriptFile(fileName, capture.transcriptText);
-      await uploadQueue.enqueue({
-        id: key,
-        tenantId: capture.tenantId,
-        activityType: capture.activityType,
-        targetId: capture.targetId,
-        transcriptPath: path,
-        request: {
+      // PRIMARY write: the composite /calls — creates the call AND attaches the transcript
+      // + locally-generated digest in one atomic op. Link is XOR in the body.
+      const request: CreateCallRequest = {
+        name: capture.callName,
+        ...(capture.activityType === 'lead'
+          ? { lead_id: capture.targetId }
+          : { opportunity_id: capture.targetId }),
+        transcript: {
           raw_content: capture.transcriptText, // artifact 1: transcript
-          digest: digestText, // artifact 2: high-level recap
-          idempotency_key: key,
+          digest: digestText, // artifact 2: high-level recap (agent-generated)
           file_name: fileName,
-          title: capture.targetLabel,
+          title: capture.callName,
         },
-      });
+        idempotency_key: key,
+      };
+      await uploadQueue.enqueue({ id: key, tenantId: capture.tenantId, request, transcriptPath: path });
       const outcome = await uploadQueue.flush();
       const uploaded = outcome.uploaded.includes(key);
       const failed = outcome.failed.find((f) => f.id === key);

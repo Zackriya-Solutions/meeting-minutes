@@ -2,14 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { MockValueOsClient, defaultMockSeed } from '@/valueos/api/mockClient';
 import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
 
-function makeItem(id: string) {
+function makeItem(id: string, leadId = 'lead-1') {
   return {
     id,
     tenantId: 'tenant-acme',
-    activityType: 'lead' as const,
-    targetId: 'lead-1',
     transcriptPath: `/tmp/${id}.txt`,
-    request: { raw_content: 'hello', digest: 'recap', idempotency_key: id },
+    request: {
+      name: 'Call with Ada Lovelace',
+      lead_id: leadId,
+      transcript: { raw_content: 'hello', digest: 'recap' },
+      idempotency_key: id,
+    },
   };
 }
 
@@ -68,7 +71,7 @@ describe('PendingUploadQueue (never lose data)', () => {
     const client = new MockValueOsClient(defaultMockSeed());
     const store = new InMemoryPendingUploadStore();
     const q = new PendingUploadQueue(client, store);
-    await q.enqueue({ ...makeItem('k1'), targetId: 'does-not-exist' });
+    await q.enqueue(makeItem('k1', 'does-not-exist')); // lead_id that doesn't exist → 404
     const out = await q.flush();
     expect(out.failed.map((f) => f.id)).toEqual(['k1']);
     expect(out.failed[0].status).toBe(404);

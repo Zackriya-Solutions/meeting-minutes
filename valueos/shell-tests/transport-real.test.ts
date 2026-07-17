@@ -44,6 +44,11 @@ describe('real transport (invoke wrappers)', () => {
       // the request VALUE stays snake_case — it's the API body, not a Tauri arg
       request: { raw_content: 'x', digest: 'y', idempotency_key: 'k' },
     });
+
+    inv.fn.mockResolvedValueOnce({ idempotent: false });
+    const callReq = { name: 'Discovery', lead_id: 'l1', transcript: { raw_content: 'x', digest: 'y' }, idempotency_key: 'k' };
+    await c.createCall('t1', callReq);
+    expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_create_call', { tenantId: 't1', request: callReq });
   });
 
   it('auth triggers the native login/logout commands', async () => {

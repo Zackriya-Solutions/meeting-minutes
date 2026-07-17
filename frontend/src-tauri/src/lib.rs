@@ -747,6 +747,7 @@ pub fn run() {
             valueos::valueos_api_get_entitlement,
             valueos::valueos_api_list_leads,
             valueos::valueos_api_list_opportunities,
+            valueos::valueos_api_create_call,
             valueos::valueos_api_upload_transcript,
             valueos::valueos_generate_digest,
             valueos::valueos_pick_folder,

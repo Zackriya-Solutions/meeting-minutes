@@ -209,9 +209,9 @@ describe('ValueOS full flow', () => {
     );
   });
 
-  it('records, then stores + digests + uploads BOTH artifacts to the selected target', async () => {
+  it('records, then creates a call with BOTH artifacts via the composite /calls path', async () => {
     const { services, client } = makeServices('active');
-    const uploadSpy = vi.spyOn(client, 'uploadTranscript');
+    const callSpy = vi.spyOn(client, 'createCall');
     render(<ValueOsShell services={services} />);
     await loginToConfig();
     await configToHome();
@@ -226,19 +226,37 @@ describe('ValueOS full flow', () => {
     await screen.findByTestId('valueos-finalize');
     await waitFor(() => expect(screen.getByTestId('valueos-finalize-status')).toHaveTextContent(/attached to/i));
 
-    expect(uploadSpy).toHaveBeenCalledTimes(1);
-    const [tenantId, activityType, targetId, req] = uploadSpy.mock.calls[0];
+    expect(callSpy).toHaveBeenCalledTimes(1);
+    const [tenantId, req] = callSpy.mock.calls[0];
     expect(tenantId).toBe('tenant-acme');
-    expect(activityType).toBe('lead');
-    expect(targetId).toBe('lead-1');
-    expect(req.raw_content).toBe('We discussed pricing and agreed next steps.'); // transcript
-    expect(req.digest.length).toBeGreaterThan(0); // digest — both artifacts uploaded
+    expect(req.name).toBe('Call with Ada Lovelace'); // user-chosen (auto-filled) call name
+    expect(req.lead_id).toBe('lead-1'); // XOR link in the body
+    expect(req.opportunity_id).toBeUndefined();
+    expect(req.transcript.raw_content).toBe('We discussed pricing and agreed next steps.'); // transcript
+    expect(req.transcript.digest.length).toBeGreaterThan(0); // agent-generated digest
     expect(req.idempotency_key).toBeTruthy();
 
     // Done → home → the captured transcript now appears in the local list.
     fireEvent.click(screen.getByTestId('valueos-finalize-done'));
     await screen.findByTestId('valueos-home');
     expect(screen.getByTestId('valueos-home-list')).toHaveTextContent('Ada Lovelace');
+  });
+
+  it('reuses the user-chosen call name when creating the call', async () => {
+    const { services, client } = makeServices('active');
+    const callSpy = vi.spyOn(client, 'createCall');
+    render(<ValueOsShell services={services} />);
+    await loginToConfig();
+    await configToHome();
+    await homeToCapture();
+    await selectLeadTarget(); // auto-fills "Call with Ada Lovelace"…
+    fireEvent.change(screen.getByTestId('valueos-capture-callname'), { target: { value: 'Q3 Renewal call' } });
+    fireEvent.click(screen.getByTestId('valueos-capture-start'));
+    await screen.findByTestId('valueos-capture-recording');
+    fireEvent.click(screen.getByTestId('valueos-capture-stop'));
+    await screen.findByTestId('valueos-finalize');
+    await waitFor(() => expect(callSpy).toHaveBeenCalled());
+    expect(callSpy.mock.calls[0][1].name).toBe('Q3 Renewal call'); // …but the edited name is used
   });
 
   it('re-gates mid-session when the selected workspace loses access during capture (§2.7)', async () => {

@@ -5,6 +5,7 @@ import type { ValueOsClient } from './client';
 import {
   ActivityType,
   AgentTenantsResult,
+  CreateCallRequest,
   Entitlement,
   Lead,
   ListParams,
@@ -46,6 +47,9 @@ export class TauriValueOsClient implements ValueOsClient {
       limit: params?.limit,
       offset: params?.offset,
     });
+  }
+  createCall(tenantId: string, req: CreateCallRequest): Promise<UploadResult> {
+    return callValueOs('valueos_api_create_call', { tenantId, request: req });
   }
   uploadTranscript(
     tenantId: string,

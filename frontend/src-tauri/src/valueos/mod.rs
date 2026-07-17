@@ -469,6 +469,17 @@ pub async fn valueos_api_list_opportunities(
     api_get(&format!("/tenants/{tenant_id}/opportunities{}", list_query(q, limit, offset))).await
 }
 
+/// PRIMARY write path: create a call activity AND attach its transcript+digest in one atomic
+/// op. The lead/opportunity link (XOR) is in the `request` body, not the path.
+#[tauri::command]
+pub async fn valueos_api_create_call(
+    tenant_id: String,
+    request: serde_json::Value,
+) -> Result<serde_json::Value, ValueOsErr> {
+    api_post(&format!("/tenants/{tenant_id}/calls"), &request).await
+}
+
+/// Fallback write path: attach a transcript to an existing lead/opportunity (link in the path).
 #[tauri::command]
 pub async fn valueos_api_upload_transcript(
     tenant_id: String,
