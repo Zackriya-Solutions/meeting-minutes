@@ -342,6 +342,13 @@ pub async fn save_config(
             delete_search_index(pool, &config.meeting_id).await?;
         }
     }
+    MeetingsRepository::set_summary_template_id(
+        pool,
+        &config.meeting_id,
+        crate::database::repositories::meeting::TEMPLATE_INTERVIEW,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     audit(
         pool,
         &config.meeting_id,
@@ -999,7 +1006,7 @@ mod tests {
 
     async fn pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY,title TEXT DEFAULT '',memory_type TEXT DEFAULT 'interview',sensitivity TEXT DEFAULT 'sensitive',cloud_processing_allowed INTEGER DEFAULT 0,indexing_allowed INTEGER DEFAULT 0,retention_days INTEGER,retention_expires_at TEXT,candidate_export_allowed INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY,title TEXT DEFAULT '',memory_type TEXT DEFAULT 'interview',sensitivity TEXT DEFAULT 'sensitive',cloud_processing_allowed INTEGER DEFAULT 0,indexing_allowed INTEGER DEFAULT 0,retention_days INTEGER,retention_expires_at TEXT,candidate_export_allowed INTEGER DEFAULT 0,summary_template_id TEXT DEFAULT 'interview_memory')").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE interview_configs(meeting_id TEXT PRIMARY KEY,candidate_name TEXT,role_title TEXT,interview_stage TEXT,interviewer_roles_json TEXT DEFAULT '[]',competencies_json TEXT DEFAULT '[]',success_criteria TEXT,question_plan_json TEXT DEFAULT '[]',glossary_json TEXT DEFAULT '[]',target_minutes INTEGER DEFAULT 60,candidate_questions_minutes INTEGER DEFAULT 10,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE interview_records(id INTEGER PRIMARY KEY,meeting_id TEXT,record_key TEXT,kind TEXT,payload TEXT,reviewed_payload TEXT,review_status TEXT DEFAULT 'pending',source_schema_version TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(meeting_id,record_key))").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE interview_audit_log(id INTEGER PRIMARY KEY,meeting_id TEXT,entity_type TEXT,entity_id TEXT,action TEXT,payload TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)").execute(&pool).await.unwrap();

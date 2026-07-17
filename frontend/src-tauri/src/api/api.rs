@@ -44,6 +44,7 @@ pub struct MeetingMemoryConfig {
     pub meeting_id: String,
     pub memory_type: String,
     pub sensitivity: String,
+    pub summary_template_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -392,11 +393,20 @@ pub async fn api_get_meeting_memory_config<R: Runtime>(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
+    let summary_template_id = MeetingsRepository::get_summary_template_id(pool, &meeting_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap_or_else(|| match config.0.as_str() {
+            "standup" => "daily_standup".to_string(),
+            "interview" => "interview_memory".to_string(),
+            _ => "standard_meeting".to_string(),
+        });
 
     Ok(MeetingMemoryConfig {
         meeting_id,
         memory_type: config.0,
         sensitivity: config.1,
+        summary_template_id,
     })
 }
 
@@ -407,6 +417,7 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
     meeting_id: String,
     memory_type: String,
     sensitivity: String,
+    summary_template_id: Option<String>,
 ) -> Result<MeetingMemoryConfig, String> {
     let pool = state.db_manager.pool();
     let previous_memory = MeetingsRepository::get_memory_config(pool, &meeting_id)
@@ -420,14 +431,20 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
     let is_private = memory_type
         == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
         || sensitivity == crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
-    let updated = MeetingsRepository::set_memory_config(
+    let summary_template_id = summary_template_id.unwrap_or_else(|| match memory_type.as_str() {
+        "standup" => "daily_standup".to_string(),
+        "interview" => "interview_memory".to_string(),
+        _ => "standard_meeting".to_string(),
+    });
+    let updated = MeetingsRepository::set_memory_and_template_config(
         pool,
         &meeting_id,
         &memory_type,
         &sensitivity,
+        &summary_template_id,
     )
-    .await
-    .map_err(|error| error.to_string())?;
+        .await
+        .map_err(|error| error.to_string())?;
     if !updated {
         return Err(format!("Meeting not found: {meeting_id}"));
     }
@@ -444,6 +461,7 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
         meeting_id,
         memory_type,
         sensitivity,
+        summary_template_id,
     })
 }
 

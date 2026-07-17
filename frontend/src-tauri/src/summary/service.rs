@@ -6,7 +6,7 @@ use crate::summary::language_detection::detect_summary_language;
 use crate::summary::llm_client::LLMProvider;
 use crate::summary::metadata::read_detected_summary_language_from_metadata;
 use crate::summary::processor::{
-    extract_meeting_name_from_markdown, generate_meeting_summary, StructuredSummaryReport,
+    extract_meeting_name_from_markdown, generate_meeting_summary,
 };
 use crate::summary::templates::{self, Template};
 use once_cell::sync::Lazy;
@@ -131,15 +131,10 @@ pub(crate) fn template_cache_fingerprint(template: &Template) -> String {
         template.to_markdown_structure(),
         template.to_section_instructions()
     );
-    if template.pipeline.as_deref() == Some("standup_v2") {
-        rendered_template.push_str("\n---STANDUP-EXTRACTION-CONTRACT---\n");
-        rendered_template
-            .push_str(&crate::summary::standup::extraction_contract_fingerprint_material());
-    }
-    if template.pipeline.as_deref() == Some("interview_v1") {
-        rendered_template.push_str("\n---INTERVIEW-EXTRACTION-CONTRACT---\n");
-        rendered_template
-            .push_str(&crate::summary::interview::extraction_contract_fingerprint_material());
+    let workflow = crate::summary::memory_workflow::MemoryWorkflow::from_template(template);
+    if let Some(contract) = workflow.extraction_contract() {
+        rendered_template.push_str("\n---SPECIALIZED-EXTRACTION-CONTRACT---\n");
+        rendered_template.push_str(&contract);
     }
     stable_text_fingerprint(&rendered_template)
 }
@@ -310,7 +305,7 @@ impl SummaryService {
                     Self::update_process_failed(
                         &pool,
                         &meeting_id,
-                        "Cloud processing is disabled for this sensitive memory. Use a local model or explicitly enable cloud processing in Interview privacy settings.",
+                        "Cloud processing is disabled for this sensitive memory. Use a local model or explicitly enable cloud processing in the memory privacy settings.",
                     )
                     .await;
                     return;
@@ -537,18 +532,15 @@ impl SummaryService {
                 return;
             }
         };
-        let mut effective_custom_prompt = if template.pipeline.as_deref() == Some("interview_v1") {
-            match crate::summary::interview_workflow::extraction_context(&pool, &meeting_id).await {
-                Ok(context) if custom_prompt.trim().is_empty() => context,
-                Ok(context) if context.trim().is_empty() => custom_prompt.clone(),
-                Ok(context) => format!("{}\n{}", context, custom_prompt.trim()),
-                Err(error) => {
-                    warn!("Failed to load Interview Memory preparation context: {error}");
-                    custom_prompt.clone()
-                }
+        let workflow = crate::summary::memory_workflow::MemoryWorkflow::from_template(&template);
+        let mut effective_custom_prompt = match workflow.preparation_context(&pool, &meeting_id).await {
+            Ok(context) if custom_prompt.trim().is_empty() => context,
+            Ok(context) if context.trim().is_empty() => custom_prompt.clone(),
+            Ok(context) => format!("{}\n{}", context, custom_prompt.trim()),
+            Err(error) => {
+                warn!("Failed to load specialized memory preparation context: {error}");
+                workflow.preparation_error_context(&custom_prompt)
             }
-        } else {
-            custom_prompt.clone()
         };
         match crate::learning::terminology::context_for_meeting(&pool, &meeting_id).await {
             Ok(Some(glossary_context)) if effective_custom_prompt.trim().is_empty() => {
@@ -650,13 +642,10 @@ impl SummaryService {
                     }
                 }
 
-                let structured_result_json = match structured_result.as_ref() {
-                    Some(StructuredSummaryReport::Standup(report)) => serde_json::to_value(report)
-                        .map(|value| Some(("standup_v2", value))),
-                    Some(StructuredSummaryReport::Interview(report)) => serde_json::to_value(report)
-                        .map(|value| Some(("interview_v1", value))),
-                    None => Ok(None),
-                };
+                let structured_result_json = structured_result
+                    .as_ref()
+                    .map(|report| report.to_json().map(|value| (report.schema_key(), value)))
+                    .transpose();
                 let structured_result_json = match structured_result_json {
                     Ok(value) => value,
                     Err(error) => {
@@ -674,12 +663,7 @@ impl SummaryService {
 
                 // Review records must be visible before the completed status wakes the UI.
                 let sync_result = match structured_result.as_ref() {
-                    Some(StructuredSummaryReport::Standup(report)) => {
-                        crate::summary::standup_workflow::sync_standup_records(&pool, &meeting_id, report).await
-                    }
-                    Some(StructuredSummaryReport::Interview(report)) => {
-                        crate::summary::interview_workflow::sync_records(&pool, &meeting_id, report).await
-                    }
+                    Some(report) => report.sync_review_records(&pool, &meeting_id).await,
                     None => Ok(0),
                 };
                 match sync_result {

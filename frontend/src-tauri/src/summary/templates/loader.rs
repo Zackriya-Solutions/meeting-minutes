@@ -241,6 +241,7 @@ mod tests {
     fn test_list_template_ids() {
         let ids = list_template_ids();
         assert!(ids.contains(&"daily_standup".to_string()));
+        assert!(ids.contains(&"one_on_one".to_string()));
         assert!(ids.contains(&"standard_meeting".to_string()));
     }
 

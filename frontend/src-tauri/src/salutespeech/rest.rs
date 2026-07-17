@@ -130,3 +130,62 @@ impl TranscriptionProvider for SaluteSpeechProvider {
         "SaluteSpeech"
     }
 }
+
+#[cfg(test)]
+mod live_load_tests {
+    use super::*;
+    use crate::audio::common::{process_bounded_ordered, CLOUD_TRANSCRIPTION_MAX_CONCURRENCY};
+    use crate::audio::transcription::TranscriptionProvider;
+
+    #[tokio::test]
+    #[ignore = "requires managed gateway credentials and SALUTESPEECH_LOAD_TEST_PCM"]
+    async fn managed_gateway_handles_parallel_recognition() {
+        let path = std::env::var("SALUTESPEECH_LOAD_TEST_PCM")
+            .expect("SALUTESPEECH_LOAD_TEST_PCM must point to 16 kHz mono f32le PCM");
+        let bytes = std::fs::read(path).unwrap();
+        let audio: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        assert!(audio.len() >= 1_600);
+
+        let (token, base) = crate::gateway_identity::install_token().await.unwrap();
+        let provider = SaluteSpeechProvider::new(super::super::SaluteSpeechConfig {
+            auth_key: token,
+            scope: None,
+            oauth_url: format!("{}/salutespeech/token", base.trim_end_matches('/')),
+            recognize_url: super::super::DEFAULT_RECOGNIZE_URL.to_string(),
+            model: super::super::DEFAULT_MODEL.to_string(),
+        });
+        let sequential_started = std::time::Instant::now();
+        let sequential = process_bounded_ordered(
+            vec![audio.clone(); CLOUD_TRANSCRIPTION_MAX_CONCURRENCY],
+            1,
+            |_, samples| provider.transcribe(samples, Some("ru".to_string())),
+        )
+        .await
+        .unwrap();
+        let sequential_elapsed = sequential_started.elapsed();
+
+        let parallel_started = std::time::Instant::now();
+        let parallel = process_bounded_ordered(
+            vec![audio; CLOUD_TRANSCRIPTION_MAX_CONCURRENCY],
+            CLOUD_TRANSCRIPTION_MAX_CONCURRENCY,
+            |_, samples| provider.transcribe(samples, Some("ru".to_string())),
+        )
+        .await
+        .unwrap();
+        let parallel_elapsed = parallel_started.elapsed();
+
+        assert_eq!(parallel.len(), CLOUD_TRANSCRIPTION_MAX_CONCURRENCY);
+        assert!(sequential.iter().all(|result| !result.text.trim().is_empty()));
+        assert!(parallel.iter().all(|result| !result.text.trim().is_empty()));
+        eprintln!(
+            "requests={} sequential_ms={} parallel_ms={} speedup={:.2}x",
+            parallel.len(),
+            sequential_elapsed.as_millis(),
+            parallel_elapsed.as_millis(),
+            sequential_elapsed.as_secs_f64() / parallel_elapsed.as_secs_f64()
+        );
+    }
+}

@@ -9,6 +9,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 const STANDUP_TEMPLATE: &str = "daily_standup";
+const ONE_ON_ONE_TEMPLATE: &str = "one_on_one";
 const STANDARD_TEMPLATE: &str = "standard_meeting";
 
 #[derive(Debug, Clone, Default)]
@@ -21,6 +22,10 @@ struct SuggestionSignals {
     status_round_handoff: bool,
     standup_time: bool,
     standup_duration: bool,
+    one_on_one_title: bool,
+    one_on_one_categories: usize,
+    reviewed_one_on_one_history: bool,
+    contrast_title: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -30,6 +35,7 @@ pub struct TemplateSuggestion {
     pub confidence: String,
     pub score: i32,
     pub reasons: Vec<String>,
+    pub confirmation_required: bool,
 }
 
 fn contains_any(text: &str, markers: &[&str]) -> bool {
@@ -142,7 +148,40 @@ fn transcript_has_status_round_handoff(transcript: &str) -> bool {
     )
 }
 
+fn transcript_one_on_one_categories(transcript: &str) -> usize {
+    let transcript = transcript.to_lowercase();
+    [
+        contains_any(&transcript, &["как ты", "как дела", "how are you", "check-in"]),
+        contains_any(&transcript, &["обратная связь", "фидбек", "feedback"]),
+        contains_any(&transcript, &["чем помочь", "нужна помощь", "поддерж", "support"]),
+        contains_any(&transcript, &["развит", "карьер", "грейд", "growth", "career"]),
+        contains_any(&transcript, &["в прошлый раз", "договаривал", "follow-up", "last time"]),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count()
+}
+
 fn suggest_from_signals(signals: SuggestionSignals) -> TemplateSuggestion {
+    let one_on_one_supported = !signals.contrast_title
+        && signals.one_on_one_categories >= 2
+        && (signals.one_on_one_title || signals.reviewed_one_on_one_history);
+    if one_on_one_supported {
+        let mut reasons = vec!["one_on_one_content".to_string()];
+        if signals.one_on_one_title {
+            reasons.push("one_on_one_title".to_string());
+        }
+        if signals.reviewed_one_on_one_history {
+            reasons.push("reviewed_one_on_one_history".to_string());
+        }
+        return TemplateSuggestion {
+            template_id: ONE_ON_ONE_TEMPLATE.to_string(),
+            confidence: if signals.one_on_one_categories >= 3 { "high" } else { "medium" }.to_string(),
+            score: signals.one_on_one_categories as i32 + 4,
+            reasons,
+            confirmation_required: true,
+        };
+    }
     let mut score = 0;
     let mut reasons = Vec::new();
     if signals.standup_title {
@@ -197,6 +236,7 @@ fn suggest_from_signals(signals: SuggestionSignals) -> TemplateSuggestion {
         .to_string(),
         score,
         reasons,
+        confirmation_required: true,
     }
 }
 
@@ -242,6 +282,28 @@ async fn suggestion_for_meeting(
     .fetch_one(pool)
     .await
     .map_err(|error| error.to_string())?;
+    let one_on_one_tables_exist: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='one_on_one_series') \
+         AND EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='one_on_one_records')",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let reviewed_one_on_one_history: bool = if one_on_one_tables_exist {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM one_on_one_series current \
+             JOIN one_on_one_series related ON related.pair_id=current.pair_id \
+             JOIN one_on_one_records r ON r.meeting_id=related.meeting_id AND r.review_status='accepted' \
+             WHERE current.meeting_id=? AND related.meeting_id<>?)",
+        )
+        .bind(meeting_id)
+        .bind(meeting_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|error| error.to_string())?
+    } else {
+        false
+    };
 
     let transcript = transcript.join("\n");
     Ok(suggest_from_signals(SuggestionSignals {
@@ -285,6 +347,14 @@ async fn suggestion_for_meeting(
             .unwrap_or_else(|| created_at_is_standup_like(&created_at))
             || title_time_is_standup_like(&title),
         standup_duration: duration.is_some_and(|seconds| (300.0..=2_700.0).contains(&seconds)),
+        one_on_one_title: contains_one_to_one_marker(&title)
+            || contains_any(&title, &["one-to-one", "1-on-1", "one on one"]),
+        one_on_one_categories: transcript_one_on_one_categories(&transcript),
+        reviewed_one_on_one_history,
+        contrast_title: contains_any(
+            &title,
+            &["pair programming", "парное программирование", "technical deep dive", "технический разбор", "interview", "собесед", "project status", "статус проекта"],
+        ),
     }))
 }
 
@@ -428,5 +498,46 @@ mod tests {
         assert!(suggestion
             .reasons
             .contains(&"reviewed_series_history".to_string()));
+    }
+
+    #[test]
+    fn one_on_one_needs_two_content_categories_and_confirmation() {
+        let suggestion = suggest_from_signals(SuggestionSignals {
+            one_on_one_title: true,
+            one_on_one_categories: 2,
+            ..Default::default()
+        });
+        assert_eq!(suggestion.template_id, ONE_ON_ONE_TEMPLATE);
+        assert!(suggestion.confirmation_required);
+
+        let title_only = suggest_from_signals(SuggestionSignals {
+            one_on_one_title: true,
+            ..Default::default()
+        });
+        assert_eq!(title_only.template_id, STANDARD_TEMPLATE);
+    }
+
+    #[test]
+    fn one_on_one_contrasts_are_never_suggested() {
+        for _contrast in ["pair programming", "technical deep dive", "interview", "project status"] {
+            let suggestion = suggest_from_signals(SuggestionSignals {
+                one_on_one_title: true,
+                one_on_one_categories: 5,
+                contrast_title: true,
+                ..Default::default()
+            });
+            assert_ne!(suggestion.template_id, ONE_ON_ONE_TEMPLATE);
+        }
+    }
+
+    #[test]
+    fn one_on_one_content_categories_require_distinct_product_signals() {
+        assert!(transcript_one_on_one_categories(
+            "Как ты? Нужна помощь? Давай обсудим обратную связь и карьерное развитие."
+        ) >= 3);
+        assert_eq!(
+            transcript_one_on_one_categories("Разобрали архитектуру сервиса и написали код."),
+            0
+        );
     }
 }
