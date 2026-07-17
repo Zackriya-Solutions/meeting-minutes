@@ -19,6 +19,15 @@ use crate::pipeline::chunker::{approx_token_count, chunk_segments, ChunkConfig, 
 
 pub struct ChunkEmbedHandler;
 
+async fn enqueue_analysis_jobs(ctx: &JobContext, meeting_id: &str) -> anyhow::Result<()> {
+    let empty = serde_json::json!({});
+    ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &empty)
+        .await?;
+    ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &empty)
+        .await?;
+    Ok(())
+}
+
 #[async_trait]
 impl JobHandler for ChunkEmbedHandler {
     fn kind(&self) -> &'static str {
@@ -34,6 +43,31 @@ impl JobHandler for ChunkEmbedHandler {
         let meeting_id =
             meeting_id.ok_or_else(|| anyhow::anyhow!("chunk_embed requires a meeting_id"))?;
         let pool = &ctx.pool;
+
+        let indexing_allowed: Option<i64> = sqlx::query_scalar(
+            "SELECT indexing_allowed FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
+        if indexing_allowed == Some(0) {
+            let old_ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id = ?")
+                .bind(meeting_id)
+                .fetch_all(pool)
+                .await?;
+            for id in old_ids {
+                let _ = sqlx::query("DELETE FROM chunk_embeddings WHERE chunk_id = ?")
+                    .bind(id)
+                    .execute(pool)
+                    .await;
+            }
+            sqlx::query("DELETE FROM chunks WHERE meeting_id = ?")
+                .bind(meeting_id)
+                .execute(pool)
+                .await?;
+            log::info!("[chunk_embed] meeting {meeting_id}: indexing disabled by memory privacy policy");
+            return enqueue_analysis_jobs(ctx, meeting_id).await;
+        }
 
         // Load segments (ordered). Timing is seconds (REAL) -> ms; NULLs degrade to 0.
         let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
@@ -183,12 +217,7 @@ impl JobHandler for ChunkEmbedHandler {
 
         // Chain: diarization and extraction run after chunking, in parallel. A diarize
         // failure must not block extraction (Phase 2 degradation rule).
-        let empty = serde_json::json!({});
-        ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &empty)
-            .await?;
-        ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &empty)
-            .await?;
-        Ok(())
+        enqueue_analysis_jobs(ctx, meeting_id).await
     }
 }
 
@@ -390,6 +419,19 @@ impl JobHandler for ExtractHandler {
 
         let meeting_id = meeting_id.unwrap_or("<none>");
         let pool = &ctx.pool;
+
+        let cloud_processing_allowed: Option<i64> = sqlx::query_scalar(
+            "SELECT cloud_processing_allowed FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
+        if cloud_processing_allowed == Some(0) {
+            log::info!(
+                "[extract] meeting {meeting_id}: cloud extraction disabled by memory privacy policy"
+            );
+            return Ok(());
+        }
 
         // Load transcript with speaker labels where available.
         let segs: Vec<(String, Option<String>)> = sqlx::query_as(

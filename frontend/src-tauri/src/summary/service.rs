@@ -5,7 +5,9 @@ use crate::ollama::metadata::ModelMetadataCache;
 use crate::summary::language_detection::detect_summary_language;
 use crate::summary::llm_client::LLMProvider;
 use crate::summary::metadata::read_detected_summary_language_from_metadata;
-use crate::summary::processor::{extract_meeting_name_from_markdown, generate_meeting_summary};
+use crate::summary::processor::{
+    extract_meeting_name_from_markdown, generate_meeting_summary, StructuredSummaryReport,
+};
 use crate::summary::templates::{self, Template};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -134,6 +136,11 @@ pub(crate) fn template_cache_fingerprint(template: &Template) -> String {
         rendered_template
             .push_str(&crate::summary::standup::extraction_contract_fingerprint_material());
     }
+    if template.pipeline.as_deref() == Some("interview_v1") {
+        rendered_template.push_str("\n---INTERVIEW-EXTRACTION-CONTRACT---\n");
+        rendered_template
+            .push_str(&crate::summary::interview::extraction_contract_fingerprint_material());
+    }
     stable_text_fingerprint(&rendered_template)
 }
 
@@ -141,7 +148,7 @@ fn build_summary_result_json(
     final_markdown: &str,
     source: SummaryCacheSource,
     output_language: &str,
-    structured_result: Option<serde_json::Value>,
+    structured_result: Option<(&str, serde_json::Value)>,
 ) -> serde_json::Value {
     let mut result = serde_json::json!({
         "markdown": strip_title_if_present(final_markdown),
@@ -151,8 +158,8 @@ fn build_summary_result_json(
             pipeline_version: SUMMARY_PIPELINE_VERSION,
         },
     });
-    if let Some(structured_result) = structured_result {
-        result["standup_v2"] = structured_result;
+    if let Some((key, structured_result)) = structured_result {
+        result[key] = structured_result;
     }
     result
 }
@@ -293,6 +300,32 @@ impl SummaryService {
                 return;
             }
         };
+
+        if !matches!(&provider, LLMProvider::BuiltInAI | LLMProvider::Ollama) {
+            match crate::summary::interview_workflow::cloud_processing_allowed(&pool, &meeting_id)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    Self::update_process_failed(
+                        &pool,
+                        &meeting_id,
+                        "Cloud processing is disabled for this sensitive memory. Use a local model or explicitly enable cloud processing in Interview privacy settings.",
+                    )
+                    .await;
+                    return;
+                }
+                Err(error) => {
+                    Self::update_process_failed(
+                        &pool,
+                        &meeting_id,
+                        &format!("Could not verify per-memory cloud policy: {error}"),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
 
         // Enforce the central privacy policy before reading credentials or constructing
         // a network client. BuiltInAI and Ollama remain available in local-only mode.
@@ -504,11 +537,24 @@ impl SummaryService {
                 return;
             }
         };
+        let effective_custom_prompt = if template.pipeline.as_deref() == Some("interview_v1") {
+            match crate::summary::interview_workflow::extraction_context(&pool, &meeting_id).await {
+                Ok(context) if custom_prompt.trim().is_empty() => context,
+                Ok(context) if context.trim().is_empty() => custom_prompt.clone(),
+                Ok(context) => format!("{}\n{}", context, custom_prompt.trim()),
+                Err(error) => {
+                    warn!("Failed to load Interview Memory preparation context: {error}");
+                    custom_prompt.clone()
+                }
+            }
+        } else {
+            custom_prompt.clone()
+        };
         let template_fingerprint = template_cache_fingerprint(&template);
 
         let cache_source = build_summary_cache_source(
             &text,
-            &custom_prompt,
+            &effective_custom_prompt,
             &template_id,
             &template_fingerprint,
             token_threshold,
@@ -530,7 +576,7 @@ impl SummaryService {
             &final_api_key,
             &meeting_id,
             &text,
-            &custom_prompt,
+            &effective_custom_prompt,
             &template_id,
             &template,
             token_threshold,
@@ -591,17 +637,17 @@ impl SummaryService {
                     }
                 }
 
-                let standup_report = structured_result.as_ref();
-                let structured_result_json = match structured_result
-                    .as_ref()
-                    .map(serde_json::to_value)
-                    .transpose()
-                {
+                let structured_result_json = match structured_result.as_ref() {
+                    Some(StructuredSummaryReport::Standup(report)) => serde_json::to_value(report)
+                        .map(|value| Some(("standup_v2", value))),
+                    Some(StructuredSummaryReport::Interview(report)) => serde_json::to_value(report)
+                        .map(|value| Some(("interview_v1", value))),
+                    None => Ok(None),
+                };
+                let structured_result_json = match structured_result_json {
                     Ok(value) => value,
                     Err(error) => {
-                        let message = format!(
-                            "Failed to serialize Standup V2 result for persistence: {error}"
-                        );
+                        let message = format!("Failed to serialize structured memory: {error}");
                         Self::update_process_failed(&pool, &meeting_id, &message).await;
                         return;
                     }
@@ -614,25 +660,27 @@ impl SummaryService {
                 );
 
                 // Review records must be visible before the completed status wakes the UI.
-                if let Some(report) = standup_report.as_ref() {
-                    match crate::summary::standup_workflow::sync_standup_records(
-                        &pool,
-                        &meeting_id,
-                        report,
-                    )
-                    .await
-                    {
-                        Ok(count) => info!(
-                            "Synced {} pending Standup V2 review records for meeting_id: {}",
-                            count, meeting_id
-                        ),
-                        Err(error) => {
-                            let message = format!(
-                                "Failed to sync Standup V2 review records for {meeting_id}: {error}"
-                            );
-                            Self::update_process_failed(&pool, &meeting_id, &message).await;
-                            return;
-                        }
+                let sync_result = match structured_result.as_ref() {
+                    Some(StructuredSummaryReport::Standup(report)) => {
+                        crate::summary::standup_workflow::sync_standup_records(&pool, &meeting_id, report).await
+                    }
+                    Some(StructuredSummaryReport::Interview(report)) => {
+                        crate::summary::interview_workflow::sync_records(&pool, &meeting_id, report).await
+                    }
+                    None => Ok(0),
+                };
+                match sync_result {
+                    Ok(count) if structured_result.is_some() => info!(
+                        "Synced {} pending structured review records for meeting_id: {}",
+                        count, meeting_id
+                    ),
+                    Ok(_) => {}
+                    Err(error) => {
+                        let message = format!(
+                            "Failed to sync structured review records for {meeting_id}: {error}"
+                        );
+                        Self::update_process_failed(&pool, &meeting_id, &message).await;
+                        return;
                     }
                 }
 
@@ -902,10 +950,13 @@ mod tests {
             "# Standup\nBody",
             sample_cache_source(),
             "English",
-            Some(serde_json::json!({
-                "schema_version": "standup_v2",
-                "action_items": []
-            })),
+            Some((
+                "standup_v2",
+                serde_json::json!({
+                    "schema_version": "standup_v2",
+                    "action_items": []
+                }),
+            )),
         );
         assert_eq!(result["standup_v2"]["schema_version"], "standup_v2");
     }

@@ -528,6 +528,19 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            if let Some(state) = _app.try_state::<state::AppState>() {
+                let pool = state.db_manager.pool().clone();
+                tauri::async_runtime::spawn(async move {
+                    match summary::interview_workflow::purge_expired(&pool).await {
+                        Ok(ids) if !ids.is_empty() => {
+                            log::info!("Purged {} expired Interview Memory item(s)", ids.len())
+                        }
+                        Ok(_) => {}
+                        Err(error) => log::warn!("Could not enforce Interview Memory retention: {error}"),
+                    }
+                });
+            }
+
             if !corpus_mode {
                 // Load the local embedding model in the background if it's already downloaded
                 // (enables the vector branch of search/RAG). Never blocks startup.
@@ -814,6 +827,8 @@ pub fn run() {
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,
+            api::api_get_meeting_memory_config,
+            api::api_set_meeting_memory_config,
             api::api_search_transcripts,
             api::api_get_profile,
             api::api_save_profile,
@@ -862,6 +877,19 @@ pub fn run() {
             summary::standup_notes::create_standup_private_note,
             summary::standup_notes::set_standup_private_note_status,
             summary::standup_suggestion::suggest_summary_template,
+            summary::interview_workflow::get_interview_config,
+            summary::interview_workflow::save_interview_config,
+            summary::interview_workflow::get_interview_privacy,
+            summary::interview_workflow::save_interview_privacy,
+            summary::interview_workflow::list_interview_records,
+            summary::interview_workflow::review_interview_record,
+            summary::interview_workflow::save_interview_debrief,
+            summary::interview_workflow::list_interview_debriefs,
+            summary::interview_workflow::create_interview_track,
+            summary::interview_workflow::assign_interview_stage,
+            summary::interview_workflow::get_interview_handoff,
+            summary::interview_workflow::export_interview_memory,
+            summary::interview_workflow::purge_expired_interview_memories,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,

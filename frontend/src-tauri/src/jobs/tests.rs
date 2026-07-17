@@ -286,6 +286,10 @@ async fn recover_running_requeues_interrupted_jobs() {
 async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
     let pool = test_pool().await;
     // Tables the chunk_embed handler touches.
+    sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL DEFAULT 1)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO meetings(id) VALUES('m1')")
+        .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, audio_start_time REAL, audio_end_time REAL)")
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE chunks (id INTEGER PRIMARY KEY, meeting_id TEXT, first_segment_id TEXT, last_segment_id TEXT, start_ms INTEGER, end_ms INTEGER, text TEXT, token_count INTEGER, embedding_status TEXT DEFAULT 'pending')")
@@ -345,6 +349,84 @@ async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
         .unwrap();
     assert!(kinds.contains(&kind::DIARIZE.to_string()));
     assert!(kinds.contains(&kind::EXTRACT.to_string()));
+}
+
+#[tokio::test]
+async fn private_memory_skips_indexing_but_still_chains_analysis() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE meetings (id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL DEFAULT 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO meetings(id, indexing_allowed) VALUES('m1', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE chunks (id INTEGER PRIMARY KEY, meeting_id TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO chunks(id, meeting_id) VALUES(1, 'm1')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let ctx = ctx(&pool);
+    let handler = super::handlers::ChunkEmbedHandler;
+    handler
+        .run(&ctx, Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
+
+    let chunk_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(chunk_count, 0, "private memory must not remain indexed");
+
+    let kinds: Vec<String> = sqlx::query_scalar("SELECT DISTINCT kind FROM jobs ORDER BY kind")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kinds, vec![kind::DIARIZE.to_string(), kind::EXTRACT.to_string()]);
+}
+
+#[tokio::test]
+async fn private_memory_blocks_cloud_extraction_handler() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE meetings (id TEXT PRIMARY KEY, cloud_processing_allowed INTEGER NOT NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO meetings(id, cloud_processing_allowed) VALUES('m1', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE transcripts (meeting_id TEXT, transcript TEXT, speaker TEXT, \
+         audio_start_time REAL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO transcripts(meeting_id, transcript, audio_start_time) \
+         VALUES('m1', 'private transcript', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let handler = super::handlers::ExtractHandler;
+    handler
+        .run(&ctx(&pool), Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

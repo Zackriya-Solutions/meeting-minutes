@@ -12,6 +12,7 @@ import { recordingService } from '@/services/recordingService';
 import { transcriptService } from '@/services/transcriptService';
 import { migrateMarkedMoments } from '@/lib/markedMoments';
 import { migrateStandupLiveState } from '@/lib/standupLiveState';
+import { migrateInterviewLiveState } from '@/lib/interviewLiveState';
 import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
@@ -327,6 +328,7 @@ export function useRecordingStop(
           // markMeetingAsSaved(), which clears the temporary id.
           migrateMarkedMoments(tempMeetingId, meetingId);
           migrateStandupLiveState(tempMeetingId, meetingId);
+          migrateInterviewLiveState(tempMeetingId, meetingId);
 
           // Persist the in-recording control pill's speaker-ID choices onto the
           // saved meeting row (drives the automatic diarize job and the manual

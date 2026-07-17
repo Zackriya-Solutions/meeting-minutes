@@ -11,6 +11,13 @@ pub struct MeetingModel {
     pub folder_path: Option<String>,
     #[sqlx(default)]
     pub occurred_at: Option<String>,
+    /// First-class Memento workflow identity. Optional in the Rust model so older
+    /// compatibility queries that select a subset of columns keep decoding safely.
+    #[sqlx(default)]
+    pub memory_type: Option<String>,
+    /// `sensitive` memories receive stricter defaults (Interview uses this by default).
+    #[sqlx(default)]
+    pub sensitivity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]

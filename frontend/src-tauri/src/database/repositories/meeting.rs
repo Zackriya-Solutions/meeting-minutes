@@ -6,6 +6,23 @@ use tracing::{error, info, warn};
 
 pub struct MeetingsRepository;
 
+pub const MEMORY_TYPE_GENERAL: &str = "general";
+pub const MEMORY_TYPE_STANDUP: &str = "standup";
+pub const MEMORY_TYPE_INTERVIEW: &str = "interview";
+pub const SENSITIVITY_STANDARD: &str = "standard";
+pub const SENSITIVITY_SENSITIVE: &str = "sensitive";
+
+fn valid_memory_type(value: &str) -> bool {
+    matches!(
+        value,
+        MEMORY_TYPE_GENERAL | MEMORY_TYPE_STANDUP | MEMORY_TYPE_INTERVIEW
+    )
+}
+
+fn valid_sensitivity(value: &str) -> bool {
+    matches!(value, SENSITIVITY_STANDARD | SENSITIVITY_SENSITIVE)
+}
+
 impl MeetingsRepository {
     pub async fn get_meetings(pool: &SqlitePool) -> Result<Vec<MeetingModel>, sqlx::Error> {
         let meetings =
@@ -181,6 +198,76 @@ impl MeetingsRepository {
         Ok(rows_affected.rows_affected() > 0)
     }
 
+    /// Read the persisted Memento workflow identity for a meeting.
+    pub async fn get_memory_config(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Option<(String, String)>, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        sqlx::query_as(
+            "SELECT memory_type, sensitivity FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await
+    }
+
+    /// Persist the workflow identity. Validation lives here so Tauri commands and future
+    /// non-UI callers cannot store unsupported states.
+    pub async fn set_memory_config(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        memory_type: &str,
+        sensitivity: &str,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+        if !valid_memory_type(memory_type) {
+            return Err(SqlxError::Protocol(format!(
+                "unsupported memory_type '{memory_type}'"
+            )));
+        }
+        if !valid_sensitivity(sensitivity) {
+            return Err(SqlxError::Protocol(format!(
+                "unsupported sensitivity '{sensitivity}'"
+            )));
+        }
+        let new_private = memory_type == MEMORY_TYPE_INTERVIEW
+            || sensitivity == SENSITIVITY_SENSITIVE;
+
+        let rows_affected = sqlx::query(
+            "UPDATE meetings SET memory_type = ?, sensitivity = ?, \
+             cloud_processing_allowed = CASE \
+                 WHEN ? AND NOT (memory_type = 'interview' OR sensitivity = 'sensitive') THEN 0 \
+                 WHEN NOT ? AND (memory_type = 'interview' OR sensitivity = 'sensitive') THEN 1 \
+                 ELSE cloud_processing_allowed END, \
+             indexing_allowed = CASE \
+                 WHEN ? AND NOT (memory_type = 'interview' OR sensitivity = 'sensitive') THEN 0 \
+                 WHEN NOT ? AND (memory_type = 'interview' OR sensitivity = 'sensitive') THEN 1 \
+                 ELSE indexing_allowed END \
+             WHERE id = ?",
+        )
+        .bind(memory_type)
+        .bind(sensitivity)
+        .bind(new_private)
+        .bind(new_private)
+        .bind(new_private)
+        .bind(new_private)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+
+        Ok(rows_affected.rows_affected() > 0)
+    }
+
     /// Get meeting transcripts with pagination support
     pub async fn get_meeting_transcripts_paginated(
         pool: &SqlitePool,
@@ -335,6 +422,31 @@ async fn delete_meeting_with_transaction(
         .await?;
 
     sqlx::query("DELETE FROM standup_private_notes WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM interview_audit_log WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM interview_debriefs WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM interview_records WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM interview_track_meetings WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM interview_configs WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
@@ -512,6 +624,157 @@ mod tests {
         );
     }
 
+    async fn memory_test_pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db");
+        sqlx::query(
+            "CREATE TABLE meetings (
+                id TEXT PRIMARY KEY,
+                memory_type TEXT NOT NULL DEFAULT 'general',
+                sensitivity TEXT NOT NULL DEFAULT 'standard',
+                cloud_processing_allowed INTEGER NOT NULL DEFAULT 1,
+                indexing_allowed INTEGER NOT NULL DEFAULT 1
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO meetings(id) VALUES('m1')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn memory_config_defaults_and_interview_round_trip() {
+        let pool = memory_test_pool().await;
+        assert_eq!(
+            MeetingsRepository::get_memory_config(&pool, "m1")
+                .await
+                .unwrap(),
+            Some(("general".to_string(), "standard".to_string()))
+        );
+
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_INTERVIEW,
+            SENSITIVITY_SENSITIVE,
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            MeetingsRepository::get_memory_config(&pool, "m1")
+                .await
+                .unwrap(),
+            Some(("interview".to_string(), "sensitive".to_string()))
+        );
+        let private_flags: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id = 'm1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(private_flags, (0, 0));
+
+        sqlx::query(
+            "UPDATE meetings SET cloud_processing_allowed=1, indexing_allowed=1 WHERE id='m1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_INTERVIEW,
+            SENSITIVITY_SENSITIVE,
+        )
+        .await
+        .unwrap());
+        let preserved_opt_in: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(preserved_opt_in, (1, 1));
+
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_STANDARD,
+        )
+        .await
+        .unwrap());
+        let restored_flags: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id = 'm1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_flags, (1, 1));
+    }
+
+    #[tokio::test]
+    async fn memory_config_rejects_unsupported_states() {
+        let pool = memory_test_pool().await;
+        assert!(MeetingsRepository::set_memory_config(&pool, "m1", "ranking", "standard")
+            .await
+            .is_err());
+        assert!(MeetingsRepository::set_memory_config(&pool, "m1", "interview", "public")
+            .await
+            .is_err());
+        assert!(!MeetingsRepository::set_memory_config(
+            &pool,
+            "missing",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_STANDARD,
+        )
+        .await
+        .unwrap());
+    }
+
+    #[tokio::test]
+    async fn sensitive_memory_fails_closed_independent_of_type() {
+        let pool = memory_test_pool().await;
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_SENSITIVE,
+        )
+        .await
+        .unwrap());
+        let private_flags: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(private_flags, (0, 0));
+
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_STANDARD,
+        )
+        .await
+        .unwrap());
+        let restored_flags: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_flags, (1, 1));
+    }
+
     #[tokio::test]
     async fn deleting_meeting_removes_standup_and_private_workflow_data() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -524,6 +787,11 @@ mod tests {
             "CREATE TABLE action_items(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE standup_records(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE standup_private_notes(id INTEGER PRIMARY KEY, meeting_id TEXT, text TEXT)",
+            "CREATE TABLE interview_audit_log(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE interview_debriefs(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE interview_records(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE interview_track_meetings(meeting_id TEXT, track_id INTEGER)",
+            "CREATE TABLE interview_configs(meeting_id TEXT PRIMARY KEY)",
             "CREATE TABLE meeting_collections(meeting_id TEXT, collection_id INTEGER)",
             "CREATE TABLE pending_merges(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE entity_mentions(id INTEGER PRIMARY KEY, meeting_id TEXT)",
@@ -548,6 +816,11 @@ mod tests {
             "INSERT INTO action_items(meeting_id) VALUES('m1')",
             "INSERT INTO standup_records(meeting_id) VALUES('m1')",
             "INSERT INTO standup_private_notes(meeting_id, text) VALUES('m1', 'secret')",
+            "INSERT INTO interview_audit_log(meeting_id) VALUES('m1')",
+            "INSERT INTO interview_debriefs(meeting_id) VALUES('m1')",
+            "INSERT INTO interview_records(meeting_id) VALUES('m1')",
+            "INSERT INTO interview_track_meetings(meeting_id, track_id) VALUES('m1', 1)",
+            "INSERT INTO interview_configs(meeting_id) VALUES('m1')",
             "INSERT INTO meeting_collections VALUES('m1', 1)",
             "INSERT INTO pending_merges(meeting_id) VALUES('m1')",
             "INSERT INTO entity_mentions(meeting_id) VALUES('m1')",
@@ -573,6 +846,11 @@ mod tests {
             "action_items",
             "standup_records",
             "standup_private_notes",
+            "interview_audit_log",
+            "interview_debriefs",
+            "interview_records",
+            "interview_track_meetings",
+            "interview_configs",
             "meeting_collections",
             "pending_merges",
             "entity_mentions",
