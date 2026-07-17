@@ -729,6 +729,7 @@ export const RU: Record<string, string> = {
   "Summary copied to clipboard": "Суммаризация скопирована в буфер обмена",
   "Failed to copy summary": "Не удалось скопировать суммаризацию",
   "Template selected": "Шаблон выбран",
+  "Switching from a sensitive memory restores cloud processing and search indexing defaults. Continue?": "При выходе из чувствительной памяти будут восстановлены обычные настройки облачной обработки и поисковой индексации. Продолжить?",
   "template for summary generation": "шаблон для суммаризации",
   "Summary settings Saved successfully": "Настройки суммаризации сохранены",
   "Failed to save summary settings": "Не удалось сохранить настройки суммаризации",

@@ -78,25 +78,35 @@ export function useTemplates(meetingId?: string) {
 
   // Handle template selection
   const handleTemplateSelection = useCallback((templateId: string, templateName: string) => {
+    const nextMemory = memoryConfigForTemplate(templateId);
+    const leavingPrivateMemory = Boolean(memoryConfig)
+      && (memoryConfig!.memory_type === 'interview' || memoryConfig!.sensitivity === 'sensitive')
+      && nextMemory.memory_type !== 'interview'
+      && nextMemory.sensitivity !== 'sensitive';
+    if (leavingPrivateMemory && !window.confirm(t(
+      'Switching from a sensitive memory restores cloud processing and search indexing defaults. Continue?'
+    ))) {
+      return;
+    }
+
     setSelectedTemplate(templateId);
     if (templateId === 'daily_standup' || templateId === 'interview_memory') {
       setTemplateSuggestion(null);
       if (meetingId) toast.dismiss(`standup-template-suggestion-${meetingId}`);
     }
     if (meetingId) {
-      const memory = memoryConfigForTemplate(templateId);
-      setMemoryConfig({ meeting_id: meetingId, ...memory });
+      setMemoryConfig({ meeting_id: meetingId, ...nextMemory });
       invokeTauri<MeetingMemoryConfig>('api_set_meeting_memory_config', {
         meetingId,
-        memoryType: memory.memory_type,
-        sensitivity: memory.sensitivity,
+        memoryType: nextMemory.memory_type,
+        sensitivity: nextMemory.sensitivity,
       }).catch((error) => console.error('Failed to persist Memento memory type:', error));
     }
     toast.success(t('Template selected'), {
       description: `${t('Using')} "${t(templateName)}" ${t('template for summary generation')}`,
     });
     Analytics.trackFeatureUsed('template_selected');
-  }, [meetingId, t]);
+  }, [meetingId, memoryConfig, t]);
 
   useEffect(() => {
     setSelectedTemplate('standard_meeting');

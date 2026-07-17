@@ -420,6 +420,19 @@ impl JobHandler for ExtractHandler {
         let meeting_id = meeting_id.unwrap_or("<none>");
         let pool = &ctx.pool;
 
+        let cloud_processing_allowed: Option<i64> = sqlx::query_scalar(
+            "SELECT cloud_processing_allowed FROM meetings WHERE id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
+        if cloud_processing_allowed == Some(0) {
+            log::info!(
+                "[extract] meeting {meeting_id}: cloud extraction disabled by memory privacy policy"
+            );
+            return Ok(());
+        }
+
         // Load transcript with speaker labels where available.
         let segs: Vec<(String, Option<String>)> = sqlx::query_as(
             "SELECT transcript, speaker FROM transcripts WHERE meeting_id = ? \

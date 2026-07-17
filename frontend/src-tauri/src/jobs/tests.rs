@@ -395,6 +395,41 @@ async fn private_memory_skips_indexing_but_still_chains_analysis() {
 }
 
 #[tokio::test]
+async fn private_memory_blocks_cloud_extraction_handler() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE meetings (id TEXT PRIMARY KEY, cloud_processing_allowed INTEGER NOT NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO meetings(id, cloud_processing_allowed) VALUES('m1', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE transcripts (meeting_id TEXT, transcript TEXT, speaker TEXT, \
+         audio_start_time REAL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO transcripts(meeting_id, transcript, audio_start_time) \
+         VALUES('m1', 'private transcript', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let handler = super::handlers::ExtractHandler;
+    handler
+        .run(&ctx(&pool), Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
     let pool = test_pool().await;
     sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY)")
