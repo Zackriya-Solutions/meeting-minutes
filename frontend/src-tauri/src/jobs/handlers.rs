@@ -19,6 +19,15 @@ use crate::pipeline::chunker::{approx_token_count, chunk_segments, ChunkConfig, 
 
 pub struct ChunkEmbedHandler;
 
+async fn enqueue_analysis_jobs(ctx: &JobContext, meeting_id: &str) -> anyhow::Result<()> {
+    let empty = serde_json::json!({});
+    ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &empty)
+        .await?;
+    ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &empty)
+        .await?;
+    Ok(())
+}
+
 #[async_trait]
 impl JobHandler for ChunkEmbedHandler {
     fn kind(&self) -> &'static str {
@@ -57,7 +66,7 @@ impl JobHandler for ChunkEmbedHandler {
                 .execute(pool)
                 .await?;
             log::info!("[chunk_embed] meeting {meeting_id}: indexing disabled by memory privacy policy");
-            return Ok(());
+            return enqueue_analysis_jobs(ctx, meeting_id).await;
         }
 
         // Load segments (ordered). Timing is seconds (REAL) -> ms; NULLs degrade to 0.
@@ -208,12 +217,7 @@ impl JobHandler for ChunkEmbedHandler {
 
         // Chain: diarization and extraction run after chunking, in parallel. A diarize
         // failure must not block extraction (Phase 2 degradation rule).
-        let empty = serde_json::json!({});
-        ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &empty)
-            .await?;
-        ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &empty)
-            .await?;
-        Ok(())
+        enqueue_analysis_jobs(ctx, meeting_id).await
     }
 }
 

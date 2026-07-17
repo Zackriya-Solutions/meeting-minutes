@@ -244,19 +244,21 @@ impl MeetingsRepository {
         let rows_affected = sqlx::query(
             "UPDATE meetings SET memory_type = ?, sensitivity = ?, \
              cloud_processing_allowed = CASE \
-                 WHEN ? = 'interview' THEN 0 \
-                 WHEN memory_type = 'interview' THEN 1 \
+                 WHEN ? = 'interview' OR ? = 'sensitive' THEN 0 \
+                 WHEN memory_type = 'interview' OR sensitivity = 'sensitive' THEN 1 \
                  ELSE cloud_processing_allowed END, \
              indexing_allowed = CASE \
-                 WHEN ? = 'interview' THEN 0 \
-                 WHEN memory_type = 'interview' THEN 1 \
+                 WHEN ? = 'interview' OR ? = 'sensitive' THEN 0 \
+                 WHEN memory_type = 'interview' OR sensitivity = 'sensitive' THEN 1 \
                  ELSE indexing_allowed END \
              WHERE id = ?",
         )
         .bind(memory_type)
         .bind(sensitivity)
         .bind(memory_type)
+        .bind(sensitivity)
         .bind(memory_type)
+        .bind(sensitivity)
         .bind(meeting_id)
         .execute(pool)
         .await?;
@@ -711,6 +713,42 @@ mod tests {
         )
         .await
         .unwrap());
+    }
+
+    #[tokio::test]
+    async fn sensitive_memory_fails_closed_independent_of_type() {
+        let pool = memory_test_pool().await;
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_SENSITIVE,
+        )
+        .await
+        .unwrap());
+        let private_flags: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(private_flags, (0, 0));
+
+        assert!(MeetingsRepository::set_memory_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_STANDARD,
+        )
+        .await
+        .unwrap());
+        let restored_flags: (i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restored_flags, (1, 1));
     }
 
     #[tokio::test]

@@ -352,6 +352,49 @@ async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
 }
 
 #[tokio::test]
+async fn private_memory_skips_indexing_but_still_chains_analysis() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE meetings (id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL DEFAULT 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO meetings(id, indexing_allowed) VALUES('m1', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE chunks (id INTEGER PRIMARY KEY, meeting_id TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO chunks(id, meeting_id) VALUES(1, 'm1')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let ctx = ctx(&pool);
+    let handler = super::handlers::ChunkEmbedHandler;
+    handler
+        .run(&ctx, Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
+
+    let chunk_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(chunk_count, 0, "private memory must not remain indexed");
+
+    let kinds: Vec<String> = sqlx::query_scalar("SELECT DISTINCT kind FROM jobs ORDER BY kind")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kinds, vec![kind::DIARIZE.to_string(), kind::EXTRACT.to_string()]);
+}
+
+#[tokio::test]
 async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
     let pool = test_pool().await;
     sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY)")
