@@ -16,9 +16,19 @@ import { useConfig } from '@/contexts/ConfigContext';
 export interface RecordingController {
   isRecording: boolean;
   status: string;
+  /** All recognized text joined — the authoritative text used for the upload. */
   transcriptText: string;
+  /** Confirmed (final) text only — solid words in the live view. */
+  confirmedText: string;
+  /** The current hypothesis tail (last partial segment) — the faded/italic words. '' when
+   *  the recognizer has nothing tentative in flight. */
+  partialText: string;
+  /** Running word count over the confirmed text (shown on the recording control bar). */
+  wordCount: number;
   start: (meetingName: string) => Promise<void>;
   stop: () => Promise<string>;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
 }
 
 function joinTranscripts(transcripts: { text: string }[]): string {
@@ -26,6 +36,29 @@ function joinTranscripts(transcripts: { text: string }[]): string {
     .map((t) => t.text?.trim())
     .filter(Boolean)
     .join('\n');
+}
+
+/** Split segments into the confirmed body and the trailing hypothesis. Only the most-recent
+ *  utterance carries a tentative tail (UI_GUIDE §4): if the last segment is still partial it
+ *  is the faded/italic tail; everything before it is confirmed. */
+function splitConfirmedPartial(transcripts: { text: string; is_partial?: boolean }[]): {
+  confirmed: string;
+  partial: string;
+} {
+  if (transcripts.length === 0) return { confirmed: '', partial: '' };
+  const last = transcripts[transcripts.length - 1];
+  if (last?.is_partial) {
+    return {
+      confirmed: joinTranscripts(transcripts.slice(0, -1)),
+      partial: last.text?.trim() ?? '',
+    };
+  }
+  return { confirmed: joinTranscripts(transcripts), partial: '' };
+}
+
+function countWords(s: string): number {
+  const t = s.trim();
+  return t ? t.split(/\s+/).length : 0;
 }
 
 export function useRecordingController(): RecordingController {
@@ -36,6 +69,11 @@ export function useRecordingController(): RecordingController {
   // Live text — recomputed on every new segment so the capture screen can show real-time
   // recognition (drives a re-render as `transcripts` grows).
   const transcriptText = useMemo(() => joinTranscripts(transcripts), [transcripts]);
+  const { confirmedText, partialText } = useMemo(() => {
+    const s = splitConfirmedPartial(transcripts);
+    return { confirmedText: s.confirmed, partialText: s.partial };
+  }, [transcripts]);
+  const wordCount = useMemo(() => countWords(confirmedText), [confirmedText]);
 
   const start = useCallback(
     async (meetingName: string) => {
@@ -73,5 +111,12 @@ export function useRecordingController(): RecordingController {
     return joinTranscripts(finalSegments);
   }, [transcriptsRef, transcripts, flushBuffer]);
 
-  return { isRecording, status: String(status), transcriptText, start, stop };
+  const pause = useCallback(async () => {
+    await recordingService.pauseRecording();
+  }, []);
+  const resume = useCallback(async () => {
+    await recordingService.resumeRecording();
+  }, []);
+
+  return { isRecording, status: String(status), transcriptText, confirmedText, partialText, wordCount, start, stop, pause, resume };
 }
