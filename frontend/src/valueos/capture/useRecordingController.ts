@@ -12,6 +12,8 @@ import { recordingService } from '@/services/recordingService';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { applyConfiguredSaveFolder } from './recordingLocation';
+import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
 export interface RecordingController {
   isRecording: boolean;
@@ -86,6 +88,16 @@ export function useRecordingController(): RecordingController {
         throw new Error(
           'The transcription model isn’t ready yet. Finish the model download, then try again.',
         );
+      }
+      // VALUEOS: colocate the upstream audio meeting folder with the configured transcript
+      // folder. Best-effort — a failure here must never block recording (the ValueOS .txt is
+      // written to the configured folder regardless, in finalizeCall).
+      try {
+        const folder =
+          typeof localStorage !== 'undefined' ? localStorage.getItem(TRANSCRIPT_FOLDER_KEY) : null;
+        await applyConfiguredSaveFolder(invoke, folder);
+      } catch {
+        /* keep the upstream default recordings folder if preferences can't be set */
       }
       clearTranscripts();
       await recordingService.startRecordingWithDevices(

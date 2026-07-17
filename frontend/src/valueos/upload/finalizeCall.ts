@@ -13,9 +13,14 @@ export type FinalizeStatus = 'done' | 'pending' | 'reauth' | 'deEntitled' | 'err
 export interface FinalizeOutcome {
   status: FinalizeStatus;
   detail?: string;
-  /** The history record written for this call (always written — the file is on disk
-   *  regardless of upload result, so nothing is ever lost). */
+  /** The history record written for this call (always written, so nothing is ever lost). */
   record: TranscriptRecord;
+  /** Whether the local .txt was written to the configured folder. When false, the upload
+   *  still proceeded and the full text is retained on the record (`record.transcript`) and in
+   *  the upload body — nothing is lost — but the user should pick a writable folder. */
+  fileSaved: boolean;
+  /** The write error, when `fileSaved` is false (e.g. folder missing/unwritable). */
+  fileError?: string;
 }
 
 function sanitize(s: string): string {
@@ -37,7 +42,17 @@ export async function finalizeCall(
 
   const digestText = await digest.generate(capture.transcriptText, { title: capture.callName });
   const fileName = `${sanitize(capture.callName)}-${key.slice(0, 8)}.txt`;
-  const path = await config.writeTranscriptFile(fileName, capture.transcriptText);
+  // Write the local .txt to the configured folder. A missing/unwritable folder must NOT drop
+  // the transcript: the full text still rides in the upload body (raw_content) and on the
+  // history record, so we continue with the upload/queue and the record regardless, then
+  // report the folder problem so the user can re-select a writable folder.
+  let path = '';
+  let fileError: string | undefined;
+  try {
+    path = await config.writeTranscriptFile(fileName, capture.transcriptText);
+  } catch (e) {
+    fileError = (e as Error)?.message ?? 'Could not write the transcript file to the configured folder.';
+  }
 
   // PRIMARY write: the composite /calls — creates the call AND attaches the transcript +
   // locally-generated digest in one atomic op. Link is XOR in the body.
@@ -88,5 +103,5 @@ export async function finalizeCall(
     detail = 'Saved locally — will retry the upload.';
   } else status = 'done';
 
-  return { status, detail, record };
+  return { status, detail, record, fileSaved: !fileError, fileError };
 }

@@ -50,6 +50,7 @@ export function AppFlow() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [guardError, setGuardError] = useState<string | null>(null);
+  const [fileWarning, setFileWarning] = useState<string | null>(null);
 
   const refreshRecords = useCallback(async () => {
     setRecords(await history.list());
@@ -141,6 +142,13 @@ export function AppFlow() {
     setActiveCall(null);
     setCallStarted(false);
     setSelectedId(outcome.record.id);
+    // Folder problem at save time: nothing is lost (uploaded/queued + text retained on the
+    // record), but tell the user clearly and point them to Settings to re-select a folder.
+    setFileWarning(
+      outcome.fileSaved
+        ? null
+        : `Your transcript was ${outcome.status === 'done' ? 'uploaded' : 'saved for upload'} and is safe, but the local copy couldn’t be written: ${outcome.fileError} Choose a writable folder in Settings — the next capture will save there.`,
+    );
     if (outcome.status === 'reauth') {
       setStage('login');
       return;
@@ -159,6 +167,7 @@ export function AppFlow() {
 
   const navigate = (r: MainRoute) => {
     setGuardError(null);
+    setFileWarning(null);
     setRoute(r);
   };
 
@@ -200,6 +209,31 @@ export function AppFlow() {
             }}
           >
             Go to recording
+          </button>
+        </div>
+      )}
+
+      {fileWarning && (
+        <div
+          data-testid="valueos-file-warning"
+          role="alert"
+          style={{
+            margin: '20px 32px 0',
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(206,54,68,.06)',
+            color: 'var(--va-signal-red)',
+            border: '1px solid rgba(206,54,68,.22)',
+            fontSize: 14,
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            alignItems: 'center',
+          }}
+        >
+          <span>{fileWarning}</span>
+          <button className="va-btn va-btn-danger-outline va-btn-sm" onClick={() => navigate('settings')}>
+            Open Settings
           </button>
         </div>
       )}
