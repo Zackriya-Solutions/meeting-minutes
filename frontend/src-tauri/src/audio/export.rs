@@ -9,6 +9,12 @@ use super::audio_processing::sanitize_filename;
 use super::ffmpeg::find_ffmpeg_path;
 use super::retranscription::find_audio_file;
 
+#[derive(serde::Serialize)]
+pub struct MeetingAudioPlaybackInfo {
+    pub path: String,
+    pub duration_seconds: f64,
+}
+
 async fn meeting_audio_source(
     state: &State<'_, AppState>,
     meeting_id: &str,
@@ -72,6 +78,181 @@ pub async fn get_meeting_audio_path<R: Runtime>(
         .allow_file(&audio)
         .map_err(|error| format!("Cannot expose the meeting recording for playback: {error}"))?;
     Ok(audio.to_string_lossy().into_owned())
+}
+
+fn source_cache_key(source: &Path) -> Result<String, String> {
+    let metadata = std::fs::metadata(source)
+        .map_err(|error| format!("Cannot inspect the meeting recording: {error}"))?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    Ok(format!("{}-{modified}", metadata.len()))
+}
+
+fn prepare_playback_file(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.is_file() {
+        return Ok(());
+    }
+    let ffmpeg = find_ffmpeg_path()
+        .ok_or_else(|| "The bundled audio converter is unavailable".to_string())?;
+    let destination_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("meeting-audio.m4a");
+    let temporary = destination.with_file_name(format!(
+        ".{destination_name}.{}.part",
+        uuid::Uuid::new_v4()
+    ));
+
+    // A remux is effectively instant even for long recordings. It fixes legacy files
+    // containing raw ADTS AAC under an `.m4a` name and gives audio-only MP4 a MIME type
+    // handled consistently by WKWebView. Re-encode only for incompatible source codecs.
+    let run = |codec: &str| {
+        Command::new(&ffmpeg)
+            .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(source)
+            .args(["-map", "0:a:0", "-vn", "-c:a", codec])
+            .args(["-movflags", "+faststart", "-f", "mp4"])
+            .arg(&temporary)
+            .output()
+            .map_err(|error| format!("Failed to start the audio converter: {error}"))
+    };
+    let first = run("copy")?;
+    let output = if first.status.success() {
+        first
+    } else {
+        let _ = std::fs::remove_file(&temporary);
+        run("aac")?
+    };
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!(
+            "Could not prepare recording for playback: {}",
+            detail.trim()
+        ));
+    }
+    match std::fs::rename(&temporary, destination) {
+        Ok(()) => Ok(()),
+        // Another concurrent request may have atomically published its own valid remux.
+        Err(_) if destination.is_file() => {
+            let _ = std::fs::remove_file(&temporary);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&temporary);
+            Err(format!("Could not cache the playable recording: {error}"))
+        }
+    }
+}
+
+/// Remove all derived playback copies for a deleted meeting. The source recording is
+/// handled separately by the delete command; cached audio must never outlive the meeting.
+pub fn remove_meeting_audio_playback_cache<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+) -> Result<(), String> {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Cannot resolve the playback cache: {error}"))?
+        .join("meeting-audio");
+    if !cache_dir.is_dir() {
+        return Ok(());
+    }
+
+    let prefix = format!("{}-", sanitize_filename(meeting_id));
+    let temporary_prefix = format!(".{prefix}");
+    for entry in std::fs::read_dir(&cache_dir)
+        .map_err(|error| format!("Cannot inspect the playback cache: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Cannot inspect a cached recording: {error}"))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (name.starts_with(&prefix) || name.starts_with(&temporary_prefix))
+            && entry.path().is_file()
+        {
+            std::fs::remove_file(entry.path())
+                .map_err(|error| format!("Cannot remove a cached recording: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn prune_stale_meeting_playback_files(
+    cache_dir: &Path,
+    meeting_id: &str,
+    keep: &Path,
+) -> Result<(), String> {
+    let prefix = format!("{}-", sanitize_filename(meeting_id));
+    for entry in std::fs::read_dir(cache_dir)
+        .map_err(|error| format!("Cannot inspect the playback cache: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Cannot inspect a cached recording: {error}"))?;
+        let path = entry.path();
+        if path != keep
+            && path.is_file()
+            && entry.file_name().to_string_lossy().starts_with(&prefix)
+        {
+            std::fs::remove_file(path)
+                .map_err(|error| format!("Cannot prune a stale cached recording: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Return a seekable WebView-compatible path and native duration without changing the
+/// original recording.
+#[tauri::command]
+pub async fn get_meeting_audio_playback_info<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<MeetingAudioPlaybackInfo, String> {
+    let (source, _) = meeting_audio_source(&state, &meeting_id).await?;
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Cannot resolve the playback cache: {error}"))?
+        .join("meeting-audio");
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|error| format!("Cannot create the playback cache: {error}"))?;
+    let destination = cache_dir.join(format!(
+        "{}-{}.m4a",
+        sanitize_filename(&meeting_id),
+        source_cache_key(&source)?
+    ));
+    prune_stale_meeting_playback_files(&cache_dir, &meeting_id, &destination)?;
+    let source_for_task = source.clone();
+    let destination_for_task = destination.clone();
+    tokio::task::spawn_blocking(move || {
+        prepare_playback_file(&source_for_task, &destination_for_task)
+    })
+    .await
+    .map_err(|error| format!("Audio preparation task failed: {error}"))??;
+    let meeting_still_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)",
+    )
+    .bind(&meeting_id)
+    .fetch_one(state.db_manager.pool())
+    .await
+    .map_err(|error| format!("Database error: {error}"))?;
+    if !meeting_still_exists {
+        let _ = remove_meeting_audio_playback_cache(&app, &meeting_id);
+        return Err("Meeting was deleted while preparing its recording".to_string());
+    }
+    let duration_seconds = super::import::extract_duration_from_metadata(&destination)
+        .map_err(|error| format!("Cannot read recording duration: {error}"))?;
+    app.asset_protocol_scope()
+        .allow_file(&destination)
+        .map_err(|error| format!("Cannot expose the meeting recording for playback: {error}"))?;
+    Ok(MeetingAudioPlaybackInfo {
+        path: destination.to_string_lossy().into_owned(),
+        duration_seconds,
+    })
 }
 
 /// Export a copy of the meeting recording as a standard 192 kbps MP3.

@@ -360,6 +360,8 @@ export default function PageContent({
           availableTemplates={templates.availableTemplates}
           selectedTemplate={templates.selectedTemplate}
           onTemplateSelect={templates.handleTemplateSelection}
+          templateSuggestion={templates.templateSuggestion}
+          onDismissTemplateSuggestion={templates.dismissTemplateSuggestion}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
         />

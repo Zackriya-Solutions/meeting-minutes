@@ -306,7 +306,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
             />
           </div>
         ) : (
-          <div className="prose prose-invert max-w-none break-words text-[var(--fg1)] prose-headings:text-[var(--fg1)] prose-p:text-[var(--fg1)] prose-strong:text-[var(--fg1)] prose-li:text-[var(--fg1)] prose-th:text-[var(--fg1)] prose-td:text-[var(--fg2)]">
+          <div className="summary-markdown prose prose-invert max-w-none break-words text-[var(--fg1)] prose-headings:text-[var(--fg1)] prose-p:text-[var(--fg1)] prose-strong:text-[var(--fg1)] prose-li:text-[var(--fg1)] prose-th:text-[var(--fg1)] prose-td:text-[var(--fg2)]">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.markdown}</ReactMarkdown>
           </div>
         )}

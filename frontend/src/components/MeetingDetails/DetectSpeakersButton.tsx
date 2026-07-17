@@ -55,7 +55,13 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
             );
             await onDetected?.();
         } catch (err) {
-            toast.error(errString(err, t("Speaker detection failed")));
+            const message = errString(err, t("Speaker detection failed"));
+            if (message.includes("local diarization models are not downloaded")) {
+                setShowDownload(true);
+                toast.warning(t("SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud."));
+            } else {
+                toast.error(message);
+            }
         } finally {
             setPhase("idle");
         }
@@ -84,9 +90,13 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
 
             if (provider === "salutespeech") {
                 if (!saluteReady) {
-                    setPhase("idle");
-                    toast.error(t("SaluteSpeech speaker detection is unavailable right now. Try again shortly or switch to Local in Settings → Transcription."));
-                    return;
+                    const localStatus = await invoke<DiarizationStatus>("diarization_status");
+                    if (!localStatus.available) {
+                        setPhase("idle");
+                        setShowDownload(true);
+                        toast.warning(t("SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud."));
+                        return;
+                    }
                 }
                 await runDiarize();
                 return;

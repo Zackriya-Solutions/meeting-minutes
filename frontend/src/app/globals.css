@@ -2,6 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /* Summary preview must retain document structure even if a build accidentally resolves
+     the legacy Tailwind config without the typography plugin. */
+  .summary-markdown > :first-child { margin-top: 0; }
+  .summary-markdown > :last-child { margin-bottom: 0; }
+  .summary-markdown p { margin: 0 0 1em; line-height: 1.65; }
+  .summary-markdown h1,
+  .summary-markdown h2,
+  .summary-markdown h3,
+  .summary-markdown h4 { margin: 1.35em 0 0.55em; line-height: 1.25; font-weight: 700; }
+  .summary-markdown h1 { font-size: 1.6rem; }
+  .summary-markdown h2 { font-size: 1.3rem; }
+  .summary-markdown h3 { font-size: 1.12rem; }
+  .summary-markdown ul,
+  .summary-markdown ol { margin: 0 0 1em; padding-left: 1.5rem; }
+  .summary-markdown ul { list-style: disc; }
+  .summary-markdown ol { list-style: decimal; }
+  .summary-markdown li { margin: 0.3em 0; }
+  .summary-markdown table { width: 100%; margin: 1rem 0 1.5rem; border-collapse: collapse; }
+  .summary-markdown th,
+  .summary-markdown td {
+    border: 1px solid var(--border-strong);
+    padding: 0.6rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .summary-markdown th { background: var(--bg-elevated); color: var(--fg1); font-weight: 700; }
+  .summary-markdown tr:nth-child(even) td { background: color-mix(in srgb, var(--bg-elevated) 45%, transparent); }
+  .summary-markdown blockquote {
+    margin: 1rem 0;
+    border-left: 3px solid var(--gold-border);
+    padding-left: 1rem;
+    color: var(--fg2);
+  }
+  .summary-markdown pre { margin: 1rem 0; overflow-x: auto; border-radius: 0.75rem; background: var(--bg-elevated); padding: 1rem; }
+  .summary-markdown code { border-radius: 0.25rem; background: var(--bg-elevated); padding: 0.1rem 0.3rem; }
+  .summary-markdown pre code { background: transparent; padding: 0; }
+  .summary-markdown hr { margin: 1.5rem 0; border-color: var(--border-subtle); }
+  .summary-markdown a { color: var(--gold); text-decoration: underline; text-underline-offset: 2px; }
+}
+
 @keyframes vibrate {
   0% {
     transform: translate(0);

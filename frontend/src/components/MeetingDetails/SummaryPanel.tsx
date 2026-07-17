@@ -12,7 +12,8 @@ import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown } from '@/components/memento/LucideCompat';
+import { Languages, ChevronDown, Sparkles, X } from '@/components/memento/LucideCompat';
+import type { VisibleTemplateSuggestion } from '@/hooks/meeting-details/useTemplates';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -63,6 +64,8 @@ interface SummaryPanelProps {
   availableTemplates: Array<{ id: string, name: string, description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
+  templateSuggestion?: VisibleTemplateSuggestion | null;
+  onDismissTemplateSuggestion?: () => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
 }
@@ -100,6 +103,8 @@ export function SummaryPanel({
   availableTemplates,
   selectedTemplate,
   onTemplateSelect,
+  templateSuggestion,
+  onDismissTemplateSuggestion,
   isModelConfigLoading = false,
   onOpenModelSettings
 }: SummaryPanelProps) {
@@ -326,6 +331,34 @@ export function SummaryPanel({
 
       {transcripts.length > 0 && !isSummaryLoading && (
         <MeetingContentWindowNotice meetingId={meeting.id} />
+      )}
+      {templateSuggestion && selectedTemplate !== 'daily_standup' && !isSummaryLoading && (
+        <div className="mx-4 mt-3 flex items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
+          <Sparkles className="h-5 w-5 shrink-0 text-[var(--gold)]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[var(--fg1)]">{templateSuggestion.title}</p>
+            <p className="mt-0.5 text-xs text-[var(--fg2)]">{templateSuggestion.description}</p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onTemplateSelect('daily_standup', 'Daily Standup')}
+            className="shrink-0 bg-[var(--gold)] text-black hover:bg-[var(--gold-active)]"
+          >
+            {t('Use Standup V2')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={onDismissTemplateSuggestion}
+            aria-label={t('Dismiss')}
+            title={t('Dismiss')}
+            className="h-8 w-8 shrink-0 p-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       )}
       <StandupWorkflowPanel
         meetingId={meeting.id}

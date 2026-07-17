@@ -838,7 +838,7 @@ pub async fn api_delete_api_key<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_delete_meeting<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
@@ -862,7 +862,17 @@ pub async fn api_delete_meeting<R: Runtime>(
             log_info!("Successfully deleted meeting {}", meeting_id);
 
             let mut files_deleted = false;
-            let mut files_warning: Option<String> = None;
+            let mut file_warnings: Vec<String> = Vec::new();
+            if let Err(error) =
+                crate::audio::export::remove_meeting_audio_playback_cache(&app, &meeting_id)
+            {
+                log_warn!(
+                    "Meeting {} was deleted, but its playback cache could not be removed: {}",
+                    meeting_id,
+                    error
+                );
+                file_warnings.push(error);
+            }
             if delete_recording_files.unwrap_or(false) {
                 match folder_path {
                     Some(folder_path) if !folder_path.trim().is_empty() => {
@@ -880,13 +890,13 @@ pub async fn api_delete_meeting<R: Runtime>(
                                     meeting_id,
                                     error
                                 );
-                                files_warning = Some(error);
+                                file_warnings.push(error);
                             }
                         }
                     }
                     _ => {
-                        files_warning =
-                            Some("This meeting has no recording folder to delete.".to_string());
+                        file_warnings
+                            .push("This meeting has no recording folder to delete.".to_string());
                     }
                 }
             }
@@ -895,7 +905,7 @@ pub async fn api_delete_meeting<R: Runtime>(
                 "status": "success",
                 "message": "Meeting deleted successfully",
                 "files_deleted": files_deleted,
-                "files_warning": files_warning,
+                "files_warning": (!file_warnings.is_empty()).then(|| file_warnings.join(" ")),
             }))
         }
         Ok(false) => {
