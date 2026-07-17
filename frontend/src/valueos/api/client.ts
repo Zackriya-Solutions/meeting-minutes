@@ -12,6 +12,8 @@ import type {
   Opportunity,
   Paginated,
   Tenant,
+  TelemetryEvent,
+  UpdateCheckResult,
   UploadRequest,
   UploadResult,
 } from './types';
@@ -41,4 +43,9 @@ export interface ValueOsClient {
     targetId: string,
     req: UploadRequest,
   ): Promise<UploadResult>;
+  /** Check for an agent update (scope read:releases + feat_agent). Notify-only — the caller
+   *  never auto-installs; it prompts the user first. */
+  checkUpdate(tenantId: string, platform: string, currentVersion: string): Promise<UpdateCheckResult>;
+  /** Report an updater telemetry event (scope write:telemetry + feat_agent). */
+  reportTelemetry(tenantId: string, event: TelemetryEvent): Promise<void>;
 }

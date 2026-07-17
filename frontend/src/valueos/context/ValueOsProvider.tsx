@@ -11,6 +11,7 @@ import { ConfigService, createMockConfigService } from '../config/configService'
 import { DigestGenerator, MockDigestGenerator } from '../digest/digest';
 import { InMemoryPendingUploadStore, PendingUploadQueue } from '../upload/pendingQueue';
 import { InMemoryTranscriptHistory, TranscriptHistory } from '../history/transcriptHistory';
+import { createUpdater, type Updater, type UpdaterNative, type UpdaterStore } from '../updater/updater';
 import { createRealServices, valueosRealTransportEnabled } from './realServices';
 
 export interface ValueOsServices {
@@ -20,6 +21,29 @@ export interface ValueOsServices {
   digest: DigestGenerator;
   uploadQueue: PendingUploadQueue;
   history: TranscriptHistory;
+  updater: Updater;
+}
+
+/** ⚠️ MOCK updater backing — no real download/apply; telemetry is recorded on the mock client. */
+function mockUpdaterNative(): UpdaterNative {
+  return {
+    async appInfo() {
+      return { platform: 'test', version: '0.0.0' };
+    },
+    async installId() {
+      return 'mock-install-id';
+    },
+    async download() {
+      return '/mock/valueos-agent-update';
+    },
+    async apply() {
+      /* no-op in the mock */
+    },
+  };
+}
+function memoryUpdaterStore(): UpdaterStore {
+  const m = new Map<string, string>();
+  return { get: (k) => m.get(k) ?? null, set: (k, v) => void m.set(k, v) };
 }
 
 /** ⚠️ MOCK services — wires all mock impls together. The running app uses these until the
@@ -31,7 +55,8 @@ export function createMockServices(opts?: { seed?: MockSeed }): ValueOsServices 
   const digest = new MockDigestGenerator();
   const uploadQueue = new PendingUploadQueue(client, new InMemoryPendingUploadStore());
   const history = new InMemoryTranscriptHistory();
-  return { client, auth, config, digest, uploadQueue, history };
+  const updater = createUpdater({ client, native: mockUpdaterNative(), store: memoryUpdaterStore() });
+  return { client, auth, config, digest, uploadQueue, history, updater };
 }
 
 const Ctx = createContext<ValueOsServices | null>(null);

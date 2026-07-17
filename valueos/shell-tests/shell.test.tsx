@@ -8,6 +8,7 @@ import { createMockConfigService } from '@/valueos/config/configService';
 import { MockDigestGenerator } from '@/valueos/digest/digest';
 import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
 import { InMemoryTranscriptHistory } from '@/valueos/history/transcriptHistory';
+import { createUpdater } from '@/valueos/updater/updater';
 import type { ValueOsServices } from '@/valueos/context/ValueOsProvider';
 import type { EntitlementState } from '@/valueos/api/types';
 
@@ -52,6 +53,7 @@ vi.mock('@/valueos/capture/useRecordingController', () => ({
 
 function servicesFromSeed(seed: MockSeed) {
   const client = new MockValueOsClient(seed);
+  const mem = new Map<string, string>();
   const services: ValueOsServices = {
     client,
     auth: createMockAuthService(client, new InMemoryTokenStore()),
@@ -59,6 +61,16 @@ function servicesFromSeed(seed: MockSeed) {
     digest: new MockDigestGenerator(),
     uploadQueue: new PendingUploadQueue(client, new InMemoryPendingUploadStore()),
     history: new InMemoryTranscriptHistory(),
+    updater: createUpdater({
+      client,
+      native: {
+        appInfo: async () => ({ platform: 'test', version: '0.0.0' }),
+        installId: async () => 'test-install',
+        download: async () => '/tmp/update',
+        apply: async () => {},
+      },
+      store: { get: (k) => mem.get(k) ?? null, set: (k, v) => void mem.set(k, v) },
+    }),
   };
   return { services, client };
 }

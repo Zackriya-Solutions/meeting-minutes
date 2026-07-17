@@ -753,6 +753,13 @@ pub fn run() {
             valueos::valueos_pick_folder,
             valueos::valueos_validate_writable,
             valueos::valueos_write_transcript_file,
+            // VALUEOS: WS4 updater + telemetry
+            valueos::valueos_install_id,
+            valueos::valueos_app_info,
+            valueos::valueos_api_check_update,
+            valueos::valueos_api_report_telemetry,
+            valueos::valueos_download_update,
+            valueos::valueos_apply_update,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,

@@ -9,7 +9,7 @@
 // CONSTRAINT (one ongoing transcript): there can be only ONE on-air call. While a call is
 // recording, "New transcript" is blocked with an explicit error telling the user to end the
 // current one first.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useValueOs } from '../context/ValueOsProvider';
 import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
@@ -38,7 +38,7 @@ const ONGOING_ERROR =
   'A transcript is already in progress. End it (End & upload) before starting a new one — only one call can be recorded at a time.';
 
 export function AppFlow() {
-  const { auth, config, digest, uploadQueue, history } = useValueOs();
+  const { auth, config, digest, uploadQueue, history, updater } = useValueOs();
   const [stage, setStage] = useState<Stage>('welcome');
   const [route, setRoute] = useState<MainRoute>('dashboard');
   const [entitled, setEntitled] = useState<EntitledTenant[]>([]);
@@ -59,6 +59,22 @@ export function AppFlow() {
   useEffect(() => {
     if (stage === 'main') void refreshRecords();
   }, [stage, refreshRecords]);
+
+  // WS4: on entering the app, register the install once (+ report update_success if we came
+  // up on a newer version than last run), then heartbeat on a long interval. Best-effort —
+  // telemetry never blocks the user, and this touches no user data.
+  const registeredRef = useRef(false);
+  useEffect(() => {
+    if (stage !== 'main') return;
+    const tenantId = entitled[0]?.tenant.id;
+    if (!tenantId) return;
+    if (!registeredRef.current) {
+      registeredRef.current = true;
+      void updater.registerAndReconcile(tenantId);
+    }
+    const id = setInterval(() => void updater.heartbeat(tenantId), 6 * 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [stage, entitled, updater]);
 
   const contactSales = () => {
     void invoke('open_external_url', { url: VALUEOS_PURCHASE_URL }).catch(() => {});
@@ -259,7 +275,7 @@ export function AppFlow() {
         />
       )}
 
-      {route === 'settings' && <Settings onLogout={logout} />}
+      {route === 'settings' && <Settings onLogout={logout} tenantId={entitled[0]?.tenant.id} />}
 
       {route === 'recording' &&
         (activeCall ? (

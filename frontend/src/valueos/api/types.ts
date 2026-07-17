@@ -1,12 +1,15 @@
 // VALUEOS: Types for the ValueOS Agent API (/api/agent/v1) — source of truth is the
 // pasted contract "ValueOS Agent API (Part 28)". Kept in OUR namespace; no upstream types.
 
-/** The four (and only four) OAuth2 scopes the agent client is granted. */
+/** The six (and only six) OAuth2 scopes the agent client is granted. read:releases +
+ *  write:telemetry back the updater (WS4). The token can never exceed this set. */
 export const VALUEOS_SCOPES = [
   'valueos/read:tenants',
   'valueos/read:leads',
   'valueos/read:opportunities',
   'valueos/write:transcripts',
+  'valueos/read:releases',
+  'valueos/write:telemetry',
 ] as const;
 export type ValueOsScope = (typeof VALUEOS_SCOPES)[number];
 
@@ -142,6 +145,31 @@ export interface UploadResult {
   transcript_id: string;
   file_id: string | null;
   s3_stored?: boolean;
+}
+
+/** GET /tenants/{tid}/updates/check — notify-only (never auto-install). `download_url` is a
+ *  short-lived presigned GET (~300s). No build → update_available:false, latest_version:null. */
+export interface UpdateCheckResult {
+  update_available: boolean;
+  latest_version: string | null;
+  download_url?: string | null;
+  expires_in?: number | null;
+  notify_only?: boolean;
+  /** Optional integrity checksum the agent verifies before applying, when the server sends it. */
+  sha256?: string | null;
+  notes?: string | null;
+}
+
+/** POST /tenants/{tid}/telemetry — event_type lifecycle for the updater. */
+export type TelemetryEventType = 'registered' | 'check' | 'update_success' | 'update_failure';
+export interface TelemetryEvent {
+  install_id: string; // agent-generated, persisted locally, stable forever
+  platform: string;
+  current_version: string;
+  event_type: TelemetryEventType;
+  from_version?: string;
+  to_version?: string;
+  detail?: string;
 }
 
 /** Structured error mirroring the contract's error envelope + codes. */

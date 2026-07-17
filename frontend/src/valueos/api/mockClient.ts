@@ -14,6 +14,8 @@ import {
   Opportunity,
   Paginated,
   Tenant,
+  TelemetryEvent,
+  UpdateCheckResult,
   UploadRequest,
   UploadResult,
   ValueOsApiError,
@@ -26,6 +28,8 @@ export interface MockSeed {
   opportunities: Record<string, Opportunity[]>; // tenantId -> opportunities
   /** When false, every call throws 401 (simulates missing/expired token → re-auth). */
   authenticated?: boolean;
+  /** Optional canned update-check result (default: no update available). */
+  updateCheck?: UpdateCheckResult;
 }
 
 function paginate<T>(all: T[], params?: ListParams): Paginated<T> {
@@ -46,6 +50,8 @@ export class MockValueOsClient implements ValueOsClient {
   private uploads = new Map<string, UploadResult>();
   /** Test hook: force the next N calls to throw 503 (retryable). */
   failNext503 = 0;
+  /** Records every telemetry event sent (for test assertions on the updater lifecycle). */
+  telemetry: TelemetryEvent[] = [];
 
   constructor(seed: MockSeed) {
     this.seed = { authenticated: true, ...seed };
@@ -81,6 +87,24 @@ export class MockValueOsClient implements ValueOsClient {
         feature: 'feat_agent',
       });
     }
+  }
+
+  async checkUpdate(
+    tenantId: string,
+    _platform: string,
+    _currentVersion: string,
+  ): Promise<UpdateCheckResult> {
+    this.guardAuth();
+    this.guardMember(tenantId);
+    this.guardEntitled(tenantId);
+    return this.seed.updateCheck ?? { update_available: false, latest_version: null, notify_only: true };
+  }
+
+  async reportTelemetry(tenantId: string, event: TelemetryEvent): Promise<void> {
+    this.guardAuth();
+    this.guardMember(tenantId);
+    this.guardEntitled(tenantId);
+    this.telemetry.push(event);
   }
 
   async getAgentTenants(): Promise<AgentTenantsResult> {
