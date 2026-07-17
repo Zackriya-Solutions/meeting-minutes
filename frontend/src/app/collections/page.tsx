@@ -40,6 +40,11 @@ interface CollectionMeeting {
 interface SeriesSuggestion {
   suggested_name: string;
   meeting_ids: string[];
+  meetings: Array<{
+    id: string;
+    title: string;
+    occurred_at: string;
+  }>;
   cadence: string;
 }
 
@@ -238,6 +243,7 @@ export default function CollectionsPage() {
   const [meetings, setMeetings] = useState<CollectionMeeting[]>([]);
   const [suggestions, setSuggestions] = useState<SeriesSuggestion[]>([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+  const [expandedSuggestions, setExpandedSuggestions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
 
@@ -673,6 +679,51 @@ export default function CollectionsPage() {
                     <div className="mt-1 text-xs text-[var(--fg3)]">
                       {suggestion.meeting_ids.length} {t('meetings')} · {t(suggestion.cadence)}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedSuggestions((current) => {
+                        const next = new Set(current);
+                        if (next.has(suggestion.suggested_name)) next.delete(suggestion.suggested_name);
+                        else next.add(suggestion.suggested_name);
+                        return next;
+                      })}
+                      aria-expanded={expandedSuggestions.has(suggestion.suggested_name)}
+                      className="mt-2 flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-left text-xs font-medium text-[var(--fg2)] transition-colors hover:bg-[var(--gold-soft-strong)] hover:text-[var(--fg1)]"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Icon name="eye" size={14} />
+                        {expandedSuggestions.has(suggestion.suggested_name) ? t('Hide meetings') : t('Show meetings')}
+                      </span>
+                      <Icon
+                        name={expandedSuggestions.has(suggestion.suggested_name) ? 'chevron-up' : 'chevron-down'}
+                        size={14}
+                      />
+                    </button>
+                    {expandedSuggestions.has(suggestion.suggested_name) && (
+                      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1.5" role="list">
+                        {suggestion.meetings.map((meeting) => {
+                          const display = getMeetingDisplayInfo({
+                            title: meeting.title,
+                            occurredAt: meeting.occurred_at,
+                          }, lang);
+                          return (
+                            <div
+                              key={meeting.id}
+                              role="listitem"
+                              className="rounded-lg px-2 py-2 text-left"
+                            >
+                              <div className="break-words text-xs font-medium leading-snug text-[var(--fg1)]">
+                                {display.title}
+                              </div>
+                              <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--fg3)]">
+                                <Icon name="calendar" size={12} />
+                                {display.dateLabel}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     <div className="mt-3 flex gap-2">
                       <Button
                         size="sm"

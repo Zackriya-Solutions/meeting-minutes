@@ -710,6 +710,7 @@ pub fn run() {
             get_transcription_status,
             meeting_detection::get_auto_meeting_detection_status,
             audio::export::get_meeting_audio_path,
+            audio::export::get_meeting_audio_playback_info,
             audio::export::export_meeting_audio_mp3,
             save_transcript,
             analytics::commands::init_analytics,

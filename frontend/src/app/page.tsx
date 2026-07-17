@@ -202,6 +202,14 @@ export default function Home() {
         });
         unlisteners.push(unlistenTranscriptionWarning);
 
+        const unlistenTranscriptionFallback = await listen<string>('transcription-fallback', (event) => {
+          toast.warning(t('Cloud transcription unavailable'), {
+            description: t(String(event.payload)),
+            duration: Infinity,
+          });
+        });
+        unlisteners.push(unlistenTranscriptionFallback);
+
         const unlistenTranscriptError = await listen<string>('transcript-error', (event) => {
           const errorMessage = String(event.payload);
           console.error('transcript-error received:', errorMessage);

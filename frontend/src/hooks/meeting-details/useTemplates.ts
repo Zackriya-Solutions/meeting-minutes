@@ -11,6 +11,12 @@ type TemplateSuggestion = {
   reasons: string[];
 };
 
+export type VisibleTemplateSuggestion = {
+  templateId: string;
+  title: string;
+  description: string;
+};
+
 const suggestionReasonKeys: Record<string, string> = {
   standup_title: 'standup-like title',
   reviewed_series_history: 'reviewed standups in this series',
@@ -28,6 +34,7 @@ export function useTemplates(meetingId?: string) {
     description: string;
   }>>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
+  const [templateSuggestion, setTemplateSuggestion] = useState<VisibleTemplateSuggestion | null>(null);
 
   // Fetch available templates on mount
   useEffect(() => {
@@ -50,14 +57,19 @@ export function useTemplates(meetingId?: string) {
   // Handle template selection
   const handleTemplateSelection = useCallback((templateId: string, templateName: string) => {
     setSelectedTemplate(templateId);
+    if (templateId === 'daily_standup') {
+      setTemplateSuggestion(null);
+      if (meetingId) toast.dismiss(`standup-template-suggestion-${meetingId}`);
+    }
     toast.success(t('Template selected'), {
       description: `${t('Using')} "${t(templateName)}" ${t('template for summary generation')}`,
     });
     Analytics.trackFeatureUsed('template_selected');
-  }, [t]);
+  }, [meetingId, t]);
 
   useEffect(() => {
     setSelectedTemplate('standard_meeting');
+    setTemplateSuggestion(null);
   }, [meetingId]);
 
   useEffect(() => {
@@ -75,10 +87,16 @@ export function useTemplates(meetingId?: string) {
           .filter((reason): reason is string => Boolean(reason))
           .map((reason) => t(reason))
           .join(' · ');
+        const description = explanation || t('Local signals suggest Standup V2. Confirm before generating.');
+        setTemplateSuggestion({
+          templateId: suggestion.templateId,
+          title: t('Standup template suggested'),
+          description,
+        });
         toast.info(t('Standup template suggested'), {
           id: toastId,
-          description: explanation || t('Local signals suggest Standup V2. Confirm before generating.'),
-          duration: 12000,
+          description,
+          duration: Infinity,
           action: {
             label: t('Use Standup V2'),
             onClick: () => handleTemplateSelection('daily_standup', 'Daily Standup'),
@@ -95,6 +113,11 @@ export function useTemplates(meetingId?: string) {
   return {
     availableTemplates,
     selectedTemplate,
+    templateSuggestion,
+    dismissTemplateSuggestion: () => {
+      setTemplateSuggestion(null);
+      if (meetingId) toast.dismiss(`standup-template-suggestion-${meetingId}`);
+    },
     handleTemplateSelection,
   };
 }

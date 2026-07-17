@@ -375,8 +375,14 @@ export function useRecordingStop(
           setStatus(RecordingStatus.COMPLETED);
 
           // Show success toast with navigation option
-          toast.success(t('Recording saved successfully!'), {
-            description: `${freshTranscripts.length} ${t('transcript segments saved.')}`,
+          const recordingToast = freshTranscripts.length === 0 ? toast.warning : toast.success;
+          recordingToast(
+            freshTranscripts.length === 0
+              ? t('Audio saved, but transcription produced no text')
+              : t('Recording saved successfully!'), {
+            description: freshTranscripts.length === 0
+              ? t('Open the meeting to play the saved audio or retranscribe it with a local model.')
+              : `${freshTranscripts.length} ${t('transcript segments saved.')}`,
             action: {
               label: t('View Meeting'),
               onClick: () => {
@@ -384,7 +390,7 @@ export function useRecordingStop(
                 Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
               }
             },
-            duration: 10000,
+            duration: freshTranscripts.length === 0 ? Infinity : 10000,
           });
 
           // Auto-navigate after a short delay with source parameter

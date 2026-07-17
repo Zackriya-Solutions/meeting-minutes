@@ -3,7 +3,7 @@
 // Parallel transcription worker pool and chunk processing logic.
 
 use super::engine::TranscriptionEngine;
-use super::provider::TranscriptionError;
+use super::provider::{TranscriptionError, TranscriptionProvider};
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -16,10 +16,14 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
+// Once the cloud provider fails, keep the rest of this recording local instead of waiting
+// for the same VPN/proxy timeout on every speech segment.
+static SALUTESPEECH_FALLBACK_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
+    SALUTESPEECH_FALLBACK_ACTIVE.store(false, Ordering::SeqCst);
     info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
 }
 
@@ -530,6 +534,25 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
         TranscriptionEngine::Provider(provider) => {
             // NEW: Trait-based provider (clean, unified interface)
             let language = crate::get_language_preference_internal();
+            let is_salutespeech = provider.provider_name() == "SaluteSpeech";
+
+            if is_salutespeech
+                && SALUTESPEECH_FALLBACK_ACTIVE.load(Ordering::SeqCst)
+                && crate::gigaam_engine::is_loaded()
+            {
+                return super::gigaam_provider::GigaamProvider
+                    .transcribe(speech_samples, language)
+                    .await
+                    .map(|result| {
+                        (
+                            result.text.trim().to_string(),
+                            result.confidence,
+                            result.is_partial,
+                        )
+                    });
+            }
+            let local_fallback_audio = (is_salutespeech && crate::gigaam_engine::is_loaded())
+                .then(|| speech_samples.clone());
 
             match provider.transcribe(speech_samples, language).await {
                 Ok(result) => {
@@ -555,6 +578,36 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                     Ok((cleaned_text, result.confidence, result.is_partial))
                 }
                 Err(e) => {
+                    if let Some(audio) = local_fallback_audio {
+                        warn!(
+                            "SaluteSpeech failed for chunk {}; switching this recording to local GigaAM: {}",
+                            chunk.chunk_id, e
+                        );
+                        match super::gigaam_provider::GigaamProvider
+                            .transcribe(audio, None)
+                            .await
+                        {
+                            Ok(result) => {
+                                let was_active =
+                                    SALUTESPEECH_FALLBACK_ACTIVE.swap(true, Ordering::SeqCst);
+                                if !was_active {
+                                    let _ = app.emit(
+                                        "transcription-fallback",
+                                        "SaluteSpeech is unavailable. Transcription continues locally with GigaAM; the audio recording is still being saved.",
+                                    );
+                                }
+                                return Ok((
+                                    result.text.trim().to_string(),
+                                    result.confidence,
+                                    result.is_partial,
+                                ));
+                            }
+                            Err(local_error) => error!(
+                                "Local GigaAM fallback also failed for chunk {}: {}",
+                                chunk.chunk_id, local_error
+                            ),
+                        }
+                    }
                     error!(
                         "{} transcription failed for chunk {}: {}",
                         provider.provider_name(),

@@ -212,6 +212,14 @@ fn assign_segments_to_speakers(
     out
 }
 
+fn should_preserve_existing_assignments(
+    had_existing_assignments: bool,
+    total_segments: i64,
+    assigned_segments: usize,
+) -> bool {
+    had_existing_assignments && total_segments > 0 && assigned_segments == 0
+}
+
 /// Resolve each diarized cluster to a persisted speaker profile (cross-meeting identity),
 /// returning a `cluster_id -> speakers.id` map for transcript attribution.
 ///
@@ -341,6 +349,35 @@ fn decode_to_pcm16_16k(path: &Path) -> anyhow::Result<Vec<u8>> {
     })
 }
 
+async fn run_local_diarization<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &SqlitePool,
+    audio_path: &Path,
+    expected_speakers: Option<usize>,
+) -> Result<(Vec<SpeakerTurn>, HashMap<i64, i64>), DiarizeError> {
+    let model_dir = resolve_model_dir(app).map_err(|e| DiarizeError::Other(anyhow!(e)))?;
+    let config = DiarizerConfig { model_dir };
+    if !config.is_available() {
+        return Err(DiarizeError::ModelsUnavailable);
+    }
+    let params = DiarizationParams {
+        num_speakers: expected_speakers,
+        ..Default::default()
+    };
+    let ap = audio_path.to_path_buf();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let diarizer = Diarizer::load_with_params(config, params)?;
+        diarizer.diarize(&ap)
+    })
+    .await
+    .map_err(|e| DiarizeError::Other(anyhow!("diarize task panicked: {e}")))?
+    .map_err(DiarizeError::Other)?;
+    let cluster_to_speaker = resolve_cluster_speakers(pool, &result.cluster_embeddings)
+        .await
+        .map_err(DiarizeError::Other)?;
+    Ok((result.turns, cluster_to_speaker))
+}
+
 /// Shared diarization core, called by both the `diarize_meeting` command and the `diarize`
 /// job handler. Runs the engine on the meeting's recording, attributes transcript segments
 /// to resolved speakers, persists cross-meeting speaker identities, and emits
@@ -378,53 +415,60 @@ pub async fn run_diarization_core<R: Runtime>(
         if resolve_diarization_provider(pool).await == "salutespeech" {
             // Cloud: SaluteSpeech async recognition with speaker separation.
             log::info!("[diarize] using SaluteSpeech cloud engine");
-            let cfg = crate::salutespeech::resolve_config(pool).await.ok_or_else(|| {
-                DiarizeError::Other(anyhow!(
-                    "SaluteSpeech Authorization Key not configured (Settings → Transcription)"
-                ))
-            })?;
-            let ap = audio_path.clone();
-            let pcm16 = tokio::task::spawn_blocking(move || decode_to_pcm16_16k(&ap))
+            let cloud_result = async {
+                let cfg = crate::salutespeech::resolve_config(pool)
+                    .await
+                    .ok_or_else(|| anyhow!("SaluteSpeech Authorization Key not configured"))?;
+                let ap = audio_path.clone();
+                let pcm16 = tokio::task::spawn_blocking(move || decode_to_pcm16_16k(&ap))
+                    .await
+                    .map_err(|e| anyhow!("audio decode task panicked: {e}"))??;
+                let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(
+                    &cfg,
+                    pcm16,
+                    expected_speakers.map(|n| n as u32),
+                )
                 .await
-                .map_err(|e| DiarizeError::Other(anyhow!("audio decode task panicked: {e}")))?
-                .map_err(DiarizeError::Other)?;
-            let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(
-                &cfg,
-                pcm16,
-                expected_speakers.map(|n| n as u32),
-            )
-            .await
-            .map_err(|e| DiarizeError::Other(anyhow!(e)))?;
-            let turns: Vec<SpeakerTurn> = cloud_turns
-                .into_iter()
-                .map(|t| SpeakerTurn {
-                    start_ms: t.start_ms,
-                    end_ms: t.end_ms,
-                    cluster_id: t.speaker_id,
-                })
-                .collect();
-            let cts = resolve_cloud_speakers(pool, &turns).await.map_err(DiarizeError::Other)?;
-            (turns, cts)
+                .map_err(|e| anyhow!(e))?;
+                let turns: Vec<SpeakerTurn> = cloud_turns
+                    .into_iter()
+                    .map(|t| SpeakerTurn {
+                        start_ms: t.start_ms,
+                        end_ms: t.end_ms,
+                        cluster_id: t.speaker_id,
+                    })
+                    .collect();
+                if turns.is_empty() {
+                    return Err(anyhow!("SaluteSpeech returned no speaker turns"));
+                }
+                let cts = resolve_cloud_speakers(pool, &turns).await?;
+                Ok::<_, anyhow::Error>((turns, cts))
+            }
+            .await;
+
+            match cloud_result {
+                Ok(result) => result,
+                Err(cloud_error) => {
+                    log::warn!("[diarize] SaluteSpeech unavailable; trying local diarization: {cloud_error}");
+                    let _ = app.emit(
+                        "diarization-fallback",
+                        serde_json::json!({ "meeting_id": meeting_id }),
+                    );
+                    match run_local_diarization(app, pool, &audio_path, expected_speakers).await {
+                        Ok(result) => result,
+                        Err(DiarizeError::ModelsUnavailable) => return Err(DiarizeError::Other(anyhow!(
+                            "SaluteSpeech is unavailable ({cloud_error}); local diarization models are not downloaded"
+                        ))),
+                        Err(DiarizeError::Other(local_error)) => return Err(DiarizeError::Other(anyhow!(
+                            "SaluteSpeech is unavailable ({cloud_error}); local fallback failed: {local_error}"
+                        ))),
+                        Err(other) => return Err(other),
+                    }
+                }
+            }
         } else {
             // Local: pyannote-style ONNX cascade (segmentation + CAM++ + clustering).
-            let model_dir = resolve_model_dir(app).map_err(|e| DiarizeError::Other(anyhow!(e)))?;
-            let config = DiarizerConfig { model_dir };
-            if !config.is_available() {
-                return Err(DiarizeError::ModelsUnavailable);
-            }
-            let params = DiarizationParams { num_speakers: expected_speakers, ..Default::default() };
-            let ap = audio_path.clone();
-            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-                let diarizer = Diarizer::load_with_params(config, params)?;
-                diarizer.diarize(&ap)
-            })
-            .await
-            .map_err(|e| DiarizeError::Other(anyhow!("diarize task panicked: {e}")))?
-            .map_err(DiarizeError::Other)?;
-            let cts = resolve_cluster_speakers(pool, &result.cluster_embeddings)
-                .await
-                .map_err(DiarizeError::Other)?;
-            (result.turns, cts)
+            run_local_diarization(app, pool, &audio_path, expected_speakers).await?
         };
 
     // 5) Attribute transcript segments. Reset first so re-runs are idempotent (only
@@ -434,6 +478,31 @@ pub async fn run_diarization_core<R: Runtime>(
         .map_err(|e| DiarizeError::Other(e.into()))?;
     let total_segments = segments.len() as i64;
     let assignments = assign_segments_to_speakers(&segments, &turns, &cluster_to_speaker);
+    let had_existing_assignments = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM transcripts WHERE meeting_id = ? AND speaker_id IS NOT NULL)",
+    )
+    .bind(meeting_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| DiarizeError::Other(error.into()))?;
+
+    // An empty/low-confidence rerun must not erase previously useful labels.
+    if should_preserve_existing_assignments(
+        had_existing_assignments,
+        total_segments,
+        assignments.len(),
+    ) {
+        // Cloud diarization creates provisional profiles before transcript attribution.
+        // They are still unreferenced here, so remove them before preserving the old labels.
+        if let Err(error) = SpeakersRepository::delete_orphaned_unconfirmed(pool).await {
+            log::warn!(
+                "[diarize] provisional-speaker cleanup failed while preserving labels: {error}"
+            );
+        }
+        return Err(DiarizeError::Other(anyhow!(
+            "Speaker detection produced no confident transcript assignments; existing labels were preserved"
+        )));
+    }
 
     SpeakersRepository::clear_meeting_speaker_ids(pool, meeting_id)
         .await
@@ -626,5 +695,13 @@ mod tests {
         let empty_map = HashMap::new();
         let clear = vec![("y".to_string(), Some(0.0), Some(0.9))];
         assert!(assign_segments_to_speakers(&clear, &turns, &empty_map).is_empty());
+    }
+
+    #[test]
+    fn empty_first_run_succeeds_but_empty_rerun_preserves_existing_labels() {
+        assert!(!should_preserve_existing_assignments(false, 3, 0));
+        assert!(should_preserve_existing_assignments(true, 3, 0));
+        assert!(!should_preserve_existing_assignments(true, 3, 1));
+        assert!(!should_preserve_existing_assignments(true, 0, 0));
     }
 }

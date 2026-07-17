@@ -83,6 +83,7 @@ export function TranscriptPanel({
 }: TranscriptPanelProps) {
   const t = useT();
   const [audioPath, setAudioPath] = useState<string | null>(null);
+  const [savedAudioDuration, setSavedAudioDuration] = useState(0);
   const [audioUnavailable, setAudioUnavailable] = useState(false);
   const [isExportingMp3, setIsExportingMp3] = useState(false);
   const audio = useAudioPlayer(audioPath);
@@ -90,12 +91,16 @@ export function TranscriptPanel({
   useEffect(() => {
     let cancelled = false;
     setAudioPath(null);
+    setSavedAudioDuration(0);
     setAudioUnavailable(false);
     if (!meetingId || !meetingFolderPath) return;
 
-    invoke<string>('get_meeting_audio_path', { meetingId })
-      .then((path) => {
-        if (!cancelled) setAudioPath(convertFileSrc(path));
+    invoke<{ path: string; duration_seconds: number }>('get_meeting_audio_playback_info', { meetingId })
+      .then((info) => {
+        if (!cancelled) {
+          setAudioPath(convertFileSrc(info.path));
+          setSavedAudioDuration(info.duration_seconds);
+        }
       })
       .catch((error) => {
         console.warn('Saved meeting has no playable audio:', error);
@@ -174,7 +179,7 @@ export function TranscriptPanel({
           isLoading={audio.isLoading}
           isExporting={isExportingMp3}
           currentTime={audio.currentTime}
-          duration={audio.duration}
+          duration={audio.duration > 0 ? audio.duration : savedAudioDuration}
           error={audio.error}
           onPlay={() => { void audio.play(); }}
           onPause={audio.pause}

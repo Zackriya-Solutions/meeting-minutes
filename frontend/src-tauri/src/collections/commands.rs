@@ -2,7 +2,7 @@
 //! (PLAN.md Phase 5). Thin DB wrappers over the schema in migrations 20260706000000/2.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::collections::{
     auto_assign_meeting, derive_series_match_rule, normalize_title, suggest_series, MeetingRef,
@@ -331,9 +331,17 @@ pub async fn save_search(
 }
 
 #[derive(Debug, Serialize)]
+pub struct SeriesSuggestionMeetingOut {
+    pub id: String,
+    pub title: String,
+    pub occurred_at: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SeriesSuggestionOut {
     pub suggested_name: String,
     pub meeting_ids: Vec<String>,
+    pub meetings: Vec<SeriesSuggestionMeetingOut>,
     pub cadence: String,
 }
 
@@ -553,29 +561,51 @@ pub async fn suggest_meeting_series(
            SELECT 1 FROM meeting_collections mc \
            JOIN collections c ON c.id = mc.collection_id \
            WHERE mc.meeting_id = m.id AND c.kind = 'series' \
-         )",
+         ) \
+         ORDER BY COALESCE(m.occurred_at, datetime(m.created_at, 'localtime')) DESC",
     )
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
 
+    let meeting_details: HashMap<String, (String, String)> = rows
+        .iter()
+        .map(|(id, title, occurred_at)| {
+            (id.clone(), (title.clone(), occurred_at.clone()))
+        })
+        .collect();
     let meetings: Vec<MeetingRef> = rows
         .into_iter()
-        .filter_map(|(id, title, created_at)| {
-            // created_at may be a full datetime; take the leading YYYY-MM-DD.
-            let date =
-                chrono::NaiveDate::parse_from_str(created_at.get(0..10).unwrap_or(""), "%Y-%m-%d")
-                    .ok()?;
+        .filter_map(|(id, title, occurred_at)| {
+            // occurred_at may be a full datetime; take the leading YYYY-MM-DD.
+            let date = chrono::NaiveDate::parse_from_str(
+                occurred_at.get(0..10).unwrap_or(""),
+                "%Y-%m-%d",
+            )
+            .ok()?;
             Some(MeetingRef { id, title, date })
         })
         .collect();
 
     Ok(suggest_series(&meetings, MIN_SERIES_SIZE)
         .into_iter()
-        .map(|s| SeriesSuggestionOut {
-            suggested_name: s.suggested_name,
-            meeting_ids: s.meeting_ids,
-            cadence: format!("{:?}", s.cadence),
+        .map(|suggestion| SeriesSuggestionOut {
+            suggested_name: suggestion.suggested_name,
+            meetings: suggestion
+                .meeting_ids
+                .iter()
+                .filter_map(|id| {
+                    meeting_details.get(id).map(|(title, occurred_at)| {
+                        SeriesSuggestionMeetingOut {
+                            id: id.clone(),
+                            title: title.clone(),
+                            occurred_at: occurred_at.clone(),
+                        }
+                    })
+                })
+                .collect(),
+            meeting_ids: suggestion.meeting_ids,
+            cadence: format!("{:?}", suggestion.cadence),
         })
         .collect())
 }
