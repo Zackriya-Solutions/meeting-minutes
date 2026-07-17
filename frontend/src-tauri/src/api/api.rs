@@ -409,6 +409,10 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
     sensitivity: String,
 ) -> Result<MeetingMemoryConfig, String> {
     let pool = state.db_manager.pool();
+    let previous_memory_type = MeetingsRepository::get_memory_config(pool, &meeting_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(|config| config.0);
     let updated = MeetingsRepository::set_memory_config(
         pool,
         &meeting_id,
@@ -419,6 +423,16 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
     .map_err(|error| error.to_string())?;
     if !updated {
         return Err(format!("Meeting not found: {meeting_id}"));
+    }
+
+    if memory_type == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW {
+        crate::summary::interview_workflow::delete_search_index(pool, &meeting_id).await?;
+    } else if previous_memory_type.as_deref()
+        == Some(crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW)
+    {
+        crate::jobs::enqueue_post_meeting_pipeline(pool, &meeting_id)
+            .await
+            .map_err(|error| format!("Could not restore memory indexing: {error}"))?;
     }
 
     Ok(MeetingMemoryConfig {

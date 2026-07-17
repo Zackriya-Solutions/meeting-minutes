@@ -321,11 +321,18 @@ pub async fn save_config(
     .bind(serde_json::to_string(&config.question_plan).unwrap())
     .bind(serde_json::to_string(&config.glossary).unwrap()).bind(config.target_minutes)
     .bind(config.candidate_questions_minutes).execute(pool).await.map_err(|e| e.to_string())?;
-    sqlx::query("UPDATE meetings SET memory_type='interview', sensitivity='sensitive' WHERE id=?")
-        .bind(&config.meeting_id)
-        .execute(pool)
+    let updated = MeetingsRepository::set_memory_config(
+        pool,
+        &config.meeting_id,
+        crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW,
+        crate::database::repositories::meeting::SENSITIVITY_SENSITIVE,
+    )
         .await
         .map_err(|e| e.to_string())?;
+    if !updated {
+        return Err("Meeting not found".to_string());
+    }
+    delete_search_index(pool, &config.meeting_id).await?;
     audit(
         pool,
         &config.meeting_id,
@@ -358,7 +365,10 @@ pub async fn get_privacy(pool: &SqlitePool, meeting_id: &str) -> Result<Intervie
     })
 }
 
-async fn delete_search_index(pool: &SqlitePool, meeting_id: &str) -> Result<(), String> {
+pub(crate) async fn delete_search_index(
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<(), String> {
     let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id=?")
         .bind(meeting_id)
         .fetch_all(pool)
@@ -951,13 +961,47 @@ mod tests {
     async fn pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY,title TEXT DEFAULT '',memory_type TEXT DEFAULT 'interview',sensitivity TEXT DEFAULT 'sensitive',cloud_processing_allowed INTEGER DEFAULT 0,indexing_allowed INTEGER DEFAULT 0,retention_days INTEGER,retention_expires_at TEXT,candidate_export_allowed INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE interview_configs(meeting_id TEXT PRIMARY KEY,candidate_name TEXT,role_title TEXT,interview_stage TEXT,interviewer_roles_json TEXT DEFAULT '[]',competencies_json TEXT DEFAULT '[]',success_criteria TEXT,question_plan_json TEXT DEFAULT '[]',glossary_json TEXT DEFAULT '[]',target_minutes INTEGER DEFAULT 60,candidate_questions_minutes INTEGER DEFAULT 10,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE interview_records(id INTEGER PRIMARY KEY,meeting_id TEXT,record_key TEXT,kind TEXT,payload TEXT,reviewed_payload TEXT,review_status TEXT DEFAULT 'pending',source_schema_version TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(meeting_id,record_key))").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE interview_audit_log(id INTEGER PRIMARY KEY,meeting_id TEXT,entity_type TEXT,entity_id TEXT,action TEXT,payload TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE chunks(id INTEGER PRIMARY KEY,meeting_id TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE jobs(id INTEGER PRIMARY KEY,kind TEXT,meeting_id TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO meetings(id,title) VALUES('m1','Interview')")
             .execute(&pool)
             .await
             .unwrap();
         pool
+    }
+
+    #[tokio::test]
+    async fn saving_interview_config_enforces_private_memory_defaults() {
+        let pool = pool().await;
+        sqlx::query(
+            "UPDATE meetings SET memory_type='general', sensitivity='standard', \
+             cloud_processing_allowed=1, indexing_allowed=1 WHERE id='m1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        save_config(&pool, InterviewConfig::empty("m1".to_string()))
+            .await
+            .unwrap();
+
+        let state: (String, String, i64, i64) = sqlx::query_as(
+            "SELECT memory_type, sensitivity, cloud_processing_allowed, indexing_allowed \
+             FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, ("interview".into(), "sensitive".into(), 0, 0));
     }
 
     #[tokio::test]
