@@ -19,9 +19,13 @@ describe('real transport (invoke wrappers)', () => {
     inv.fn.mockResolvedValue({ items: [], total: 0 });
     const c = new TauriValueOsClient();
 
+    await c.getAgentTenants();
+    expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_get_agent_tenants', undefined);
+
+    // Tauri v2 wants camelCase arg keys; the Rust side maps them to snake_case params.
     await c.listLeads('t1', { q: 'ada', limit: 10, offset: 5 });
     expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_list_leads', {
-      tenant_id: 't1',
+      tenantId: 't1',
       q: 'ada',
       limit: 10,
       offset: 5,
@@ -34,11 +38,17 @@ describe('real transport (invoke wrappers)', () => {
       idempotency_key: 'k',
     });
     expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_upload_transcript', {
-      tenant_id: 't1',
-      activity_type: 'opportunity',
-      target_id: 'o9',
+      tenantId: 't1',
+      activityType: 'opportunity',
+      targetId: 'o9',
+      // the request VALUE stays snake_case — it's the API body, not a Tauri arg
       request: { raw_content: 'x', digest: 'y', idempotency_key: 'k' },
     });
+
+    inv.fn.mockResolvedValueOnce({ idempotent: false });
+    const callReq = { name: 'Discovery', lead_id: 'l1', transcript: { raw_content: 'x', digest: 'y' }, idempotency_key: 'k' };
+    await c.createCall('t1', callReq);
+    expect(inv.fn).toHaveBeenLastCalledWith('valueos_api_create_call', { tenantId: 't1', request: callReq });
   });
 
   it('auth triggers the native login/logout commands', async () => {
@@ -63,7 +73,7 @@ describe('real transport (invoke wrappers)', () => {
     expect(path).toBe('/picked/folder/call.txt');
     expect(inv.fn).toHaveBeenLastCalledWith('valueos_write_transcript_file', {
       folder: '/picked/folder',
-      file_name: 'call.txt',
+      fileName: 'call.txt',
       content: 'body',
     });
   });

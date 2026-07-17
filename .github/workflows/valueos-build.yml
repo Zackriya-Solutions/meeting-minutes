@@ -45,6 +45,33 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # VALUEOS: automated tests — MAIN-ONLY build gate. On a push to `main` this MUST
+  # pass before the build runs, so every main build is validated by our test suite.
+  # On feature branches and the `macos-test` tag it is SKIPPED (fast iteration) and
+  # the build proceeds unblocked.
+  # ---------------------------------------------------------------------------
+  test:
+    name: ValueOS tests (main gate)
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: valueos/shell-tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: valueos/shell-tests/package-lock.json
+      - name: Install test dependencies
+        run: npm ci
+      - name: Run ValueOS shell tests (OUR code only)
+        run: npm test
+
+  # ---------------------------------------------------------------------------
   # Decide which platforms to build, based on how the workflow was triggered.
   # ---------------------------------------------------------------------------
   setup:
@@ -80,7 +107,11 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.label }}
-    needs: setup
+    # Wait for platform selection AND (on main only) the test gate. `always()` lets the
+    # build run when `test` was SKIPPED (non-main) while still blocking it if `test` FAILED
+    # on main. So main is gated by tests; feature/tag builds are not.
+    needs: [setup, test]
+    if: ${{ always() && needs.setup.result == 'success' && needs.test.result != 'failure' && needs.test.result != 'cancelled' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -179,6 +210,19 @@ jobs:
           #
           # The overlay is produced by a small node script (not inline JSON) and passed by
           # relative path, so nothing can be mangled by Git Bash / MSYS on windows-latest.
+          #
+          # VALUEOS: stamp the build identity into the frontend. beforeBuildCommand runs
+          # `pnpm build` (next build) as a child of `tauri build`, so exporting these
+          # NEXT_PUBLIC_* vars here makes Next inline them into the static export. The
+          # landing screen then shows exactly which commit this installer came from —
+          # so a stale build is instantly obvious. Works on macOS + Windows (git bash).
+          export NEXT_PUBLIC_VALUEOS_BUILD="${GITHUB_SHA:0:7}"
+          export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # VALUEOS: force REAL transport in packaged builds so Next inlines it to a literal
+          # (never a runtime process.env lookup that could fall back to mock). The mock path
+          # is dev/test-only (NEXT_PUBLIC_VALUEOS_REAL=off, or services injected in tests).
+          export NEXT_PUBLIC_VALUEOS_REAL="on"
+          echo "Stamping build: ${NEXT_PUBLIC_VALUEOS_BUILD} @ ${NEXT_PUBLIC_VALUEOS_BUILD_TIME} (real transport)"
           node ../valueos/branding/make-ci-config.js valueos-ci.config.json
           pnpm exec tauri build --target ${{ matrix.target }} --config valueos-ci.config.json
 

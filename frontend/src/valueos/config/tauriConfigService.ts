@@ -21,9 +21,10 @@ export function createTauriConfigService(): ConfigService {
     async writeTranscriptFile(fileName: string, content: string) {
       const folder = localStorage.getItem(TRANSCRIPT_FOLDER_KEY);
       if (!folder) throw new Error('Transcript folder not set');
+      // camelCase keys — Tauri v2 maps them to the snake_case Rust params.
       return callValueOs<string>('valueos_write_transcript_file', {
         folder,
-        file_name: fileName,
+        fileName,
         content,
       });
     },

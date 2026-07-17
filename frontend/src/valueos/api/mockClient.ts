@@ -5,6 +5,8 @@
 import type { ValueOsClient } from './client';
 import {
   ActivityType,
+  AgentTenantsResult,
+  CreateCallRequest,
   Entitlement,
   EntitlementState,
   Lead,
@@ -81,6 +83,22 @@ export class MockValueOsClient implements ValueOsClient {
     }
   }
 
+  async getAgentTenants(): Promise<AgentTenantsResult> {
+    this.guardAuth();
+    // Server-side filter: ONLY tenants whose add-on is active right now (never/expired and
+    // not-a-member are excluded). total_memberships counts ALL of the user's tenants.
+    const items = this.seed.tenants
+      .filter((t) => (this.seed.entitlements[t.id] ?? 'never') === 'active')
+      .map((t) => ({ ...t, state: 'active' as EntitlementState, active: true }));
+    return {
+      items,
+      total: items.length,
+      total_memberships: this.seed.tenants.length,
+      capability: 'valueos_agent',
+      feature: 'feat_agent',
+    };
+  }
+
   async getTenants(): Promise<Paginated<Tenant>> {
     this.guardAuth();
     return { items: [...this.seed.tenants], total: this.seed.tenants.length };
@@ -109,6 +127,45 @@ export class MockValueOsClient implements ValueOsClient {
     let all = this.seed.opportunities[tenantId] ?? [];
     if (params?.q) all = all.filter((o) => match([o.label, o.stage], params.q!));
     return paginate(all, params);
+  }
+
+  /** PRIMARY: composite create-call-with-transcript. XOR link in the body. */
+  async createCall(tenantId: string, req: CreateCallRequest): Promise<UploadResult> {
+    this.guardAuth();
+    this.guardMember(tenantId);
+    this.guardEntitled(tenantId);
+
+    const hasLead = !!req.lead_id;
+    const hasOpp = !!req.opportunity_id;
+    const fields: Record<string, string> = {};
+    if (!req.name) fields.name = 'required';
+    if (!req.transcript?.raw_content) fields.raw_content = 'required';
+    if (!req.transcript?.digest) fields.digest = 'required';
+    if (hasLead === hasOpp) fields.link = 'exactly one of lead_id / opportunity_id is required';
+    if (Object.keys(fields).length) throw new ValueOsApiError(422, 'Invalid request body', { fields });
+
+    const targetId = (req.lead_id ?? req.opportunity_id)!;
+    const targets = hasLead ? this.seed.leads[tenantId] : this.seed.opportunities[tenantId];
+    if (!targets?.some((t) => t.id === targetId)) {
+      throw new ValueOsApiError(404, 'Referenced lead/opportunity does not exist');
+    }
+
+    // Idempotency (only when a key is supplied): a retry replays the same ids.
+    const key = req.idempotency_key;
+    if (key) {
+      const existing = this.uploads.get(key);
+      if (existing) return { ...existing, idempotent: true };
+    }
+    const seed = key ?? `${targetId}-${this.uploads.size}`;
+    const result: UploadResult = {
+      idempotent: false,
+      activity_id: `act-${seed}`,
+      transcript_id: `tr-${seed}`,
+      file_id: `file-${seed}`,
+      s3_stored: true,
+    };
+    if (key) this.uploads.set(key, result);
+    return result;
   }
 
   async uploadTranscript(

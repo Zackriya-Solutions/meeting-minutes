@@ -12,29 +12,40 @@ export interface EntitledTenant {
 }
 
 export interface EntitlementSummary {
-  /** true iff at least one tenant is actively entitled (gate passes). */
+  /** true iff at least one workspace has the agent add-on active (the gate passes). */
   anyEntitled: boolean;
-  all: EntitledTenant[];
-  entitled: EntitledTenant[]; // subset with entitlement.active === true
+  /** the entitled workspaces (from /me/agent-tenants) — the ONLY tenants to offer. */
+  entitled: EntitledTenant[];
+  /** how many workspaces the user is a member of at all — drives the block wording
+   *  (0 = "no workspace"; >0 = "no add-on"). */
+  totalMemberships: number;
 }
 
 export interface AuthService {
   isLoggedIn(): Promise<boolean>;
   login(): Promise<void>;
   logout(): Promise<void>;
-  /** Fetch tenants + per-tenant entitlement to drive the gate + later tenant choices. */
+  /** Run the post-login gate (GET /me/agent-tenants) to drive the entitlement block and
+   *  the later tenant picker. */
   loadEntitlementSummary(): Promise<EntitlementSummary>;
 }
 
 export async function summarizeEntitlements(client: ValueOsClient): Promise<EntitlementSummary> {
-  const tenants = (await client.getTenants()).items;
-  const all: EntitledTenant[] = [];
-  for (const tenant of tenants) {
-    const entitlement = await client.getEntitlement(tenant.id);
-    all.push({ tenant, entitlement });
-  }
-  const entitled = all.filter((e) => e.entitlement.active);
-  return { anyEntitled: entitled.length > 0, all, entitled };
+  // Contract §2: /me/agent-tenants is the SINGLE post-login gate. It returns ONLY the
+  // workspaces whose agent add-on is active right now (not-a-member / never / expired are
+  // filtered server-side), plus total_memberships. We do NOT enumerate /me/entitlements
+  // per tenant, and we do NOT rely on catching 403s to decide the gate.
+  const res = await client.getAgentTenants();
+  const entitled: EntitledTenant[] = res.items.map((t) => ({
+    tenant: { id: t.id, name: t.name, role: t.role, roles: t.roles },
+    entitlement: {
+      capability: 'valueos_agent',
+      feature: 'feat_agent',
+      state: t.state,
+      active: t.active,
+    },
+  }));
+  return { anyEntitled: entitled.length > 0, entitled, totalMemberships: res.total_memberships };
 }
 
 /**

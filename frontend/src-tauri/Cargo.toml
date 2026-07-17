@@ -156,6 +156,11 @@ tauri-plugin-updater = "2.3.0"
 tauri-plugin-process = "2.3.0"
 
 # VALUEOS: native transport deps (see src/valueos). Loopback OAuth + OS keychain + PKCE hash.
+# ⚠️ keyring v3 uses a NON-PERSISTENT, per-Entry MOCK store unless a platform backend
+# feature is enabled. With the mock store, the token saved in `valueos_login` is invisible
+# to later commands, so login "succeeds" but the very next call reports "Not logged in".
+# The real backends are therefore enabled per-OS in the [target…] sections below
+# (apple-native / windows-native). This base line keeps keyring available on all targets.
 tauri-plugin-oauth = "2"
 keyring = "3"
 sha2 = "0.10"
@@ -178,6 +183,7 @@ core-graphics = "0.23"
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
+keyring = { version = "3", features = ["apple-native"] } # VALUEOS: real macOS Keychain (else keyring v3 mock; see base dep note)
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
@@ -192,6 +198,7 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+keyring = { version = "3", features = ["windows-native"] } # VALUEOS: real Windows Credential Manager (else keyring v3 mock; see base dep note)
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)

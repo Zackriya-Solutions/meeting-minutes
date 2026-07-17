@@ -30,10 +30,13 @@ valueos/read:tenants  valueos/read:leads  valueos/read:opportunities  valueos/wr
 
 PKCE S256 is computed in the webview (Web Crypto, `auth/pkce.ts`); the browser opens to the
 Cognito authorize URL; the code returns via a **loopback** redirect
-(`http://127.0.0.1:8765/callback`, or 14321). Tokens persist in secure storage and refresh;
-**401/403 → re-auth**. After login, the **entitlement gate** checks the tenant's agent
-add-on: `expired`/`never` → hard block with a CTA to <https://www.value-accelerator.io>;
-`active` → continue. No bypass.
+(`http://127.0.0.1:8765/callback`, or 14321). Tokens persist in secure storage and refresh
+(**401 → force-refresh + retry once, else re-auth**). After login, the **entitlement gate**
+calls `GET /me/agent-tenants` (contract §2): an **empty list → hard block** (worded from
+`total_memberships`: `0` = "no workspace"; `>0` = "no add-on") with a CTA to
+<https://www.value-accelerator.io>; a **non-empty list → those are the ONLY workspaces
+offered**. No per-tenant `/me/entitlements` enumeration, and the gate never relies on
+catching 403s. No bypass.
 
 ## The blocking-metadata rule (capture)
 
@@ -54,8 +57,11 @@ the single upload destination for BOTH the transcript and the digest.
 ## Finalize
 
 On finish: write the transcript file to the configured folder; generate the **digest**
-(readable HIGH-LEVEL recap, not a hash); upload **both** to the pre-selected tenant +
-lead/opportunity with a client `idempotency_key`. Resilience via the pending-upload queue:
+(readable HIGH-LEVEL recap, not a hash); then **create the call WITH its transcript in one
+atomic op** via the composite `POST /tenants/{tid}/calls` (contract §5) — the body carries
+the user-chosen call **`name`** (entered at capture time and reused verbatim), the XOR link
+(`lead_id` **or** `opportunity_id`), the `transcript` (`raw_content` + agent-generated
+`digest`), and a client `idempotency_key`. Resilience via the pending-upload queue:
 401 → re-auth; network/503 → keep the local file + retry; success (incl. idempotent
 replay) → dequeue. **Write-only** (transcripts are never read back).
 
@@ -86,7 +92,8 @@ replay) → dequeue. **Write-only** (transcripts are never read back).
 | `upload/pendingQueue.ts` | Retry queue — never loses data |
 
 Tests: `valueos/shell-tests/{pkce,valueos-client,upload-queue,digest}.test.ts` (+ existing
-shell tests) — 23 passing, run in CI (`valueos-tests.yml`).
+shell tests) — run in CI as the **main-branch gate** inside `valueos-build.yml` (the build
+on `main` requires them; feature/`macos-test` builds skip the gate for fast iteration).
 
 ## Phase 3b — native module (the remaining step)
 
@@ -117,15 +124,19 @@ All reject with `{ status, message, scope?, feature?, fields? }` on error (TS ma
 | `valueos_login` | — | opens browser (PKCE loopback via tauri-plugin-oauth), exchanges code, stores tokens in keychain |
 | `valueos_is_logged_in` | — | `boolean` |
 | `valueos_logout` | — | clears keychain tokens |
-| `valueos_api_get_tenants` | — | `{ items: Tenant[], total }` |
-| `valueos_api_get_entitlement` | `tenant_id` | `Entitlement` |
+| `valueos_api_get_tenants` | — | `{ items: Tenant[], total }` (all memberships) |
+| `valueos_api_get_agent_tenants` | — | `{ items: AgentTenant[], total, total_memberships }` — **the post-login gate** |
+| `valueos_api_get_entitlement` | `tenant_id` | `Entitlement` (optional detail; not the gate) |
 | `valueos_api_list_leads` | `tenant_id, q?, limit?, offset?` | `{ items: Lead[], total, … }` |
 | `valueos_api_list_opportunities` | `tenant_id, q?, limit?, offset?` | `{ items: Opportunity[], total, … }` |
-| `valueos_api_upload_transcript` | `tenant_id, activity_type, target_id, request` | `UploadResult` |
+| `valueos_api_create_call` | `tenant_id, request` (name + XOR lead_id/opportunity_id + transcript) | `UploadResult` — **PRIMARY write** (composite call + transcript) |
+| `valueos_api_upload_transcript` | `tenant_id, activity_type, target_id, request` | `UploadResult` — fallback (link in path) |
 | `valueos_generate_digest` | `transcript, title?, max_chars?` | `string` (recap) |
 | `valueos_pick_folder` | — | `string \| null` |
 | `valueos_validate_writable` | `path` | `boolean` |
 | `valueos_write_transcript_file` | `folder, file_name, content` | `string` (path) |
 
-Config values (client_id, hosted-UI domain, API base, callback ports) come from the
-Terraform outputs (`cognito_agent_*`) and are read by the Rust module at build/runtime.
+Config values (client_id, hosted-UI domain, API base, callback ports) are the Terraform
+outputs (`cognito_agent_*`) — **public** (public client, no secret) — and are now **baked**
+into the native module (env-overridable). Real transport is the **default**
+(`NEXT_PUBLIC_VALUEOS_REAL=off` forces mock).

@@ -1,0 +1,267 @@
+'use client';
+// VALUEOS: the redesigned end-to-end flow.
+//   welcome → browser/PKCE login (+entitlement gate) → setup (reused model download) →
+//   storage (transcript folder, first run only) → main app.
+// The main app is the dark-sidebar shell hosting Dashboard / Transcripts / Settings and the
+// full-width Recording screen, plus the New-transcript wizard. All existing logic is reused
+// verbatim (auth, gate, config, composite /calls upload via finalizeCall, local history).
+//
+// CONSTRAINT (one ongoing transcript): there can be only ONE on-air call. While a call is
+// recording, "New transcript" is blocked with an explicit error telling the user to end the
+// current one first.
+import React, { useCallback, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { useValueOs } from '../context/ValueOsProvider';
+import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
+import type { TranscriptRecord } from '../history/transcriptHistory';
+import type { CaptureResult } from '../shell/flowTypes';
+import { finalizeCall } from '../upload/finalizeCall';
+import { AppShell, type MainRoute } from './AppShell';
+import { Dashboard } from './screens/Dashboard';
+import { Transcripts } from './screens/Transcripts';
+import { Settings } from './screens/Settings';
+import { Recording } from './screens/Recording';
+import { Wizard } from './Wizard';
+import {
+  WelcomeScreen,
+  LoginScreen,
+  BlockedScreen,
+  SetupScreen,
+  StorageScreen,
+  VALUEOS_PURCHASE_URL,
+} from './onboarding/Onboarding';
+import type { ActiveCall, StartCallMeta } from './types';
+
+type Stage = 'welcome' | 'login' | 'blocked' | 'setup' | 'storage' | 'main';
+
+const ONGOING_ERROR =
+  'A transcript is already in progress. End it (End & upload) before starting a new one — only one call can be recorded at a time.';
+
+export function AppFlow() {
+  const { auth, config, digest, uploadQueue, history } = useValueOs();
+  const [stage, setStage] = useState<Stage>('welcome');
+  const [route, setRoute] = useState<MainRoute>('dashboard');
+  const [entitled, setEntitled] = useState<EntitledTenant[]>([]);
+  const [blockedReason, setBlockedReason] = useState<'no-membership' | 'no-addon'>('no-addon');
+
+  const [records, setRecords] = useState<TranscriptRecord[]>([]);
+  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+  const [callStarted, setCallStarted] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [guardError, setGuardError] = useState<string | null>(null);
+
+  const refreshRecords = useCallback(async () => {
+    setRecords(await history.list());
+  }, [history]);
+
+  useEffect(() => {
+    if (stage === 'main') void refreshRecords();
+  }, [stage, refreshRecords]);
+
+  const contactSales = () => {
+    void invoke('open_external_url', { url: VALUEOS_PURCHASE_URL }).catch(() => {});
+  };
+
+  // The post-login entitlement gate (GET /me/agent-tenants).
+  const applySummary = (summary: EntitlementSummary, next: () => void) => {
+    if (summary.anyEntitled) {
+      setEntitled(summary.entitled);
+      next();
+    } else {
+      setBlockedReason(summary.totalMemberships === 0 ? 'no-membership' : 'no-addon');
+      setStage('blocked');
+    }
+  };
+
+  const handleLogin = (summary: EntitlementSummary) => applySummary(summary, () => setStage('setup'));
+
+  // Re-run the gate when a workspace loses the add-on mid-session (§2.7).
+  const reGate = () => {
+    void (async () => {
+      try {
+        const summary = await auth.loadEntitlementSummary();
+        applySummary(summary, () => setStage('main'));
+      } catch {
+        setStage('login');
+      }
+    })();
+  };
+
+  // After model setup: transcript-folder config is a ONE-TIME step (first run only).
+  const afterSetup = () => {
+    void (async () => {
+      const folder = await config.getTranscriptFolder();
+      setStage(folder ? 'main' : 'storage');
+    })();
+  };
+
+  const logout = () => {
+    void (async () => {
+      try {
+        await auth.logout();
+      } catch {
+        /* ignore */
+      }
+      setActiveCall(null);
+      setCallStarted(false);
+      setWizardOpen(false);
+      setSelectedId(null);
+      setEntitled([]);
+      setRecords([]);
+      setStage('welcome');
+      setRoute('dashboard');
+    })();
+  };
+
+  // ── one-ongoing-transcript guard ──────────────────────────────────────────
+  const requestNew = () => {
+    if (activeCall) {
+      setGuardError(ONGOING_ERROR);
+      return;
+    }
+    setGuardError(null);
+    setWizardOpen(true);
+  };
+
+  const startCall = (meta: StartCallMeta) => {
+    setWizardOpen(false);
+    setCallStarted(false);
+    setActiveCall({ meta, startedAt: Date.now() });
+    setRoute('recording');
+  };
+
+  // End & upload — write file, generate digest, composite /calls upload, record history.
+  const endCall = async (transcriptText: string) => {
+    const call = activeCall;
+    if (!call) return;
+    const capture: CaptureResult = { ...call.meta, transcriptText };
+    const outcome = await finalizeCall({ digest, config, uploadQueue, history }, capture);
+    await refreshRecords();
+    setActiveCall(null);
+    setCallStarted(false);
+    setSelectedId(outcome.record.id);
+    if (outcome.status === 'reauth') {
+      setStage('login');
+      return;
+    }
+    if (outcome.status === 'deEntitled') {
+      reGate();
+      return;
+    }
+    setRoute('transcripts');
+  };
+
+  const openTranscript = (id: string) => {
+    setSelectedId(id);
+    setRoute('transcripts');
+  };
+
+  const navigate = (r: MainRoute) => {
+    setGuardError(null);
+    setRoute(r);
+  };
+
+  // ── onboarding stages (full-bleed blue, no shell) ─────────────────────────
+  if (stage === 'welcome') return <WelcomeScreen onProceed={() => setStage('login')} />;
+  if (stage === 'login') return <LoginScreen onDone={handleLogin} />;
+  if (stage === 'blocked')
+    return <BlockedScreen reason={blockedReason} onContact={contactSales} onRetry={() => setStage('login')} />;
+  if (stage === 'setup') return <SetupScreen onComplete={afterSetup} />;
+  if (stage === 'storage') return <StorageScreen onDone={() => setStage('main')} />;
+
+  // ── main app (shell) ──────────────────────────────────────────────────────
+  return (
+    <AppShell route={route} onNavigate={navigate}>
+      {guardError && (
+        <div
+          data-testid="valueos-guard-error"
+          role="alert"
+          style={{
+            margin: '20px 32px 0',
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(206,54,68,.08)',
+            color: 'var(--va-signal-red)',
+            border: '1px solid rgba(206,54,68,.25)',
+            fontSize: 14,
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            alignItems: 'center',
+          }}
+        >
+          <span>{guardError}</span>
+          <button
+            className="va-btn va-btn-danger va-btn-sm"
+            onClick={() => {
+              setGuardError(null);
+              setRoute('recording');
+            }}
+          >
+            Go to recording
+          </button>
+        </div>
+      )}
+
+      {route === 'dashboard' && (
+        <Dashboard
+          records={records}
+          activeCall={activeCall}
+          onNew={requestNew}
+          onOpenRecording={() => setRoute('recording')}
+          onOpenTranscript={openTranscript}
+        />
+      )}
+
+      {route === 'transcripts' && (
+        <Transcripts
+          records={records}
+          activeCall={activeCall}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onNew={requestNew}
+          onOpenRecording={() => setRoute('recording')}
+        />
+      )}
+
+      {route === 'settings' && <Settings onLogout={logout} />}
+
+      {route === 'recording' &&
+        (activeCall ? (
+          <Recording
+            key={activeCall.startedAt}
+            meta={activeCall.meta}
+            startedAt={activeCall.startedAt}
+            hasStarted={callStarted}
+            onStarted={() => setCallStarted(true)}
+            onEnd={endCall}
+          />
+        ) : (
+          <NoActiveCall onNew={requestNew} />
+        ))}
+
+      {wizardOpen && (
+        <Wizard
+          entitledTenants={entitled}
+          onClose={() => setWizardOpen(false)}
+          onStart={startCall}
+          onLostAccess={() => {
+            setWizardOpen(false);
+            reGate();
+          }}
+        />
+      )}
+    </AppShell>
+  );
+}
+
+function NoActiveCall({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="va-page" data-testid="valueos-no-active-call">
+      <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 28 }}>No call in progress</h1>
+      <p className="va-body" style={{ marginTop: 8 }}>Start a new transcript to begin recording.</p>
+      <button className="va-btn va-btn-primary" style={{ marginTop: 16 }} onClick={onNew}>New transcript</button>
+    </div>
+  );
+}

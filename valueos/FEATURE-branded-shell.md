@@ -22,7 +22,7 @@ everything else is new code in our namespaces.
 | `frontend/src/valueos/assets/VaLogo.tsx` | VA brand mark (compact SVG) |
 | `frontend/src/valueos/assets/valueos-agent-logo.svg` | Full-fidelity VA logo (reference) |
 | `valueos/shell-tests/**` | Self-contained vitest project (our tests) |
-| `.github/workflows/valueos-tests.yml` | CI: runs our tests on push |
+| `.github/workflows/valueos-build.yml` | CI: runs our tests as the **main-branch gate** before the build |
 | `frontend/src/app/layout.tsx` | **ONLY upstream edit** — the marked seam (below) |
 
 ## Reused (imported) vs copied
@@ -84,7 +84,9 @@ outside `frontend/` so upstream's `package.json` is never touched). It mocks
 5. completion advances B→C and the flow ends (hand-off disabled).
 
 Run locally: `cd valueos/shell-tests && npm install && npm test`.
-CI: `.github/workflows/valueos-tests.yml` runs them on every push.
+CI: `.github/workflows/valueos-build.yml` runs them as the **main-branch gate** — a push to
+`main` must pass the tests before the macOS/Windows build runs. Feature branches and the
+`macos-test` tag skip the gate (fast iteration); run `npm test` locally there.
 
 ## Merge-safety summary
 

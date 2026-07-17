@@ -14,10 +14,24 @@ use tauri::{AppHandle, Runtime};
 const KEYCHAIN_SERVICE: &str = "com.valueos.io";
 const KEYCHAIN_USER: &str = "agent-tokens";
 
-// ---- config (from env; real values are Terraform outputs cognito_agent_*) --------------
-fn cfg_client_id() -> String { std::env::var("VALUEOS_CLIENT_ID").unwrap_or_default() }
-fn cfg_hosted_ui() -> String { std::env::var("VALUEOS_HOSTED_UI_BASE").unwrap_or_default() }
-fn cfg_api_base() -> String { std::env::var("VALUEOS_API_BASE").unwrap_or_default() }
+// ---- config (Terraform outputs cognito_agent_*; PUBLIC — public client, no secret) ------
+// Baked as defaults so the packaged desktop app has them (it can't read shell env); still
+// overridable via env for other deployments.
+fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| default.to_string())
+}
+fn cfg_client_id() -> String {
+    env_or("VALUEOS_CLIENT_ID", "3kjnt13ct6k25u2hkvqatkfrrm")
+}
+fn cfg_hosted_ui() -> String {
+    env_or(
+        "VALUEOS_HOSTED_UI_BASE",
+        "https://va-pptx-agents-agent.auth.eu-central-2.amazoncognito.com",
+    )
+}
+fn cfg_api_base() -> String {
+    env_or("VALUEOS_API_BASE", "https://d2luofz0a4v7f3.cloudfront.net/api/agent/v1")
+}
 fn cfg_ports() -> Vec<u16> { vec![8765, 14321] }
 const SCOPES: &str =
     "valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts";
@@ -64,6 +78,22 @@ fn b64url(bytes: &[u8]) -> String {
 // percent-encode a query value using the already-present `url` crate (no extra dep)
 fn enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
+
+// Extract a human-readable detail from an OAuth2/Cognito error body, which is JSON like
+// {"error":"invalid_grant","error_description":"…"}. Falls back to a trimmed snippet.
+fn oauth_error_detail(body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        let e = v.get("error").and_then(|x| x.as_str());
+        let d = v.get("error_description").and_then(|x| x.as_str());
+        match (e, d) {
+            (Some(e), Some(d)) => return format!(": {e} — {d}"),
+            (Some(e), None) => return format!(": {e}"),
+            _ => {}
+        }
+    }
+    let t = body.trim();
+    if t.is_empty() { String::new() } else { format!(": {}", t.chars().take(200).collect::<String>()) }
 }
 
 // ---- keychain ---------------------------------------------------------------------------
@@ -115,7 +145,9 @@ async fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(ValueOsErr::new(401, "Token exchange failed"));
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ValueOsErr::new(401, format!("Token exchange failed ({status}){}", oauth_error_detail(&body))));
     }
     let tr: TokenResponse = resp.json().await.map_err(|e| ValueOsErr::transport(e.to_string()))?;
     Ok(StoredTokens {
@@ -144,7 +176,9 @@ async fn refresh(tokens: &StoredTokens) -> Result<StoredTokens, ValueOsErr> {
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(ValueOsErr::new(401, "Token refresh failed"));
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ValueOsErr::new(401, format!("Token refresh failed ({status}){}", oauth_error_detail(&body))));
     }
     let tr: TokenResponse = resp.json().await.map_err(|e| ValueOsErr::transport(e.to_string()))?;
     let updated = StoredTokens {
@@ -167,6 +201,13 @@ async fn valid_access_token() -> Result<String, ValueOsErr> {
     Ok(refreshed.access_token)
 }
 
+/// Force a token refresh regardless of expiry — used to recover from a server 401
+/// mid-session (contract §2.6). Returns the new access token, or an auth error.
+async fn force_refresh() -> Result<String, ValueOsErr> {
+    let tokens = read_tokens().ok_or_else(|| ValueOsErr::new(401, "Not logged in"))?;
+    Ok(refresh(&tokens).await?.access_token)
+}
+
 // ---- authenticated ValueOS HTTP ---------------------------------------------------------
 async fn map_http_error(resp: reqwest::Response) -> ValueOsErr {
     let status = resp.status().as_u16();
@@ -185,13 +226,24 @@ async fn map_http_error(resp: reqwest::Response) -> ValueOsErr {
 }
 
 async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
+    let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let resp = reqwest::Client::new()
-        .get(format!("{}{}", cfg_api_base(), path))
+    let mut resp = reqwest::Client::new()
+        .get(url.as_str())
         .bearer_auth(token)
         .send()
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    // Contract §2.6: on 401, force one token refresh and retry the call once.
+    if resp.status().as_u16() == 401 {
+        let token = force_refresh().await?;
+        resp = reqwest::Client::new()
+            .get(url.as_str())
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    }
     if !resp.status().is_success() {
         return Err(map_http_error(resp).await);
     }
@@ -200,14 +252,27 @@ async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
 }
 
 async fn api_post(path: &str, payload: &serde_json::Value) -> Result<serde_json::Value, ValueOsErr> {
+    let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let resp = reqwest::Client::new()
-        .post(format!("{}{}", cfg_api_base(), path))
+    let mut resp = reqwest::Client::new()
+        .post(url.as_str())
         .bearer_auth(token)
         .json(payload)
         .send()
         .await
         .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    // Contract §2.6: on 401, force one token refresh and retry once (idempotency_key makes
+    // the retried upload safe — the server replays the same ids, never duplicates).
+    if resp.status().as_u16() == 401 {
+        let token = force_refresh().await?;
+        resp = reqwest::Client::new()
+            .post(url.as_str())
+            .bearer_auth(token)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    }
     if !resp.status().is_success() {
         return Err(map_http_error(resp).await);
     }
@@ -233,6 +298,40 @@ pub async fn valueos_is_logged_in() -> Result<bool, ValueOsErr> {
 #[tauri::command]
 pub async fn valueos_logout() -> Result<(), ValueOsErr> {
     clear_tokens()
+}
+
+/// DIAGNOSTIC: decode and return only the CLAIMS (payload) of the stored access token so a
+/// 401 from the API can be triaged (client_id / token_use / scope / iss / exp). Deliberately
+/// returns ONLY these claims — never the signature or the raw token — so nothing usable as a
+/// credential is exposed. Returns null if not logged in.
+#[tauri::command]
+pub async fn valueos_debug_token_claims() -> Result<serde_json::Value, ValueOsErr> {
+    let tokens = match read_tokens() {
+        Some(t) => t,
+        None => return Ok(serde_json::Value::Null),
+    };
+    // A JWT is header.payload.signature — decode ONLY the middle (payload) segment.
+    let payload_b64 = tokens
+        .access_token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| ValueOsErr::new(0, "Access token is not a JWT"))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64.as_bytes())
+        .map_err(|e| ValueOsErr::transport(format!("claims decode: {e}")))?;
+    let claims: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| ValueOsErr::transport(format!("claims parse: {e}")))?;
+    let pick = |k: &str| claims.get(k).cloned().unwrap_or(serde_json::Value::Null);
+    // Only the fields useful for diagnosing a rejected token — not the whole payload.
+    Ok(serde_json::json!({
+        "client_id": pick("client_id"),
+        "token_use": pick("token_use"),
+        "scope": pick("scope"),
+        "iss": pick("iss"),
+        "exp": pick("exp"),
+        "sub": pick("sub"),
+        "username": pick("username"),
+    }))
 }
 
 #[tauri::command]
@@ -275,20 +374,39 @@ pub async fn valueos_login() -> Result<(), ValueOsErr> {
     open_browser(&authorize_url);
 
     // Wait up to 5 minutes for the browser redirect.
-    let url = tokio::time::timeout(std::time::Duration::from_secs(300), rx)
-        .await
+    let redirect = tokio::time::timeout(std::time::Duration::from_secs(300), rx).await;
+    // Release the loopback listener so its port is free for a later login THIS session
+    // (otherwise repeated logout→login cycles would exhaust the pinned ports). Safe on all
+    // outcomes — success, timeout, or a dropped channel.
+    let _ = tauri_plugin_oauth::cancel(port);
+    let url = redirect
         .map_err(|_| ValueOsErr::new(408, "Login timed out"))?
         .map_err(|_| ValueOsErr::transport("Login cancelled"))?;
 
     let parsed = url::Url::parse(&url).map_err(|e| ValueOsErr::transport(e.to_string()))?;
     let mut code: Option<String> = None;
     let mut got_state: Option<String> = None;
+    let mut oauth_error: Option<String> = None;
+    let mut oauth_error_desc: Option<String> = None;
     for (k, v) in parsed.query_pairs() {
         match k.as_ref() {
             "code" => code = Some(v.into_owned()),
             "state" => got_state = Some(v.into_owned()),
+            "error" => oauth_error = Some(v.into_owned()),
+            "error_description" => oauth_error_desc = Some(v.into_owned()),
             _ => {}
         }
+    }
+    // If the IdP redirected back with an error (access_denied, invalid_scope, …), report it
+    // verbatim rather than a generic "no code".
+    if let Some(err) = oauth_error {
+        let desc = oauth_error_desc.unwrap_or_default();
+        let msg = if desc.is_empty() {
+            format!("Sign-in failed: {err}")
+        } else {
+            format!("Sign-in failed: {err} — {desc}")
+        };
+        return Err(ValueOsErr::new(401, msg));
     }
     if got_state.as_deref() != Some(state.as_str()) {
         return Err(ValueOsErr::new(401, "State mismatch"));
@@ -302,6 +420,14 @@ pub async fn valueos_login() -> Result<(), ValueOsErr> {
 #[tauri::command]
 pub async fn valueos_api_get_tenants() -> Result<serde_json::Value, ValueOsErr> {
     api_get("/me/tenants").await
+}
+
+/// The post-login gate (contract §2): tenants where the agent add-on is ACTIVE right now,
+/// plus total_memberships. The webview uses this to gate the app; not-a-member / never /
+/// expired tenants are filtered server-side.
+#[tauri::command]
+pub async fn valueos_api_get_agent_tenants() -> Result<serde_json::Value, ValueOsErr> {
+    api_get("/me/agent-tenants").await
 }
 
 #[tauri::command]
@@ -343,6 +469,17 @@ pub async fn valueos_api_list_opportunities(
     api_get(&format!("/tenants/{tenant_id}/opportunities{}", list_query(q, limit, offset))).await
 }
 
+/// PRIMARY write path: create a call activity AND attach its transcript+digest in one atomic
+/// op. The lead/opportunity link (XOR) is in the `request` body, not the path.
+#[tauri::command]
+pub async fn valueos_api_create_call(
+    tenant_id: String,
+    request: serde_json::Value,
+) -> Result<serde_json::Value, ValueOsErr> {
+    api_post(&format!("/tenants/{tenant_id}/calls"), &request).await
+}
+
+/// Fallback write path: attach a transcript to an existing lead/opportunity (link in the path).
 #[tauri::command]
 pub async fn valueos_api_upload_transcript(
     tenant_id: String,

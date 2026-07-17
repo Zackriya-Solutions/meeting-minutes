@@ -7,10 +7,11 @@ import { callValueOs } from '../transport/invoke';
 export function createTauriDigest(): DigestGenerator {
   return {
     generate(transcript: string, opts?: DigestOptions) {
+      // camelCase key — Tauri v2 maps `maxChars` to the Rust `max_chars` param.
       return callValueOs<string>('valueos_generate_digest', {
         transcript,
         title: opts?.title,
-        max_chars: opts?.maxChars,
+        maxChars: opts?.maxChars,
       });
     },
   };

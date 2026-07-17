@@ -36,6 +36,24 @@ export interface Entitlement {
   active: boolean;
 }
 
+/** One workspace where the ValueOS Agent capability is ACTIVE right now (an item of
+ *  GET /me/agent-tenants). Superset of Tenant carrying the live entitlement state. */
+export interface AgentTenant extends Tenant {
+  state: EntitlementState;
+  active: boolean;
+}
+
+/** GET /me/agent-tenants — the post-login gate (contract §2). `items` are the ONLY
+ *  workspaces the agent may operate in; `total_memberships` distinguishes "member of
+ *  nothing" from "member of workspaces that lack the add-on" so the block can be worded. */
+export interface AgentTenantsResult {
+  items: AgentTenant[];
+  total: number;
+  total_memberships: number;
+  capability?: 'valueos_agent';
+  feature?: 'feat_agent';
+}
+
 export interface Lead {
   id: string;
   label: string; // full name, else company, else email
@@ -93,6 +111,29 @@ export interface UploadRequest {
   file_name?: string; // default transcript.txt
   content_type?: TranscriptContentType;
   title?: string;
+}
+
+/** The transcript sub-object of the composite POST /calls request. */
+export interface CallTranscript {
+  raw_content: string; // the transcript text (required)
+  digest: string; // the high-level recap — generated LOCALLY by the agent (required)
+  title?: string; // defaults to the call name
+  digest_source?: string; // default 'ai_generated'
+  file_name?: string; // default transcript.txt
+  content_type?: TranscriptContentType;
+}
+
+/** Body for POST /api/agent/v1/tenants/{tenantId}/calls — creates a call activity AND
+ *  attaches its transcript+digest in one atomic op. The link is in the body: EXACTLY ONE
+ *  of lead_id / opportunity_id (XOR). */
+export interface CreateCallRequest {
+  name: string; // required — the call activity's title (user-chosen at capture time)
+  lead_id?: string; // XOR with opportunity_id
+  opportunity_id?: string;
+  transcript: CallTranscript;
+  notes?: string; // optional → stored on the call activity
+  occurred_at?: string; // optional (default: now)
+  idempotency_key?: string; // optional here; if sent, reuse the SAME key on every retry
 }
 
 export interface UploadResult {

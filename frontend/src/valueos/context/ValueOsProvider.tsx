@@ -10,6 +10,7 @@ import { InMemoryTokenStore } from '../auth/tokenStore';
 import { ConfigService, createMockConfigService } from '../config/configService';
 import { DigestGenerator, MockDigestGenerator } from '../digest/digest';
 import { InMemoryPendingUploadStore, PendingUploadQueue } from '../upload/pendingQueue';
+import { InMemoryTranscriptHistory, TranscriptHistory } from '../history/transcriptHistory';
 import { createRealServices, valueosRealTransportEnabled } from './realServices';
 
 export interface ValueOsServices {
@@ -18,6 +19,7 @@ export interface ValueOsServices {
   config: ConfigService;
   digest: DigestGenerator;
   uploadQueue: PendingUploadQueue;
+  history: TranscriptHistory;
 }
 
 /** ⚠️ MOCK services — wires all mock impls together. The running app uses these until the
@@ -28,7 +30,8 @@ export function createMockServices(opts?: { seed?: MockSeed }): ValueOsServices 
   const config = createMockConfigService();
   const digest = new MockDigestGenerator();
   const uploadQueue = new PendingUploadQueue(client, new InMemoryPendingUploadStore());
-  return { client, auth, config, digest, uploadQueue };
+  const history = new InMemoryTranscriptHistory();
+  return { client, auth, config, digest, uploadQueue, history };
 }
 
 const Ctx = createContext<ValueOsServices | null>(null);
