@@ -8,7 +8,7 @@ import { InMemoryTranscriptHistory } from '@/valueos/history/transcriptHistory';
 import type { UpdateCheckResult } from '@/valueos/api/types';
 
 // VALUEOS WS4: updater orchestration against the REAL contract shapes, with the HTTP layer
-// mocked (MockValueOsClient). Covers the telemetry lifecycle (registered/check/update_success/
+// mocked (MockValueOsClient). Covers the telemetry lifecycle (install/check/update_success/
 // update_failure), notify-only download+verify+apply, error mapping (401→reauth, 403
 // feat_agent→deEntitled), and an explicit data-preservation guarantee.
 
@@ -35,10 +35,10 @@ describe('updater lifecycle', () => {
     const store = memStore();
     await createUpdater({ client, native: fakeNative(), store }).registerAndReconcile(T);
     await createUpdater({ client, native: fakeNative(), store }).registerAndReconcile(T);
-    const registered = client.telemetry.filter((e) => e.event_type === 'registered');
-    expect(registered).toHaveLength(1);
-    expect(registered[0].install_id).toBe('install-abc');
-    expect(registered[0].current_version).toBe('1.0.0');
+    const installed = client.telemetry.filter((e) => e.event_type === 'install');
+    expect(installed).toHaveLength(1);
+    expect(installed[0].install_id).toBe('install-abc');
+    expect(installed[0].current_version).toBe('1.0.0');
   });
 
   it('reports update_success on the first run after a version bump (from → to)', async () => {
@@ -58,7 +58,7 @@ describe('updater check + apply', () => {
     const seed = defaultMockSeed();
     seed.updateCheck = {
       update_available: true,
-      latest_version: '2.0.0',
+      latest: '2.0.0',
       download_url: 'https://x/app.dmg',
       sha256: 'abc',
       notify_only: true,
@@ -66,7 +66,7 @@ describe('updater check + apply', () => {
     const client = new MockValueOsClient(seed);
     const out = await createUpdater({ client, native: fakeNative(), store: memStore() }).checkForUpdates(T);
     expect(out.status).toBe('available');
-    expect(out.result?.latest_version).toBe('2.0.0');
+    expect(out.result?.latest).toBe('2.0.0');
     expect(client.telemetry.some((e) => e.event_type === 'check')).toBe(true);
   });
 
@@ -83,7 +83,7 @@ describe('updater check + apply', () => {
     const u = createUpdater({ client, native: fakeNative({ download, apply }), store: memStore() });
     const result: UpdateCheckResult = {
       update_available: true,
-      latest_version: '2.0.0',
+      latest: '2.0.0',
       download_url: 'https://x/app.dmg',
       sha256: 'deadbeef',
     };
@@ -102,7 +102,7 @@ describe('updater check + apply', () => {
     const u = createUpdater({ client, native: fakeNative({ download }), store: memStore() });
     const out = await u.downloadAndApply(T, {
       update_available: true,
-      latest_version: '2.0.0',
+      latest: '2.0.0',
       download_url: 'https://x/app.dmg',
       sha256: 'expected',
     });
@@ -160,7 +160,7 @@ describe('updater data preservation', () => {
       client,
       native: fakeNative({ version: '1.0.0', installId: PERSISTED_ID }),
       store,
-    }).downloadAndApply(T, { update_available: true, latest_version: '1.1.0', download_url: 'https://x/app.dmg' });
+    }).downloadAndApply(T, { update_available: true, latest: '1.1.0', download_url: 'https://x/app.dmg' });
     expect(applied.status).toBe('applying');
     await createUpdater({ client, native: fakeNative({ version: '1.1.0', installId: PERSISTED_ID }), store }).registerAndReconcile(T);
 

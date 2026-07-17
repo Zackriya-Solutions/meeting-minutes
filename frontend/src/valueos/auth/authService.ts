@@ -36,16 +36,23 @@ export async function summarizeEntitlements(client: ValueOsClient): Promise<Enti
   // filtered server-side), plus total_memberships. We do NOT enumerate /me/entitlements
   // per tenant, and we do NOT rely on catching 403s to decide the gate.
   const res = await client.getAgentTenants();
-  const entitled: EntitledTenant[] = res.items.map((t) => ({
-    tenant: { id: t.id, name: t.name, role: t.role, roles: t.roles },
-    entitlement: {
-      capability: 'valueos_agent',
-      feature: 'feat_agent',
-      state: t.state,
-      active: t.active,
-    },
-  }));
-  return { anyEntitled: entitled.length > 0, entitled, totalMemberships: res.total_memberships };
+  // Tolerate both {id,name,…} and the contract's {tenant_id,tenant_name,…} (§2), and
+  // total_memberships or total — so the gate is robust to the exact server field names.
+  const entitled: EntitledTenant[] = res.items.map((raw) => {
+    const t = raw as typeof raw & { tenant_id?: string; tenant_name?: string };
+    const id = t.id ?? t.tenant_id ?? '';
+    return {
+      tenant: { id, name: t.name ?? t.tenant_name ?? id, role: t.role ?? '', roles: t.roles ?? [] },
+      entitlement: {
+        capability: 'valueos_agent',
+        feature: 'feat_agent',
+        state: t.state ?? 'active',
+        active: t.active ?? true,
+      },
+    };
+  });
+  const totalMemberships = res.total_memberships ?? res.total ?? entitled.length;
+  return { anyEntitled: entitled.length > 0, entitled, totalMemberships };
 }
 
 /**
@@ -68,6 +75,7 @@ export function createMockAuthService(
         refreshToken: 'mock-refresh-token',
         expiresAt: now() + 60 * 60 * 1000,
         scopes: [
+          'openid',
           'valueos/read:tenants',
           'valueos/read:leads',
           'valueos/read:opportunities',

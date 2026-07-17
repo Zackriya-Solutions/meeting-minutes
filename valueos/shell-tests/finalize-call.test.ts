@@ -42,8 +42,8 @@ describe('finalizeCall', () => {
     expect(out.status).toBe('done');
     expect(out.record.path).toContain('/tmp/tx/');
     expect(callSpy).toHaveBeenCalledTimes(1);
-    expect(callSpy.mock.calls[0][1].transcript.raw_content).toBe(capture.transcriptText);
-    expect(callSpy.mock.calls[0][1].transcript.digest.length).toBeGreaterThan(0);
+    expect(callSpy.mock.calls[0][1].raw_content).toBe(capture.transcriptText);
+    expect(callSpy.mock.calls[0][1].digest.length).toBeGreaterThan(0);
     expect((await s.history.list())[0].id).toBe('key-1');
   });
 
@@ -66,7 +66,7 @@ describe('finalizeCall', () => {
     expect(out.fileError).toMatch(/permission denied/i);
     // upload STILL happened → cloud copy is safe
     expect(callSpy).toHaveBeenCalledTimes(1);
-    expect(callSpy.mock.calls[0][1].transcript.raw_content).toBe(capture.transcriptText);
+    expect(callSpy.mock.calls[0][1].raw_content).toBe(capture.transcriptText);
     expect(out.status).toBe('done');
     // history STILL recorded with the full text retained, path empty (no local file)
     const recs = await s.history.list();

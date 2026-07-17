@@ -95,7 +95,7 @@ export function createUpdater(deps: {
       }
       store.set(K.lastVersion, version);
       if (store.get(K.registered) !== '1') {
-        await telemetry(tenantId, 'registered');
+        await telemetry(tenantId, 'install');
         store.set(K.registered, '1');
       }
     },
@@ -125,7 +125,7 @@ export function createUpdater(deps: {
         return { status: 'applying', result };
       } catch (e) {
         await telemetry(tenantId, 'update_failure', {
-          to_version: result.latest_version ?? undefined,
+          to_version: result.latest ?? undefined,
           detail: (e as Error)?.message,
         });
         return mapErr(e);

@@ -33,8 +33,9 @@ fn cfg_api_base() -> String {
     env_or("VALUEOS_API_BASE", "https://d2luofz0a4v7f3.cloudfront.net/api/agent/v1")
 }
 fn cfg_ports() -> Vec<u16> { vec![8765, 14321] }
+// VALUEOS_AGENT_API.md §1: standard `openid` + the six ValueOS agent scopes.
 const SCOPES: &str =
-    "valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts valueos/read:releases valueos/write:telemetry";
+    "openid valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts valueos/read:releases valueos/write:telemetry";
 
 // ---- error envelope (serialized to the JS side; TS maps to ValueOsApiError) ------------
 #[derive(Debug, Serialize)]

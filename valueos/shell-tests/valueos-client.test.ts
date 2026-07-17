@@ -79,7 +79,8 @@ describe('MockValueOsClient (contract behaviors)', () => {
     const call = (over = {}) => ({
       name: 'Discovery with Ada',
       lead_id: 'lead-1',
-      transcript: { raw_content: 'hi', digest: 'recap' },
+      raw_content: 'hi',
+      digest: 'recap',
       idempotency_key: 'ck-1',
       ...over,
     });

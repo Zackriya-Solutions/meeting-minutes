@@ -66,7 +66,7 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
       setUpdateMsg('You’re on the latest version.');
     } else if (out.status === 'available' && out.result?.update_available) {
       setUpdate(out.result);
-      setUpdateMsg(`Update available: ${out.result.latest_version ?? 'new version'}.`);
+      setUpdateMsg(`Update available: ${out.result.latest ?? 'new version'}.`);
     } else if (out.status === 'reauth') {
       setUpdateMsg(out.error ?? 'Please sign in again to check for updates.');
     } else if (out.status === 'deEntitled') {
@@ -136,7 +136,7 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
               onClick={installUpdate}
               disabled={applying}
             >
-              {applying ? 'Updating…' : `Download & install ${update.latest_version ?? ''}`.trim()}
+              {applying ? 'Updating…' : `Download & install ${update.latest ?? ''}`.trim()}
             </button>
           )}
         </div>

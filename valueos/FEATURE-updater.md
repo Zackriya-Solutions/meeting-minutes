@@ -9,14 +9,14 @@ HTTP layer mocked only in tests.
 1. **install_id** — on first launch the native side generates a UUIDv4 and persists it in the
    app data dir (`valueos-install-id`); it is reused forever. `valueos_install_id` (mod.rs).
 2. **Register + reconcile** (app entry, `AppFlow`): once per install, report telemetry
-   `registered`; on every launch, if the running version is newer than the last recorded run,
+   `install`; on every launch, if the running version is newer than the last recorded run,
    report `update_success` (from_version → to_version). A long-interval `heartbeat` then sends
    periodic `check` events.
 3. **Check** (user-triggered in **Settings → Software updates**): `GET
    /tenants/{tid}/updates/check?platform=&current_version=` (scope `read:releases` +
    `feat_agent`) via `valueos_api_check_update`. The tenant is the one resolved by the
    post-login gate (`/me/agent-tenants`).
-4. **Notify + wait** — if `update_available`, the UI shows current vs `latest_version` (+ notes)
+4. **Notify + wait** — if `update_available`, the UI shows current vs `latest` (+ notes)
    and a **Download & install** button. `notify_only:true` from the server; we **never**
    auto-install. Nothing happens without the user clicking install.
 5. **Download + verify + apply** — on confirm: `valueos_download_update` fetches the presigned
@@ -65,9 +65,9 @@ injected via the DI (`ValueOsServices.updater`) exactly like every other service
 
 Native commands (mod.rs, registered in lib.rs): `valueos_install_id`, `valueos_app_info`,
 `valueos_api_check_update`, `valueos_api_report_telemetry`, `valueos_download_update`,
-`valueos_apply_update`. Scopes extended to the full six (added `read:releases`,
-`write:telemetry`) in both the Rust `SCOPES` const (authoritative) and the TS
-`VALUEOS_SCOPES`.
+`valueos_apply_update`. Scopes are the full set requested at authorize (`openid` + the six
+ValueOS agent scopes, incl. `read:releases` + `write:telemetry`) in both the Rust `SCOPES`
+const (authoritative) and the TS `VALUEOS_SCOPES`.
 
 ## Why not the Tauri updater plugin's manifest flow
 
@@ -77,9 +77,10 @@ is driven through our own API (steps above), and the plugin is only a fallback. 
 `tauri.conf.json` previously pointed at the **upstream Zackriya project** — a real bug (the app
 could self-update to upstream Meetily). **Upstream edit made (authorized):**
 `frontend/src-tauri/tauri.conf.json` — `plugins.updater.endpoints` repointed to a ValueOS-owned
-URL so a stray plugin check can never pull upstream. **Follow-up (deferred):** replace
-`plugins.updater.pubkey` with a ValueOS-owned minisign key when the publish-to-S3 CI lands (see
-`valueos/CI.md`); until then our own SHA-256 verification is the integrity check.
+URL so a stray plugin check can never pull upstream. `plugins.updater.pubkey` is unused by our
+flow (we distribute plain installers via `publish-agent.yml` and verify with SHA-256, not Tauri
+signed updater bundles); it would only need a ValueOS-owned minisign key if we ever adopt the
+plugin's signed-bundle update path.
 
 ## Tests
 

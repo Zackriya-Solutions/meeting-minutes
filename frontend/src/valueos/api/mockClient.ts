@@ -97,7 +97,7 @@ export class MockValueOsClient implements ValueOsClient {
     this.guardAuth();
     this.guardMember(tenantId);
     this.guardEntitled(tenantId);
-    return this.seed.updateCheck ?? { update_available: false, latest_version: null, notify_only: true };
+    return this.seed.updateCheck ?? { update_available: false, latest: null };
   }
 
   async reportTelemetry(tenantId: string, event: TelemetryEvent): Promise<void> {
@@ -163,8 +163,8 @@ export class MockValueOsClient implements ValueOsClient {
     const hasOpp = !!req.opportunity_id;
     const fields: Record<string, string> = {};
     if (!req.name) fields.name = 'required';
-    if (!req.transcript?.raw_content) fields.raw_content = 'required';
-    if (!req.transcript?.digest) fields.digest = 'required';
+    if (!req.raw_content) fields.raw_content = 'required';
+    if (!req.digest) fields.digest = 'required';
     if (hasLead === hasOpp) fields.link = 'exactly one of lead_id / opportunity_id is required';
     if (Object.keys(fields).length) throw new ValueOsApiError(422, 'Invalid request body', { fields });
 

@@ -1,9 +1,10 @@
 // VALUEOS: Types for the ValueOS Agent API (/api/agent/v1) — source of truth is the
 // pasted contract "ValueOS Agent API (Part 28)". Kept in OUR namespace; no upstream types.
 
-/** The six (and only six) OAuth2 scopes the agent client is granted. read:releases +
- *  write:telemetry back the updater (WS4). The token can never exceed this set. */
+/** The OAuth2 scopes the agent client requests (VALUEOS_AGENT_API.md §1): standard `openid`
+ *  plus the six ValueOS agent scopes. The token can never exceed this set. */
 export const VALUEOS_SCOPES = [
+  'openid',
   'valueos/read:tenants',
   'valueos/read:leads',
   'valueos/read:opportunities',
@@ -116,26 +117,22 @@ export interface UploadRequest {
   title?: string;
 }
 
-/** The transcript sub-object of the composite POST /calls request. */
-export interface CallTranscript {
-  raw_content: string; // the transcript text (required)
-  digest: string; // the high-level recap — generated LOCALLY by the agent (required)
-  title?: string; // defaults to the call name
-  digest_source?: string; // default 'ai_generated'
-  file_name?: string; // default transcript.txt
-  content_type?: TranscriptContentType;
-}
-
-/** Body for POST /api/agent/v1/tenants/{tenantId}/calls — creates a call activity AND
- *  attaches its transcript+digest in one atomic op. The link is in the body: EXACTLY ONE
- *  of lead_id / opportunity_id (XOR). */
+/** Body for POST /api/agent/v1/tenants/{tenantId}/calls (VALUEOS_AGENT_API.md §4) — creates a
+ *  call activity AND attaches its transcript+digest in one atomic op. FLAT body: raw_content +
+ *  digest at the top level. The link is EXACTLY ONE of lead_id / opportunity_id (XOR; both or
+ *  neither → 422 {fields.link}). name, raw_content, digest are required; digest is generated
+ *  LOCALLY by the agent (ValueOS does not generate it). */
 export interface CreateCallRequest {
   name: string; // required — the call activity's title (user-chosen at capture time)
+  raw_content: string; // required — the transcript text
+  digest: string; // required — the high-level recap (agent-generated)
   lead_id?: string; // XOR with opportunity_id
   opportunity_id?: string;
-  transcript: CallTranscript;
-  notes?: string; // optional → stored on the call activity
+  title?: string; // defaults to the call name
+  file_name?: string; // default transcript.txt
+  content_type?: TranscriptContentType;
   occurred_at?: string; // optional (default: now)
+  notes?: string; // optional → stored on the call activity
   idempotency_key?: string; // optional here; if sent, reuse the SAME key on every retry
 }
 
@@ -147,21 +144,23 @@ export interface UploadResult {
   s3_stored?: boolean;
 }
 
-/** GET /tenants/{tid}/updates/check — notify-only (never auto-install). `download_url` is a
- *  short-lived presigned GET (~300s). No build → update_available:false, latest_version:null. */
+/** GET /tenants/{tid}/updates/check (VALUEOS_AGENT_API.md §5) — NOTIFY-ONLY (never
+ *  auto-install). `download_url` is a short-lived (~5-min) presigned GET, null when no update.
+ *  No build → update_available:false, latest:null. */
 export interface UpdateCheckResult {
   update_available: boolean;
-  latest_version: string | null;
+  current?: string | null;
+  latest: string | null;
+  platform?: string | null;
   download_url?: string | null;
   expires_in?: number | null;
-  notify_only?: boolean;
   /** Optional integrity checksum the agent verifies before applying, when the server sends it. */
   sha256?: string | null;
   notes?: string | null;
 }
 
-/** POST /tenants/{tid}/telemetry — event_type lifecycle for the updater. */
-export type TelemetryEventType = 'registered' | 'check' | 'update_success' | 'update_failure';
+/** POST /tenants/{tid}/telemetry (VALUEOS_AGENT_API.md §6) — event_type lifecycle. */
+export type TelemetryEventType = 'install' | 'check' | 'update_success' | 'update_failure';
 export interface TelemetryEvent {
   install_id: string; // agent-generated, persisted locally, stable forever
   platform: string;

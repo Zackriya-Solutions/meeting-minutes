@@ -58,15 +58,13 @@ export async function finalizeCall(
   // locally-generated digest in one atomic op. Link is XOR in the body.
   const request: CreateCallRequest = {
     name: capture.callName,
+    raw_content: capture.transcriptText, // FLAT body (VALUEOS_AGENT_API.md §4)
+    digest: digestText,
     ...(capture.activityType === 'lead'
       ? { lead_id: capture.targetId }
       : { opportunity_id: capture.targetId }),
-    transcript: {
-      raw_content: capture.transcriptText,
-      digest: digestText,
-      file_name: fileName,
-      title: capture.callName,
-    },
+    file_name: fileName,
+    title: capture.callName,
     idempotency_key: key,
   };
 
