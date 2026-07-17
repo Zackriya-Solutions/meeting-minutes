@@ -127,10 +127,14 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success(t('Meeting recovered successfully!'), {
-          description: result.audioRecoveryStatus?.status === 'success'
+        const recoveryDescription = result.audioRecoveryStatus?.status === 'success'
+          ? result.recoveredTranscriptCount > 0
             ? t('Transcripts and audio recovered')
-            : t('Transcripts recovered (no audio available)'),
+            : t('Audio recovered. Transcription is not available yet.')
+          : t('Transcripts recovered (no audio available)');
+
+        toast.success(t('Meeting recovered successfully!'), {
+          description: recoveryDescription,
           action: result.meetingId ? {
             label: t('View Meeting'),
             onClick: () => {
