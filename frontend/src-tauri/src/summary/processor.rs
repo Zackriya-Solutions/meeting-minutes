@@ -1,5 +1,8 @@
 use crate::summary::llm_client::{generate_summary, LLMProvider};
 use crate::summary::interview::{generate_interview_report, InterviewGenerationRequest, InterviewReport};
+use crate::summary::one_on_one::{
+    generate_one_on_one_report, OneOnOneGenerationRequest, OneOnOneReport,
+};
 use crate::summary::standup::{generate_standup_report, StandupGenerationRequest};
 use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
@@ -13,6 +16,43 @@ use tracing::{error, info};
 pub enum StructuredSummaryReport {
     Standup(crate::summary::standup::StandupReport),
     Interview(InterviewReport),
+    OneOnOne(OneOnOneReport),
+}
+
+impl StructuredSummaryReport {
+    pub fn schema_key(&self) -> &'static str {
+        match self {
+            Self::Standup(_) => "standup_v2",
+            Self::Interview(_) => "interview_v1",
+            Self::OneOnOne(_) => "one_on_one_v1",
+        }
+    }
+
+    pub fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
+        match self {
+            Self::Standup(report) => serde_json::to_value(report),
+            Self::Interview(report) => serde_json::to_value(report),
+            Self::OneOnOne(report) => serde_json::to_value(report),
+        }
+    }
+
+    pub async fn sync_review_records(
+        &self,
+        pool: &sqlx::SqlitePool,
+        meeting_id: &str,
+    ) -> anyhow::Result<usize> {
+        match self {
+            Self::Standup(report) => {
+                crate::summary::standup_workflow::sync_standup_records(pool, meeting_id, report).await
+            }
+            Self::Interview(report) => {
+                crate::summary::interview_workflow::sync_records(pool, meeting_id, report).await
+            }
+            Self::OneOnOne(report) => {
+                crate::summary::one_on_one_workflow::sync_records(pool, meeting_id, report).await
+            }
+        }
+    }
 }
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
@@ -315,8 +355,9 @@ pub async fn generate_meeting_summary(
     let output_language = resolve_output_language(summary_language, detected_transcript_language);
     info!("Generating summary directly in {}", output_language);
 
-    if template.pipeline.as_deref() == Some("standup_v2") {
-        let generated = generate_standup_report(StandupGenerationRequest {
+    match crate::summary::memory_workflow::MemoryWorkflow::from_template(template) {
+        crate::summary::memory_workflow::MemoryWorkflow::StandupV2 => {
+            let generated = generate_standup_report(StandupGenerationRequest {
             client,
             provider,
             model_name,
@@ -333,17 +374,16 @@ pub async fn generate_meeting_summary(
             app_data_dir,
             cancellation_token,
         })
-        .await?;
-        return Ok((
-            generated.markdown,
-            output_language.to_string(),
-            generated.chunk_count,
-            Some(StructuredSummaryReport::Standup(generated.report)),
-        ));
-    }
-
-    if template.pipeline.as_deref() == Some("interview_v1") {
-        let generated = generate_interview_report(InterviewGenerationRequest {
+            .await?;
+            return Ok((
+                generated.markdown,
+                output_language.to_string(),
+                generated.chunk_count,
+                Some(StructuredSummaryReport::Standup(generated.report)),
+            ));
+        }
+        crate::summary::memory_workflow::MemoryWorkflow::InterviewV1 => {
+            let generated = generate_interview_report(InterviewGenerationRequest {
             client,
             provider,
             model_name,
@@ -360,13 +400,41 @@ pub async fn generate_meeting_summary(
             app_data_dir,
             cancellation_token,
         })
-        .await?;
-        return Ok((
-            generated.markdown,
-            output_language.to_string(),
-            generated.chunk_count,
-            Some(StructuredSummaryReport::Interview(generated.report)),
-        ));
+            .await?;
+            return Ok((
+                generated.markdown,
+                output_language.to_string(),
+                generated.chunk_count,
+                Some(StructuredSummaryReport::Interview(generated.report)),
+            ));
+        }
+        crate::summary::memory_workflow::MemoryWorkflow::OneOnOneV1 => {
+            let generated = generate_one_on_one_report(OneOnOneGenerationRequest {
+            client,
+            provider,
+            model_name,
+            api_key,
+            meeting_id,
+            transcript: text,
+            custom_prompt,
+            token_threshold,
+            output_language,
+            ollama_endpoint,
+            custom_openai_endpoint,
+            deepseek_base_url,
+            max_tokens,
+            app_data_dir,
+            cancellation_token,
+        })
+            .await?;
+            return Ok((
+                generated.markdown,
+                output_language.to_string(),
+                generated.chunk_count,
+                Some(StructuredSummaryReport::OneOnOne(generated.report)),
+            ));
+        }
+        crate::summary::memory_workflow::MemoryWorkflow::Generic => {}
     }
 
     let total_tokens = rough_token_count(text);

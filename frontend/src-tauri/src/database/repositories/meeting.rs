@@ -9,6 +9,10 @@ pub struct MeetingsRepository;
 pub const MEMORY_TYPE_GENERAL: &str = "general";
 pub const MEMORY_TYPE_STANDUP: &str = "standup";
 pub const MEMORY_TYPE_INTERVIEW: &str = "interview";
+pub const TEMPLATE_STANDARD: &str = "standard_meeting";
+pub const TEMPLATE_STANDUP: &str = "daily_standup";
+pub const TEMPLATE_INTERVIEW: &str = "interview_memory";
+pub const TEMPLATE_ONE_ON_ONE: &str = "one_on_one";
 pub const SENSITIVITY_STANDARD: &str = "standard";
 pub const SENSITIVITY_SENSITIVE: &str = "sensitive";
 
@@ -21,6 +25,17 @@ fn valid_memory_type(value: &str) -> bool {
 
 fn valid_sensitivity(value: &str) -> bool {
     matches!(value, SENSITIVITY_STANDARD | SENSITIVITY_SENSITIVE)
+}
+
+fn valid_summary_template(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.chars().count() <= 200
+        && !value.chars().any(char::is_control)
+        && !value.contains('/')
+        && !value.contains('\\')
+        && value != "."
+        && value != ".."
 }
 
 impl MeetingsRepository {
@@ -266,6 +281,84 @@ impl MeetingsRepository {
         .await?;
 
         Ok(rows_affected.rows_affected() > 0)
+    }
+
+    pub async fn get_summary_template_id(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Option<String>, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol("meeting_id cannot be empty".to_string()));
+        }
+        sqlx::query_scalar("SELECT summary_template_id FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
+    }
+
+    pub async fn set_summary_template_id(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        template_id: &str,
+    ) -> Result<bool, SqlxError> {
+        if !valid_summary_template(template_id) {
+            return Err(SqlxError::Protocol(format!(
+                "unsupported summary template '{template_id}'"
+            )));
+        }
+        let result = sqlx::query("UPDATE meetings SET summary_template_id=? WHERE id=?")
+            .bind(template_id)
+            .bind(meeting_id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Atomically switch workflow identity, privacy defaults, and concrete template. This avoids
+    /// a window where a newly selected sensitive workflow could still use the previous cloud or
+    /// indexing policy.
+    pub async fn set_memory_and_template_config(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        memory_type: &str,
+        sensitivity: &str,
+        template_id: &str,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol("meeting_id cannot be empty".to_string()));
+        }
+        if !valid_memory_type(memory_type) {
+            return Err(SqlxError::Protocol(format!("unsupported memory_type '{memory_type}'")));
+        }
+        if !valid_sensitivity(sensitivity) {
+            return Err(SqlxError::Protocol(format!("unsupported sensitivity '{sensitivity}'")));
+        }
+        if !valid_summary_template(template_id) {
+            return Err(SqlxError::Protocol(format!("unsupported summary template '{template_id}'")));
+        }
+        let new_private = memory_type == MEMORY_TYPE_INTERVIEW || sensitivity == SENSITIVITY_SENSITIVE;
+        let result = sqlx::query(
+            "UPDATE meetings SET memory_type=?,sensitivity=?,summary_template_id=?, \
+             cloud_processing_allowed=CASE \
+               WHEN ? AND NOT (memory_type='interview' OR sensitivity='sensitive') THEN 0 \
+               WHEN NOT ? AND (memory_type='interview' OR sensitivity='sensitive') THEN 1 \
+               ELSE cloud_processing_allowed END, \
+             indexing_allowed=CASE \
+               WHEN ? AND NOT (memory_type='interview' OR sensitivity='sensitive') THEN 0 \
+               WHEN NOT ? AND (memory_type='interview' OR sensitivity='sensitive') THEN 1 \
+               ELSE indexing_allowed END WHERE id=?",
+        )
+        .bind(memory_type)
+        .bind(sensitivity)
+        .bind(template_id)
+        .bind(new_private)
+        .bind(new_private)
+        .bind(new_private)
+        .bind(new_private)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Get meeting transcripts with pagination support
@@ -636,7 +729,8 @@ mod tests {
                 memory_type TEXT NOT NULL DEFAULT 'general',
                 sensitivity TEXT NOT NULL DEFAULT 'standard',
                 cloud_processing_allowed INTEGER NOT NULL DEFAULT 1,
-                indexing_allowed INTEGER NOT NULL DEFAULT 1
+                indexing_allowed INTEGER NOT NULL DEFAULT 1,
+                summary_template_id TEXT NOT NULL DEFAULT 'standard_meeting'
             )",
         )
         .execute(&pool)
@@ -737,6 +831,72 @@ mod tests {
         )
         .await
         .unwrap());
+    }
+
+    #[tokio::test]
+    async fn summary_template_round_trip_accepts_safe_ids_and_rejects_paths() {
+        let pool = memory_test_pool().await;
+        assert_eq!(
+            MeetingsRepository::get_summary_template_id(&pool, "m1")
+                .await
+                .unwrap(),
+            Some(TEMPLATE_STANDARD.to_string())
+        );
+        assert!(MeetingsRepository::set_summary_template_id(
+            &pool,
+            "m1",
+            TEMPLATE_ONE_ON_ONE
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            MeetingsRepository::get_summary_template_id(&pool, "m1")
+                .await
+                .unwrap(),
+            Some(TEMPLATE_ONE_ON_ONE.to_string())
+        );
+        assert!(MeetingsRepository::set_summary_template_id(&pool, "m1", "../ranking")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn memory_and_template_switch_is_atomic_and_applies_sensitive_defaults() {
+        let pool = memory_test_pool().await;
+        assert!(MeetingsRepository::set_memory_and_template_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_SENSITIVE,
+            TEMPLATE_ONE_ON_ONE,
+        )
+        .await
+        .unwrap());
+        let row: (String, String, String, i64, i64) = sqlx::query_as(
+            "SELECT memory_type,sensitivity,summary_template_id,cloud_processing_allowed,indexing_allowed \
+             FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row, ("general".into(), "sensitive".into(), TEMPLATE_ONE_ON_ONE.into(), 0, 0));
+
+        assert!(MeetingsRepository::set_memory_and_template_config(
+            &pool,
+            "m1",
+            MEMORY_TYPE_GENERAL,
+            SENSITIVITY_STANDARD,
+            "../unsafe",
+        )
+        .await
+        .is_err());
+        let unchanged: (String, String) = sqlx::query_as(
+            "SELECT sensitivity,summary_template_id FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unchanged, ("sensitive".into(), TEMPLATE_ONE_ON_ONE.into()));
     }
 
     #[tokio::test]

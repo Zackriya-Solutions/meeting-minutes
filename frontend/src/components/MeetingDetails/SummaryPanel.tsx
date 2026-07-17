@@ -21,6 +21,7 @@ import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
 import { StandupWorkflowPanel } from './StandupWorkflowPanel';
 import { InterviewWorkflowPanel } from './InterviewWorkflowPanel';
+import { OneOnOneWorkflowPanel } from './OneOnOneWorkflowPanel';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
@@ -369,6 +370,11 @@ export function SummaryPanel({
         meetingId={meeting.id}
         summaryStatus={summaryStatus}
         interviewSelected={selectedTemplate === 'interview_memory'}
+      />
+      <OneOnOneWorkflowPanel
+        meetingId={meeting.id}
+        summaryStatus={summaryStatus}
+        oneOnOneSelected={selectedTemplate === 'one_on_one'}
       />
 
       {isSummaryLoading ? (

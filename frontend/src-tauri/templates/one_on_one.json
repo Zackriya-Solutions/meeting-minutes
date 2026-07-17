@@ -1,0 +1,55 @@
+{
+  "name": "One-on-One Memory",
+  "description": "An evidence-oriented record of a recurring one-on-one: explicit check-in, mutual feedback, support, growth, decisions, and follow-ups without automatic performance judgments.",
+  "pipeline": "one_on_one_v1",
+  "sections": [
+    {
+      "title": "Context and Check-in",
+      "instruction": "State the meeting date only when supported, list participants only when known, and capture how either participant explicitly described their situation, workload, motivation, or concerns. Do not infer mood, wellbeing, intent, relationship, or performance. Add a transcript timestamp for every substantive observation and say 'not stated' when context is missing.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Follow-up from the Previous One-on-One",
+      "instruction": "List earlier commitments or open topics that were explicitly revisited in this conversation, including their stated status and a transcript timestamp. Do not claim continuity from the current transcript alone when no earlier commitment is mentioned.",
+      "format": "list"
+    },
+    {
+      "title": "Progress and Impact",
+      "instruction": "Capture completed work, progress, achievements, and impact explicitly discussed by either participant. Keep reported claims distinct from verified outcomes, avoid productivity scoring, and attach a transcript timestamp to each item.",
+      "format": "list"
+    },
+    {
+      "title": "Challenges and Support",
+      "instruction": "Capture obstacles, risks, unclear priorities, workload or collaboration problems, and explicit requests or offers of support. Preserve who raised the topic and who was asked to help only when speaker attribution is reliable; otherwise use 'unknown participant'. Include a transcript timestamp.",
+      "format": "list",
+      "item_format": "| **Topic** | What is difficult | Support requested or offered | Owner | Evidence timestamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Feedback Both Ways",
+      "instruction": "Record concrete feedback, its stated example or impact, and any response or request. Distinguish feedback directions only when participant roles and speakers are known. Never infer personality, emotion, loyalty, promotion readiness, or a performance rating. Include a transcript timestamp and mark unsupported context as 'not stated'.",
+      "format": "list",
+      "item_format": "| **Direction** | Observation | Example or impact | Response or request | Evidence timestamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Growth and Career",
+      "instruction": "Capture explicit development interests, skills, role or grade discussions, compensation-process facts, growth goals, and agreed preparation. Keep aspirations separate from promises or approved changes. Do not infer readiness or recommend a personnel decision. Include a transcript timestamp.",
+      "format": "list"
+    },
+    {
+      "title": "Decisions and Shared Context",
+      "instruction": "List decisions and organizational or project context that materially changes priorities, responsibilities, or expectations. Distinguish a confirmed decision from a proposal, prediction, or unresolved question, and attach a transcript timestamp.",
+      "format": "list"
+    },
+    {
+      "title": "Commitments",
+      "instruction": "List only explicit follow-up commitments. Preserve the owner and due date only when stated; otherwise use 'unknown' and 'not stated'. Include a transcript timestamp and never turn advice, speculation, or a general need into an assigned action.",
+      "format": "list",
+      "item_format": "| **Commitment** | Owner | Due | Status | Evidence timestamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Open Topics for the Next One-on-One",
+      "instruction": "List unresolved questions, topics explicitly deferred, and follow-ups that need checking at the next conversation. Do not manufacture an agenda from generic discussion. Include the supporting transcript timestamp.",
+      "format": "list"
+    }
+  ]
+}

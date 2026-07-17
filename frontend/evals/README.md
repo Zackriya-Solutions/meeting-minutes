@@ -30,6 +30,37 @@ object with values from 0 to 1: `fact_coverage`, `unsupported_claim_rate`, and
 contain only counts and aggregate metrics; keep the source dataset under `evals/private/`
 or outside the repository.
 
+## One-on-One Memory corpus workflow
+
+Export the explicitly named local Memento collection without guessing dates, roles, pairs, or
+meeting types. The output contains private transcript text, is created with mode `0600`, and must
+remain under `evals/private/` or outside the repository:
+
+```bash
+python3 evals/prepare_one_on_one_corpus.py \
+  --db "$HOME/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite" \
+  --collection 1to1 \
+  --output evals/private/one-on-one-corpus.json
+```
+
+Manually review at least 8 genuine one-on-ones and add four explicit contrasts: pair programming,
+a technical deep dive, an interview, and a project-status meeting. Confirm `pair_id`, date, roles,
+speaker attribution, recording scope, and a pair-level `train`/`dev`/`test` split. Populate
+`reference_records`, link each supported hypothesis with `match_id`, and record losses,
+hallucinations, and attribution errors in `review_notes`. Never split one pair across datasets.
+
+The focused gate emits aggregate metrics only:
+
+```bash
+MEMENTO_ONE_ON_ONE_DATASET="$PWD/evals/private/one-on-one-corpus-reviewed.json" \
+  pnpm quality:one-on-one
+```
+
+The release gates are 100% valid evidence, at least 95% owner precision when an owner is shown,
+zero people-evaluation inferences, fewer than 2% unsupported commitments/decisions, zero false
+positives on the four contrasts, and at least 95% successful structured runs. An untouched export
+is expected to fail until human review and provider runs are complete.
+
 ## Standup corpus workflow
 
 Create a private 12-15-meeting annotation skeleton from the local Memento database:
