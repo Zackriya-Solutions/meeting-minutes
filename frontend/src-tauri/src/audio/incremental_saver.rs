@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use log::{info, warn, error};
 use super::encode::encode_single_audio;
@@ -235,6 +235,32 @@ pub struct AudioRecoveryStatus {
     pub message: String,
 }
 
+fn existing_recording_path(meeting_folder: &Path) -> Option<PathBuf> {
+    let audio_path = meeting_folder.join("audio.mp4");
+    let metadata = std::fs::metadata(&audio_path).ok()?;
+
+    if metadata.is_file() && metadata.len() > 0 {
+        Some(audio_path)
+    } else {
+        None
+    }
+}
+
+fn has_checkpoint_files(meeting_folder: &Path) -> Result<bool, String> {
+    let checkpoints_dir = meeting_folder.join(".checkpoints");
+    if !checkpoints_dir.exists() {
+        return Ok(false);
+    }
+
+    std::fs::read_dir(&checkpoints_dir)
+        .map_err(|e| format!("Failed to read checkpoints directory: {}", e))
+        .map(|entries| {
+            entries.filter_map(|entry| entry.ok()).any(|entry| {
+                entry.path().extension().and_then(|extension| extension.to_str()) == Some("mp4")
+            })
+        })
+}
+
 /// Recover audio from checkpoint files
 /// This is called by the transcript recovery system to merge audio chunks after a crash
 #[tauri::command]
@@ -245,6 +271,23 @@ pub async fn recover_audio_from_checkpoints(
     info!("Starting audio recovery for folder: {}", meeting_folder);
 
     let folder_path = PathBuf::from(&meeting_folder);
+
+    // A clean recording stop merges checkpoints into audio.mp4 and removes the
+    // checkpoint directory. IndexedDB recovery metadata can still remain when
+    // the app is interrupted immediately afterwards, so the finalized file is
+    // itself a valid (and preferred) recovery source.
+    if let Some(audio_path) = existing_recording_path(&folder_path) {
+        let audio_path = audio_path.to_string_lossy().to_string();
+        info!("Using existing finalized recording: {}", audio_path);
+        return Ok(AudioRecoveryStatus {
+            status: "success".to_string(),
+            chunk_count: 0,
+            estimated_duration_seconds: 0.0,
+            audio_file_path: Some(audio_path),
+            message: "Existing finalized recording found".to_string(),
+        });
+    }
+
     let checkpoints_dir = folder_path.join(".checkpoints");
 
     // Check if checkpoints directory exists
@@ -395,22 +438,19 @@ pub async fn cleanup_checkpoints(meeting_folder: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn has_audio_checkpoints(meeting_folder: String) -> Result<bool, String> {
     let folder_path = PathBuf::from(&meeting_folder);
-    let checkpoints_dir = folder_path.join(".checkpoints");
+    has_checkpoint_files(&folder_path)
+}
 
-    // Check if checkpoints directory exists
-    if !checkpoints_dir.exists() {
-        return Ok(false);
+/// Check whether a meeting can recover audio from either the finalized
+/// recording or incremental checkpoint files.
+#[tauri::command]
+pub async fn has_recoverable_audio(meeting_folder: String) -> Result<bool, String> {
+    let folder_path = PathBuf::from(&meeting_folder);
+    if existing_recording_path(&folder_path).is_some() {
+        return Ok(true);
     }
 
-    // Scan for .mp4 checkpoint files
-    let has_mp4_files = std::fs::read_dir(&checkpoints_dir)
-        .map_err(|e| format!("Failed to read checkpoints directory: {}", e))?
-        .filter_map(|entry| entry.ok())
-        .any(|entry| {
-            entry.path().extension().and_then(|s| s.to_str()) == Some("mp4")
-        });
-
-    Ok(has_mp4_files)
+    has_checkpoint_files(&folder_path)
 }
 
 #[cfg(test)]
@@ -472,5 +512,62 @@ mod tests {
         let result = saver.finalize().await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No audio checkpoints"));
+    }
+
+    #[tokio::test]
+    async fn finalized_audio_is_recoverable_without_checkpoints() {
+        let temp_dir = tempdir().unwrap();
+        let meeting_folder = temp_dir.path().join("Finalized_Meeting");
+        std::fs::create_dir_all(&meeting_folder).unwrap();
+        std::fs::write(meeting_folder.join("audio.mp4"), b"recorded audio").unwrap();
+
+        assert!(has_recoverable_audio(meeting_folder.to_string_lossy().to_string())
+            .await
+            .unwrap());
+        assert!(!has_audio_checkpoints(meeting_folder.to_string_lossy().to_string())
+            .await
+            .unwrap());
+
+        let status = recover_audio_from_checkpoints(
+            meeting_folder.to_string_lossy().to_string(),
+            48_000,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(status.status, "success");
+        assert_eq!(status.chunk_count, 0);
+        assert_eq!(
+            status.audio_file_path,
+            Some(meeting_folder.join("audio.mp4").to_string_lossy().to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_finalized_audio_is_not_recoverable() {
+        let temp_dir = tempdir().unwrap();
+        let meeting_folder = temp_dir.path().join("Empty_Finalized_Meeting");
+        std::fs::create_dir_all(&meeting_folder).unwrap();
+        std::fs::File::create(meeting_folder.join("audio.mp4")).unwrap();
+
+        assert!(!has_recoverable_audio(meeting_folder.to_string_lossy().to_string())
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn checkpoint_audio_remains_recoverable() {
+        let temp_dir = tempdir().unwrap();
+        let meeting_folder = temp_dir.path().join("Checkpoint_Meeting");
+        let checkpoints = meeting_folder.join(".checkpoints");
+        std::fs::create_dir_all(&checkpoints).unwrap();
+        std::fs::write(checkpoints.join("audio_chunk_000.mp4"), b"checkpoint").unwrap();
+
+        assert!(has_recoverable_audio(meeting_folder.to_string_lossy().to_string())
+            .await
+            .unwrap());
+        assert!(has_audio_checkpoints(meeting_folder.to_string_lossy().to_string())
+            .await
+            .unwrap());
     }
 }
