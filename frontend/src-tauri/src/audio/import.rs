@@ -43,6 +43,10 @@ static IMPORT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
 const MAX_BATCH_AUDIO_FILES: usize = 500;
 
+fn has_parallel_cloud_work(use_salutespeech: bool, processable_count: usize) -> bool {
+    use_salutespeech && processable_count > 0
+}
+
 /// RAII guard for IMPORT_IN_PROGRESS flag
 /// Ensures flag is cleared even if import panics or returns early
 struct ImportGuard;
@@ -1299,7 +1303,7 @@ async fn run_import<R: Runtime>(
     // SaluteSpeech is an independent HTTP request per segment, so it benefits from
     // bounded concurrency. Keep local engines sequential: they share mutable model
     // state and parallel calls would add contention (or exceed GPU/RAM capacity).
-    let salute_results = if use_salutespeech {
+    let salute_results = if has_parallel_cloud_work(use_salutespeech, processable_count) {
         use crate::audio::transcription::TranscriptionProvider;
 
         let provider = salute_provider
@@ -2251,6 +2255,13 @@ mod tests {
         assert!(AUDIO_EXTENSIONS.contains(&"wav"));
         assert!(AUDIO_EXTENSIONS.contains(&"mp3"));
         assert!(!AUDIO_EXTENSIONS.contains(&"txt"));
+    }
+
+    #[test]
+    fn silent_salutespeech_import_has_no_parallel_work() {
+        assert!(!has_parallel_cloud_work(true, 0));
+        assert!(has_parallel_cloud_work(true, 1));
+        assert!(!has_parallel_cloud_work(false, 1));
     }
 
     #[test]
