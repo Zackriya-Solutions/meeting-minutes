@@ -295,14 +295,15 @@ pub async fn save_config(
     config.question_plan = validate_string_list("questionPlan", &config.question_plan, 60)?;
     config.glossary = validate_string_list("glossary", &config.glossary, 100)?;
 
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)")
-        .bind(&config.meeting_id)
-        .fetch_one(pool)
+    let current_memory = MeetingsRepository::get_memory_config(pool, &config.meeting_id)
         .await
         .map_err(|e| e.to_string())?;
-    if !exists {
-        return Err("Meeting not found".to_string());
-    }
+    let (current_memory_type, current_sensitivity) =
+        current_memory.ok_or_else(|| "Meeting not found".to_string())?;
+    let entering_private_interview = current_memory_type
+        != crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
+        || current_sensitivity
+            != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
 
     sqlx::query(
         "INSERT INTO interview_configs(meeting_id, candidate_name, role_title, interview_stage, \
@@ -321,18 +322,20 @@ pub async fn save_config(
     .bind(serde_json::to_string(&config.question_plan).unwrap())
     .bind(serde_json::to_string(&config.glossary).unwrap()).bind(config.target_minutes)
     .bind(config.candidate_questions_minutes).execute(pool).await.map_err(|e| e.to_string())?;
-    let updated = MeetingsRepository::set_memory_config(
-        pool,
-        &config.meeting_id,
-        crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW,
-        crate::database::repositories::meeting::SENSITIVITY_SENSITIVE,
-    )
+    if entering_private_interview {
+        let updated = MeetingsRepository::set_memory_config(
+            pool,
+            &config.meeting_id,
+            crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW,
+            crate::database::repositories::meeting::SENSITIVITY_SENSITIVE,
+        )
         .await
         .map_err(|e| e.to_string())?;
-    if !updated {
-        return Err("Meeting not found".to_string());
+        if !updated {
+            return Err("Meeting not found".to_string());
+        }
+        delete_search_index(pool, &config.meeting_id).await?;
     }
-    delete_search_index(pool, &config.meeting_id).await?;
     audit(
         pool,
         &config.meeting_id,
@@ -1002,6 +1005,36 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(state, ("interview".into(), "sensitive".into(), 0, 0));
+    }
+
+    #[tokio::test]
+    async fn resaving_interview_config_preserves_explicit_privacy_opt_in() {
+        let pool = pool().await;
+        let mut config = InterviewConfig::empty("m1".to_string());
+        save_config(&pool, config.clone()).await.unwrap();
+        sqlx::query(
+            "UPDATE meetings SET cloud_processing_allowed=1, indexing_allowed=1 WHERE id='m1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO chunks(id, meeting_id) VALUES(99, 'm1')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        config.question_plan.push("Add one follow-up".into());
+        save_config(&pool, config).await.unwrap();
+
+        let state: (i64, i64, i64) = sqlx::query_as(
+            "SELECT cloud_processing_allowed, indexing_allowed, \
+             (SELECT COUNT(*) FROM chunks WHERE meeting_id='m1') \
+             FROM meetings WHERE id='m1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, (1, 1, 1));
     }
 
     #[tokio::test]
