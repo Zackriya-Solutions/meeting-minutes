@@ -409,10 +409,17 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
     sensitivity: String,
 ) -> Result<MeetingMemoryConfig, String> {
     let pool = state.db_manager.pool();
-    let previous_memory_type = MeetingsRepository::get_memory_config(pool, &meeting_id)
+    let previous_memory = MeetingsRepository::get_memory_config(pool, &meeting_id)
         .await
         .map_err(|error| error.to_string())?
-        .map(|config| config.0);
+        .ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
+    let was_private = previous_memory.0
+        == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
+        || previous_memory.1
+            == crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
+    let is_private = memory_type
+        == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
+        || sensitivity == crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
     let updated = MeetingsRepository::set_memory_config(
         pool,
         &meeting_id,
@@ -425,11 +432,9 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
         return Err(format!("Meeting not found: {meeting_id}"));
     }
 
-    if memory_type == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW {
+    if !was_private && is_private {
         crate::summary::interview_workflow::delete_search_index(pool, &meeting_id).await?;
-    } else if previous_memory_type.as_deref()
-        == Some(crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW)
-    {
+    } else if was_private && !is_private {
         crate::jobs::enqueue_post_meeting_pipeline(pool, &meeting_id)
             .await
             .map_err(|error| format!("Could not restore memory indexing: {error}"))?;

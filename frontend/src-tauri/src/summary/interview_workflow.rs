@@ -300,9 +300,13 @@ pub async fn save_config(
         .map_err(|e| e.to_string())?;
     let (current_memory_type, current_sensitivity) =
         current_memory.ok_or_else(|| "Meeting not found".to_string())?;
-    let entering_private_interview = current_memory_type
+    let needs_identity_update = current_memory_type
         != crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
         || current_sensitivity
+            != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
+    let entering_private_memory = current_memory_type
+        != crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
+        && current_sensitivity
             != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
 
     sqlx::query(
@@ -322,7 +326,7 @@ pub async fn save_config(
     .bind(serde_json::to_string(&config.question_plan).unwrap())
     .bind(serde_json::to_string(&config.glossary).unwrap()).bind(config.target_minutes)
     .bind(config.candidate_questions_minutes).execute(pool).await.map_err(|e| e.to_string())?;
-    if entering_private_interview {
+    if needs_identity_update {
         let updated = MeetingsRepository::set_memory_config(
             pool,
             &config.meeting_id,
@@ -334,7 +338,9 @@ pub async fn save_config(
         if !updated {
             return Err("Meeting not found".to_string());
         }
-        delete_search_index(pool, &config.meeting_id).await?;
+        if entering_private_memory {
+            delete_search_index(pool, &config.meeting_id).await?;
+        }
     }
     audit(
         pool,
