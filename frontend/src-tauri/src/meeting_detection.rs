@@ -277,8 +277,14 @@ async fn deliver_detection(app: &AppHandle<Wry>, event: MeetingDetectedEvent) {
         window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
     });
 
+    // Always deliver the prompt to the webview. Meeting apps normally own focus while a
+    // call is active, and relying exclusively on a native notification in that state makes
+    // the prompt disappear when macOS notifications are denied or delivered quietly. The
+    // webview listener remains mounted while the window is hidden and will show the prompt
+    // when the user returns to Memento.
+    let _ = app.emit("auto-meeting-detected", event);
+
     if main_is_focused {
-        let _ = app.emit("auto-meeting-detected", event);
         return;
     }
 

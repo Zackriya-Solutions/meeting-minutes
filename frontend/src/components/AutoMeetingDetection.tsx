@@ -76,7 +76,9 @@ export function AutoMeetingDetection() {
           label: t('Not now'),
           onClick: () => undefined,
         },
-        duration: 30_000,
+        // A call is normally detected while the browser owns focus. Keep the in-app prompt
+        // until the user makes a choice so it is still present when they return to Memento.
+        duration: Infinity,
       });
     }).then((unsubscribe) => {
       if (disposed) unsubscribe();
