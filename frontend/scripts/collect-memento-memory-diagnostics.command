@@ -70,16 +70,13 @@ done
 
 memory_pressure > "$bundle_dir/memory-pressure.txt" 2>&1 || true
 vm_stat > "$bundle_dir/vm-stat.txt" 2>&1 || true
-ps -axo pid=,ppid=,%cpu=,rss=,vsz=,state=,etime=,comm= \
-  | sort -k4 -nr \
-  | head -40 > "$bundle_dir/top-processes-by-rss.txt"
 
 if [[ -n "$selected_pid" ]]; then
   echo "Found Memento PID $selected_pid (RSS $((largest_rss / 1024)) MB)."
 
   # comm reports the executable path without argv, so deep-link or opened-file
   # arguments cannot leak into the diagnostic archive.
-  ps -p "$selected_pid" -o pid=,ppid=,user=,%cpu=,%mem=,rss=,vsz=,state=,etime=,comm= \
+  ps -p "$selected_pid" -o pid=,ppid=,%cpu=,%mem=,rss=,vsz=,state=,etime=,comm= \
     > "$bundle_dir/memento-process.txt" 2>&1 || true
 
   executable_path="$(ps -p "$selected_pid" -o comm= 2>/dev/null | sed 's/^[[:space:]]*//')"
@@ -184,9 +181,11 @@ fi
 # not heap contents, but their path columns can still contain private filenames.
 for diagnostic_file in "$bundle_dir"/*.txt "$bundle_dir"/*.csv; do
   [[ -f "$diagnostic_file" ]] || continue
-  sed "s|$user_home|<HOME>|g" "$diagnostic_file" \
-    | sed -E 's#<HOME>/.*#<HOME>/<REDACTED_PATH>#g' \
-    > "$diagnostic_file.redacted"
+  MEMENTO_DIAGNOSTICS_HOME="$user_home" /usr/bin/perl -pe '
+    BEGIN { $home = quotemeta($ENV{"MEMENTO_DIAGNOSTICS_HOME"}) }
+    s/$home/<HOME>/g;
+    s{<HOME>/.*}{<HOME>/<REDACTED_PATH>}g;
+  ' "$diagnostic_file" > "$diagnostic_file.redacted"
   mv "$diagnostic_file.redacted" "$diagnostic_file"
 done
 
