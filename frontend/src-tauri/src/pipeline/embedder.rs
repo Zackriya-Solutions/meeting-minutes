@@ -54,12 +54,20 @@ enum Pooling {
     Cls,
 }
 
+// Transformer embedding graphs can materialize very large attention/MatMul intermediates.
+// A batch of 16 512-token passages made ONNX Runtime retain more than 30 GiB on a 16 GiB
+// Apple Silicon Mac. Archive backfill is background work, so bounded memory is more
+// important than throughput here.
+const SAFE_EMBEDDING_BATCH_SIZE: usize = 1;
+const EMBEDDING_INTRA_THREADS: usize = 2;
+
 /// Where to find the embedding model and how to execute it.
 #[derive(Debug, Clone)]
 pub struct EmbedderConfig {
     pub model_dir: PathBuf,
     pub dim: usize,
-    /// Inference batch size (PLAN.md: 8–16).
+    /// Memory-bounded inference batch size. Keep this at the safe global limit because
+    /// both ordinary indexing and archive repair share the same ONNX session.
     pub batch_size: usize,
     kind: EmbedderKind,
     pooling: Pooling,
@@ -74,7 +82,7 @@ impl EmbedderConfig {
         Self {
             model_dir: model_dir.into(),
             dim: kind.dim(),
-            batch_size: if kind == EmbedderKind::Frida { 4 } else { 16 },
+            batch_size: SAFE_EMBEDDING_BATCH_SIZE,
             kind,
             pooling: if kind == EmbedderKind::Frida {
                 Pooling::Cls
@@ -305,9 +313,20 @@ impl Embedder {
 }
 
 fn build_session(model_path: &Path) -> Result<ort::session::Session> {
+    use ort::execution_providers::CPUExecutionProvider;
     use ort::session::{builder::GraphOptimizationLevel, Session};
     let session = Session::builder()
         .map_err(|e| anyhow!("ort builder: {e}"))?
+        // Inputs have dynamic sequence lengths. Memory patterns and the CPU arena retain
+        // peak allocations between archive-backfill batches, which can exhaust RAM+swap.
+        .with_memory_pattern(false)
+        .map_err(|e| anyhow!("ort memory pattern: {e}"))?
+        .with_execution_providers([CPUExecutionProvider::default()
+            .with_arena_allocator(false)
+            .build()])
+        .map_err(|e| anyhow!("ort CPU provider: {e}"))?
+        .with_intra_threads(EMBEDDING_INTRA_THREADS)
+        .map_err(|e| anyhow!("ort intra threads: {e}"))?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| anyhow!("ort optimization level: {e}"))?
         .commit_from_file(model_path)
@@ -461,6 +480,14 @@ mod tests {
             build_input_text_for_kind(EmbedderKind::Frida, "текст", false),
             "search_document: текст"
         );
+    }
+
+    #[test]
+    fn embedding_batches_are_memory_bounded_for_all_models() {
+        for kind in [EmbedderKind::MultilingualE5Small, EmbedderKind::Frida] {
+            let config = EmbedderConfig::for_kind("/tmp/unused", kind);
+            assert_eq!(config.batch_size, 1);
+        }
     }
 
     #[test]
