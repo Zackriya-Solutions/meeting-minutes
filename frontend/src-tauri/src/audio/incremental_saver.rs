@@ -261,6 +261,16 @@ fn has_checkpoint_files(meeting_folder: &Path) -> Result<bool, String> {
         })
 }
 
+fn finalized_recording_without_checkpoints(
+    meeting_folder: &Path,
+) -> Result<Option<PathBuf>, String> {
+    if has_checkpoint_files(meeting_folder)? {
+        return Ok(None);
+    }
+
+    Ok(existing_recording_path(meeting_folder))
+}
+
 /// Recover audio from checkpoint files
 /// This is called by the transcript recovery system to merge audio chunks after a crash
 #[tauri::command]
@@ -275,8 +285,9 @@ pub async fn recover_audio_from_checkpoints(
     // A clean recording stop merges checkpoints into audio.mp4 and removes the
     // checkpoint directory. IndexedDB recovery metadata can still remain when
     // the app is interrupted immediately afterwards, so the finalized file is
-    // itself a valid (and preferred) recovery source.
-    if let Some(audio_path) = existing_recording_path(&folder_path) {
+    // itself a valid recovery source. Existing checkpoints always take priority:
+    // audio.mp4 may be a partial file left by a crash during the merge.
+    if let Some(audio_path) = finalized_recording_without_checkpoints(&folder_path)? {
         let audio_path = audio_path.to_string_lossy().to_string();
         info!("Using existing finalized recording: {}", audio_path);
         return Ok(AudioRecoveryStatus {
@@ -569,5 +580,20 @@ mod tests {
         assert!(has_audio_checkpoints(meeting_folder.to_string_lossy().to_string())
             .await
             .unwrap());
+    }
+
+    #[test]
+    fn checkpoints_take_priority_over_a_possibly_partial_finalized_file() {
+        let temp_dir = tempdir().unwrap();
+        let meeting_folder = temp_dir.path().join("Interrupted_Merge");
+        let checkpoints = meeting_folder.join(".checkpoints");
+        std::fs::create_dir_all(&checkpoints).unwrap();
+        std::fs::write(meeting_folder.join("audio.mp4"), b"possibly truncated").unwrap();
+        std::fs::write(checkpoints.join("audio_chunk_000.mp4"), b"checkpoint").unwrap();
+
+        assert_eq!(
+            finalized_recording_without_checkpoints(&meeting_folder).unwrap(),
+            None
+        );
     }
 }
