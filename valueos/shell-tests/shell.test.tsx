@@ -251,6 +251,10 @@ describe('ValueOS redesigned flow', () => {
     const partial = screen.getByTestId('valueos-recording-partial');
     expect(partial).toHaveTextContent('before the deal even reaches');
     expect(partial).toHaveStyle({ fontStyle: 'italic' });
+    // live activity indicator is present during capture (fallback signal); an in-flight interim
+    // makes it "recognizing".
+    const activity = await screen.findByTestId('valueos-recording-activity');
+    expect(activity).toHaveAttribute('data-activity', 'recognizing');
   });
 
   it('End & upload creates a call with BOTH artifacts via the composite /calls path', async () => {

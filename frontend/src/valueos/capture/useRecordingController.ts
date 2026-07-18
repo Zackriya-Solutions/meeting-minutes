@@ -15,6 +15,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { applyConfiguredSaveFolder } from './recordingLocation';
 import { labelTranscript } from './speakerLabels';
+import { deriveLive } from './liveTranscript';
 import { formatTranscript, type TranscriptSegment } from './transcriptFormat';
 import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
@@ -40,22 +41,14 @@ export interface RecordingController {
 // prefixes appear automatically if/when the stack ever provides a per-segment source. Today
 // segments carry none, so this is exactly a plain newline join (no regression).
 
-/** Split segments into the confirmed body and the trailing hypothesis. Only the most-recent
- *  utterance carries a tentative tail (UI_GUIDE §4): if the last segment is still partial it
- *  is the faded/italic tail; everything before it is confirmed. */
+/** Split segments into the confirmed body + the trailing in-progress hypothesis, via the shared
+ *  live-transcript model (liveTranscript.ts). The interim is DISPLAY-ONLY. */
 function splitConfirmedPartial(transcripts: { text: string; is_partial?: boolean; source?: string | null }[]): {
   confirmed: string;
   partial: string;
 } {
-  if (transcripts.length === 0) return { confirmed: '', partial: '' };
-  const last = transcripts[transcripts.length - 1];
-  if (last?.is_partial) {
-    return {
-      confirmed: labelTranscript(transcripts.slice(0, -1)),
-      partial: last.text?.trim() ?? '',
-    };
-  }
-  return { confirmed: labelTranscript(transcripts), partial: '' };
+  const { committed, interim } = deriveLive(transcripts);
+  return { confirmed: labelTranscript(committed), partial: interim?.text?.trim() ?? '' };
 }
 
 function countWords(s: string): number {

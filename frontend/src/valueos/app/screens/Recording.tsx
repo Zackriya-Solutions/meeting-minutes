@@ -5,6 +5,8 @@
 // Pause (real pause_recording), and End & upload (stop → write file → composite /calls upload).
 import React, { useEffect, useRef, useState } from 'react';
 import { useRecordingController } from '@/valueos/capture/useRecordingController';
+import { useMicLevel } from '@/valueos/capture/useMicLevel';
+import { recognitionActivity, type RecognitionActivity } from '@/valueos/capture/liveTranscript';
 import type { StartCallMeta } from '../types';
 import { Avatar, StatusPill } from '../parts';
 import { IcMic } from '../icons';
@@ -45,6 +47,21 @@ export function Recording({
   const liveRef = useRef<HTMLDivElement>(null);
   const startedOnce = useRef(false);
 
+  // Live signals (fallback path — no true interim stream): a REAL VU meter from the webview's
+  // own mic + an activity indicator + "seconds since the last recognized line".
+  const micLevel = useMicLevel(phase === 'live' && !paused);
+  const activity = recognitionActivity({
+    recording: phase === 'live',
+    paused,
+    hasInterim: !!rec.partialText,
+    speaking: micLevel > 0.08,
+  });
+  const lastLineRef = useRef(startedAt);
+  useEffect(() => {
+    lastLineRef.current = Date.now(); // a new committed line arrived → reset the "since last line" timer
+  }, [rec.confirmedText]);
+  const sinceLineSec = Math.max(0, Math.round((now - lastLineRef.current) / 1000));
+
   // Start the engine + capture once, on mount — but only if this call hasn't started yet
   // (returning to an in-progress call must not restart it).
   useEffect(() => {
@@ -63,9 +80,9 @@ export function Recording({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 1s timer.
+  // 1s timer (drives the running clock + the "seconds since last line" signal).
   useEffect(() => {
-    if (phase !== 'live') return;
+    if (phase !== 'live' && phase !== 'starting') return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [phase]);
@@ -145,7 +162,7 @@ export function Recording({
         className="va-card"
         style={{ marginTop: 18, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 16 }}
       >
-        <Waveform paused={paused || phase !== 'live'} />
+        <VuMeter level={micLevel} paused={paused || phase !== 'live'} />
         <span className="va-muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }} data-testid="valueos-recording-words">
           <strong style={{ color: 'var(--va-near-black)' }}>{rec.wordCount.toLocaleString()}</strong> words
         </span>
@@ -159,10 +176,13 @@ export function Recording({
       </div>
 
       {/* live transcript */}
-      <div className="va-ovl" style={{ margin: '26px 0 4px' }}>Live transcript</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '26px 0 4px', flexWrap: 'wrap' }}>
+        <div className="va-ovl">Live transcript</div>
+        <ActivityChip activity={activity} secondsSinceLine={sinceLineSec} />
+      </div>
       <p className="va-muted" style={{ fontSize: 13, margin: '0 0 12px' }}>
-        Faded, italic text is still being confirmed. Speaker labels (Me / Other) in the saved
-        transcript are best-effort.
+        Recognized speech appears as each phrase is confirmed. Faded, italic text is still being
+        confirmed. Speaker labels (Me / Other) in the saved transcript are best-effort.
       </p>
 
       <div ref={liveRef} className="va-scroll" data-testid="valueos-recording-live" style={{ maxHeight: 360, overflowY: 'auto' }}>
@@ -209,6 +229,56 @@ export function Recording({
         )}
       </div>
     </div>
+  );
+}
+
+/** Real VU meter driven by the mic level (0..1). level < 0 → mic unavailable, fall back to the
+ *  animated waveform so there's always a live signal. */
+function VuMeter({ level, paused }: { level: number; paused: boolean }) {
+  if (level < 0) return <Waveform paused={paused} />;
+  const bars = 28;
+  return (
+    <div aria-hidden="true" data-testid="valueos-recording-vu" style={{ display: 'flex', alignItems: 'center', gap: 3, height: 30 }}>
+      {Array.from({ length: bars }).map((_, i) => {
+        const center = 1 - Math.abs(i - (bars - 1) / 2) / ((bars - 1) / 2); // taller in the middle
+        const h = paused ? 0.12 : Math.max(0.08, Math.min(1, level * (0.55 + center * 0.9)));
+        return (
+          <span
+            key={i}
+            style={{
+              width: 3,
+              height: `${h * 100}%`,
+              borderRadius: 2,
+              background: paused ? 'var(--va-gray-200)' : 'var(--va-blue)',
+              transition: 'height 80ms linear',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** The always-on live signal: Listening / Recognizing (+ seconds since the last committed line). */
+function ActivityChip({ activity, secondsSinceLine }: { activity: RecognitionActivity; secondsSinceLine: number }) {
+  if (activity === 'idle') return null;
+  const label = activity === 'recognizing' ? 'Recognizing…' : activity === 'paused' ? 'Paused' : 'Listening…';
+  const color = activity === 'paused' ? 'var(--va-gray-400)' : activity === 'recognizing' ? 'var(--va-blue)' : 'var(--va-gray-600)';
+  return (
+    <span
+      data-testid="valueos-recording-activity"
+      data-activity={activity}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, color }}
+    >
+      <span
+        className="va-dot"
+        style={{ background: color, animation: activity === 'paused' ? 'none' : 'vaPulse 1.2s var(--ease) infinite' }}
+      />
+      {label}
+      {activity !== 'paused' && secondsSinceLine >= 2 && (
+        <span className="va-muted" style={{ fontWeight: 500 }}>· {secondsSinceLine}s since last line</span>
+      )}
+    </span>
   );
 }
 
