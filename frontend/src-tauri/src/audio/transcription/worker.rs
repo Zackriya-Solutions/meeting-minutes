@@ -140,6 +140,41 @@ pub fn start_transcription_task<R: Runtime>(
                                 continue;
                             }
 
+                            // VALUEOS: streaming interim ("preview") request. The pipeline tags the
+                            // in-progress (not-yet-closed) speech with a reserved chunk_id. Transcribe
+                            // it and emit is_partial:true with a sentinel sequence id so the webview
+                            // REPLACES the live preview (reduceLive) — never committing it, never
+                            // advancing the sequence counter, never persisting it.
+                            if chunk.chunk_id == crate::audio::recording_state::VALUEOS_PARTIAL_CHUNK_ID {
+                                let valueos_source = match &chunk.device_type {
+                                    crate::audio::recording_state::DeviceType::System => "Other",
+                                    _ => "Me",
+                                }
+                                .to_string();
+                                let p_start = chunk.timestamp;
+                                let p_dur = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                                if let Ok((text, _confidence, _is_partial)) =
+                                    transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone).await
+                                {
+                                    if !text.trim().is_empty() {
+                                        let update = TranscriptUpdate {
+                                            text,
+                                            timestamp: format_current_timestamp(),
+                                            source: valueos_source,
+                                            sequence_id: u64::MAX, // VALUEOS: interim sentinel (never committed)
+                                            chunk_start_time: p_start,
+                                            is_partial: true,
+                                            confidence: 0.0,
+                                            audio_start_time: p_start,
+                                            audio_end_time: p_start + p_dur,
+                                            duration: p_dur,
+                                        };
+                                        let _ = app_clone.emit("transcript-update", &update);
+                                    }
+                                }
+                                continue;
+                            }
+
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
                             // VALUEOS: carry the best-effort Me/Other source set in the pipeline

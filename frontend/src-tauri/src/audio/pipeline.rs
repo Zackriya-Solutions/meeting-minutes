@@ -9,17 +9,36 @@ use super::batch_processor::AudioMetricsBatcher;
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 
 use super::devices::AudioDevice;
-use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
+use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType, VALUEOS_PARTIAL_CHUNK_ID};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
-// VALUEOS: RMS energy of a sample window — used for best-effort Me/Other speaker tagging
-// (the mic vs system stream that is louder over an utterance is attributed the speech).
+// VALUEOS: RMS energy of a sample window — used for best-effort Me/Other speaker tagging.
 fn valueos_rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
     (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+// VALUEOS: decide Me/Other for one utterance from the RAW system stream. Returns System
+// ('Other') when the mean per-window system energy this utterance is BOTH above a tiny absolute
+// floor (guards a stack with no system capture at all) AND clearly above the self-calibrating
+// system noise floor (the remote/video was audibly playing). Otherwise the speech came from the
+// mic → Microphone ('Me'). The mic is loudness-normalized so it is deliberately NOT used here.
+// Constants are first-cut and tuned from the `🗣️ VALUEOS speaker=` logs on the desktop build.
+fn valueos_attribute(sys_energy_sum: f32, sys_windows: u32, sys_floor: f32) -> DeviceType {
+    if sys_windows == 0 {
+        return DeviceType::Microphone;
+    }
+    let mean_sys = sys_energy_sum / sys_windows as f32;
+    const SYS_ABS_MIN: f32 = 0.0035; // below this the system stream is effectively silent
+    const SYS_ACTIVATION: f32 = 3.5; // how far above its own floor system must rise to be "active"
+    if mean_sys > SYS_ABS_MIN && mean_sys > sys_floor * SYS_ACTIVATION {
+        DeviceType::System
+    } else {
+        DeviceType::Microphone
+    }
 }
 
 /// Ring buffer for synchronized audio mixing
@@ -703,9 +722,16 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
-    // VALUEOS: per-utterance mic/system energy accumulators for best-effort Me/Other tagging.
-    valueos_mic_energy: f32,
-    valueos_sys_energy: f32,
+    // VALUEOS: best-effort Me/Other tagging. The mic is loudness-normalized (EBU R128, no gate
+    // → near-constant energy whether or not anyone talks), so it can't tell speech from silence.
+    // We therefore key attribution off the RAW system stream: accumulate its per-window energy
+    // for the current utterance and keep a self-calibrating noise floor; when the utterance's
+    // mean system energy clearly rises above that floor, the remote/'Other' was audible.
+    valueos_sys_energy: f32,   // sum of per-window system RMS for the in-progress utterance
+    valueos_sys_windows: u32,  // number of windows accumulated for the in-progress utterance
+    valueos_sys_floor: f32,    // running system noise-floor estimate (persists across utterances)
+    // VALUEOS: throttle for streaming interim ("preview") transcription of the in-progress utterance.
+    valueos_last_partial: std::time::Instant,
 }
 
 impl AudioPipeline {
@@ -766,9 +792,11 @@ impl AudioPipeline {
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
-            // VALUEOS: Me/Other energy accumulators
-            valueos_mic_energy: 0.0,
+            // VALUEOS: system-energy accumulators + noise floor for Me/Other tagging
             valueos_sys_energy: 0.0,
+            valueos_sys_windows: 0,
+            valueos_sys_floor: 0.0,
+            valueos_last_partial: std::time::Instant::now(),
             // Initialize metrics batcher for smart batching
             metrics_batcher: Some(AudioMetricsBatcher::new()),
             // Initialize professional audio mixing
@@ -837,10 +865,19 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // VALUEOS: accumulate per-source energy so we can attribute each
-                            // utterance to the louder stream (mic = Me, system = Other).
-                            self.valueos_mic_energy += valueos_rms(&mic_window);
-                            self.valueos_sys_energy += valueos_rms(&sys_window);
+                            // VALUEOS: accumulate raw system energy for this utterance and keep a
+                            // self-calibrating noise floor (tracks the quiet gaps: falls fast, rises
+                            // very slowly) so we can tell when the system stream is genuinely active.
+                            let sys_rms = valueos_rms(&sys_window);
+                            self.valueos_sys_energy += sys_rms;
+                            self.valueos_sys_windows += 1;
+                            self.valueos_sys_floor = if self.valueos_sys_floor == 0.0 {
+                                sys_rms
+                            } else if sys_rms < self.valueos_sys_floor {
+                                self.valueos_sys_floor * 0.9 + sys_rms * 0.1 // adapt down fast
+                            } else {
+                                self.valueos_sys_floor * 0.998 + sys_rms * 0.002 // rise very slowly
+                            };
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
@@ -860,18 +897,25 @@ impl AudioPipeline {
                                             info!("📤 Sending VAD segment: {:.1}ms, {} samples",
                                                   duration_ms, segment.samples.len());
 
-                                            // VALUEOS: attribute this utterance to the louder
-                                            // source since the last segment; require system to be
-                                            // clearly louder (non-assertive → defaults to Me).
-                                            let valueos_source = if self.valueos_sys_energy
-                                                > self.valueos_mic_energy * 1.15
-                                            {
-                                                DeviceType::System
-                                            } else {
-                                                DeviceType::Microphone
-                                            };
-                                            self.valueos_mic_energy = 0.0;
+                                            // VALUEOS: the system stream is RAW, so its energy is
+                                            // meaningful. Attribute to 'Other' when this utterance's
+                                            // mean system energy clearly cleared the system noise
+                                            // floor (remote/video was audibly playing); otherwise the
+                                            // speech came from the (normalized) mic → 'Me'.
+                                            let valueos_source = valueos_attribute(
+                                                self.valueos_sys_energy,
+                                                self.valueos_sys_windows,
+                                                self.valueos_sys_floor,
+                                            );
+                                            info!(
+                                                "🗣️ VALUEOS speaker={:?} mean_sys={:.4} floor={:.4}",
+                                                valueos_source,
+                                                self.valueos_sys_energy
+                                                    / self.valueos_sys_windows.max(1) as f32,
+                                                self.valueos_sys_floor
+                                            );
                                             self.valueos_sys_energy = 0.0;
+                                            self.valueos_sys_windows = 0;
 
                                             let transcription_chunk = AudioChunk {
                                                 data: segment.samples,
@@ -907,6 +951,33 @@ impl AudioPipeline {
                                     device_type: DeviceType::Microphone,  // Mixed audio
                                 };
                                 let _ = sender.send(recording_chunk);
+                            }
+                        }
+                    }
+
+                    // VALUEOS: streaming interim — after the mixing/VAD pass for this chunk,
+                    // periodically transcribe the in-progress (not-yet-closed) utterance so preview
+                    // words appear before it finalizes. Throttled (~700ms); buffer bounded (~0.5s min
+                    // to skip noise, ~25s max to bound re-decode cost). Emitted is_partial only
+                    // (display-only — the worker never persists it or advances the sequence counter).
+                    if self.valueos_last_partial.elapsed().as_millis() >= 700 {
+                        if let Some(inprogress) = self.vad_processor.valueos_in_progress_speech() {
+                            let len = inprogress.len();
+                            if len >= 8_000 && len <= 16_000 * 25 {
+                                self.valueos_last_partial = std::time::Instant::now();
+                                let valueos_source = valueos_attribute(
+                                    self.valueos_sys_energy,
+                                    self.valueos_sys_windows,
+                                    self.valueos_sys_floor,
+                                );
+                                let partial_chunk = AudioChunk {
+                                    data: inprogress,
+                                    sample_rate: 16000,
+                                    timestamp: 0.0, // display-only; dropped from the saved transcript
+                                    chunk_id: VALUEOS_PARTIAL_CHUNK_ID,
+                                    device_type: valueos_source,
+                                };
+                                let _ = self.transcription_sender.send(partial_chunk);
                             }
                         }
                     }

@@ -1,15 +1,14 @@
 // VALUEOS WS3: speaker-label mapping.
 //
-// Reality today (see valueos/FEATURE-speakers.md — achieved level: c): the audio stack
-// captures mic and system as separate, source-tagged streams but SUMS them into one mono
-// signal BEFORE transcription, and the emitted segment `source` is a hardcoded "Audio". So no
-// real speaker distinction reaches our layer, and we do NOT edit upstream to force one.
+// The native pipeline now tags each emitted segment's `source` with a BEST-EFFORT speaker
+// (see valueos/FEATURE-speakers.md and pipeline.rs `valueos_attribute`): the mic stream is
+// loudness-normalized so it can't tell talk from silence, so attribution keys off the RAW
+// system stream — when an utterance's system energy clearly rises above its self-calibrating
+// noise floor the remote/'Other' was audible ("Other"), otherwise it's the local mic ("Me").
 //
-// This module is the single place that maps a segment's `source` → a display label. It is the
-// seam for real "Me:" / "Other:" labels the moment an upstream change starts populating
-// `source` with the capture DeviceType (mic vs system). Until then it is INERT: an unknown /
-// "Audio" source resolves to no label, so the stored + uploaded transcript text is byte-for-byte
-// identical to a plain join — no regression, no overpromising in the UI.
+// This module is the single place that maps a segment's `source` → a display label. A source
+// it can't resolve (or none at all) still yields NO label — so the stored + uploaded text
+// degrades gracefully to a plain join rather than inventing a speaker.
 
 export interface LabeledSegment {
   text: string;

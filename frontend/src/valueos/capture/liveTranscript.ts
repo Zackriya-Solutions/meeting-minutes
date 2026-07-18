@@ -1,9 +1,10 @@
-// VALUEOS: live-transcript state model. The engine currently emits one update per completed
-// utterance (no true interim stream — see FEATURE-live-partial-transcript.md), so at runtime
-// `deriveLive` (snapshot over the segment array) is used. `reduceLive` is the forward-compatible
-// event-stream reducer: it handles a stream of INTERIM updates (latest replaces prior, never
-// appended) and commits the FINAL exactly once — so the moment the engine gains a real interim
-// stream, wiring it here gives live in-progress text with zero UI changes.
+// VALUEOS: live-transcript state model. The native pipeline now streams INTERIM ("preview")
+// hypotheses for the in-progress utterance (pipeline.rs periodically transcribes the not-yet-
+// closed VAD buffer and emits is_partial:true), then a FINAL when the segment closes. The runtime
+// live view is driven by `reduceLive` over the transcript-update event stream (see
+// useRecordingController): each INTERIM replaces the single preview buffer (latest wins, never
+// appended); the FINAL commits exactly once (deduped by sequence_id) and clears the preview.
+// `deriveLive` is the equivalent snapshot form over a segment array (used in tests/fallbacks).
 //
 // INTERIM IS DISPLAY-ONLY. Only committed (final) segments flow into the enriched export/upload
 // (see transcriptFormat.ts, which drops is_partial segments).

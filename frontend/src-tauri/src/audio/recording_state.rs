@@ -24,6 +24,12 @@ pub struct AudioChunk {
     pub device_type: DeviceType,
 }
 
+/// VALUEOS: reserved `chunk_id` marking an in-progress (not-yet-finalized) speech buffer sent to
+/// the transcription worker for a STREAMING INTERIM ("preview") hypothesis. The worker transcribes
+/// it, emits `is_partial: true` with a sentinel sequence id, and neither advances the sequence
+/// counter nor persists it. Distinct from the flush sentinels (`>= u64::MAX - 10`).
+pub const VALUEOS_PARTIAL_CHUNK_ID: u64 = u64::MAX - 20;
+
 /// Processed audio chunk (post-VAD) for recording
 #[derive(Debug, Clone)]
 pub struct ProcessedAudioChunk {
