@@ -52,6 +52,18 @@ interface RetranscriptionError {
   error: string;
 }
 
+interface TranscriptionProvenance {
+  provider?: string | null;
+  model?: string | null;
+  language?: string | null;
+  transcribed_at?: string | null;
+  source?: string | null;
+  known: boolean;
+}
+
+const normalizeProvider = (provider?: string | null) =>
+  provider === 'localWhisper' ? 'whisper' : (provider || '').toLowerCase();
+
 export function RetranscribeDialog({
   open,
   onOpenChange,
@@ -65,6 +77,8 @@ export function RetranscribeDialog({
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const [provenance, setProvenance] = useState<TranscriptionProvenance | null>(null);
+  const [loadingProvenance, setLoadingProvenance] = useState(false);
 
   // Use centralized model fetching hook
   const {
@@ -100,6 +114,12 @@ export function RetranscribeDialog({
   // GigaAM (Russian e2e), Parakeet, and SaluteSpeech don't take a language hint here —
   // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
   const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
+  const usesSameModel = Boolean(
+    provenance?.known
+    && selectedModelDetails
+    && normalizeProvider(provenance.provider) === normalizeProvider(selectedModelDetails.provider)
+    && provenance.model === selectedModelDetails.name
+  );
 
   useEffect(() => {
     if (languageAutoOnly && selectedLang !== 'auto') {
@@ -119,11 +139,20 @@ export function RetranscribeDialog({
       setProgress(null);
       setError(null);
       setSelectedLang(selectedLanguage || 'auto');
+      setProvenance(null);
 
       // Fetch available models using centralized hook
       fetchModels();
+      setLoadingProvenance(true);
+      invoke<TranscriptionProvenance>('get_meeting_transcription_provenance', { meetingId })
+        .then(setProvenance)
+        .catch((provenanceError) => {
+          console.warn('Failed to load transcription provenance:', provenanceError);
+          setProvenance({ known: false });
+        })
+        .finally(() => setLoadingProvenance(false));
     }
-  }, [open, selectedLanguage, transcriptModelConfig, fetchModels]);
+  }, [open, selectedLanguage, transcriptModelConfig, fetchModels, meetingId]);
 
   // Listen for retranscription events
   useEffect(() => {
@@ -308,6 +337,36 @@ export function RetranscribeDialog({
 
         <div className="space-y-4 py-4">
           {!isProcessing && !error && (
+            <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--fg3)]">
+                {t('Current transcript')}
+              </p>
+              {loadingProvenance ? (
+                <p className="mt-1 flex items-center gap-2 text-sm text-[var(--fg2)]">
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t('Loading transcription details...')}
+                </p>
+              ) : provenance?.known ? (
+                <>
+                  <p className="mt-1 text-sm font-medium text-[var(--fg)]">
+                    {provenance.provider} · {provenance.model}
+                    {provenance.language && provenance.language !== 'auto' ? ` · ${provenance.language}` : ''}
+                  </p>
+                  {usesSameModel && (
+                    <p className="mt-2 flex items-start gap-2 text-xs text-[var(--success)]">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                      {t('This transcript already uses the selected model. Repeat only to change language or retry recognition quality.')}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-[var(--fg2)]">
+                  {t('The original model is unknown because this meeting was created before model history was stored.')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!isProcessing && !error && (
             !languageAutoOnly ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
@@ -411,7 +470,7 @@ export function RetranscribeDialog({
                 disabled={!meetingFolderPath}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
-                {t('Start Retranscription')}
+                {usesSameModel ? t('Retranscribe anyway') : t('Start Retranscription')}
               </Button>
             </>
           )}

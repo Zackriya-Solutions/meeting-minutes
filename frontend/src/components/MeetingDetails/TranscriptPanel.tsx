@@ -51,6 +51,7 @@ interface TranscriptPanelProps {
 
   // Speaker diarization props
   speakersById?: Map<number, string> | null;
+  speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   /** Refresh speakers + transcripts after a successful detect. */
   onSpeakersDetected?: () => Promise<void> | void;
@@ -78,27 +79,31 @@ export function TranscriptPanel({
   markedMoments = [],
   onSeekToMoment,
   speakersById = null,
+  speakerCount = 0,
   onRenameSpeaker,
   onSpeakersDetected,
 }: TranscriptPanelProps) {
   const t = useT();
-  const [audioPath, setAudioPath] = useState<string | null>(null);
+  const [audioSources, setAudioSources] = useState<string[]>([]);
   const [savedAudioDuration, setSavedAudioDuration] = useState(0);
   const [audioUnavailable, setAudioUnavailable] = useState(false);
   const [isExportingMp3, setIsExportingMp3] = useState(false);
-  const audio = useAudioPlayer(audioPath);
+  const audio = useAudioPlayer(audioSources);
 
   useEffect(() => {
     let cancelled = false;
-    setAudioPath(null);
+    setAudioSources([]);
     setSavedAudioDuration(0);
     setAudioUnavailable(false);
     if (!meetingId || !meetingFolderPath) return;
 
-    invoke<{ path: string; duration_seconds: number }>('get_meeting_audio_playback_info', { meetingId })
+    invoke<{ path: string; playback_url?: string; duration_seconds: number }>('get_meeting_audio_playback_info', { meetingId })
       .then((info) => {
         if (!cancelled) {
-          setAudioPath(convertFileSrc(info.path));
+          // WKWebView support differs between macOS versions. Prefer Tauri's scoped
+          // asset protocol and automatically fall back to the byte-range localhost
+          // transport if the media engine rejects the first source.
+          setAudioSources([convertFileSrc(info.path), info.playback_url].filter(Boolean) as string[]);
           setSavedAudioDuration(info.duration_seconds);
         }
       })
@@ -124,9 +129,9 @@ export function TranscriptPanel({
   }, [isExportingMp3, meetingId, t]);
 
   const handlePlayTimestamp = useCallback((seconds: number) => {
-    if (!audioPath) return;
+    if (audioSources.length === 0) return;
     void audio.playFrom(seconds);
-  }, [audio, audioPath]);
+  }, [audio, audioSources.length]);
 
   const handleMarkedMoment = useCallback((seconds: number) => {
     onSeekToMoment?.(seconds);
@@ -179,19 +184,20 @@ export function TranscriptPanel({
             if (audio.isPlaying) audio.pause();
             else void audio.play();
           }}
-          recordingAudioAvailable={!!audioPath && !audioUnavailable}
+          recordingAudioAvailable={audioSources.length > 0 && !audioUnavailable}
           isRecordingAudioPlaying={audio.isPlaying}
           isRecordingAudioLoading={audio.isLoading}
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
           onSpeakersDetected={onSpeakersDetected}
+          speakerCount={speakerCount}
         />
       </div>
 
       {meetingId && meetingFolderPath && (
         <MeetingAudioPlayer
-          available={!!audioPath && !audioUnavailable}
+          available={audioSources.length > 0 && !audioUnavailable}
           isPlaying={audio.isPlaying}
           isLoading={audio.isLoading}
           isExporting={isExportingMp3}
@@ -245,7 +251,7 @@ export function TranscriptPanel({
           speakersById={speakersById}
           onRenameSpeaker={onRenameSpeaker}
           onPlayTimestamp={handlePlayTimestamp}
-          playbackTime={audioPath && (audio.isPlaying || audio.currentTime > 0) ? audio.currentTime : null}
+          playbackTime={audioSources.length > 0 && (audio.isPlaying || audio.currentTime > 0) ? audio.currentTime : null}
           onCorrectTranscript={meetingId ? handleCorrectTranscript : undefined}
         />
       </div>

@@ -1,0 +1,74 @@
+table_name,domain
+app_settings_kv,Foundation: capture and processing
+audio_duplicate_reviews,Foundation: capture and processing
+audio_identities,Foundation: capture and processing
+capture_observations,Foundation: capture and processing
+capture_retention_policy,Foundation: capture and processing
+capture_sessions,Foundation: capture and processing
+jobs,Foundation: capture and processing
+meeting_audio_identities,Foundation: capture and processing
+meeting_notes,Foundation: capture and processing
+meeting_windows,Foundation: capture and processing
+meetings,Foundation: capture and processing
+settings,Foundation: capture and processing
+settings_new,Foundation: capture and processing
+summary_processes,Foundation: capture and processing
+transcript_chunks,Foundation: capture and processing
+transcript_settings,Foundation: capture and processing
+transcripts,Foundation: capture and processing
+action_items,Knowledge and organization
+chat_messages,Knowledge and organization
+chat_sessions,Knowledge and organization
+chunks,Knowledge and organization
+collection_auto_exclusions,Knowledge and organization
+collections,Knowledge and organization
+entities,Knowledge and organization
+entity_mentions,Knowledge and organization
+meeting_collections,Knowledge and organization
+pending_merges,Knowledge and organization
+saved_searches,Knowledge and organization
+artifact_versions,Cross-meeting learning
+collection_suggestions,Cross-meeting learning
+context_edges,Cross-meeting learning
+conversation_dynamics_profiles,Cross-meeting learning
+identity_assertions,Cross-meeting learning
+identity_inference_runs,Cross-meeting learning
+language_profiles,Cross-meeting learning
+learning_events,Cross-meeting learning
+meeting_type_suggestions,Cross-meeting learning
+quality_observations,Cross-meeting learning
+reconciliation_runs,Cross-meeting learning
+reconciliation_suggestions,Cross-meeting learning
+rejected_speaker_name_candidate_instances,Cross-meeting learning
+rejected_speaker_name_fingerprints,Cross-meeting learning
+rejected_speaker_name_observations,Cross-meeting learning
+speaker_aliases,Cross-meeting learning
+speaker_cluster_segments,Cross-meeting learning
+speaker_clusters,Cross-meeting learning
+speaker_name_candidates,Cross-meeting learning
+speaker_profile_versions,Cross-meeting learning
+speakers,Cross-meeting learning
+terminology_aliases,Cross-meeting learning
+terminology_evidence,Cross-meeting learning
+terminology_term_versions,Cross-meeting learning
+terminology_terms,Cross-meeting learning
+transcript_corrections,Cross-meeting learning
+voice_centroids,Cross-meeting learning
+voice_samples,Cross-meeting learning
+interview_audit_log,Domain-specific workflows
+interview_configs,Domain-specific workflows
+interview_debriefs,Domain-specific workflows
+interview_records,Domain-specific workflows
+interview_track_meetings,Domain-specific workflows
+interview_tracks,Domain-specific workflows
+one_on_one_audit_log,Domain-specific workflows
+one_on_one_commitments,Domain-specific workflows
+one_on_one_configs,Domain-specific workflows
+one_on_one_live_markers,Domain-specific workflows
+one_on_one_participant_pairs,Domain-specific workflows
+one_on_one_private_notes,Domain-specific workflows
+one_on_one_records,Domain-specific workflows
+one_on_one_recurring_topics,Domain-specific workflows
+one_on_one_series,Domain-specific workflows
+standup_private_notes,Domain-specific workflows
+standup_records,Domain-specific workflows

@@ -165,6 +165,7 @@ pub struct IdentityReviewItem {
     pub local_cluster_id: i64,
     pub placeholder_speaker_id: Option<i64>,
     pub operational_speaker_id: Option<i64>,
+    pub operational_display_name: Option<String>,
     pub speech_duration_ms: i64,
     pub speech_quality: Option<f64>,
     pub policy_result: String,
@@ -619,12 +620,14 @@ pub async fn list_identity_review(
 ) -> Result<Vec<IdentityReviewItem>, String> {
     let rows = sqlx::query(
         "SELECT sc.id, sc.local_cluster_id, sc.placeholder_speaker_id, \
-                sc.operational_speaker_id, sc.speech_duration_ms, sc.speech_quality, \
+                sc.operational_speaker_id, os.display_name AS operational_display_name, \
+                sc.speech_duration_ms, sc.speech_quality, \
                 ir.policy_result, ir.candidate_scores_json, \
                 (SELECT ia.polarity || ':' || ia.trust_tier || ':' || ia.reason \
                    FROM identity_assertions ia WHERE ia.cluster_id=sc.id \
                    ORDER BY ia.id DESC LIMIT 1) AS latest_assertion \
          FROM speaker_clusters sc \
+         LEFT JOIN speakers os ON os.id=sc.operational_speaker_id \
          JOIN identity_inference_runs ir ON ir.id=( \
              SELECT id FROM identity_inference_runs WHERE cluster_id=sc.id ORDER BY id DESC LIMIT 1 \
          ) \
@@ -646,6 +649,7 @@ pub async fn list_identity_review(
             local_cluster_id: row.get("local_cluster_id"),
             placeholder_speaker_id: row.get("placeholder_speaker_id"),
             operational_speaker_id: row.get("operational_speaker_id"),
+            operational_display_name: row.get("operational_display_name"),
             speech_duration_ms: row.get("speech_duration_ms"),
             speech_quality: row.get("speech_quality"),
             policy_result: row.get("policy_result"),

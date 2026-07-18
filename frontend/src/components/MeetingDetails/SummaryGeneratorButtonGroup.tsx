@@ -13,14 +13,17 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Sparkles, Settings, Loader2, FileText, Check, Square } from '@/components/memento/LucideCompat';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { useState, useEffect, useRef, ReactNode } from 'react';
+import { useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
 import { useT } from '@/lib/i18n';
@@ -43,6 +46,40 @@ interface SummaryGeneratorButtonGroupProps {
   onOpenModelSettings?: (openFn: () => void) => void;
 }
 
+type SummaryTemplate = SummaryGeneratorButtonGroupProps['availableTemplates'][number];
+type SummaryTemplateGroup = { label: string; templates: SummaryTemplate[] };
+
+const BUILT_IN_TEMPLATE_GROUPS = [
+  {
+    label: 'Common templates',
+    ids: ['standard_meeting', 'project_sync', 'daily_standup', 'sales_marketing_client_call', 'retrospective'],
+  },
+  {
+    label: 'People and feedback',
+    ids: ['interview_memory', 'one_on_one'],
+  },
+  {
+    label: 'Specialized templates',
+    ids: ['psychatric_session'],
+  },
+] as const;
+
+function groupSummaryTemplates(templates: SummaryTemplate[]) {
+  const templatesById = new Map(templates.map((template) => [template.id, template]));
+  const builtInIds = new Set<string>(BUILT_IN_TEMPLATE_GROUPS.flatMap((group) => [...group.ids]));
+  const groups: SummaryTemplateGroup[] = BUILT_IN_TEMPLATE_GROUPS.map((group) => ({
+    label: group.label,
+    templates: group.ids
+      .map((id) => templatesById.get(id))
+      .filter((template): template is SummaryTemplate => Boolean(template)),
+  })).filter((group) => group.templates.length > 0);
+  const customTemplates = templates.filter((template) => !builtInIds.has(template.id));
+  if (customTemplates.length > 0) {
+    groups.push({ label: 'Custom templates', templates: customTemplates });
+  }
+  return groups;
+}
+
 export function SummaryGeneratorButtonGroup({
   modelConfig,
   setModelConfig,
@@ -63,6 +100,8 @@ export function SummaryGeneratorButtonGroup({
   const t = useT();
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const templateGroups = useMemo(() => groupSummaryTemplates(availableTemplates), [availableTemplates]);
+  const selectedTemplateName = availableTemplates.find((template) => template.id === selectedTemplate)?.name;
 
   // Expose the function to open the modal via callback registration
   useEffect(() => {
@@ -333,27 +372,40 @@ export function SummaryGeneratorButtonGroup({
             <Button
               variant="outline"
               size="sm"
-              title={t('Select summary template')}
+              title={selectedTemplateName
+                ? `${t('Template')}: ${t(selectedTemplateName)}`
+                : t('Select summary template')}
             >
               <FileText />
               <span className="hidden lg:inline">{t('Template')}</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {availableTemplates.map((template) => (
-              <DropdownMenuItem
-                key={template.id}
-                onClick={() => onTemplateSelect(template.id, template.name)}
-                title={t(template.description)}
-                className="flex items-center justify-between gap-2"
-              >
-                <span>{t(template.name)}</span>
-                {selectedTemplate === template.id && (
-                  <Check className="h-4 w-4 text-[var(--success)]" />
-                )}
-              </DropdownMenuItem>
+          <DropdownMenuContent align="end" className="w-[min(28rem,calc(100vw-2rem))]">
+            {templateGroups.map((group, groupIndex) => (
+              <DropdownMenuGroup key={group.label}>
+                {groupIndex > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--fg3)]">
+                  {t(group.label)}
+                </DropdownMenuLabel>
+                {group.templates.map((template) => (
+                  <DropdownMenuItem
+                    key={template.id}
+                    onClick={() => onTemplateSelect(template.id, template.name)}
+                    className="items-start gap-3 px-2 py-2.5"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-[var(--fg1)]">{t(template.name)}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-[var(--fg3)]">
+                        {t(template.description)}
+                      </span>
+                    </span>
+                    {selectedTemplate === template.id && (
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-[var(--success)]" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             ))}
-
           </DropdownMenuContent>
         </DropdownMenu>
       )}

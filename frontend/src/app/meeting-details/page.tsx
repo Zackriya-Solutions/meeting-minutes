@@ -1,6 +1,6 @@
 "use client"
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -21,6 +21,48 @@ interface MeetingDetailsResponse {
   folder_path?: string;
 }
 
+type SummaryLoadStatus = 'loading' | 'loaded' | 'absent' | 'error';
+
+function parsePersistedSummary(rawData: unknown): Summary | null {
+  let parsedData: any = rawData;
+  if (typeof parsedData === 'string') {
+    try {
+      parsedData = JSON.parse(parsedData);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsedData || typeof parsedData !== 'object') return null;
+
+  // Current formats must retain their generation/freshness metadata.
+  if (parsedData.summary_json || parsedData.markdown) return parsedData as Summary;
+
+  // Legacy section format.
+  const { MeetingName: _meetingName, _section_order, ...restSummaryData } = parsedData;
+  const formattedSummary: Summary = {};
+  const sectionKeys = Array.isArray(_section_order)
+    ? _section_order
+    : Object.keys(restSummaryData);
+
+  for (const key of sectionKeys) {
+    const section = restSummaryData[key];
+    if (!section || typeof section !== 'object' || !('title' in section) || !('blocks' in section)) {
+      continue;
+    }
+    const blocks = Array.isArray(section.blocks) ? section.blocks : [];
+    formattedSummary[key] = {
+      title: typeof section.title === 'string' ? section.title : key,
+      blocks: blocks.map((block: any) => ({
+        ...block,
+        color: 'default',
+        content: block?.content?.trim() || '',
+      })),
+    };
+  }
+
+  return Object.keys(formattedSummary).length > 0 ? formattedSummary : null;
+}
+
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
@@ -35,6 +77,10 @@ function MeetingDetailsContent() {
   const t = useT();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
+  const meetingSummaryRef = useRef<Summary | null>(null);
+  const summaryLoadRequestRef = useRef(0);
+  const [summaryLoadStatus, setSummaryLoadStatus] = useState<SummaryLoadStatus>('loading');
+  const [summaryLoadError, setSummaryLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState<boolean>(false);
@@ -58,10 +104,17 @@ function MeetingDetailsContent() {
   // Diarized speaker identities for this meeting. Kept here (alongside the
   // transcript pagination hook) so the `diarization-complete` listener can
   // refresh both speakers and transcripts for the currently open meeting.
-  const { speakersById, refetchSpeakers, renameSpeaker } = useMeetingSpeakers({
+  const { speakers, speakersById, refetchSpeakers, renameSpeaker } = useMeetingSpeakers({
     meetingId: meetingId || null,
     onDiarized: refetch,
   });
+
+  const commitMeetingSummary = useCallback((summary: Summary | null) => {
+    meetingSummaryRef.current = summary;
+    setMeetingSummary(summary);
+    setSummaryLoadStatus(summary ? 'loaded' : 'absent');
+    setSummaryLoadError(null);
+  }, []);
 
   // Explicit refresh after a Detect action completes (immediate feedback;
   // the diarization-complete event covers refreshes triggered elsewhere).
@@ -69,6 +122,26 @@ function MeetingDetailsContent() {
     await refetchSpeakers();
     await refetch();
   }, [refetchSpeakers, refetch]);
+
+  const handleRenameSpeaker = useCallback(async (speakerId: number, displayName: string) => {
+    await renameSpeaker(speakerId, displayName);
+    // A persisted summary is editable prose, not a live view over speaker ids. Mark it stale
+    // immediately; api_get_summary independently verifies the persisted generation snapshot on
+    // the next load. We deliberately do not rewrite or regenerate over manual edits silently.
+    setMeetingSummary((previous) => {
+      if (!previous) return previous;
+      const next = {
+        ...(previous as any),
+        summary_freshness: {
+          ...((previous as any).summary_freshness || {}),
+          speaker_attribution_status: 'stale',
+          speaker_attribution_stale: true,
+        },
+      } as any;
+      meetingSummaryRef.current = next;
+      return next;
+    });
+  }, [renameSpeaker]);
 
   // Check if gemma3:1b model is available in Ollama
   const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
@@ -182,10 +255,76 @@ function MeetingDetailsContent() {
     console.log('fetchMeetingDetails called - pagination hook will handle refetch');
   }, [meetingId]);
 
+  const fetchMeetingSummary = useCallback(async (showPageLoader = false) => {
+    if (!meetingId || meetingId === 'intro-call') return;
+
+    const requestId = ++summaryLoadRequestRef.current;
+    if (showPageLoader) setIsLoading(true);
+    setSummaryLoadStatus('loading');
+    setSummaryLoadError(null);
+
+    let lastError: unknown = null;
+    try {
+      // SQLite reads should normally be instant, but background migrations/jobs can produce a
+      // transient failure. Retry before presenting an error and never replace known content.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await invoke('api_get_summary', { meetingId }) as any;
+          if (summaryLoadRequestRef.current !== requestId) return;
+
+          if (response?.data != null) {
+            const parsed = parsePersistedSummary(response.data);
+            if (!parsed) {
+              throw new Error(t('The saved summary has an unsupported or damaged format.'));
+            }
+            commitMeetingSummary(parsed);
+            return;
+          }
+
+          if (response?.status === 'idle') {
+            if (meetingSummaryRef.current) {
+              // A late/stale `idle` response must not erase content already shown in this
+              // session. Keep it and surface the inconsistency as recoverable load trouble.
+              setSummaryLoadStatus('loaded');
+              setSummaryLoadError(t('Could not verify the saved summary. The last loaded version is still shown.'));
+            } else {
+              commitMeetingSummary(null);
+            }
+            return;
+          }
+
+          if (['pending', 'processing', 'summarizing', 'regenerating'].includes(response?.status)) {
+            setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'loading');
+            return;
+          }
+
+          throw new Error(response?.error || t('The saved summary could not be loaded.'));
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 150 * (attempt + 1)));
+          }
+        }
+      }
+
+      if (summaryLoadRequestRef.current !== requestId) return;
+      console.error('FETCH SUMMARY: exhausted retries:', lastError);
+      setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'error');
+      setSummaryLoadError(
+        lastError instanceof Error ? lastError.message : t('The saved summary could not be loaded.')
+      );
+    } finally {
+      if (summaryLoadRequestRef.current === requestId) setIsLoading(false);
+    }
+  }, [meetingId, commitMeetingSummary, t]);
+
   // Reset states when meetingId changes (prevent race conditions)
   useEffect(() => {
     setMeetingDetails(null);
     setMeetingSummary(null);
+    meetingSummaryRef.current = null;
+    setSummaryLoadStatus('loading');
+    setSummaryLoadError(null);
     setError(null);
     setIsLoading(true);
     // Reset auto-generation state to allow new meeting to be checked
@@ -215,124 +354,13 @@ function MeetingDetailsContent() {
     }
 
     console.log('Valid meeting ID found, fetching details for:', meetingId);
+    void fetchMeetingSummary(true);
 
-    setMeetingDetails(null);
-    setMeetingSummary(null);
-    setError(null);
-    setIsLoading(true);
-
-    const fetchMeetingSummary = async () => {
-      try {
-        const summary = await invoke('api_get_summary', {
-          meetingId: meetingId,
-        }) as any;
-
-        console.log('FETCH SUMMARY: Raw response:', summary);
-
-        // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
-        // Note: 'cancelled' and 'failed' statuses can still have data if backup was restored
-        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
-          console.warn('Meeting summary not found or no summary generated yet:', summary.error || 'idle');
-          setMeetingSummary(null);
-          return;
-        }
-
-        const summaryData = summary.data || {};
-
-        // Parse if it's a JSON string (backend may return double-encoded JSON)
-        let parsedData = summaryData;
-        if (typeof summaryData === 'string') {
-          try {
-            parsedData = JSON.parse(summaryData);
-          } catch (e) {
-            parsedData = {};
-          }
-        }
-
-        console.log('🔍 FETCH SUMMARY: Parsed data:', parsedData);
-
-        // Priority 1: BlockNote JSON format
-        if (parsedData.summary_json) {
-          setMeetingSummary(parsedData as any);
-          return;
-        }
-
-        // Priority 2: Markdown format
-        if (parsedData.markdown) {
-          setMeetingSummary(parsedData as any);
-          return;
-        }
-
-        // Legacy format - apply formatting
-        console.log('LEGACY FORMAT: Detected legacy format, applying section formatting');
-
-        const { MeetingName, _section_order, ...restSummaryData } = parsedData;
-
-        // Format the summary data with consistent styling - PRESERVE ORDER
-        const formattedSummary: Summary = {};
-
-        // Use section order if available to maintain exact order and handle duplicates
-        const sectionKeys = _section_order || Object.keys(restSummaryData);
-
-        console.log('LEGACY FORMAT: Processing sections:', sectionKeys);
-
-        for (const key of sectionKeys) {
-          try {
-            const section = restSummaryData[key];
-            // Comprehensive null checks to prevent the error
-            if (section &&
-              typeof section === 'object' &&
-              'title' in section &&
-              'blocks' in section) {
-              const typedSection = section as { title?: string; blocks?: any[] };
-
-              // Ensure blocks is an array before mapping
-              if (Array.isArray(typedSection.blocks)) {
-                formattedSummary[key] = {
-                  title: typedSection.title || key,
-                  blocks: typedSection.blocks.map((block: any) => ({
-                    ...block,
-                    // type: 'bullet',
-                    color: 'default',
-                    content: block?.content?.trim() || ''
-                  }))
-                };
-              } else {
-                // Handle case where blocks is not an array
-                console.warn(`LEGACY FORMAT: Section ${key} has invalid blocks:`, typedSection.blocks);
-                formattedSummary[key] = {
-                  title: typedSection.title || key,
-                  blocks: []
-                };
-              }
-            } else {
-              console.warn(`LEGACY FORMAT: Skipping invalid section ${key}:`, section);
-            }
-          } catch (error) {
-            console.warn(`LEGACY FORMAT: Error processing section ${key}:`, error);
-            // Continue processing other sections
-          }
-        }
-
-        console.log('LEGACY FORMAT: Formatted summary:', formattedSummary);
-        setMeetingSummary(formattedSummary);
-      } catch (error) {
-        console.error('FETCH SUMMARY: Error fetching meeting summary:', error);
-        // Don't set error state for summary fetch failure, set to null to show generate button
-        setMeetingSummary(null);
-      }
+    return () => {
+      // Ignore a late response from a meeting that is no longer open.
+      summaryLoadRequestRef.current += 1;
     };
-
-    const loadData = async () => {
-      try {
-        await fetchMeetingSummary();
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadData();
-  }, [meetingId]);
+  }, [meetingId, fetchMeetingSummary, t]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
   useEffect(() => {
@@ -345,6 +373,7 @@ function MeetingDetailsContent() {
       if (
         meetingDetails &&
         meetingSummary === null &&
+        summaryLoadStatus === 'absent' &&
         meetingDetails.transcripts &&
         meetingDetails.transcripts.length > 0 &&
         !hasCheckedAutoGen
@@ -355,7 +384,7 @@ function MeetingDetailsContent() {
     };
 
     checkAutoGen();
-  }, [meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
+  }, [meetingDetails, meetingSummary, summaryLoadStatus, hasCheckedAutoGen, setupAutoGeneration]);
 
   if (error) {
     return (
@@ -383,6 +412,10 @@ function MeetingDetailsContent() {
   return <PageContent
     meeting={meetingDetails}
     summaryData={meetingSummary}
+    summaryLoadStatus={summaryLoadStatus}
+    summaryLoadError={summaryLoadError}
+    onRetrySummary={() => fetchMeetingSummary(false)}
+    onSummaryDataChange={commitMeetingSummary}
     shouldAutoGenerate={shouldAutoGenerate}
     onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
     onMeetingUpdated={async () => {
@@ -402,7 +435,8 @@ function MeetingDetailsContent() {
     seekToSeconds={seekToSeconds}
     // Speaker diarization props
     speakersById={speakersById}
-    onRenameSpeaker={renameSpeaker}
+    speakerCount={speakers.length}
+    onRenameSpeaker={handleRenameSpeaker}
     onSpeakersDetected={handleSpeakersDetected}
   />;
 }

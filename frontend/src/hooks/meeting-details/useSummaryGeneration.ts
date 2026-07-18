@@ -104,7 +104,6 @@ interface UseSummaryGenerationProps {
   isModelConfigLoading: boolean;
   selectedTemplate: string;
   onMeetingUpdated?: () => Promise<void>;
-  updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: Summary | null) => void;
   onOpenModelSettings?: () => void;
 }
@@ -116,7 +115,6 @@ export function useSummaryGeneration({
   isModelConfigLoading,
   selectedTemplate,
   onMeetingUpdated,
-  updateMeetingTitle,
   setAiSummary,
   onOpenModelSettings,
 }: UseSummaryGenerationProps) {
@@ -316,16 +314,12 @@ export function useSummaryGeneration({
         if (pollingResult.status === 'completed' && pollingResult.data) {
           console.log('Summary generation completed:', pollingResult.data);
 
-          // Update meeting title if available
-          const meetingName = pollingResult.data.MeetingName || pollingResult.meetingName;
-          if (meetingName) {
-            updateMeetingTitle(meetingName);
-          }
-
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            // Keep generation metadata and freshness alongside markdown. Dropping these fields
+            // made the speaker-rename warning disappear until the meeting was reopened.
+            setAiSummary(pollingResult.data as any);
             setSummaryStatus('completed');
 
             // Show success toast
@@ -449,7 +443,6 @@ export function useSummaryGeneration({
     selectedTemplate,
     startSummaryPolling,
     setAiSummary,
-    updateMeetingTitle,
     onMeetingUpdated,
     restorePersistedSummary,
   ]);

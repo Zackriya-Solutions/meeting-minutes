@@ -23,6 +23,18 @@ static DIRECT_ADDRESS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?iu)^\s*(?:(?:так|ну|слушай|смотри)\s*,\s*)?([\p{L}][\p{L}'’\-]{1,31})\s*[,!]")
         .expect("valid direct-address regex")
 });
+static GREETING_ADDRESS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?iu)(?:^|[.!?]\s*|\bвсем\s+)(?:привет|здравствуй|здравствуйте|доброе\s+утро|добрый\s+(?:день|вечер)|hello|hi)\s*[,!—-]?\s+([\p{L}][\p{L}'’\-]{1,31})(?:\s*[,!.?]|$)",
+    )
+    .expect("valid greeting-address regex")
+});
+static MEETING_TITLE_PERSON: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?iu)(?:\b1\s*(?:to|[-–—])\s*1\b|\b1to1\b|\b1-1\b)[^\p{L}]{0,16}(?:w(?:ith)?\s+|с\s+)?([\p{L}][\p{L}'’\-]{1,31})",
+    )
+    .expect("valid meeting-title person regex")
+});
 
 const BLOCKED_EXACT: &[&str] = &[
     "коллега",
@@ -283,13 +295,50 @@ fn validate_candidate(value: &str) -> Result<String, &'static str> {
     Ok(normalized)
 }
 
+fn address_candidate(
+    segments: &[Segment],
+    index: usize,
+    candidate_text: String,
+) -> ExtractedCandidate {
+    let segment = &segments[index];
+    let next = segment.speaker_id.and_then(|addressing_speaker_id| {
+        segments.iter().skip(index + 1).find(|next| {
+            next.speaker_id.is_some()
+                && next.speaker_id != Some(addressing_speaker_id)
+                && match (segment.start_ms, next.start_ms) {
+                    (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
+                    _ => false,
+                }
+        })
+    });
+    if let Some(next) = next {
+        ExtractedCandidate {
+            text: candidate_text,
+            speaker_id: next.speaker_id,
+            evidence_kind: "direct_address",
+            evidence_quote: segment.text.clone(),
+            start_ms: segment.start_ms,
+            confidence: 0.60,
+        }
+    } else {
+        // The name itself is useful evidence even when diarization cannot safely determine
+        // who was addressed. Keep speaker selection manual.
+        ExtractedCandidate {
+            text: candidate_text,
+            speaker_id: None,
+            evidence_kind: "direct_address_unassigned",
+            evidence_quote: segment.text.clone(),
+            start_ms: segment.start_ms,
+            confidence: 0.45,
+        }
+    }
+}
+
 fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
     let mut extracted = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
         for capture in SELF_INTRO.captures_iter(&segment.text) {
-            if !has_name_like_capitalization(&capture[1]) {
-                continue;
-            }
+            // Strong grammatical evidence is safe even when ASR lowercases a proper name.
             extracted.push(ExtractedCandidate {
                 text: display_name(&capture[1]),
                 speaker_id: segment.speaker_id,
@@ -300,9 +349,8 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             });
         }
         for capture in EXPLICIT_INTRO.captures_iter(&segment.text) {
-            if !has_name_like_capitalization(&capture[1]) {
-                continue;
-            }
+            // ASR capitalization is inconsistent; the explicit introduction phrase is
+            // the safety signal, not the casing of the captured token.
             extracted.push(ExtractedCandidate {
                 text: display_name(&capture[1]),
                 speaker_id: None,
@@ -317,40 +365,37 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                 continue;
             }
             let candidate_text = display_name(&capture[1]);
-            let next = segment.speaker_id.and_then(|addressing_speaker_id| {
-                segments.iter().skip(index + 1).find(|next| {
-                    next.speaker_id.is_some()
-                        && next.speaker_id != Some(addressing_speaker_id)
-                        && match (segment.start_ms, next.start_ms) {
-                            (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
-                            _ => false,
-                        }
-                })
-            });
-            if let Some(next) = next {
-                extracted.push(ExtractedCandidate {
-                    text: candidate_text,
-                    speaker_id: next.speaker_id,
-                    evidence_kind: "direct_address",
-                    evidence_quote: segment.text.clone(),
-                    start_ms: segment.start_ms,
-                    confidence: 0.60,
-                });
-            } else {
-                // The name itself is useful evidence even when diarization cannot
-                // safely determine who was addressed. Keep speaker selection manual.
-                extracted.push(ExtractedCandidate {
-                    text: candidate_text,
-                    speaker_id: None,
-                    evidence_kind: "direct_address_unassigned",
-                    evidence_quote: segment.text.clone(),
-                    start_ms: segment.start_ms,
-                    confidence: 0.45,
-                });
+            extracted.push(address_candidate(segments, index, candidate_text));
+        }
+        for capture in GREETING_ADDRESS.captures_iter(&segment.text) {
+            if !has_name_like_capitalization(&capture[1]) {
+                continue;
             }
+            extracted.push(address_candidate(
+                segments,
+                index,
+                display_name(&capture[1]),
+            ));
         }
     }
     extracted
+}
+
+fn extract_title_candidates(title: &str) -> Vec<ExtractedCandidate> {
+    MEETING_TITLE_PERSON
+        .captures_iter(title)
+        .filter_map(|capture| {
+            let raw = capture.get(1)?.as_str();
+            has_name_like_capitalization(raw).then(|| ExtractedCandidate {
+                text: display_name(raw),
+                speaker_id: None,
+                evidence_kind: "meeting_title",
+                evidence_quote: title.to_string(),
+                start_ms: None,
+                confidence: 0.55,
+            })
+        })
+        .collect()
 }
 
 #[cfg(not(test))]
@@ -468,7 +513,20 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
         .map_err(|error| error.to_string())?;
     let mut grouped: HashMap<(String, Option<i64>, &'static str), (ExtractedCandidate, i64)> =
         HashMap::new();
-    for candidate in extract_candidates(&segments) {
+    let mut extracted = extract_candidates(&segments);
+    // Titles such as "1to1 with Andrew" are useful, reviewable evidence for old
+    // imported archives even when the transcript never contains an introduction.
+    // Keep the target unassigned so the user must map it to a detected speaker.
+    if let Some(title) = sqlx::query_scalar::<_, String>("SELECT title FROM meetings WHERE id=?")
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+    {
+        extracted.extend(extract_title_candidates(&title));
+    }
+    for candidate in extracted {
         let normalized = match validate_candidate(&candidate.text) {
             Ok(value) => value,
             Err(reason) => {
@@ -803,6 +861,49 @@ mod tests {
                 && item.speaker_id == Some(8)
                 && item.evidence_kind == "direct_address"
         }));
+    }
+
+    #[test]
+    fn extraction_finds_names_in_realistic_russian_intro_and_greeting() {
+        let rows = vec![
+            segment("Всем привет, Макс. Ага, привет.", Some(36), 52_000),
+            segment("Привет, Андрей.", Some(37), 67_000),
+            segment("Привет!", Some(38), 70_000),
+            segment(
+                "Окей, с этим решили. Давайте дальше. Значит, меня зовут Андрей. Я техлит в команде.",
+                Some(38),
+                145_950,
+            ),
+        ];
+        let extracted = extract_candidates(&rows);
+
+        assert!(extracted.iter().any(|candidate| {
+            candidate.text == "Макс" && candidate.evidence_kind == "direct_address"
+        }));
+
+        assert!(extracted.iter().any(|candidate| {
+            candidate.text == "Андрей"
+                && candidate.speaker_id == Some(38)
+                && candidate.evidence_kind == "direct_address"
+        }));
+        assert!(extracted.iter().any(|candidate| {
+            candidate.text == "Андрей"
+                && candidate.speaker_id == Some(38)
+                && candidate.evidence_kind == "self_introduction"
+        }));
+    }
+
+    #[test]
+    fn strong_intro_survives_lowercase_asr_and_one_on_one_title_is_reviewable() {
+        let rows = vec![segment("меня зовут андрей", Some(7), 0)];
+        assert!(extract_candidates(&rows).iter().any(|candidate| {
+            candidate.text == "Андрей" && candidate.speaker_id == Some(7)
+        }));
+        let title = extract_title_candidates("Thu 16.02 1to1 w Andrew, Mar 5, 2026");
+        assert_eq!(title.len(), 1);
+        assert_eq!(title[0].text, "Andrew");
+        assert_eq!(title[0].evidence_kind, "meeting_title");
+        assert!(title[0].speaker_id.is_none());
     }
 
     #[test]

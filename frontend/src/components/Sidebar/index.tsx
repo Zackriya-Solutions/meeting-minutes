@@ -159,6 +159,7 @@ const Sidebar: React.FC = () => {
     currentTitle: ''
   });
   const [editingTitle, setEditingTitle] = useState<string>('');
+  const [sourceTitle, setSourceTitle] = useState<{ meetingId: string; title: string } | null>(null);
 
   // Ensure 'meetings' folder is always expanded
   useEffect(() => {
@@ -458,6 +459,12 @@ const Sidebar: React.FC = () => {
       currentTitle: currentTitle
     });
     setEditingTitle(currentTitle);
+    setSourceTitle(null);
+    void invoke<string | null>('get_meeting_source_title', { meetingId })
+      .then((title) => {
+        if (title?.trim()) setSourceTitle({ meetingId, title: title.trim() });
+      })
+      .catch((error) => console.warn('Could not load the original meeting title:', error));
   };
 
   const handleEditConfirm = async () => {
@@ -508,6 +515,7 @@ const Sidebar: React.FC = () => {
   const handleEditCancel = () => {
     setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
     setEditingTitle('');
+    setSourceTitle(null);
   };
 
   const toggleFolder = (folderId: string) => {
@@ -1057,6 +1065,20 @@ const Sidebar: React.FC = () => {
                   autoFocus
                 />
               </div>
+              {sourceTitle?.meetingId === editModalState.meetingId
+                && sourceTitle.title !== editModalState.currentTitle && (
+                <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
+                  <p className="text-xs font-medium text-[var(--fg3)]">{t('Original recording title')}</p>
+                  <p className="mt-1 break-words text-sm text-[var(--fg1)]">{sourceTitle.title}</p>
+                  <button
+                    type="button"
+                    onClick={() => setEditingTitle(sourceTitle.title)}
+                    className="mt-2 text-xs font-medium text-[var(--gold)] hover:underline"
+                  >
+                    {t('Use original title')}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>

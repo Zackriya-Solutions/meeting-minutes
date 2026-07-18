@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
+import { getCollectionDisplayText } from '@/lib/collectionDisplay';
 import { useT } from '@/lib/i18n';
 import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 
@@ -53,6 +54,8 @@ interface MeetingRef {
 interface CollectionRef {
   id: number;
   name: string;
+  kind: 'manual' | 'series';
+  system_key?: string | null;
 }
 
 const SUGGESTIONS = [
@@ -76,6 +79,7 @@ export default function ChatPage() {
   const [scopeKind, setScopeKind] = useState<ScopeKind>('archive');
   const [collectionId, setCollectionId] = useState<number | null>(null);
   const [meetingId, setMeetingId] = useState<string | null>(null);
+  const [returnCollectionId, setReturnCollectionId] = useState<number | null>(null);
 
   const [meetings, setMeetings] = useState<MeetingRef[]>([]);
   const [collections, setCollections] = useState<CollectionRef[]>([]);
@@ -83,6 +87,8 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const draftBeforeHistory = useRef('');
+  const pendingQuestion = useRef<string | null>(null);
+  const submittedPendingQuestion = useRef(false);
 
   // Load scope options.
   useEffect(() => {
@@ -99,13 +105,26 @@ export default function ChatPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const scope = params.get('scope');
+    pendingQuestion.current = params.get('question')?.trim() || null;
+    if (params.has('question')) {
+      params.delete('question');
+      const nextSearch = params.toString();
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`,
+      );
+    }
+    submittedPendingQuestion.current = false;
     if (scope === 'collection') {
       const requestedCollectionId = Number(params.get('collectionId'));
       if (Number.isInteger(requestedCollectionId) && requestedCollectionId > 0) {
         setScopeKind('collection');
         setCollectionId(requestedCollectionId);
+        setReturnCollectionId(requestedCollectionId);
       } else {
         setScopeKind('archive');
+        setReturnCollectionId(null);
       }
     } else if (scope === 'meeting') {
       const requestedMeetingId = params.get('meetingId')?.trim();
@@ -117,6 +136,7 @@ export default function ChatPage() {
       }
     } else {
       setScopeKind('archive');
+      setReturnCollectionId(null);
     }
     setSessionId(null);
     setMessages([]);
@@ -251,8 +271,23 @@ export default function ChatPage() {
         setSending(false);
       }
     },
-    [sending, loadingHistory, scopeKind, collectionId, meetingId, sessionId],
+    [sending, loadingHistory, scopeKind, collectionId, meetingId, sessionId, t],
   );
+
+  useEffect(() => {
+    const question = pendingQuestion.current;
+    if (
+      !scopeInitialized
+      || loadingHistory
+      || sending
+      || submittedPendingQuestion.current
+      || !question
+    ) return;
+
+    submittedPendingQuestion.current = true;
+    pendingQuestion.current = null;
+    void send(question);
+  }, [loadingHistory, scopeInitialized, send, sending]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -301,20 +336,39 @@ export default function ChatPage() {
   };
 
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
+  const selectedCollection = collections.find((collection) => collection.id === collectionId);
+  const selectedCollectionName = selectedCollection
+    ? getCollectionDisplayText(selectedCollection, t).name
+    : null;
+  const backToContext = () => {
+    if (returnCollectionId != null) {
+      router.push(`/collections?collectionId=${returnCollectionId}`);
+      return;
+    }
+    router.push('/');
+  };
 
   return (
     <div className="mm-page">
       {/* Header */}
       <div className="mm-page-header">
         <button
-          onClick={() => router.push('/')}
+          onClick={backToContext}
           className="mm-icon-button mm-hover"
-          aria-label={t('Back')}
+          aria-label={returnCollectionId != null ? t('Back to collection') : t('Back')}
+          title={returnCollectionId != null ? t('Back to collection') : t('Back')}
         >
           <Icon name="back" />
         </button>
         <Icon name="library" size={24} className="text-[var(--gold)]" />
-        <h1 className="mm-page-title">{t('Chat with archive')}</h1>
+        <div className="min-w-0">
+          <h1 className="mm-page-title">
+            {scopeKind === 'collection' ? t('Chat with collection') : t('Chat with archive')}
+          </h1>
+          {scopeKind === 'collection' && selectedCollectionName && (
+            <p className="mt-0.5 truncate text-xs text-[var(--fg3)]">{selectedCollectionName}</p>
+          )}
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           {/* Scope selector */}
@@ -337,7 +391,7 @@ export default function ChatPage() {
               <option value="">{t('Select a collection…')}</option>
               {collections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name}
+                  {getCollectionDisplayText(c, t).name}
                 </option>
               ))}
             </select>

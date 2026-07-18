@@ -1,6 +1,6 @@
 {
-  "name": "One-on-One Memory",
-  "description": "An evidence-oriented record of a recurring one-on-one: explicit check-in, mutual feedback, support, growth, decisions, and follow-ups without automatic performance judgments.",
+  "name": "One-on-One",
+  "description": "Check-in topics, mutual feedback, support, growth, decisions, and follow-ups without automated performance judgments.",
   "pipeline": "one_on_one_v1",
   "sections": [
     {

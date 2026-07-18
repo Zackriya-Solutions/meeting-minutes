@@ -66,6 +66,18 @@ export function resolveSpeakerLabel(
   }
 }
 
+/** Localize only system-generated labels; user-confirmed display names stay untouched. */
+export function localizeSpeakerLabel(
+  label: string | null,
+  translate: (value: string) => string,
+): string | null {
+  if (!label) return null;
+  const automatic = label.match(/^Speaker\s+(\d+)$/i);
+  if (automatic) return `${translate('Speaker')} ${automatic[1]}`;
+  if (label === 'You' || label === 'Others') return translate(label);
+  return label;
+}
+
 /**
  * A diarized speaker profile for a saved meeting (from `get_meeting_speakers`).
  */

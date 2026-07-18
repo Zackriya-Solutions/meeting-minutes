@@ -1,6 +1,6 @@
 {
-  "name": "Standard Meeting Notes",
-  "description": "A standard template for general meetings, focusing on key outcomes and actions.",
+  "name": "General Meeting",
+  "description": "A concise summary of the discussion, decisions, action items, and important context.",
   "sections": [
     {
       "title": "Summary",

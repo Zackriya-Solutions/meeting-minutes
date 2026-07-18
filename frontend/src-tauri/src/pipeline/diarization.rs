@@ -11,6 +11,7 @@
 //! WeSpeaker CAM++ speaker-embedding model, with the embedding frontend driven by the
 //! model's own ONNX metadata (see [`crate::pipeline::kaldi_fbank`] for why that matters).
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -156,7 +157,8 @@ pub fn assign_segment(
         return None;
     }
     // Sum overlap per cluster.
-    let mut overlap_by_cluster: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    let mut overlap_by_cluster: std::collections::HashMap<i64, i64> =
+        std::collections::HashMap::new();
     for t in turns {
         let start = seg_start_ms.max(t.start_ms);
         let end = seg_end_ms.min(t.end_ms);
@@ -214,22 +216,18 @@ pub fn fold_embedding(existing: &[f32], count: u32, new: &[f32]) -> Vec<f32> {
 /// max 2 simultaneous → 7 classes, generated in increasing-cardinality order):
 /// 0:{} 1:{0} 2:{1} 3:{2} 4:{0,1} 5:{0,2} 6:{1,2}.
 pub fn powerset_speakers(class: usize) -> &'static [usize] {
-    const MAP: [&[usize]; 7] = [
-        &[],
-        &[0],
-        &[1],
-        &[2],
-        &[0, 1],
-        &[0, 2],
-        &[1, 2],
-    ];
+    const MAP: [&[usize]; 7] = [&[], &[0], &[1], &[2], &[0, 1], &[0, 2], &[1, 2]];
     MAP.get(class).copied().unwrap_or(&[])
 }
 
 /// Decode one segmentation window's logits `[num_frames, num_classes]` (row-major) into
 /// per-frame per-local-speaker activity: `active[frame][local_speaker]`. Each frame takes
 /// the argmax powerset class, then expands it to its member local speakers.
-pub fn decode_powerset(logits: &[f32], num_frames: usize, num_classes: usize) -> Vec<[bool; SEG_NUM_LOCAL_SPEAKERS]> {
+pub fn decode_powerset(
+    logits: &[f32],
+    num_frames: usize,
+    num_classes: usize,
+) -> Vec<[bool; SEG_NUM_LOCAL_SPEAKERS]> {
     let mut out = vec![[false; SEG_NUM_LOCAL_SPEAKERS]; num_frames];
     if num_classes == 0 {
         return out;
@@ -302,7 +300,10 @@ pub fn runs_to_turns(
     }
 
     // Drop turns that are too short to embed reliably.
-    merged.into_iter().filter(|(s, e)| e - s >= min_turn_ms).collect()
+    merged
+        .into_iter()
+        .filter(|(s, e)| e - s >= min_turn_ms)
+        .collect()
 }
 
 /// Agglomerative clustering of L2-normalized embeddings, cut at `distance_threshold` on
@@ -482,7 +483,11 @@ pub fn merge_clusters_by_centroid_with_hint(
 /// a 30 s turn thus counts 60× a 0.5 s turn toward the cluster's identity centroid. Skips
 /// dimension-mismatched embeddings. Empty/zero-weight input yields an empty vec.
 pub fn duration_weighted_centroid(items: &[(&[f32], i64)]) -> Vec<f32> {
-    let dim = items.iter().map(|(e, _)| e.len()).find(|&d| d > 0).unwrap_or(0);
+    let dim = items
+        .iter()
+        .map(|(e, _)| e.len())
+        .find(|&d| d > 0)
+        .unwrap_or(0);
     if dim == 0 {
         return Vec::new();
     }
@@ -509,7 +514,11 @@ pub fn duration_weighted_centroid(items: &[(&[f32], i64)]) -> Vec<f32> {
 /// Attach a turn to the most cosine-similar cluster centroid. Returns `Some(index)` when the
 /// best similarity reaches `min_similarity`, else `None` (caller drops the turn from
 /// attribution). Used for short / heavily-overlapped turns that must not form new clusters.
-pub fn nearest_cluster(embedding: &[f32], centroids: &[Vec<f32>], min_similarity: f32) -> Option<usize> {
+pub fn nearest_cluster(
+    embedding: &[f32],
+    centroids: &[Vec<f32>],
+    min_similarity: f32,
+) -> Option<usize> {
     let mut best: Option<(usize, f32)> = None;
     for (i, c) in centroids.iter().enumerate() {
         let sim = cosine_similarity(embedding, c);
@@ -532,7 +541,10 @@ fn duration_weighted_centroids<'a>(
             buckets[c].push((e, w));
         }
     }
-    buckets.into_iter().map(|b| duration_weighted_centroid(&b)).collect()
+    buckets
+        .into_iter()
+        .map(|b| duration_weighted_centroid(&b))
+        .collect()
 }
 
 /// Fraction of a turn `[s_ms, e_ms]` that falls on frames the powerset decode marked as
@@ -567,7 +579,11 @@ fn window_overlap_fraction(
 
 /// Merge adjacent same-cluster turns (sorted by start) separated by `< merge_gap_ms`.
 fn merge_same_cluster(mut turns: Vec<SpeakerTurn>, merge_gap_ms: i64) -> Vec<SpeakerTurn> {
-    turns.sort_by(|a, b| a.start_ms.cmp(&b.start_ms).then(a.cluster_id.cmp(&b.cluster_id)));
+    turns.sort_by(|a, b| {
+        a.start_ms
+            .cmp(&b.start_ms)
+            .then(a.cluster_id.cmp(&b.cluster_id))
+    });
     let mut out: Vec<SpeakerTurn> = Vec::with_capacity(turns.len());
     for t in turns {
         if let Some(last) = out.last_mut() {
@@ -721,7 +737,14 @@ impl Diarizer {
                     .flatten()
                     .map(|v| v.trim() == "global-mean")
                     .unwrap_or(false);
-                (if normalize_samples { 1.0 } else { SEG_WAVEFORM_SCALE }, apply_cmn)
+                (
+                    if normalize_samples {
+                        1.0
+                    } else {
+                        SEG_WAVEFORM_SCALE
+                    },
+                    apply_cmn,
+                )
             }
             Err(e) => {
                 log::warn!("[diarize] embedding model metadata unavailable ({e}); assuming [-1,1] input, no CMN");
@@ -748,6 +771,72 @@ impl Diarizer {
         })
     }
 
+    /// Extract one duration-weighted voice embedding for each already-diarized speaker.
+    ///
+    /// Cloud diarization provides a good speaker timeline but its numeric speaker ids are
+    /// local to one recording. Running only the local embedding model over that timeline
+    /// gives the identity-learning pipeline the same privacy-preserving representation as
+    /// full local diarization, without replacing the cloud speaker turns.
+    pub fn embed_labeled_turns(
+        &self,
+        audio_path: &std::path::Path,
+        turns: &[SpeakerTurn],
+    ) -> Result<Vec<(i64, Vec<f32>)>> {
+        const MAX_TURNS_PER_SPEAKER: usize = 8;
+        const MAX_AUDIO_MS_PER_SPEAKER: i64 = 60_000;
+
+        let decoded = crate::audio::decoder::decode_audio_file(audio_path)
+            .map_err(|e| anyhow!("speaker embedding: decode {}: {e}", audio_path.display()))?;
+        let waveform = decoded.to_whisper_format();
+        if waveform.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut by_speaker: BTreeMap<i64, Vec<SpeakerTurn>> = BTreeMap::new();
+        for turn in turns
+            .iter()
+            .copied()
+            .filter(|turn| turn.end_ms - turn.start_ms >= DEFAULT_MIN_CLUSTER_TURN_MS)
+        {
+            by_speaker.entry(turn.cluster_id).or_default().push(turn);
+        }
+
+        let mut result = Vec::with_capacity(by_speaker.len());
+        for (speaker_id, mut speaker_turns) in by_speaker {
+            speaker_turns.sort_by_key(|turn| std::cmp::Reverse(turn.end_ms - turn.start_ms));
+            let mut embedded = Vec::new();
+            let mut embedded_ms = 0_i64;
+            for turn in speaker_turns.into_iter().take(MAX_TURNS_PER_SPEAKER) {
+                if embedded_ms >= MAX_AUDIO_MS_PER_SPEAKER {
+                    break;
+                }
+                let start =
+                    ((turn.start_ms.max(0) as usize) * SEG_SAMPLE_RATE / 1000).min(waveform.len());
+                let end =
+                    ((turn.end_ms.max(0) as usize) * SEG_SAMPLE_RATE / 1000).min(waveform.len());
+                if end <= start {
+                    continue;
+                }
+                let duration_ms =
+                    (turn.end_ms - turn.start_ms).min(MAX_AUDIO_MS_PER_SPEAKER - embedded_ms);
+                let capped_end = (start + duration_ms as usize * SEG_SAMPLE_RATE / 1000).min(end);
+                if let Some(embedding) = self.embed_turn(&waveform[start..capped_end])? {
+                    embedded.push((embedding, duration_ms));
+                    embedded_ms += duration_ms;
+                }
+            }
+            let refs = embedded
+                .iter()
+                .map(|(embedding, duration_ms)| (embedding.as_slice(), *duration_ms))
+                .collect::<Vec<_>>();
+            let centroid = duration_weighted_centroid(&refs);
+            if !centroid.is_empty() {
+                result.push((speaker_id, centroid));
+            }
+        }
+        Ok(result)
+    }
+
     /// Run diarization on an audio file → speaker turns + per-cluster mean embeddings.
     ///
     /// Pipeline: decode to 16 kHz mono → slide 10 s segmentation windows → powerset-decode
@@ -762,7 +851,10 @@ impl Diarizer {
             .map_err(|e| anyhow!("diarize: decode {}: {e}", audio_path.display()))?;
         let waveform = decoded.to_whisper_format(); // 16 kHz mono
         if waveform.is_empty() {
-            return Ok(DiarizationResult { turns: Vec::new(), cluster_embeddings: Vec::new() });
+            return Ok(DiarizationResult {
+                turns: Vec::new(),
+                cluster_embeddings: Vec::new(),
+            });
         }
         let total_ms = (waveform.len() as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
 
@@ -799,7 +891,8 @@ impl Diarizer {
                         // Clamp to the real (unpadded) audio extent.
                         let e = e.min(total_ms.round() as i64);
                         if e - s >= self.params.min_turn_ms {
-                            let ov = window_overlap_fraction(&active, frame_ms, window_start_ms, s, e);
+                            let ov =
+                                window_overlap_fraction(&active, frame_ms, window_start_ms, s, e);
                             raw_turns.push((s, e, ov));
                         }
                     }
@@ -809,7 +902,10 @@ impl Diarizer {
         }
 
         if raw_turns.is_empty() {
-            return Ok(DiarizationResult { turns: Vec::new(), cluster_embeddings: Vec::new() });
+            return Ok(DiarizationResult {
+                turns: Vec::new(),
+                cluster_embeddings: Vec::new(),
+            });
         }
 
         // 3) One speaker embedding per raw turn (drop ones too short to featurize).
@@ -829,12 +925,21 @@ impl Diarizer {
                 continue;
             }
             if let Some(embedding) = self.embed_turn(&waveform[start_sample..end_sample])? {
-                embs.push(Emb { start_ms: s, end_ms: e, dur_ms: e - s, overlap_frac: ov, embedding });
+                embs.push(Emb {
+                    start_ms: s,
+                    end_ms: e,
+                    dur_ms: e - s,
+                    overlap_frac: ov,
+                    embedding,
+                });
             }
         }
 
         if embs.is_empty() {
-            return Ok(DiarizationResult { turns: Vec::new(), cluster_embeddings: Vec::new() });
+            return Ok(DiarizationResult {
+                turns: Vec::new(),
+                cluster_embeddings: Vec::new(),
+            });
         }
 
         // 4) Formation set: long, low-overlap turns. Short / heavily-overlapped turns are
@@ -851,8 +956,10 @@ impl Diarizer {
             formation = (0..embs.len()).collect();
         }
 
-        let formation_embs: Vec<Vec<f32>> =
-            formation.iter().map(|&i| embs[i].embedding.clone()).collect();
+        let formation_embs: Vec<Vec<f32>> = formation
+            .iter()
+            .map(|&i| embs[i].embedding.clone())
+            .collect();
         let formation_durs: Vec<i64> = formation.iter().map(|&i| embs[i].dur_ms).collect();
         // Stage 1: tight complete-linkage HAC -> high-purity fragments.
         let fragment_labels = cluster_embeddings(
@@ -905,7 +1012,11 @@ impl Diarizer {
             .iter()
             .zip(&turn_cluster)
             .filter_map(|(e, c)| {
-                c.map(|cluster_id| SpeakerTurn { start_ms: e.start_ms, end_ms: e.end_ms, cluster_id })
+                c.map(|cluster_id| SpeakerTurn {
+                    start_ms: e.start_ms,
+                    end_ms: e.end_ms,
+                    cluster_id,
+                })
             })
             .collect();
         let turns = merge_same_cluster(turns, self.params.merge_gap_ms);
@@ -925,7 +1036,10 @@ impl Diarizer {
             .map(|(label, emb)| (label as i64, emb))
             .collect();
 
-        Ok(DiarizationResult { turns, cluster_embeddings })
+        Ok(DiarizationResult {
+            turns,
+            cluster_embeddings,
+        })
     }
 
     /// Run the segmentation model on one 16 kHz window (i16-scaled f32, length
@@ -974,7 +1088,10 @@ impl Diarizer {
     fn embed_turn(&self, samples: &[f32]) -> Result<Option<Vec<f32>>> {
         use ort::value::TensorRef;
 
-        let scaled: Vec<f32> = samples.iter().map(|s| s * self.emb_waveform_scale).collect();
+        let scaled: Vec<f32> = samples
+            .iter()
+            .map(|s| s * self.emb_waveform_scale)
+            .collect();
         let feats = if self.emb_apply_cmn {
             self.fbank.compute(&scaled)
         } else {
@@ -1049,8 +1166,16 @@ mod tests {
     fn segment_assigned_to_dominant_cluster() {
         // Segment [0,1000]; cluster 1 covers [0,800], cluster 2 covers [800,1000].
         let turns = vec![
-            SpeakerTurn { start_ms: 0, end_ms: 800, cluster_id: 1 },
-            SpeakerTurn { start_ms: 800, end_ms: 1000, cluster_id: 2 },
+            SpeakerTurn {
+                start_ms: 0,
+                end_ms: 800,
+                cluster_id: 1,
+            },
+            SpeakerTurn {
+                start_ms: 800,
+                end_ms: 1000,
+                cluster_id: 2,
+            },
         ];
         assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), Some(1));
     }
@@ -1058,7 +1183,11 @@ mod tests {
     #[test]
     fn ambiguous_segment_is_unattributed() {
         // Cluster 1 covers only 40% of the segment -> below 60% -> None.
-        let turns = vec![SpeakerTurn { start_ms: 0, end_ms: 400, cluster_id: 1 }];
+        let turns = vec![SpeakerTurn {
+            start_ms: 0,
+            end_ms: 400,
+            cluster_id: 1,
+        }];
         assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), None);
     }
 
@@ -1112,7 +1241,9 @@ mod tests {
         // [T T T . T T . . . T]
         //  0-300ms run, gap 1 frame (100ms) < merge_gap(250) -> merges to 0-600ms,
         //  then a lone frame at 900-1000ms (100ms) dropped by min_turn(250).
-        let active = [true, true, true, false, true, true, false, false, false, true];
+        let active = [
+            true, true, true, false, true, true, false, false, false, true,
+        ];
         let turns = runs_to_turns(&active, 100.0, 0.0, 250, 250);
         assert_eq!(turns, vec![(0, 600)]);
     }
@@ -1140,8 +1271,14 @@ mod tests {
 
     #[test]
     fn cluster_edge_cases() {
-        assert_eq!(cluster_embeddings(&[], 0.5, Linkage::Complete), Vec::<usize>::new());
-        assert_eq!(cluster_embeddings(&[vec![1.0, 0.0]], 0.5, Linkage::Complete), vec![0]);
+        assert_eq!(
+            cluster_embeddings(&[], 0.5, Linkage::Complete),
+            Vec::<usize>::new()
+        );
+        assert_eq!(
+            cluster_embeddings(&[vec![1.0, 0.0]], 0.5, Linkage::Complete),
+            vec![0]
+        );
     }
 
     #[test]
@@ -1171,9 +1308,18 @@ mod tests {
         let embs = vec![x1, x2, y];
         let avg = cluster_embeddings(&embs, DEFAULT_CLUSTER_DISTANCE_THRESHOLD, Linkage::Average);
         let comp = cluster_embeddings(&embs, DEFAULT_CLUSTER_DISTANCE_THRESHOLD, Linkage::Complete);
-        assert_eq!(avg[0], avg[2], "average linkage absorbs y via the close pair");
-        assert_eq!(comp[0], comp[1], "tight pair stays together under complete linkage");
-        assert_ne!(comp[0], comp[2], "complete linkage keeps the far turn out of the fragment");
+        assert_eq!(
+            avg[0], avg[2],
+            "average linkage absorbs y via the close pair"
+        );
+        assert_eq!(
+            comp[0], comp[1],
+            "tight pair stays together under complete linkage"
+        );
+        assert_ne!(
+            comp[0], comp[2],
+            "complete linkage keeps the far turn out of the fragment"
+        );
     }
 
     #[test]
@@ -1262,10 +1408,18 @@ mod tests {
         let labels = vec![0, 1, 2];
 
         let auto = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.85, None);
-        assert_eq!(auto.iter().copied().max().unwrap() + 1, 3, "floor keeps all apart");
+        assert_eq!(
+            auto.iter().copied().max().unwrap() + 1,
+            3,
+            "floor keeps all apart"
+        );
 
         let hinted = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.85, Some(2));
-        assert_eq!(hinted.iter().copied().max().unwrap() + 1, 2, "hint forces down to 2");
+        assert_eq!(
+            hinted.iter().copied().max().unwrap() + 1,
+            2,
+            "hint forces down to 2"
+        );
         // The middle fragment joins one of its equally-close neighbors; the far pair
         // (+x vs +y, cos 0) must remain split.
         assert_ne!(hinted[0], hinted[2]);
@@ -1314,7 +1468,10 @@ mod tests {
         let durs = vec![20_000, 400, 5_000];
         let labels = vec![0, 0, 1];
         let merged = merge_clusters_by_centroid(&embs, &durs, &labels, 0.85);
-        assert_eq!(merged[0], merged[2], "duration weighting should dominate the noise");
+        assert_eq!(
+            merged[0], merged[2],
+            "duration weighting should dominate the noise"
+        );
     }
 
     #[test]
@@ -1333,16 +1490,41 @@ mod tests {
     #[test]
     fn merge_same_cluster_joins_adjacent() {
         let turns = vec![
-            SpeakerTurn { start_ms: 0, end_ms: 500, cluster_id: 0 },
-            SpeakerTurn { start_ms: 600, end_ms: 900, cluster_id: 0 }, // gap 100 < 250 -> merge
-            SpeakerTurn { start_ms: 950, end_ms: 1200, cluster_id: 1 }, // different cluster
-            SpeakerTurn { start_ms: 5000, end_ms: 5500, cluster_id: 0 }, // far gap -> separate
+            SpeakerTurn {
+                start_ms: 0,
+                end_ms: 500,
+                cluster_id: 0,
+            },
+            SpeakerTurn {
+                start_ms: 600,
+                end_ms: 900,
+                cluster_id: 0,
+            }, // gap 100 < 250 -> merge
+            SpeakerTurn {
+                start_ms: 950,
+                end_ms: 1200,
+                cluster_id: 1,
+            }, // different cluster
+            SpeakerTurn {
+                start_ms: 5000,
+                end_ms: 5500,
+                cluster_id: 0,
+            }, // far gap -> separate
         ];
         let merged = merge_same_cluster(turns, 250);
         assert_eq!(merged.len(), 3);
-        assert_eq!((merged[0].start_ms, merged[0].end_ms, merged[0].cluster_id), (0, 900, 0));
-        assert_eq!((merged[1].start_ms, merged[1].end_ms, merged[1].cluster_id), (950, 1200, 1));
-        assert_eq!((merged[2].start_ms, merged[2].end_ms, merged[2].cluster_id), (5000, 5500, 0));
+        assert_eq!(
+            (merged[0].start_ms, merged[0].end_ms, merged[0].cluster_id),
+            (0, 900, 0)
+        );
+        assert_eq!(
+            (merged[1].start_ms, merged[1].end_ms, merged[1].cluster_id),
+            (950, 1200, 1)
+        );
+        assert_eq!(
+            (merged[2].start_ms, merged[2].end_ms, merged[2].cluster_id),
+            (5000, 5500, 0)
+        );
     }
 
     // ---- Integration test (requires the real ONNX models) ----
@@ -1385,14 +1567,19 @@ mod tests {
         };
 
         let diarizer = Diarizer::load(config).expect("load diarizer");
-        let result = diarizer.diarize(&wav_path).expect("diarize should not error");
+        let result = diarizer
+            .diarize(&wav_path)
+            .expect("diarize should not error");
         eprintln!(
             "diarize ran: {} turns, {} clusters",
             result.turns.len(),
             result.cluster_embeddings.len()
         );
         for t in &result.turns {
-            eprintln!("  turn [{:>6}..{:>6}] ms -> cluster {}", t.start_ms, t.end_ms, t.cluster_id);
+            eprintln!(
+                "  turn [{:>6}..{:>6}] ms -> cluster {}",
+                t.start_ms, t.end_ms, t.cluster_id
+            );
         }
         // Each cluster embedding is L2-normalized.
         for (id, emb) in &result.cluster_embeddings {
@@ -1413,14 +1600,23 @@ mod tests {
     fn embed_stability_probe() {
         let model_dir = match std::env::var("MEETILY_DIARIZATION_MODEL_DIR") {
             Ok(d) => std::path::PathBuf::from(d),
-            Err(_) => { eprintln!("skip: no model dir"); return; }
+            Err(_) => {
+                eprintln!("skip: no model dir");
+                return;
+            }
         };
         let wav = match std::env::var("MEETILY_DIARIZATION_TEST_WAV") {
             Ok(p) => std::path::PathBuf::from(p),
-            Err(_) => { eprintln!("skip: no wav"); return; }
+            Err(_) => {
+                eprintln!("skip: no wav");
+                return;
+            }
         };
         let config = DiarizerConfig { model_dir };
-        if !config.is_available() { eprintln!("skip: models absent"); return; }
+        if !config.is_available() {
+            eprintln!("skip: models absent");
+            return;
+        }
         let d = Diarizer::load(config).unwrap();
 
         let decoded = crate::audio::decoder::decode_audio_file(&wav).unwrap();
@@ -1432,22 +1628,41 @@ mod tests {
         // 1) Determinism: same input twice.
         let a1 = d.embed_turn(slice(6655, 10000)).unwrap().unwrap();
         let a2 = d.embed_turn(slice(6655, 10000)).unwrap().unwrap();
-        eprintln!("determinism (same slice twice): cos = {:.6}", cosine_similarity(&a1, &a2));
+        eprintln!(
+            "determinism (same slice twice): cos = {:.6}",
+            cosine_similarity(&a1, &a2)
+        );
 
         // 2) Same-utterance halves (B speaks continuously 6655..12828).
         let h1 = d.embed_turn(slice(6655, 10000)).unwrap().unwrap();
         let h2 = d.embed_turn(slice(10017, 11851)).unwrap().unwrap();
         let h2b = d.embed_turn(slice(10017, 12800)).unwrap().unwrap();
         let full = d.embed_turn(slice(6655, 12800)).unwrap().unwrap();
-        eprintln!("same utterance: h1 vs h2       = {:.3}", cosine_similarity(&h1, &h2));
-        eprintln!("same utterance: h1 vs h2(long) = {:.3}", cosine_similarity(&h1, &h2b));
-        eprintln!("same utterance: h1 vs full     = {:.3}", cosine_similarity(&h1, &full));
-        eprintln!("same utterance: h2 vs full     = {:.3}", cosine_similarity(&h2, &full));
+        eprintln!(
+            "same utterance: h1 vs h2       = {:.3}",
+            cosine_similarity(&h1, &h2)
+        );
+        eprintln!(
+            "same utterance: h1 vs h2(long) = {:.3}",
+            cosine_similarity(&h1, &h2b)
+        );
+        eprintln!(
+            "same utterance: h1 vs full     = {:.3}",
+            cosine_similarity(&h1, &full)
+        );
+        eprintln!(
+            "same utterance: h2 vs full     = {:.3}",
+            cosine_similarity(&h2, &full)
+        );
 
         // 3) Length sensitivity: nested prefixes of one utterance.
         for len_ms in [500usize, 1000, 1500, 2000, 3000] {
             let e = d.embed_turn(slice(6655, 6655 + len_ms)).unwrap().unwrap();
-            eprintln!("prefix {:>4}ms vs full-utterance: cos = {:.3}", len_ms, cosine_similarity(&e, &full));
+            eprintln!(
+                "prefix {:>4}ms vs full-utterance: cos = {:.3}",
+                len_ms,
+                cosine_similarity(&e, &full)
+            );
         }
 
         // 4) Optional: pure clip files (MEETILY_DIARIZATION_CLIP_DIR with clip_NN_S.wav).
@@ -1481,17 +1696,33 @@ mod tests {
                 for j in (i + 1)..embs.len() {
                     let sim = cosine_similarity(&embs[i].1, &embs[j].1);
                     if embs[i].0 == embs[j].0 {
-                        if sim < worst_same.0 { worst_same = (sim, format!("{i} vs {j}")); }
+                        if sim < worst_same.0 {
+                            worst_same = (sim, format!("{i} vs {j}"));
+                        }
                         same.push(sim);
                     } else {
-                        if sim > best_cross.0 { best_cross = (sim, format!("{i} vs {j}")); }
+                        if sim > best_cross.0 {
+                            best_cross = (sim, format!("{i} vs {j}"));
+                        }
                         cross.push(sim);
                     }
                 }
             }
             let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
-            eprintln!("clips: same n={} mean={:.3} worst={:.3} ({})", same.len(), mean(&same), worst_same.0, worst_same.1);
-            eprintln!("clips: cross n={} mean={:.3} best={:.3} ({})", cross.len(), mean(&cross), best_cross.0, best_cross.1);
+            eprintln!(
+                "clips: same n={} mean={:.3} worst={:.3} ({})",
+                same.len(),
+                mean(&same),
+                worst_same.0,
+                worst_same.1
+            );
+            eprintln!(
+                "clips: cross n={} mean={:.3} best={:.3} ({})",
+                cross.len(),
+                mean(&cross),
+                best_cross.0,
+                best_cross.1
+            );
         }
     }
 
@@ -1510,18 +1741,30 @@ mod tests {
     fn measure_calibration() {
         let model_dir = match std::env::var("MEETILY_DIARIZATION_MODEL_DIR") {
             Ok(d) => std::path::PathBuf::from(d),
-            Err(_) => { eprintln!("skip: MEETILY_DIARIZATION_MODEL_DIR not set"); return; }
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_MODEL_DIR not set");
+                return;
+            }
         };
         let wav = match std::env::var("MEETILY_DIARIZATION_TEST_WAV") {
             Ok(p) => std::path::PathBuf::from(p),
-            Err(_) => { eprintln!("skip: MEETILY_DIARIZATION_TEST_WAV not set"); return; }
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_TEST_WAV not set");
+                return;
+            }
         };
         let truth_csv = match std::env::var("MEETILY_DIARIZATION_TRUTH") {
             Ok(p) => std::path::PathBuf::from(p),
-            Err(_) => { eprintln!("skip: MEETILY_DIARIZATION_TRUTH not set"); return; }
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_TRUTH not set");
+                return;
+            }
         };
         let config = DiarizerConfig { model_dir };
-        if !config.is_available() { eprintln!("skip: models absent"); return; }
+        if !config.is_available() {
+            eprintln!("skip: models absent");
+            return;
+        }
 
         // Ground-truth intervals.
         let truth_txt = std::fs::read_to_string(&truth_csv).unwrap();
@@ -1531,20 +1774,29 @@ mod tests {
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
                 let c: Vec<&str> = l.split(',').collect();
-                (c[0].trim().parse().unwrap(), c[1].trim().parse().unwrap(), c[2].trim().to_string())
+                (
+                    c[0].trim().parse().unwrap(),
+                    c[1].trim().parse().unwrap(),
+                    c[2].trim().to_string(),
+                )
             })
             .collect();
         let truth_of = |s: i64, e: i64| -> String {
             let mut best = ("?".to_string(), 0i64);
             for (ts, te, spk) in &truth {
                 let ov = (e.min(*te) - s.max(*ts)).max(0);
-                if ov > best.1 { best = (spk.clone(), ov); }
+                if ov > best.1 {
+                    best = (spk.clone(), ov);
+                }
             }
             best.0
         };
 
         // Capture-all params: tiny min_turn so short interjections are embedded too.
-        let params = DiarizationParams { min_turn_ms: 200, ..Default::default() };
+        let params = DiarizationParams {
+            min_turn_ms: 200,
+            ..Default::default()
+        };
         let diarizer = Diarizer::load_with_params(config, params).unwrap();
 
         let decoded = crate::audio::decoder::decode_audio_file(&wav).unwrap();
@@ -1554,7 +1806,14 @@ mod tests {
         // Per-turn: (start,end,dur,overlap_frac,truth_spk,embedding). Also a global per-frame
         // active-count timeline for overlap fraction.
         #[derive(Clone)]
-        struct T { s: i64, e: i64, dur: i64, ov: f32, spk: String, emb: Vec<f32> }
+        struct T {
+            s: i64,
+            e: i64,
+            dur: i64,
+            ov: f32,
+            spk: String,
+            emb: Vec<f32>,
+        }
         let mut frames_active: Vec<(i64, i64, u8)> = Vec::new(); // (s_ms,e_ms,count)
         let mut turns_meta: Vec<(i64, i64)> = Vec::new();
 
@@ -1563,8 +1822,12 @@ mod tests {
         while win_start < waveform.len() {
             let end = (win_start + SEG_WINDOW_SAMPLES).min(waveform.len());
             let n = end - win_start;
-            for (dst, src) in window_buf.iter_mut().zip(&waveform[win_start..end]) { *dst = *src * SEG_WAVEFORM_SCALE; }
-            for x in window_buf.iter_mut().skip(n) { *x = 0.0; }
+            for (dst, src) in window_buf.iter_mut().zip(&waveform[win_start..end]) {
+                *dst = *src * SEG_WAVEFORM_SCALE;
+            }
+            for x in window_buf.iter_mut().skip(n) {
+                *x = 0.0;
+            }
             let active = diarizer.run_segmentation(&window_buf).unwrap();
             let num_frames = active.len();
             if num_frames > 0 {
@@ -1578,9 +1841,17 @@ mod tests {
                 }
                 for spk in 0..SEG_NUM_LOCAL_SPEAKERS {
                     let column: Vec<bool> = active.iter().map(|f| f[spk]).collect();
-                    for (s, e) in runs_to_turns(&column, frame_ms, window_start_ms, 200, DEFAULT_MERGE_GAP_MS) {
+                    for (s, e) in runs_to_turns(
+                        &column,
+                        frame_ms,
+                        window_start_ms,
+                        200,
+                        DEFAULT_MERGE_GAP_MS,
+                    ) {
                         let e = e.min(total_ms.round() as i64);
-                        if e - s >= 200 { turns_meta.push((s, e)); }
+                        if e - s >= 200 {
+                            turns_meta.push((s, e));
+                        }
                     }
                 }
             }
@@ -1592,31 +1863,55 @@ mod tests {
             let (mut tot, mut ov) = (0i64, 0i64);
             for (fs, fe, cnt) in &frames_active {
                 let o = (e.min(*fe) - s.max(*fs)).max(0);
-                if o > 0 { tot += o; if *cnt >= 2 { ov += o; } }
+                if o > 0 {
+                    tot += o;
+                    if *cnt >= 2 {
+                        ov += o;
+                    }
+                }
             }
-            if tot == 0 { 0.0 } else { ov as f32 / tot as f32 }
+            if tot == 0 {
+                0.0
+            } else {
+                ov as f32 / tot as f32
+            }
         };
 
         let mut turns: Vec<T> = Vec::new();
         for (s, e) in turns_meta {
             let ss = ((s as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize;
             let ee = (((e as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize).min(waveform.len());
-            if ee <= ss { continue; }
+            if ee <= ss {
+                continue;
+            }
             if let Some(emb) = diarizer.embed_turn(&waveform[ss..ee]).unwrap() {
-                turns.push(T { s, e, dur: e - s, ov: ov_frac(s, e), spk: truth_of(s, e), emb });
+                turns.push(T {
+                    s,
+                    e,
+                    dur: e - s,
+                    ov: ov_frac(s, e),
+                    spk: truth_of(s, e),
+                    emb,
+                });
             }
         }
 
         eprintln!("\n==== {} embedded turns ====", turns.len());
         for t in &turns {
             let b = if t.dur < 1200 { "SHORT" } else { "long " };
-            eprintln!("  [{:>6}..{:>6}] {} {} dur={:>5} ovlp={:.2}", t.s, t.e, t.spk, b, t.dur, t.ov);
+            eprintln!(
+                "  [{:>6}..{:>6}] {} {} dur={:>5} ovlp={:.2}",
+                t.s, t.e, t.spk, b, t.dur, t.ov
+            );
         }
 
         // Similarity distributions.
         let stat = |v: &[f32]| -> (f32, f32, f32, usize) {
-            if v.is_empty() { return (0.0, 0.0, 0.0, 0); }
-            let mut s = v.to_vec(); s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            if v.is_empty() {
+                return (0.0, 0.0, 0.0, 0);
+            }
+            let mut s = v.to_vec();
+            s.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let mean = s.iter().sum::<f32>() / s.len() as f32;
             (s[0], mean, s[s.len() - 1], s.len())
         };
@@ -1629,11 +1924,26 @@ mod tests {
                 let same = turns[i].spk == turns[j].spk;
                 let both_long = is_long(&turns[i]) && is_long(&turns[j]);
                 let involves_short = !is_long(&turns[i]) || !is_long(&turns[j]);
-                if both_long { if same { ll_same.push(sim) } else { ll_cross.push(sim) } }
-                if involves_short { if same { sh_same.push(sim) } else { sh_cross.push(sim) } }
+                if both_long {
+                    if same {
+                        ll_same.push(sim)
+                    } else {
+                        ll_cross.push(sim)
+                    }
+                }
+                if involves_short {
+                    if same {
+                        sh_same.push(sim)
+                    } else {
+                        sh_cross.push(sim)
+                    }
+                }
             }
         }
-        let p = |name: &str, v: &[f32]| { let (mn, me, mx, n) = stat(v); eprintln!("  {name:<22} n={n:<4} min={mn:.3} mean={me:.3} max={mx:.3}"); };
+        let p = |name: &str, v: &[f32]| {
+            let (mn, me, mx, n) = stat(v);
+            eprintln!("  {name:<22} n={n:<4} min={mn:.3} mean={me:.3} max={mx:.3}");
+        };
         eprintln!("\n==== pairwise cosine similarity ====");
         p("LONG-LONG same", &ll_same);
         p("LONG-LONG cross", &ll_cross);
@@ -1646,9 +1956,14 @@ mod tests {
             let mut c_embs: Vec<(String, Vec<f32>)> = Vec::new();
             for t in turns.iter().filter(|t| is_long(t)) {
                 let mid = (t.s + t.e) / 2;
-                let (cs, ce) = if t.dur > 3000 { (mid - 1500, mid + 1500) } else { (t.s, t.e) };
+                let (cs, ce) = if t.dur > 3000 {
+                    (mid - 1500, mid + 1500)
+                } else {
+                    (t.s, t.e)
+                };
                 let ss = ((cs as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize;
-                let ee = (((ce as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize).min(waveform.len());
+                let ee =
+                    (((ce as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize).min(waveform.len());
                 if let Some(e) = diarizer.embed_turn(&waveform[ss..ee]).unwrap() {
                     c_embs.push((t.spk.clone(), e));
                 }
@@ -1657,7 +1972,11 @@ mod tests {
             for i in 0..c_embs.len() {
                 for j in (i + 1)..c_embs.len() {
                     let sim = cosine_similarity(&c_embs[i].1, &c_embs[j].1);
-                    if c_embs[i].0 == c_embs[j].0 { cs_same.push(sim) } else { cs_cross.push(sim) }
+                    if c_embs[i].0 == c_embs[j].0 {
+                        cs_same.push(sim)
+                    } else {
+                        cs_cross.push(sim)
+                    }
                 }
             }
             p("central-3s same", &cs_same);
@@ -1665,19 +1984,36 @@ mod tests {
         }
 
         // Threshold sweep (LONG turns only vs ALL turns).
-        let long_embs: Vec<Vec<f32>> = turns.iter().filter(|t| is_long(t)).map(|t| t.emb.clone()).collect();
-        let long_spks: Vec<String> = turns.iter().filter(|t| is_long(t)).map(|t| t.spk.clone()).collect();
+        let long_embs: Vec<Vec<f32>> = turns
+            .iter()
+            .filter(|t| is_long(t))
+            .map(|t| t.emb.clone())
+            .collect();
+        let long_spks: Vec<String> = turns
+            .iter()
+            .filter(|t| is_long(t))
+            .map(|t| t.spk.clone())
+            .collect();
         let all_embs: Vec<Vec<f32>> = turns.iter().map(|t| t.emb.clone()).collect();
         let purity = |labels: &[usize], spks: &[String]| -> f32 {
             use std::collections::HashMap;
             let mut by: HashMap<usize, HashMap<&str, i64>> = HashMap::new();
-            for (l, s) in labels.iter().zip(spks) { *by.entry(*l).or_default().entry(s.as_str()).or_default() += 1; }
+            for (l, s) in labels.iter().zip(spks) {
+                *by.entry(*l).or_default().entry(s.as_str()).or_default() += 1;
+            }
             let tot: i64 = labels.len() as i64;
             let correct: i64 = by.values().map(|m| *m.values().max().unwrap()).sum();
-            if tot == 0 { 0.0 } else { correct as f32 / tot as f32 }
+            if tot == 0 {
+                0.0
+            } else {
+                correct as f32 / tot as f32
+            }
         };
         let all_spks: Vec<String> = turns.iter().map(|t| t.spk.clone()).collect();
-        for (name, method) in [("AVERAGE", Linkage::Average), ("COMPLETE", Linkage::Complete)] {
+        for (name, method) in [
+            ("AVERAGE", Linkage::Average),
+            ("COMPLETE", Linkage::Complete),
+        ] {
             eprintln!("\n==== cluster count sweep ({name} linkage) ====");
             eprintln!("  thr | k(LONG only) purity | k(ALL turns) purity");
             for thr in [0.3, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8] {
@@ -1704,17 +2040,28 @@ mod tests {
         let f_durs: Vec<i64> = formation.iter().map(|t| t.dur).collect();
         let f_spks: Vec<String> = formation.iter().map(|t| t.spk.clone()).collect();
         let frag_labels = cluster_embeddings(&f_embs, dp.cluster_distance_threshold, dp.linkage);
-        let kf = frag_labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+        let kf = frag_labels
+            .iter()
+            .copied()
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
         eprintln!(
             "\n==== stage-1 fragments (thr={}, {:?}): k={} purity={:.3} ====",
-            dp.cluster_distance_threshold, dp.linkage, kf, purity(&frag_labels, &f_spks)
+            dp.cluster_distance_threshold,
+            dp.linkage,
+            kf,
+            purity(&frag_labels, &f_spks)
         );
         eprintln!("==== stage-2 centroid-merge sweep ====");
         eprintln!("  min_sim | k purity");
         for min_sim in [0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90] {
             let merged = merge_clusters_by_centroid(&f_embs, &f_durs, &frag_labels, min_sim);
             let k = merged.iter().copied().max().map(|m| m + 1).unwrap_or(0);
-            eprintln!("  {min_sim:.2}    | k={k:<2} {:.3}", purity(&merged, &f_spks));
+            eprintln!(
+                "  {min_sim:.2}    | k={k:<2} {:.3}",
+                purity(&merged, &f_spks)
+            );
         }
         let f_labels = merge_clusters_by_centroid(
             &f_embs,
@@ -1722,54 +2069,110 @@ mod tests {
             &frag_labels,
             dp.centroid_merge_min_similarity,
         );
-        eprintln!("==== two-stage @ defaults (stage2={}) ====", dp.centroid_merge_min_similarity);
+        eprintln!(
+            "==== two-stage @ defaults (stage2={}) ====",
+            dp.centroid_merge_min_similarity
+        );
         for (t, l) in formation.iter().zip(&f_labels) {
-            eprintln!("  cluster {l}: [{:>6}..{:>6}] {} dur={}", t.s, t.e, t.spk, t.dur);
+            eprintln!(
+                "  cluster {l}: [{:>6}..{:>6}] {} dur={}",
+                t.s, t.e, t.spk, t.dur
+            );
         }
         // Most-suspicious pairs: top cross-speaker similarities and bottom same-speaker ones.
         let mut cross_pairs: Vec<(f32, usize, usize)> = Vec::new();
         let mut same_pairs: Vec<(f32, usize, usize)> = Vec::new();
         for i in 0..turns.len() {
             for j in (i + 1)..turns.len() {
-                if !is_long(&turns[i]) || !is_long(&turns[j]) { continue; }
+                if !is_long(&turns[i]) || !is_long(&turns[j]) {
+                    continue;
+                }
                 let sim = cosine_similarity(&turns[i].emb, &turns[j].emb);
-                if turns[i].spk == turns[j].spk { same_pairs.push((sim, i, j)); } else { cross_pairs.push((sim, i, j)); }
+                if turns[i].spk == turns[j].spk {
+                    same_pairs.push((sim, i, j));
+                } else {
+                    cross_pairs.push((sim, i, j));
+                }
             }
         }
         cross_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         same_pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         eprintln!("  top cross-speaker sims:");
         for (sim, i, j) in cross_pairs.iter().take(3) {
-            eprintln!("    {:.3}  [{}..{}]{} vs [{}..{}]{}", sim, turns[*i].s, turns[*i].e, turns[*i].spk, turns[*j].s, turns[*j].e, turns[*j].spk);
+            eprintln!(
+                "    {:.3}  [{}..{}]{} vs [{}..{}]{}",
+                sim,
+                turns[*i].s,
+                turns[*i].e,
+                turns[*i].spk,
+                turns[*j].s,
+                turns[*j].e,
+                turns[*j].spk
+            );
         }
         eprintln!("  bottom same-speaker sims:");
         for (sim, i, j) in same_pairs.iter().take(3) {
-            eprintln!("    {:.3}  [{}..{}]{} vs [{}..{}]{}", sim, turns[*i].s, turns[*i].e, turns[*i].spk, turns[*j].s, turns[*j].e, turns[*j].spk);
+            eprintln!(
+                "    {:.3}  [{}..{}]{} vs [{}..{}]{}",
+                sim,
+                turns[*i].s,
+                turns[*i].e,
+                turns[*i].spk,
+                turns[*j].s,
+                turns[*j].e,
+                turns[*j].spk
+            );
         }
 
         // Full-pipeline cluster count with the NEW defaults (formation/attach + complete linkage).
         let new_result = {
-            let cfg2 = DiarizerConfig { model_dir: std::path::PathBuf::from(std::env::var("MEETILY_DIARIZATION_MODEL_DIR").unwrap()) };
+            let cfg2 = DiarizerConfig {
+                model_dir: std::path::PathBuf::from(
+                    std::env::var("MEETILY_DIARIZATION_MODEL_DIR").unwrap(),
+                ),
+            };
             let d2 = Diarizer::load(cfg2).unwrap();
             d2.diarize(&wav).unwrap()
         };
         eprintln!("\n==== full diarize() with NEW defaults ====");
-        eprintln!("  clusters = {}  turns = {}", new_result.cluster_embeddings.len(), new_result.turns.len());
+        eprintln!(
+            "  clusters = {}  turns = {}",
+            new_result.cluster_embeddings.len(),
+            new_result.turns.len()
+        );
 
         // Tau: per-speaker duration-weighted centroid from first vs second half of that
         // speaker's LONG turns; cross-half same-speaker vs cross-speaker centroid cosine.
         use std::collections::BTreeMap;
         let mut by_spk: BTreeMap<String, Vec<&T>> = BTreeMap::new();
-        for t in &turns { if is_long(t) { by_spk.entry(t.spk.clone()).or_default().push(t); } }
+        for t in &turns {
+            if is_long(t) {
+                by_spk.entry(t.spk.clone()).or_default().push(t);
+            }
+        }
         let centroid = |ts: &[&T]| -> Vec<f32> {
-            if ts.is_empty() { return vec![]; }
+            if ts.is_empty() {
+                return vec![];
+            }
             let dim = ts[0].emb.len();
             let mut acc = vec![0f32; dim];
             let mut w = 0f32;
-            for t in ts { let dw = t.dur as f32; for (a, x) in acc.iter_mut().zip(&t.emb) { *a += x * dw; } w += dw; }
-            for a in acc.iter_mut() { *a /= w; }
+            for t in ts {
+                let dw = t.dur as f32;
+                for (a, x) in acc.iter_mut().zip(&t.emb) {
+                    *a += x * dw;
+                }
+                w += dw;
+            }
+            for a in acc.iter_mut() {
+                *a /= w;
+            }
             let norm = acc.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if norm > 0.0 { for a in acc.iter_mut() { *a /= norm; } }
+            if norm > 0.0 {
+                for a in acc.iter_mut() {
+                    *a /= norm;
+                }
+            }
             acc
         };
         let mut half_centroids: BTreeMap<String, (Vec<f32>, Vec<f32>)> = BTreeMap::new();
@@ -1779,14 +2182,22 @@ mod tests {
         }
         eprintln!("\n==== tau validation (duration-weighted half centroids) ====");
         for (spk, (h1, h2)) in &half_centroids {
-            eprintln!("  {spk} same-speaker cross-half cos = {:.3}", cosine_similarity(h1, h2));
+            eprintln!(
+                "  {spk} same-speaker cross-half cos = {:.3}",
+                cosine_similarity(h1, h2)
+            );
         }
         let spks: Vec<&String> = half_centroids.keys().collect();
         for i in 0..spks.len() {
             for j in (i + 1)..spks.len() {
                 let a = &half_centroids[spks[i]].0;
                 let b = &half_centroids[spks[j]].0;
-                eprintln!("  {} vs {} cross-speaker cos = {:.3}", spks[i], spks[j], cosine_similarity(a, b));
+                eprintln!(
+                    "  {} vs {} cross-speaker cos = {:.3}",
+                    spks[i],
+                    spks[j],
+                    cosine_similarity(a, b)
+                );
             }
         }
     }
@@ -1817,7 +2228,8 @@ mod tests {
         let data_bytes = samples.len() * 2;
         let mut f = std::fs::File::create(path).unwrap();
         f.write_all(b"RIFF").unwrap();
-        f.write_all(&((36 + data_bytes) as u32).to_le_bytes()).unwrap();
+        f.write_all(&((36 + data_bytes) as u32).to_le_bytes())
+            .unwrap();
         f.write_all(b"WAVE").unwrap();
         f.write_all(b"fmt ").unwrap();
         f.write_all(&16u32.to_le_bytes()).unwrap(); // fmt chunk size

@@ -426,10 +426,8 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
         .ok_or_else(|| format!("Meeting not found: {meeting_id}"))?;
     let was_private = previous_memory.0
         == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
-        || previous_memory.1
-            == crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
-    let is_private = memory_type
-        == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
+        || previous_memory.1 == crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
+    let is_private = memory_type == crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
         || sensitivity == crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
     let summary_template_id = summary_template_id.unwrap_or_else(|| match memory_type.as_str() {
         "standup" => "daily_standup".to_string(),
@@ -443,8 +441,8 @@ pub async fn api_set_meeting_memory_config<R: Runtime>(
         &sensitivity,
         &summary_template_id,
     )
-        .await
-        .map_err(|error| error.to_string())?;
+    .await
+    .map_err(|error| error.to_string())?;
     if !updated {
         return Err(format!("Meeting not found: {meeting_id}"));
     }
@@ -1023,7 +1021,10 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
     meeting_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<MeetingMetadata, String> {
-    log_info!("api_get_meeting_metadata called for meeting_id: {}", meeting_id);
+    log_info!(
+        "api_get_meeting_metadata called for meeting_id: {}",
+        meeting_id
+    );
 
     let pool = state.db_manager.pool();
 
@@ -1067,7 +1068,9 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset).await {
+    match MeetingsRepository::get_meeting_transcripts_paginated(pool, &meeting_id, limit, offset)
+        .await
+    {
         Ok((transcripts, total_count)) => {
             log_info!(
                 "Successfully retrieved {} transcripts for meeting {} (total: {})",
@@ -1100,7 +1103,11 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
             })
         }
         Err(e) => {
-            log_error!("Error retrieving transcripts for meeting {}: {}", meeting_id, e);
+            log_error!(
+                "Error retrieving transcripts for meeting {}: {}",
+                meeting_id,
+                e
+            );
             Err(format!("Failed to retrieve transcripts: {}", e))
         }
     }
@@ -1168,7 +1175,10 @@ pub async fn api_save_transcript<R: Runtime>(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             log_error!("Failed to parse transcript segments: {}", e);
-            format!("Invalid transcript data format: {}. Please check the data structure.", e)
+            format!(
+                "Invalid transcript data format: {}. Please check the data structure.",
+                e
+            )
         })?;
 
     // Log parsed segments count and first segment details
@@ -1182,6 +1192,7 @@ pub async fn api_save_transcript<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
+    let provenance_folder = folder_path.clone();
     // Now, call the repository with the correctly typed data.
     match TranscriptsRepository::save_transcript(
         pool,
@@ -1192,6 +1203,35 @@ pub async fn api_save_transcript<R: Runtime>(
     .await
     {
         Ok(meeting_id) => {
+            if let Some(folder) = provenance_folder.filter(|value| !value.trim().is_empty()) {
+                match sqlx::query_as::<_, (String, String)>(
+                    "SELECT provider, model FROM transcript_settings WHERE id='1'",
+                )
+                .fetch_optional(pool)
+                .await
+                {
+                    Ok(Some((provider, model))) => {
+                        if let Err(error) =
+                            crate::audio::transcription_provenance::write_transcription_provenance(
+                                Path::new(&folder),
+                                &provider,
+                                &model,
+                                None,
+                                "recording",
+                            )
+                        {
+                            log_warn!("Could not save transcription provenance: {}", error);
+                        }
+                    }
+                    Ok(None) => log_warn!(
+                        "Could not save transcription provenance: no active transcription model"
+                    ),
+                    Err(error) => log_warn!(
+                        "Could not read transcription model for provenance: {}",
+                        error
+                    ),
+                }
+            }
             log_info!(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id
@@ -1427,10 +1467,12 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     let pool = state.db_manager.pool();
     let api_key = match api_key {
-        Some(value) if is_secret_sentinel(&value) => SettingsRepository::get_custom_openai_config(pool)
-            .await
-            .map_err(|e| e.to_string())?
-            .and_then(|config| config.api_key),
+        Some(value) if is_secret_sentinel(&value) => {
+            SettingsRepository::get_custom_openai_config(pool)
+                .await
+                .map_err(|e| e.to_string())?
+                .and_then(|config| config.api_key)
+        }
         value => value.filter(|key| !key.trim().is_empty()),
     };
     let config = CustomOpenAIConfig {
@@ -1444,7 +1486,10 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
-            log_info!("✅ Successfully saved custom OpenAI config for endpoint: {}", config.endpoint);
+            log_info!(
+                "✅ Successfully saved custom OpenAI config for endpoint: {}",
+                config.endpoint
+            );
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Custom OpenAI configuration saved successfully"
@@ -1470,8 +1515,11 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
     match SettingsRepository::get_custom_openai_config(pool).await {
         Ok(mut config) => {
             if let Some(ref mut c) = config {
-                log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint, c.model);
+                log_info!(
+                    "✅ Found custom OpenAI config: endpoint='{}', model='{}'",
+                    c.endpoint,
+                    c.model
+                );
                 c.api_key = redact_secret(c.api_key.take());
             } else {
                 log_info!("No custom OpenAI config found");
@@ -1566,7 +1614,7 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                                             .get("message")
                                             .and_then(|m| {
                                                 m.get("content")
-                                                .or_else(|| m.get("reasoning_content"))
+                                                    .or_else(|| m.get("reasoning_content"))
                                             })
                                             .is_some();
 
@@ -1584,17 +1632,33 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                         }
 
                         // Response was 200 but doesn't match OpenAI format
-                        log_warn!("⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}", response_text);
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}",
+                            response_text
+                        );
                         Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
                     }
                     Err(e) => {
-                        log_warn!("⚠️ Endpoint returned 200 but response is not valid JSON: {}", e);
-                        Err(format!("Endpoint is reachable but returned invalid JSON: {}. Response: {}", e, response_text))
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response is not valid JSON: {}",
+                            e
+                        );
+                        Err(format!(
+                            "Endpoint is reachable but returned invalid JSON: {}. Response: {}",
+                            e, response_text
+                        ))
                     }
                 }
             } else {
-                log_warn!("⚠️ Custom OpenAI connection test failed with status {}: {}", status, response_text);
-                Err(format!("Connection failed with status {}: {}", status, response_text))
+                log_warn!(
+                    "⚠️ Custom OpenAI connection test failed with status {}: {}",
+                    status,
+                    response_text
+                );
+                Err(format!(
+                    "Connection failed with status {}: {}",
+                    status, response_text
+                ))
             }
         }
         Err(e) => {

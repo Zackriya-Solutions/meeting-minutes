@@ -44,7 +44,11 @@ pub struct PrivacyConfig {
 
 impl Default for PrivacyConfig {
     fn default() -> Self {
-        Self { local_only: false, extraction_enabled: true, chat_enabled: true }
+        Self {
+            local_only: false,
+            extraction_enabled: true,
+            chat_enabled: true,
+        }
     }
 }
 
@@ -103,7 +107,10 @@ impl std::fmt::Display for LlmError {
             LlmError::LocalOnlyMode => write!(f, "local-only mode is enabled; LLM call blocked"),
             LlmError::PurposeDisabled(p) => write!(f, "{} is disabled in settings", p.as_str()),
             LlmError::PrivacyConfigUnavailable(e) => {
-                write!(f, "privacy settings unavailable; outbound call blocked: {e}")
+                write!(
+                    f,
+                    "privacy settings unavailable; outbound call blocked: {e}"
+                )
             }
             LlmError::Provider(e) => write!(f, "LLM provider error: {e}"),
         }
@@ -196,12 +203,24 @@ mod tests {
         assert!(cfg.ensure_allowed(Purpose::Extract).is_ok());
 
         cfg.extraction_enabled = false;
-        assert!(matches!(cfg.ensure_allowed(Purpose::Extract), Err(LlmError::PurposeDisabled(_))));
-        assert!(cfg.ensure_allowed(Purpose::Summary).is_ok(), "summary unaffected");
+        assert!(matches!(
+            cfg.ensure_allowed(Purpose::Extract),
+            Err(LlmError::PurposeDisabled(_))
+        ));
+        assert!(
+            cfg.ensure_allowed(Purpose::Summary).is_ok(),
+            "summary unaffected"
+        );
 
-        cfg = PrivacyConfig { local_only: true, ..Default::default() };
+        cfg = PrivacyConfig {
+            local_only: true,
+            ..Default::default()
+        };
         for p in [Purpose::Summary, Purpose::Extract, Purpose::Chat] {
-            assert!(matches!(cfg.ensure_allowed(p), Err(LlmError::LocalOnlyMode)));
+            assert!(matches!(
+                cfg.ensure_allowed(p),
+                Err(LlmError::LocalOnlyMode)
+            ));
         }
     }
 
@@ -209,7 +228,10 @@ mod tests {
     async fn blocked_call_never_awaits_provider() {
         let awaited = Arc::new(AtomicBool::new(false));
         let flag = awaited.clone();
-        let cfg = PrivacyConfig { local_only: true, ..Default::default() };
+        let cfg = PrivacyConfig {
+            local_only: true,
+            ..Default::default()
+        };
 
         let fut = async move {
             flag.store(true, Ordering::SeqCst);
@@ -218,13 +240,19 @@ mod tests {
         let res = guarded_complete(&cfg, Purpose::Chat, fut).await;
 
         assert!(matches!(res, Err(LlmError::LocalOnlyMode)));
-        assert!(!awaited.load(Ordering::SeqCst), "provider future must NOT be polled when blocked");
+        assert!(
+            !awaited.load(Ordering::SeqCst),
+            "provider future must NOT be polled when blocked"
+        );
     }
 
     #[tokio::test]
     async fn permitted_call_runs_provider() {
         let cfg = PrivacyConfig::default();
-        let res = guarded_complete(&cfg, Purpose::Summary, async { Ok::<String, String>("ok".into()) }).await;
+        let res = guarded_complete(&cfg, Purpose::Summary, async {
+            Ok::<String, String>("ok".into())
+        })
+        .await;
         assert_eq!(res.unwrap(), "ok");
     }
 
@@ -236,7 +264,9 @@ mod tests {
             .await
             .unwrap();
         sqlx::query("CREATE TABLE app_settings_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         // Missing keys -> defaults.
         assert!(PrivacyConfig::load(&pool).await.unwrap().extraction_enabled);
 

@@ -93,7 +93,12 @@ async fn download_file<R: Runtime>(
                 last_pct = pct;
                 let _ = app.emit(
                     "diarization-download-progress",
-                    DownloadProgress { file: label.to_string(), downloaded, total, percent: pct },
+                    DownloadProgress {
+                        file: label.to_string(),
+                        downloaded,
+                        total,
+                        percent: pct,
+                    },
                 );
             }
         }
@@ -105,7 +110,9 @@ async fn download_file<R: Runtime>(
 
 /// Report whether both diarization models are present, and where they live.
 #[tauri::command]
-pub async fn diarization_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+pub async fn diarization_status<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<serde_json::Value, String> {
     let dir = diarization_model_dir(&app)?;
     Ok(serde_json::json!({
         "available": models_present(&dir),
@@ -122,8 +129,20 @@ pub async fn diarization_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_j
 #[tauri::command]
 pub async fn download_diarization_models<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let dir = diarization_model_dir(&app)?;
-    download_file(&app, SEGMENTATION_URL, &dir.join(SEGMENTATION_FILE), SEGMENTATION_FILE).await?;
-    download_file(&app, EMBEDDING_URL, &dir.join(EMBEDDING_FILE), EMBEDDING_FILE).await?;
+    download_file(
+        &app,
+        SEGMENTATION_URL,
+        &dir.join(SEGMENTATION_FILE),
+        SEGMENTATION_FILE,
+    )
+    .await?;
+    download_file(
+        &app,
+        EMBEDDING_URL,
+        &dir.join(EMBEDDING_FILE),
+        EMBEDDING_FILE,
+    )
+    .await?;
 
     let _ = app.emit("diarization-ready", ());
     log::info!("diarization models downloaded to {}", dir.display());
@@ -278,6 +297,99 @@ async fn resolve_cloud_speakers(
     Ok(map)
 }
 
+/// Keep SaluteSpeech's speaker timeline, but derive local voice embeddings when the local
+/// models are present. Cloud speaker numbers reset for every recording; embeddings are the
+/// only safe way to offer a confirmed cross-meeting identity without trusting those ids.
+async fn resolve_cloud_speakers_with_identity<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &SqlitePool,
+    meeting_id: &str,
+    audio_path: &Path,
+    turns: &[SpeakerTurn],
+) -> anyhow::Result<(HashMap<i64, i64>, HashMap<i64, i64>)> {
+    let model_dir = resolve_model_dir(app).map_err(anyhow::Error::msg)?;
+    let config = DiarizerConfig { model_dir };
+    if !config.is_available() {
+        log::info!(
+            "[diarize] local voice models are unavailable; cloud speakers remain meeting-local"
+        );
+        return Ok((resolve_cloud_speakers(pool, turns).await?, HashMap::new()));
+    }
+
+    let audio_path = audio_path.to_path_buf();
+    let embedding_turns = turns.to_vec();
+    let cluster_embeddings = match tokio::task::spawn_blocking(move || {
+        let diarizer = Diarizer::load(config)?;
+        diarizer.embed_labeled_turns(&audio_path, &embedding_turns)
+    })
+    .await
+    {
+        Ok(Ok(embeddings)) if !embeddings.is_empty() => embeddings,
+        Ok(Ok(_)) => {
+            log::warn!("[diarize] cloud turns contained no voice suitable for identity matching");
+            return Ok((resolve_cloud_speakers(pool, turns).await?, HashMap::new()));
+        }
+        Ok(Err(error)) => {
+            log::warn!("[diarize] local identity embedding failed: {error}");
+            return Ok((resolve_cloud_speakers(pool, turns).await?, HashMap::new()));
+        }
+        Err(error) => {
+            log::warn!("[diarize] local identity embedding task failed: {error}");
+            return Ok((resolve_cloud_speakers(pool, turns).await?, HashMap::new()));
+        }
+    };
+
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let resolved = match crate::learning::identity::resolve_clusters(
+        pool,
+        meeting_id,
+        &run_id,
+        turns,
+        &cluster_embeddings,
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            log::warn!("[diarize] cloud identity resolution failed: {error}");
+            let _ = sqlx::query(
+                "DELETE FROM speaker_clusters WHERE meeting_id=? AND diarization_run_id=?",
+            )
+            .bind(meeting_id)
+            .bind(&run_id)
+            .execute(pool)
+            .await;
+            return Ok((resolve_cloud_speakers(pool, turns).await?, HashMap::new()));
+        }
+    };
+
+    let mut cluster_to_speaker = resolved
+        .iter()
+        .map(|(local_cluster, (speaker_id, _))| (*local_cluster, *speaker_id))
+        .collect::<HashMap<_, _>>();
+    let cluster_to_learning = resolved
+        .into_iter()
+        .map(|(local_cluster, (_, cluster_id))| (local_cluster, cluster_id))
+        .collect::<HashMap<_, _>>();
+
+    // Very short speakers may not yield a trustworthy embedding. They still need a local
+    // label, but are deliberately excluded from cross-meeting learning.
+    let mut missing_clusters = turns
+        .iter()
+        .map(|turn| turn.cluster_id)
+        .filter(|cluster_id| !cluster_to_speaker.contains_key(cluster_id))
+        .collect::<Vec<_>>();
+    missing_clusters.sort_unstable();
+    missing_clusters.dedup();
+    let base_count = SpeakersRepository::count(pool).await?;
+    for (index, cluster_id) in missing_clusters.into_iter().enumerate() {
+        let name = format!("Speaker {}", base_count + 1 + index as i64);
+        let speaker_id = SpeakersRepository::insert(pool, &name, &[], false).await?;
+        cluster_to_speaker.insert(cluster_id, speaker_id);
+    }
+    Ok((cluster_to_speaker, cluster_to_learning))
+}
+
 /// Decode a recording to 16 kHz mono 16-bit LE PCM (for cloud upload). CPU-bound — call
 /// under `spawn_blocking`.
 fn decode_to_pcm16_16k(path: &Path) -> anyhow::Result<Vec<u8>> {
@@ -342,8 +454,8 @@ async fn run_local_diarization<R: Runtime>(
         &result.turns,
         &result.cluster_embeddings,
     )
-        .await
-        .map_err(|error| DiarizeError::Other(anyhow!(error)))?;
+    .await
+    .map_err(|error| DiarizeError::Other(anyhow!(error)))?;
     let cluster_to_speaker = resolved
         .iter()
         .map(|(local_cluster, (speaker_id, _))| (*local_cluster, *speaker_id))
@@ -377,12 +489,13 @@ pub async fn run_diarization_core<R: Runtime>(
 
     // Per-meeting expected-speaker-count hint (in-meeting control pill). Constrains
     // clustering (local) / count_of_speaker (cloud); None = automatic estimation.
-    let expected_speakers: Option<usize> = MeetingsRepository::get_diarization_prefs(pool, meeting_id)
-        .await
-        .map_err(|e| DiarizeError::Other(e.into()))?
-        .and_then(|(_, expected)| expected)
-        .filter(|n| *n >= 1)
-        .map(|n| n as usize);
+    let expected_speakers: Option<usize> =
+        MeetingsRepository::get_diarization_prefs(pool, meeting_id)
+            .await
+            .map_err(|e| DiarizeError::Other(e.into()))?
+            .and_then(|(_, expected)| expected)
+            .filter(|n| *n >= 1)
+            .map(|n| n as usize);
     if let Some(n) = expected_speakers {
         log::info!("[diarize] meeting {meeting_id}: using expected speaker count hint = {n}");
     }
@@ -392,50 +505,53 @@ pub async fn run_diarization_core<R: Runtime>(
         Vec<SpeakerTurn>,
         HashMap<i64, i64>,
         HashMap<i64, i64>,
-    ) =
-        if resolve_diarization_provider(pool).await == "salutespeech" {
-            // Cloud: SaluteSpeech async recognition with speaker separation.
-            log::info!("[diarize] using SaluteSpeech cloud engine");
-            let cloud_result = async {
-                let cfg = crate::salutespeech::resolve_config(pool)
-                    .await
-                    .ok_or_else(|| anyhow!("SaluteSpeech Authorization Key not configured"))?;
-                let ap = audio_path.clone();
-                let pcm16 = tokio::task::spawn_blocking(move || decode_to_pcm16_16k(&ap))
-                    .await
-                    .map_err(|e| anyhow!("audio decode task panicked: {e}"))??;
-                let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(
-                    &cfg,
-                    pcm16,
-                    expected_speakers.map(|n| n as u32),
-                )
+    ) = if resolve_diarization_provider(pool).await == "salutespeech" {
+        // Cloud: SaluteSpeech async recognition with speaker separation.
+        log::info!("[diarize] using SaluteSpeech cloud engine");
+        let cloud_result = async {
+            let cfg = crate::salutespeech::resolve_config(pool)
                 .await
-                .map_err(|e| anyhow!(e))?;
-                let turns: Vec<SpeakerTurn> = cloud_turns
-                    .into_iter()
-                    .map(|t| SpeakerTurn {
-                        start_ms: t.start_ms,
-                        end_ms: t.end_ms,
-                        cluster_id: t.speaker_id,
-                    })
-                    .collect();
-                if turns.is_empty() {
-                    return Err(anyhow!("SaluteSpeech returned no speaker turns"));
-                }
-                let cts = resolve_cloud_speakers(pool, &turns).await?;
-                Ok::<_, anyhow::Error>((turns, cts, HashMap::new()))
+                .ok_or_else(|| anyhow!("SaluteSpeech Authorization Key not configured"))?;
+            let ap = audio_path.clone();
+            let pcm16 = tokio::task::spawn_blocking(move || decode_to_pcm16_16k(&ap))
+                .await
+                .map_err(|e| anyhow!("audio decode task panicked: {e}"))??;
+            let cloud_turns = crate::salutespeech::diarize::diarize_pcm16(
+                &cfg,
+                pcm16,
+                expected_speakers.map(|n| n as u32),
+            )
+            .await
+            .map_err(|e| anyhow!(e))?;
+            let turns: Vec<SpeakerTurn> = cloud_turns
+                .into_iter()
+                .map(|t| SpeakerTurn {
+                    start_ms: t.start_ms,
+                    end_ms: t.end_ms,
+                    cluster_id: t.speaker_id,
+                })
+                .collect();
+            if turns.is_empty() {
+                return Err(anyhow!("SaluteSpeech returned no speaker turns"));
             }
-            .await;
+            let (cluster_to_speaker, cluster_to_learning) =
+                resolve_cloud_speakers_with_identity(app, pool, meeting_id, &audio_path, &turns)
+                    .await?;
+            Ok::<_, anyhow::Error>((turns, cluster_to_speaker, cluster_to_learning))
+        }
+        .await;
 
-            match cloud_result {
-                Ok(result) => result,
-                Err(cloud_error) => {
-                    log::warn!("[diarize] SaluteSpeech unavailable; trying local diarization: {cloud_error}");
-                    let _ = app.emit(
-                        "diarization-fallback",
-                        serde_json::json!({ "meeting_id": meeting_id }),
-                    );
-                    match run_local_diarization(
+        match cloud_result {
+            Ok(result) => result,
+            Err(cloud_error) => {
+                log::warn!(
+                    "[diarize] SaluteSpeech unavailable; trying local diarization: {cloud_error}"
+                );
+                let _ = app.emit(
+                    "diarization-fallback",
+                    serde_json::json!({ "meeting_id": meeting_id }),
+                );
+                match run_local_diarization(
                         app,
                         pool,
                         meeting_id,
@@ -453,12 +569,12 @@ pub async fn run_diarization_core<R: Runtime>(
                         ))),
                         Err(other) => return Err(other),
                     }
-                }
             }
-        } else {
-            // Local: pyannote-style ONNX cascade (segmentation + CAM++ + clustering).
-            run_local_diarization(app, pool, meeting_id, &audio_path, expected_speakers).await?
-        };
+        }
+    } else {
+        // Local: pyannote-style ONNX cascade (segmentation + CAM++ + clustering).
+        run_local_diarization(app, pool, meeting_id, &audio_path, expected_speakers).await?
+    };
 
     // 5) Attribute transcript segments. Reset first so re-runs are idempotent (only
     //    speaker_id is touched — the 'mic'/'system' channel tag is preserved).
@@ -567,7 +683,11 @@ pub async fn run_diarization_core<R: Runtime>(
         "[diarize] meeting {meeting_id}: {speaker_count} speaker(s), \
          {assigned_segments}/{total_segments} segment(s) attributed"
     );
-    Ok(DiarizeOutcome { speaker_count, assigned_segments, total_segments })
+    Ok(DiarizeOutcome {
+        speaker_count,
+        assigned_segments,
+        total_segments,
+    })
 }
 
 /// Result of the `diarize_meeting` command (superset of the `diarization-complete` payload).
@@ -594,7 +714,9 @@ pub async fn diarize_meeting<R: Runtime>(
             assigned_segments: o.assigned_segments,
             total_segments: o.total_segments,
         }),
-        Err(DiarizeError::ModelsUnavailable) => Err("Diarization models not downloaded".to_string()),
+        Err(DiarizeError::ModelsUnavailable) => {
+            Err("Diarization models not downloaded".to_string())
+        }
         Err(DiarizeError::NoRecording) => Err("No recording found for this meeting".to_string()),
         Err(DiarizeError::Other(e)) => Err(format!("Diarization failed: {e}")),
     }
@@ -670,7 +792,11 @@ mod tests {
     use super::*;
 
     fn turn(start_ms: i64, end_ms: i64, cluster_id: i64) -> SpeakerTurn {
-        SpeakerTurn { start_ms, end_ms, cluster_id }
+        SpeakerTurn {
+            start_ms,
+            end_ms,
+            cluster_id,
+        }
     }
 
     #[test]

@@ -25,6 +25,7 @@ interface TranscriptButtonGroupProps {
   onRefetchTranscripts?: () => Promise<void>;
   /** Refresh speakers + transcripts after a successful speaker detection. */
   onSpeakersDetected?: () => Promise<void> | void;
+  speakerCount?: number;
 }
 
 
@@ -39,6 +40,7 @@ export function TranscriptButtonGroup({
   meetingFolderPath,
   onRefetchTranscripts,
   onSpeakersDetected,
+  speakerCount = 0,
 }: TranscriptButtonGroupProps) {
   const t = useT();
   const { betaFeatures } = useConfig();
@@ -103,7 +105,7 @@ export function TranscriptButtonGroup({
           </Button>
         )}
 
-        <DetectSpeakersButton meetingId={meetingId} onDetected={onSpeakersDetected} />
+        <DetectSpeakersButton meetingId={meetingId} speakerCount={speakerCount} onDetected={onSpeakersDetected} />
         <SpeakerNameCandidatesButton meetingId={meetingId} onApplied={onSpeakersDetected} />
         <DeleteMeetingButton
           meetingId={meetingId}

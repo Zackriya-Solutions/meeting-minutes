@@ -1,6 +1,6 @@
 {
-      "name": "Client / Sales Meeting",
-      "description": "Capture client goals, deliverables, and next steps.",
+      "name": "Client Meeting",
+      "description": "Client goals, needs, concerns, agreed deliverables, and follow-up actions.",
       "sections": [
         {
           "title": "Meeting Metadata",

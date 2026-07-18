@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useT } from '@/lib/i18n';
-import { SpeakerInfo } from '@/types';
+import { localizeSpeakerLabel, SpeakerInfo } from '@/types';
 
 interface Candidate {
   id: number;
@@ -33,6 +33,7 @@ const EVIDENCE_LABELS: Record<string, string> = {
   explicit_introduction: 'Explicit introduction',
   direct_address: 'Direct address',
   direct_address_unassigned: 'Name mentioned in an address',
+  meeting_title: 'Name mentioned in the meeting title',
 };
 
 export function SpeakerNameCandidatesButton({
@@ -69,7 +70,7 @@ export function SpeakerNameCandidatesButton({
       ])));
     } catch (error) {
       console.error('Failed to scan speaker names:', error);
-      toast.error(t('Failed to find speaker name candidates'));
+      toast.error(t('Failed to find speaker name candidates'), { description: String(error) });
     } finally {
       setLoading(false);
     }
@@ -168,7 +169,9 @@ export function SpeakerNameCandidatesButton({
                       >
                         <option value="">{t('Choose speaker')}</option>
                         {speakers.map((speaker) => (
-                          <option key={speaker.id} value={speaker.id}>{speaker.display_name}</option>
+                          <option key={speaker.id} value={speaker.id}>
+                            {localizeSpeakerLabel(speaker.display_name, t)}
+                          </option>
                         ))}
                       </select>
                       <label className="flex items-center gap-2 text-xs text-[var(--fg2)]">

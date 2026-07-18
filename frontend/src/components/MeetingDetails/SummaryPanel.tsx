@@ -12,7 +12,7 @@ import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown, Sparkles, X } from '@/components/memento/LucideCompat';
+import { AlertTriangle, Languages, ChevronDown, RefreshCw, Sparkles, X } from '@/components/memento/LucideCompat';
 import type { VisibleTemplateSuggestion } from '@/hooks/meeting-details/useTemplates';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -47,6 +47,10 @@ interface SummaryPanelProps {
   onOpenFolder: () => Promise<void>;
   onDiscussSummary: () => void;
   aiSummary: Summary | null;
+  summaryLoadStatus?: 'loading' | 'loaded' | 'absent' | 'error';
+  summaryLoadError?: string | null;
+  onRetrySummary?: () => Promise<void> | void;
+  speakerAttributionStale?: boolean;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
   modelConfig: ModelConfig;
@@ -86,6 +90,10 @@ export function SummaryPanel({
   onOpenFolder,
   onDiscussSummary,
   aiSummary,
+  summaryLoadStatus = 'loaded',
+  summaryLoadError = null,
+  onRetrySummary,
+  speakerAttributionStale = false,
   summaryStatus,
   transcripts,
   modelConfig,
@@ -333,6 +341,42 @@ export function SummaryPanel({
       {transcripts.length > 0 && !isSummaryLoading && (
         <MeetingContentWindowNotice meetingId={meeting.id} />
       )}
+      {aiSummary && speakerAttributionStale && !isSummaryLoading && (
+        <div className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--gold)]" />
+          <div className="min-w-[220px] flex-1">
+            <p className="text-sm font-semibold text-[var(--fg1)]">
+              {t('Speaker names changed after this summary was created')}
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--fg2)]">
+              {t('The existing text is kept to protect manual edits. Regenerate the summary to use the current speaker names and attribution.')}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void onRegenerateSummary()}
+            className="shrink-0 bg-[var(--gold)] text-black hover:bg-[var(--gold-active)]"
+          >
+            <RefreshCw className="h-4 w-4" />
+            {t('Regenerate with current names')}
+          </Button>
+        </div>
+      )}
+      {aiSummary && summaryLoadError && !isSummaryLoading && (
+        <div className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--gold)]" />
+          <p className="min-w-[220px] flex-1 text-xs text-[var(--fg2)]">
+            {t('Could not verify the saved summary. The last loaded version is still shown.')}
+          </p>
+          {onRetrySummary && (
+            <Button type="button" size="sm" variant="outline" onClick={() => void onRetrySummary()}>
+              <RefreshCw className="h-4 w-4" />
+              {t('Retry loading summary')}
+            </Button>
+          )}
+        </div>
+      )}
       {templateSuggestion && selectedTemplate !== 'daily_standup' && !isSummaryLoading && (
         <div className="mx-4 mt-3 flex items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
           <Sparkles className="h-5 w-5 shrink-0 text-[var(--gold)]" />
@@ -407,32 +451,61 @@ export function SummaryPanel({
         </div>
       ) : !aiSummary ? (
         <div className="flex flex-col h-full">
-          {/* Centered Summary Generator Button Group when no summary */}
-          <div className="flex items-center justify-center gap-2 pt-8 pb-4">
-            <SummaryGeneratorButtonGroup
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
-              onStopGeneration={onStopGeneration}
-              customPrompt={customPrompt}
-              summaryStatus={summaryStatus}
-              availableTemplates={availableTemplates}
-              selectedTemplate={selectedTemplate}
-              onTemplateSelect={onTemplateSelect}
-              hasTranscripts={transcripts.length > 0}
-              hasSummary={false}
-              isModelConfigLoading={isModelConfigLoading}
-              onOpenModelSettings={onOpenModelSettings}
-              languageSlot={transcripts.length > 0 ? languageSlot : undefined}
-            />
-          </div>
-          {/* Empty state message */}
-          <EmptyStateSummary
-            onGenerate={() => onGenerateSummary(customPrompt)}
-            hasModel={modelConfig.provider !== null && modelConfig.model !== null}
-            isGenerating={isSummaryLoading}
-          />
+          {summaryLoadStatus === 'loading' ? (
+            <div className="flex flex-1 items-center justify-center">
+              <div className="text-center text-[var(--fg2)]">
+                <RefreshCw className="mx-auto mb-3 h-7 w-7 animate-spin text-[var(--gold)]" />
+                <p className="text-sm font-medium">{t('Loading saved summary...')}</p>
+              </div>
+            </div>
+          ) : summaryLoadError ? (
+            <div className="flex flex-1 items-center justify-center p-6">
+              <div className="max-w-md rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] p-5 text-center">
+                <AlertTriangle className="mx-auto mb-3 h-7 w-7 text-[var(--gold)]" />
+                <h3 className="text-base font-semibold text-[var(--fg1)]">
+                  {t('The saved summary could not be loaded')}
+                </h3>
+                <p className="mt-2 text-sm text-[var(--fg2)]">
+                  {t('The summary was not deleted. Retry loading it instead of creating a replacement.')}
+                </p>
+                <p className="mt-2 break-words text-xs text-[var(--fg3)]">{summaryLoadError}</p>
+                {onRetrySummary && (
+                  <Button type="button" className="mt-4" onClick={() => void onRetrySummary()}>
+                    <RefreshCw className="h-4 w-4" />
+                    {t('Retry loading summary')}
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Centered Summary Generator Button Group only after the backend explicitly says absent. */}
+              <div className="flex items-center justify-center gap-2 pt-8 pb-4">
+                <SummaryGeneratorButtonGroup
+                  modelConfig={modelConfig}
+                  setModelConfig={setModelConfig}
+                  onSaveModelConfig={onSaveModelConfig}
+                  onGenerateSummary={onGenerateSummary}
+                  onStopGeneration={onStopGeneration}
+                  customPrompt={customPrompt}
+                  summaryStatus={summaryStatus}
+                  availableTemplates={availableTemplates}
+                  selectedTemplate={selectedTemplate}
+                  onTemplateSelect={onTemplateSelect}
+                  hasTranscripts={transcripts.length > 0}
+                  hasSummary={false}
+                  isModelConfigLoading={isModelConfigLoading}
+                  onOpenModelSettings={onOpenModelSettings}
+                  languageSlot={transcripts.length > 0 ? languageSlot : undefined}
+                />
+              </div>
+              <EmptyStateSummary
+                onGenerate={() => onGenerateSummary(customPrompt)}
+                hasModel={modelConfig.provider !== null && modelConfig.model !== null}
+                isGenerating={isSummaryLoading}
+              />
+            </>
+          )}
         </div>
       ) : transcripts?.length > 0 && (
         <div className="flex-1 overflow-y-auto min-h-0">

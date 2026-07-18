@@ -1,6 +1,6 @@
 {
-      "name": "Retrospective (Agile)",
-      "description": "Sprint retrospective template for continuous improvement.",
+      "name": "Sprint Retrospective",
+      "description": "What worked, what did not, lessons learned, and agreed improvements.",
       "sections": [
         {
           "title": "Sprint",

@@ -1,7 +1,7 @@
 use log::{error, info};
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::manager::DatabaseManager;
 use crate::state::AppState;
@@ -10,6 +10,59 @@ use crate::state::AppState;
 pub struct DatabaseCheckResult {
     pub exists: bool,
     pub size: u64,
+}
+
+fn source_title_from_metadata_json(contents: &str) -> Option<String> {
+    let metadata: serde_json::Value = serde_json::from_str(contents).ok()?;
+    metadata
+        .get("meeting_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            metadata
+                .get("source_filename")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|filename| {
+                    std::path::Path::new(filename)
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                })
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(str::to_string)
+        })
+}
+
+/// Return the immutable recording/import title stored alongside the audio. Summary
+/// generation and later manual renames never rewrite `metadata.json`, so this provides an
+/// explicit, user-controlled recovery path for meetings renamed by older app versions.
+#[tauri::command]
+pub async fn get_meeting_source_title(
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<String>, String> {
+    let folder_path: Option<String> =
+        sqlx::query_scalar("SELECT folder_path FROM meetings WHERE id=?")
+            .bind(&meeting_id)
+            .fetch_optional(state.db_manager.pool())
+            .await
+            .map_err(|error| format!("Failed to load meeting folder: {error}"))?
+            .flatten();
+    let Some(folder_path) = folder_path else {
+        return Ok(None);
+    };
+    tokio::task::spawn_blocking(move || {
+        let metadata_path = PathBuf::from(folder_path).join("metadata.json");
+        match std::fs::read_to_string(metadata_path) {
+            Ok(contents) => Ok(source_title_from_metadata_json(&contents)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("Failed to read recording metadata: {error}")),
+        }
+    })
+    .await
+    .map_err(|error| format!("Source-title task failed: {error}"))?
 }
 
 /// Check if this is the first launch (no database exists yet)
@@ -108,9 +161,9 @@ pub async fn check_default_legacy_database(app: AppHandle) -> Result<Option<Stri
 #[tauri::command]
 pub async fn check_homebrew_database(path: String) -> Result<Option<DatabaseCheckResult>, String> {
     let db_path = PathBuf::from(&path);
-    
+
     info!("Checking for Homebrew database at: {}", path);
-    
+
     // Check if file exists and is a regular file
     if db_path.exists() && db_path.is_file() {
         // Get file metadata to check size
@@ -118,13 +171,10 @@ pub async fn check_homebrew_database(path: String) -> Result<Option<DatabaseChec
             Ok(metadata) => {
                 let size = metadata.len();
                 info!("Found Homebrew database: {} ({} bytes)", path, size);
-                
+
                 // Only consider it valid if it has content (not empty)
                 if size > 0 {
-                    Ok(Some(DatabaseCheckResult {
-                        exists: true,
-                        size,
-                    }))
+                    Ok(Some(DatabaseCheckResult { exists: true, size }))
                 } else {
                     info!("Database file exists but is empty");
                     Ok(None)
@@ -185,7 +235,9 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         })?;
 
     // Update app state with the new manager
-    app.manage(AppState { db_manager: db_manager.clone() });
+    app.manage(AppState {
+        db_manager: db_manager.clone(),
+    });
 
     // Set default model configuration for fresh installs. Managed pilot defaults:
     // cloud DeepSeek (summary) + SaluteSpeech (transcription), both via the Memento
@@ -200,16 +252,21 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         crate::llm::providers::deepseek::DEFAULT_MODEL,
         "large-v3", // Default whisper model (unused for cloud but column is required)
         None,
-    ).await {
+    )
+    .await
+    {
         error!("Failed to set default summary model config: {}", e);
     }
 
     // Default Transcription Model: managed SaluteSpeech (cloud)
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
-        pool,
-        "salutespeech",
-        "salutespeech-stream-v2",
-    ).await {
+    if let Err(e) =
+        crate::database::repositories::setting::SettingsRepository::save_transcript_config(
+            pool,
+            "salutespeech",
+            "salutespeech-stream-v2",
+        )
+        .await
+    {
         error!("Failed to set default transcription model config: {}", e);
     }
 
@@ -275,4 +332,30 @@ pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
 
     info!("Opened database folder: {}", folder_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_title_from_metadata_json;
+
+    #[test]
+    fn source_title_prefers_recorded_meeting_name() {
+        let metadata = r#"{
+            "meeting_name":"Thu 17.02 1to1 with Andrew",
+            "source_filename":"fallback.mp3"
+        }"#;
+        assert_eq!(
+            source_title_from_metadata_json(metadata).as_deref(),
+            Some("Thu 17.02 1to1 with Andrew")
+        );
+    }
+
+    #[test]
+    fn source_title_falls_back_to_imported_filename() {
+        let metadata = r#"{"meeting_name":" ","source_filename":"Original call.m4a"}"#;
+        assert_eq!(
+            source_title_from_metadata_json(metadata).as_deref(),
+            Some("Original call")
+        );
+    }
 }

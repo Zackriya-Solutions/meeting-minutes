@@ -15,6 +15,7 @@
 
 use serde::Serialize;
 use sqlx::{Error as SqlxError, SqlitePool};
+use std::collections::HashMap;
 
 /// A speaker referenced by a specific meeting's transcripts, with that meeting's segment
 /// count. Field names are snake_case on the wire (the diarization UI codes against these).
@@ -70,6 +71,36 @@ pub fn decode_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
 
 pub struct SpeakersRepository;
 
+fn is_automatic_speaker_name(display_name: &str) -> bool {
+    display_name.strip_prefix("Speaker ").is_some_and(|suffix| {
+        !suffix.is_empty() && suffix.chars().all(|character| character.is_ascii_digit())
+    })
+}
+
+/// Automatic speaker rows are global database identities, but their labels are meeting UI.
+/// Never expose the global/autoincrement id as the participant number: repeated diarization
+/// runs create fresh rows and would otherwise turn two people into "Speaker 37/38/…".
+fn apply_meeting_local_automatic_names(speakers: &mut [MeetingSpeaker]) {
+    let mut automatic_ids = speakers
+        .iter()
+        .filter(|speaker| !speaker.is_confirmed && is_automatic_speaker_name(&speaker.display_name))
+        .map(|speaker| speaker.id)
+        .collect::<Vec<_>>();
+    automatic_ids.sort_unstable();
+    automatic_ids.dedup();
+    let ordinals = automatic_ids
+        .into_iter()
+        .enumerate()
+        .map(|(index, speaker_id)| (speaker_id, index + 1))
+        .collect::<HashMap<_, _>>();
+
+    for speaker in speakers {
+        if let Some(ordinal) = ordinals.get(&speaker.id) {
+            speaker.display_name = format!("Speaker {ordinal}");
+        }
+    }
+}
+
 impl SpeakersRepository {
     /// Load every speaker profile that has a stored voice embedding, decoded. Rows whose
     /// BLOB is corrupt (length not a multiple of 4) are skipped with a warning.
@@ -97,7 +128,9 @@ impl SpeakersRepository {
 
     /// Total number of speaker profiles (used to derive human-friendly "Speaker N" names).
     pub async fn count(pool: &SqlitePool) -> Result<i64, SqlxError> {
-        sqlx::query_scalar("SELECT COUNT(*) FROM speakers").fetch_one(pool).await
+        sqlx::query_scalar("SELECT COUNT(*) FROM speakers")
+            .fetch_one(pool)
+            .await
     }
 
     /// Insert a new speaker profile with an initial voice embedding. Returns the new id.
@@ -140,11 +173,12 @@ impl SpeakersRepository {
         speaker_id: i64,
         display_name: &str,
     ) -> Result<u64, SqlxError> {
-        let res = sqlx::query("UPDATE speakers SET display_name = ?, is_confirmed = 1 WHERE id = ?")
-            .bind(display_name)
-            .bind(speaker_id)
-            .execute(pool)
-            .await?;
+        let res =
+            sqlx::query("UPDATE speakers SET display_name = ?, is_confirmed = 1 WHERE id = ?")
+                .bind(display_name)
+                .bind(speaker_id)
+                .execute(pool)
+                .await?;
         Ok(res.rows_affected())
     }
 
@@ -208,15 +242,19 @@ impl SpeakersRepository {
         .fetch_all(pool)
         .await?;
 
-        Ok(rows
+        let mut speakers = rows
             .into_iter()
-            .map(|(id, display_name, is_confirmed, segment_count)| MeetingSpeaker {
-                id,
-                display_name,
-                is_confirmed: is_confirmed != 0,
-                segment_count,
-            })
-            .collect())
+            .map(
+                |(id, display_name, is_confirmed, segment_count)| MeetingSpeaker {
+                    id,
+                    display_name,
+                    is_confirmed: is_confirmed != 0,
+                    segment_count,
+                },
+            )
+            .collect::<Vec<_>>();
+        apply_meeting_local_automatic_names(&mut speakers);
+        Ok(speakers)
     }
 
     /// A meeting's transcript segments with resolved speaker display names, ordered as the UI
@@ -240,10 +278,19 @@ impl SpeakersRepository {
             .fetch_all(pool)
             .await?;
 
+        let meeting_labels = Self::meeting_speakers(pool, meeting_id)
+            .await?
+            .into_iter()
+            .map(|speaker| (speaker.id, speaker.display_name))
+            .collect::<HashMap<_, _>>();
+
         Ok(rows
             .into_iter()
             .map(
                 |(text, timestamp, audio_start_time, speaker, speaker_id, display_name)| {
+                    let display_name = speaker_id
+                        .and_then(|id| meeting_labels.get(&id).cloned())
+                        .or(display_name);
                     TranscriptSpeakerSegment {
                         text,
                         timestamp,
@@ -308,6 +355,43 @@ mod tests {
         // 5 bytes is not a whole number of f32s.
         assert_eq!(decode_embedding(&[1, 2, 3, 4, 5]), None);
         assert_eq!(decode_embedding(&[1]), None);
+    }
+
+    #[test]
+    fn automatic_names_are_numbered_inside_the_meeting_not_from_global_ids() {
+        let mut speakers = vec![
+            MeetingSpeaker {
+                id: 64,
+                display_name: "Speaker 41".into(),
+                is_confirmed: false,
+                segment_count: 72,
+            },
+            MeetingSpeaker {
+                id: 60,
+                display_name: "Speaker 37".into(),
+                is_confirmed: false,
+                segment_count: 4,
+            },
+            MeetingSpeaker {
+                id: 62,
+                display_name: "Андрей".into(),
+                is_confirmed: true,
+                segment_count: 20,
+            },
+            MeetingSpeaker {
+                id: 61,
+                display_name: "Speaker 38".into(),
+                is_confirmed: false,
+                segment_count: 17,
+            },
+        ];
+
+        apply_meeting_local_automatic_names(&mut speakers);
+
+        assert_eq!(speakers[0].display_name, "Speaker 3");
+        assert_eq!(speakers[1].display_name, "Speaker 1");
+        assert_eq!(speakers[2].display_name, "Андрей");
+        assert_eq!(speakers[3].display_name, "Speaker 2");
     }
 
     /// In-memory pool with just the columns the GC SQL touches (mirrors the real schema's
@@ -375,12 +459,19 @@ mod tests {
                 .unwrap();
         }
 
-        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool).await.unwrap();
-        assert_eq!(deleted, 1, "only the orphaned unconfirmed speaker is removed");
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            deleted, 1,
+            "only the orphaned unconfirmed speaker is removed"
+        );
         assert_eq!(speaker_ids(&pool).await, vec![1, 3, 4]);
 
         // Idempotent: nothing left to collect.
-        let again = SpeakersRepository::delete_orphaned_unconfirmed(&pool).await.unwrap();
+        let again = SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
         assert_eq!(again, 0);
     }
 
@@ -389,16 +480,22 @@ mod tests {
         let pool = gc_test_pool().await;
         // Unconfirmed speaker referenced only by ANOTHER meeting's transcript must be kept:
         // the GC criterion is "unreferenced by ANY transcript row", not per-meeting.
-        sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (5, 'Speaker 5', 0)")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES ('x', 'other-meeting', 5)")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO speakers (id, display_name, is_confirmed) VALUES (5, 'Speaker 5', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES ('x', 'other-meeting', 5)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
-        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool).await.unwrap();
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
         assert_eq!(deleted, 0);
         assert_eq!(speaker_ids(&pool).await, vec![5]);
     }

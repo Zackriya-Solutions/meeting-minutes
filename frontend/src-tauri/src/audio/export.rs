@@ -1,9 +1,14 @@
 use crate::state::AppState;
 use log::{info, warn};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OnceCell, RwLock};
 
 use super::audio_processing::sanitize_filename;
 use super::ffmpeg::find_ffmpeg_path;
@@ -12,7 +17,164 @@ use super::retranscription::find_audio_file;
 #[derive(serde::Serialize)]
 pub struct MeetingAudioPlaybackInfo {
     pub path: String,
+    pub playback_url: String,
     pub duration_seconds: f64,
+}
+
+struct PlaybackServer {
+    address: std::net::SocketAddr,
+    files: Arc<RwLock<HashMap<String, PathBuf>>>,
+}
+
+static PLAYBACK_SERVER: OnceCell<PlaybackServer> = OnceCell::const_new();
+
+fn parse_byte_range(value: Option<&str>, length: u64) -> Result<Option<(u64, u64)>, ()> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(range) = value.trim().strip_prefix("bytes=") else {
+        return Err(());
+    };
+    if range.contains(',') || length == 0 {
+        return Err(());
+    }
+    let (start, end) = range.split_once('-').ok_or(())?;
+    if start.is_empty() {
+        let suffix = end.parse::<u64>().map_err(|_| ())?;
+        if suffix == 0 {
+            return Err(());
+        }
+        return Ok(Some((length.saturating_sub(suffix), length - 1)));
+    }
+    let start = start.parse::<u64>().map_err(|_| ())?;
+    if start >= length {
+        return Err(());
+    }
+    let end = if end.is_empty() {
+        length - 1
+    } else {
+        end.parse::<u64>().map_err(|_| ())?.min(length - 1)
+    };
+    if end < start {
+        return Err(());
+    }
+    Ok(Some((start, end)))
+}
+
+async fn write_http_error(stream: &mut TcpStream, status: &str) -> std::io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n"
+    );
+    stream.write_all(response.as_bytes()).await
+}
+
+async fn serve_playback_connection(
+    mut stream: TcpStream,
+    files: Arc<RwLock<HashMap<String, PathBuf>>>,
+) -> std::io::Result<()> {
+    let mut request = Vec::with_capacity(2_048);
+    let mut buffer = [0_u8; 2_048];
+    loop {
+        let read = stream.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        request.extend_from_slice(&buffer[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        if request.len() > 16_384 {
+            return write_http_error(&mut stream, "431 Request Header Fields Too Large").await;
+        }
+    }
+
+    let request = String::from_utf8_lossy(&request);
+    let mut lines = request.split("\r\n");
+    let mut request_parts = lines.next().unwrap_or("").split_whitespace();
+    let method = request_parts.next().unwrap_or("");
+    let path = request_parts.next().unwrap_or("");
+    if !matches!(method, "GET" | "HEAD") {
+        return write_http_error(&mut stream, "405 Method Not Allowed").await;
+    }
+    let Some(token) = path.strip_prefix("/meeting-audio/") else {
+        return write_http_error(&mut stream, "404 Not Found").await;
+    };
+    if token.is_empty() || token.contains('/') || token.contains('?') {
+        return write_http_error(&mut stream, "404 Not Found").await;
+    }
+    let range_header = lines.find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("range").then_some(value.trim())
+    });
+    let Some(file_path) = files.read().await.get(token).cloned() else {
+        return write_http_error(&mut stream, "404 Not Found").await;
+    };
+    let mut file = match tokio::fs::File::open(&file_path).await {
+        Ok(file) => file,
+        Err(_) => return write_http_error(&mut stream, "404 Not Found").await,
+    };
+    let length = file.metadata().await?.len();
+    let range = match parse_byte_range(range_header, length) {
+        Ok(range) => range,
+        Err(()) => {
+            let response = format!(
+                "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{length}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(response.as_bytes()).await?;
+            return Ok(());
+        }
+    };
+    let (status, start, end) = match range {
+        Some((start, end)) => ("206 Partial Content", start, end),
+        None if length > 0 => ("200 OK", 0, length - 1),
+        None => ("200 OK", 0, 0),
+    };
+    let content_length = if length == 0 { 0 } else { end - start + 1 };
+    let content_range = range
+        .map(|_| format!("Content-Range: bytes {start}-{end}/{length}\r\n"))
+        .unwrap_or_default();
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: audio/mp4\r\nAccept-Ranges: bytes\r\n{content_range}Content-Length: {content_length}\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(response.as_bytes()).await?;
+    if method == "HEAD" || content_length == 0 {
+        return Ok(());
+    }
+    file.seek(std::io::SeekFrom::Start(start)).await?;
+    tokio::io::copy(&mut file.take(content_length), &mut stream).await?;
+    Ok(())
+}
+
+async fn playback_url(file_path: PathBuf) -> Result<String, String> {
+    let server = PLAYBACK_SERVER
+        .get_or_try_init(|| async {
+            let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .map_err(|error| format!("Cannot start the local audio server: {error}"))?;
+            let address = listener
+                .local_addr()
+                .map_err(|error| format!("Cannot resolve the local audio server: {error}"))?;
+            let files = Arc::new(RwLock::new(HashMap::new()));
+            let served_files = Arc::clone(&files);
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let Ok((stream, _)) = listener.accept().await else {
+                        break;
+                    };
+                    let files = Arc::clone(&served_files);
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = serve_playback_connection(stream, files).await {
+                            warn!("Local meeting-audio response failed: {error}");
+                        }
+                    });
+                }
+            });
+            Ok::<_, String>(PlaybackServer { address, files })
+        })
+        .await?;
+    let token = uuid::Uuid::new_v4().to_string();
+    server.files.write().await.insert(token.clone(), file_path);
+    Ok(format!("http://{}/meeting-audio/{token}", server.address))
 }
 
 async fn meeting_audio_source(
@@ -102,10 +264,8 @@ fn prepare_playback_file(source: &Path, destination: &Path) -> Result<(), String
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("meeting-audio.m4a");
-    let temporary = destination.with_file_name(format!(
-        ".{destination_name}.{}.part",
-        uuid::Uuid::new_v4()
-    ));
+    let temporary =
+        destination.with_file_name(format!(".{destination_name}.{}.part", uuid::Uuid::new_v4()));
 
     // A remux is effectively instant even for long recordings. It fixes legacy files
     // containing raw ADTS AAC under an `.m4a` name and gives audio-only MP4 a MIME type
@@ -233,13 +393,12 @@ pub async fn get_meeting_audio_playback_info<R: Runtime>(
     })
     .await
     .map_err(|error| format!("Audio preparation task failed: {error}"))??;
-    let meeting_still_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)",
-    )
-    .bind(&meeting_id)
-    .fetch_one(state.db_manager.pool())
-    .await
-    .map_err(|error| format!("Database error: {error}"))?;
+    let meeting_still_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?)")
+            .bind(&meeting_id)
+            .fetch_one(state.db_manager.pool())
+            .await
+            .map_err(|error| format!("Database error: {error}"))?;
     if !meeting_still_exists {
         let _ = remove_meeting_audio_playback_cache(&app, &meeting_id);
         return Err("Meeting was deleted while preparing its recording".to_string());
@@ -249,8 +408,10 @@ pub async fn get_meeting_audio_playback_info<R: Runtime>(
     app.asset_protocol_scope()
         .allow_file(&destination)
         .map_err(|error| format!("Cannot expose the meeting recording for playback: {error}"))?;
+    let playback_url = playback_url(destination.clone()).await?;
     Ok(MeetingAudioPlaybackInfo {
         path: destination.to_string_lossy().into_owned(),
+        playback_url,
         duration_seconds,
     })
 }
@@ -367,5 +528,37 @@ mod tests {
             ensure_mp3_extension(PathBuf::from("meeting.MP3")),
             PathBuf::from("meeting.MP3")
         );
+    }
+
+    #[test]
+    fn byte_ranges_support_webkit_probe_and_seek_requests() {
+        assert_eq!(parse_byte_range(None, 100), Ok(None));
+        assert_eq!(parse_byte_range(Some("bytes=0-1"), 100), Ok(Some((0, 1))));
+        assert_eq!(parse_byte_range(Some("bytes=25-"), 100), Ok(Some((25, 99))));
+        assert_eq!(parse_byte_range(Some("bytes=-10"), 100), Ok(Some((90, 99))));
+        assert_eq!(parse_byte_range(Some("bytes=100-"), 100), Err(()));
+        assert_eq!(parse_byte_range(Some("items=0-1"), 100), Err(()));
+    }
+
+    #[tokio::test]
+    async fn playback_server_returns_partial_audio_content() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut file, b"0123456789").unwrap();
+        let url = playback_url(file.path().to_path_buf()).await.unwrap();
+
+        let response = reqwest::Client::new()
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=2-5")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[reqwest::header::ACCEPT_RANGES], "bytes");
+        assert_eq!(
+            response.headers()[reqwest::header::CONTENT_RANGE],
+            "bytes 2-5/10"
+        );
+        assert_eq!(response.bytes().await.unwrap().as_ref(), b"2345");
     }
 }

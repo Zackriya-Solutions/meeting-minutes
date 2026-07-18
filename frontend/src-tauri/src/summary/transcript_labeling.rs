@@ -31,6 +31,18 @@
 use crate::database::repositories::speaker::{SpeakersRepository, TranscriptSpeakerSegment};
 use sqlx::SqlitePool;
 
+fn stable_text_fingerprint(text: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in text.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{:016x}:{}", hash, text.len())
+}
+
 /// Resolve a segment's speaker label, mirroring the UI's `resolveSpeakerLabel`.
 ///
 /// Note: an empty `display_name` is treated as "not found" (JS truthiness of the string),
@@ -79,6 +91,47 @@ pub fn assemble_labeled_transcript(segments: &[TranscriptSpeakerSegment]) -> Opt
         }
     }
     Some(lines.join("\n"))
+}
+
+/// Fingerprint only speaker attribution, independently from transcript wording.
+///
+/// Each ordered segment contributes its stable speaker profile id and the label rendered into
+/// the summary prompt. A rename or re-diarization therefore invalidates the snapshot, while a
+/// transcript typo correction does not masquerade as a speaker-name change.
+pub fn speaker_attribution_fingerprint(segments: &[TranscriptSpeakerSegment]) -> Option<String> {
+    if !segments
+        .iter()
+        .any(|segment| resolve_segment_label(segment).is_some())
+    {
+        return None;
+    }
+
+    let material = segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            format!(
+                "{index}|{}|{}",
+                segment
+                    .speaker_id
+                    .map(|speaker_id| speaker_id.to_string())
+                    .unwrap_or_else(|| "channel".to_string()),
+                resolve_segment_label(segment).unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Some(stable_text_fingerprint(&material))
+}
+
+/// Read the current speaker-attribution snapshot for a meeting.
+pub async fn current_speaker_attribution_fingerprint(
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let segments = SpeakersRepository::meeting_transcript_segments(pool, meeting_id).await?;
+    Ok(speaker_attribution_fingerprint(&segments))
 }
 
 /// Rebuild the summary input with speaker labels when the meeting's stored transcripts carry
@@ -135,7 +188,14 @@ mod tests {
     #[test]
     fn resolve_label_speaker_id_display_name_wins() {
         assert_eq!(
-            resolve_segment_label(&seg("hi", "t", Some(0.0), Some("system"), Some(1), Some("Андрей"))),
+            resolve_segment_label(&seg(
+                "hi",
+                "t",
+                Some(0.0),
+                Some("system"),
+                Some(1),
+                Some("Андрей")
+            )),
             Some("Андрей".to_string())
         );
     }
@@ -179,9 +239,23 @@ mod tests {
     fn assemble_mixed_speaker_id_channel_and_none() {
         let segments = vec![
             // Diarized, renamed speaker.
-            seg("ну давайте начнем", "00:00:01", Some(0.0), Some("mic"), Some(1), Some("Андрей")),
+            seg(
+                "ну давайте начнем",
+                "00:00:01",
+                Some(0.0),
+                Some("mic"),
+                Some(1),
+                Some("Андрей"),
+            ),
             // Remote channel, no diarized id.
-            seg("да, я готов", "00:00:03", Some(3.0), Some("system"), None, None),
+            seg(
+                "да, я готов",
+                "00:00:03",
+                Some(3.0),
+                Some("system"),
+                None,
+                None,
+            ),
             // Local channel.
             seg("отлично", "00:00:07", Some(7.0), Some("mic"), None, None),
             // No speaker info at all -> unlabeled line, but still contributes (mixed meeting).
@@ -212,6 +286,43 @@ mod tests {
     #[test]
     fn assemble_returns_none_for_empty_meeting() {
         assert_eq!(assemble_labeled_transcript(&[]), None);
+    }
+
+    #[test]
+    fn speaker_attribution_fingerprint_changes_on_rename_but_not_transcript_edit() {
+        let original = vec![seg(
+            "исходный текст",
+            "00:00:01",
+            Some(0.0),
+            Some("mic"),
+            Some(7),
+            Some("Андрей"),
+        )];
+        let renamed = vec![seg(
+            "исходный текст",
+            "00:00:01",
+            Some(0.0),
+            Some("mic"),
+            Some(7),
+            Some("Максим"),
+        )];
+        let corrected_text = vec![seg(
+            "исправленный текст",
+            "00:00:01",
+            Some(0.0),
+            Some("mic"),
+            Some(7),
+            Some("Андрей"),
+        )];
+
+        assert_ne!(
+            speaker_attribution_fingerprint(&original),
+            speaker_attribution_fingerprint(&renamed)
+        );
+        assert_eq!(
+            speaker_attribution_fingerprint(&original),
+            speaker_attribution_fingerprint(&corrected_text)
+        );
     }
 
     #[test]

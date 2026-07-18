@@ -1,6 +1,6 @@
 {
-  "name": "Interview Memory",
-  "description": "Evidence-focused interview memory with candidate claims, case reasoning, open questions, and next steps. It never makes a hiring decision.",
+  "name": "Candidate Interview",
+  "description": "Candidate experience, examples, reasoning, open questions, and next steps. No automated hiring decision.",
   "pipeline": "interview_v1",
   "sections": [
     {

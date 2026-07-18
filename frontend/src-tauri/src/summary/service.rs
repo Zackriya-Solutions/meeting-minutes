@@ -5,9 +5,7 @@ use crate::ollama::metadata::ModelMetadataCache;
 use crate::summary::language_detection::detect_summary_language;
 use crate::summary::llm_client::LLMProvider;
 use crate::summary::metadata::read_detected_summary_language_from_metadata;
-use crate::summary::processor::{
-    extract_meeting_name_from_markdown, generate_meeting_summary,
-};
+use crate::summary::processor::generate_meeting_summary;
 use crate::summary::templates::{self, Template};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -58,6 +56,8 @@ const SUMMARY_PIPELINE_VERSION: u32 = 2;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SummaryCacheSource {
     transcript_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    speaker_attribution_fingerprint: Option<String>,
     custom_prompt_fingerprint: String,
     template_id: String,
     template_fingerprint: String,
@@ -79,7 +79,7 @@ struct SummaryGenerationMetadata {
     pipeline_version: u32,
 }
 
-fn stable_text_fingerprint(text: &str) -> String {
+pub(crate) fn stable_text_fingerprint(text: &str) -> String {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
 
@@ -109,6 +109,7 @@ fn build_summary_cache_source(
 ) -> SummaryCacheSource {
     SummaryCacheSource {
         transcript_fingerprint: stable_text_fingerprint(text),
+        speaker_attribution_fingerprint: None,
         custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
         template_id: template_id.to_string(),
         template_fingerprint: template_fingerprint.to_string(),
@@ -279,6 +280,25 @@ impl SummaryService {
         summary_language: Option<String>,
     ) {
         let start_time = Instant::now();
+        // Snapshot the attribution used by this generation. The summary is persisted as
+        // editable prose, so later renames cannot be safely rewritten in place; this snapshot
+        // lets the UI detect that the prose is stale and offer an explicit regeneration.
+        let speaker_attribution_fingerprint =
+            match crate::summary::transcript_labeling::current_speaker_attribution_fingerprint(
+                &pool,
+                &meeting_id,
+            )
+            .await
+            {
+                Ok(fingerprint) => fingerprint,
+                Err(error) => {
+                    warn!(
+                        "Failed to snapshot speaker attribution for summary {}: {}",
+                        meeting_id, error
+                    );
+                    None
+                }
+            };
         info!(
             "Starting background processing for meeting_id: {}",
             meeting_id
@@ -533,15 +553,16 @@ impl SummaryService {
             }
         };
         let workflow = crate::summary::memory_workflow::MemoryWorkflow::from_template(&template);
-        let mut effective_custom_prompt = match workflow.preparation_context(&pool, &meeting_id).await {
-            Ok(context) if custom_prompt.trim().is_empty() => context,
-            Ok(context) if context.trim().is_empty() => custom_prompt.clone(),
-            Ok(context) => format!("{}\n{}", context, custom_prompt.trim()),
-            Err(error) => {
-                warn!("Failed to load specialized memory preparation context: {error}");
-                workflow.preparation_error_context(&custom_prompt)
-            }
-        };
+        let mut effective_custom_prompt =
+            match workflow.preparation_context(&pool, &meeting_id).await {
+                Ok(context) if custom_prompt.trim().is_empty() => context,
+                Ok(context) if context.trim().is_empty() => custom_prompt.clone(),
+                Ok(context) => format!("{}\n{}", context, custom_prompt.trim()),
+                Err(error) => {
+                    warn!("Failed to load specialized memory preparation context: {error}");
+                    workflow.preparation_error_context(&custom_prompt)
+                }
+            };
         match crate::learning::terminology::context_for_meeting(&pool, &meeting_id).await {
             Ok(Some(glossary_context)) if effective_custom_prompt.trim().is_empty() => {
                 effective_custom_prompt = glossary_context;
@@ -557,7 +578,7 @@ impl SummaryService {
         }
         let template_fingerprint = template_cache_fingerprint(&template);
 
-        let cache_source = build_summary_cache_source(
+        let mut cache_source = build_summary_cache_source(
             &text,
             &effective_custom_prompt,
             &template_id,
@@ -572,6 +593,7 @@ impl SummaryService {
             custom_openai_temperature,
             custom_openai_top_p,
         );
+        cache_source.speaker_attribution_fingerprint = speaker_attribution_fingerprint;
 
         let client = reqwest::Client::new();
         let result = generate_meeting_summary(
@@ -611,23 +633,10 @@ impl SummaryService {
                 );
                 info!("Final markdown generated ({} chars)", final_markdown.len());
 
-                // Standup V2 uses a stable renderer heading (`# Standup`) and keeps the
-                // meaningful source/series title. Generic summaries may still propose a
-                // descriptive H1 and retain the existing rename behavior.
-                if structured_result.is_none() {
-                    if let Some(name) = extract_meeting_name_from_markdown(&final_markdown)
-                        .filter(|n| !n.is_empty())
-                    {
-                        info!("Extracted meeting name from summary: '{}'", name);
-                        if let Err(e) =
-                            MeetingsRepository::update_meeting_name(&pool, &meeting_id, &name).await
-                        {
-                            error!("Failed to update meeting name for {}: {}", meeting_id, e);
-                        } else {
-                            info!("Successfully updated meeting name for {}", meeting_id);
-                        }
-                    }
-                } else if template_id == "daily_standup" {
+                // A generated H1 belongs to the summary document. It must never overwrite
+                // the recording/user title shown in the sidebar; otherwise one meeting has
+                // a different database title and folder title after every regeneration.
+                if structured_result.is_some() && template_id == "daily_standup" {
                     if let Err(error) = crate::collections::auto_assign_unique_template_series(
                         &pool,
                         &meeting_id,
@@ -830,8 +839,7 @@ mod tests {
 
     #[test]
     fn test_strip_title_if_present_mid_document_h1_preserved() {
-        // H1 after body content must NOT be stripped — guards the asymmetry where
-        // extract_meeting_name_from_markdown scans every line for "# ".
+        // H1 after body content must NOT be stripped.
         let input = "Some paragraph\n\n# H1 on line 3\n## Section\nbody";
         assert_eq!(strip_title_if_present(input), input);
     }

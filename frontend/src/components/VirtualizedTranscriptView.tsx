@@ -8,7 +8,7 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData, resolveSpeakerLabel } from "@/types";
+import { TranscriptSegmentData, localizeSpeakerLabel, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -450,7 +450,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
-                                        speakerLabel={resolveSpeakerLabel(segment, speakersById)}
+                                        speakerLabel={localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t)}
                                         speakerId={segment.speaker_id}
                                         speakerRenamable={
                                             !!onRenameSpeaker &&
@@ -518,7 +518,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
-                                        speakerLabel={resolveSpeakerLabel(segment, speakersById)}
+                                        speakerLabel={localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t)}
                                         speakerId={segment.speaker_id}
                                         speakerRenamable={
                                             !!onRenameSpeaker &&

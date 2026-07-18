@@ -67,6 +67,78 @@ enum MeetingFolderResolution {
     NoFolder,
 }
 
+async fn attach_summary_freshness(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    summary: &mut serde_json::Value,
+) {
+    let stored_attribution = summary
+        .pointer("/summary_generation/source/speaker_attribution_fingerprint")
+        .and_then(serde_json::Value::as_str);
+    let stored_transcript = summary
+        .pointer("/summary_generation/source/transcript_fingerprint")
+        .and_then(serde_json::Value::as_str);
+
+    let current_segments = match crate::database::repositories::speaker::SpeakersRepository::meeting_transcript_segments(
+        pool,
+        meeting_id,
+    )
+    .await
+    {
+        Ok(segments) => segments,
+        Err(error) => {
+            log_warn!(
+                "Failed to calculate summary freshness for {}: {}",
+                meeting_id,
+                error
+            );
+            return;
+        }
+    };
+
+    let current_attribution =
+        crate::summary::transcript_labeling::speaker_attribution_fingerprint(&current_segments);
+    let (status, stale) = match (stored_attribution, current_attribution.as_deref()) {
+        (Some(stored), Some(current)) => {
+            if stored == current {
+                ("current", false)
+            } else {
+                ("stale", true)
+            }
+        }
+        (Some(_), None) => ("stale", true),
+        (None, Some(_)) => {
+            // Backward-compatible check for summaries generated before the dedicated speaker
+            // snapshot existed. The source transcript already included rendered speaker labels,
+            // so a mismatch catches a later rename/re-diarization (and conservatively also a
+            // transcript edit).
+            let current_labeled =
+                crate::summary::transcript_labeling::assemble_labeled_transcript(&current_segments);
+            let changed = current_labeled
+                .as_deref()
+                .map(crate::summary::service::stable_text_fingerprint)
+                .zip(stored_transcript)
+                .is_some_and(|(current, stored)| current != stored);
+            if changed {
+                ("legacy_source_changed", true)
+            } else {
+                ("unknown", false)
+            }
+        }
+        (None, None) => ("not_applicable", false),
+    };
+
+    if let Some(object) = summary.as_object_mut() {
+        object.insert(
+            "summary_freshness".to_string(),
+            serde_json::json!({
+                "speaker_attribution_status": status,
+                "speaker_attribution_stale": stale,
+            }),
+        );
+    }
+}
+
 fn merge_manual_summary_with_generated_fields(
     existing_raw: Option<&str>,
     mut incoming: serde_json::Value,
@@ -82,8 +154,12 @@ fn merge_manual_summary_with_generated_fields(
     };
 
     let markdown_changed = match (
-        existing_object.get("markdown").and_then(|value| value.as_str()),
-        incoming_object.get("markdown").and_then(|value| value.as_str()),
+        existing_object
+            .get("markdown")
+            .and_then(|value| value.as_str()),
+        incoming_object
+            .get("markdown")
+            .and_then(|value| value.as_str()),
     ) {
         (Some(existing), Some(incoming)) => {
             markdown_semantic_text(existing) != markdown_semantic_text(incoming)
@@ -396,9 +472,22 @@ pub async fn api_get_summary<R: Runtime>(
 
             // Parse result data if it exists (regardless of status)
             // This allows displaying restored summaries after cancellation or failure
-            let data = if let Some(result_str) = process.result {
+            let durable_result = process.result.or_else(|| {
+                if process.result_backup.is_some() {
+                    log_warn!(
+                        "Summary {} has no primary result; serving its recovery backup",
+                        meeting_id
+                    );
+                }
+                process.result_backup
+            });
+            let data = if let Some(result_str) = durable_result {
                 match serde_json::from_str::<serde_json::Value>(&result_str) {
-                    Ok(parsed) => Some(parsed),
+                    Ok(mut parsed) => {
+                        crate::summary::processor::localize_summary_result_for_display(&mut parsed);
+                        attach_summary_freshness(pool, &meeting_id, &mut parsed).await;
+                        Some(parsed)
+                    }
                     Err(e) => {
                         log_error!("Failed to parse summary result JSON: {}", e);
                         None

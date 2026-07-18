@@ -1,0 +1,168 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Memento: от заметок о встрече к приватной рабочей памяти",
+    "generatedAt": "2026-07-18T00:00:00+03:00",
+    "charts": [
+      {
+        "id": "architecture_surface_chart",
+        "title": "Архитектурная поверхность по доменам",
+        "description": "73 уникальные таблицы в migrations, сгруппированные аналитически по основной ответственности. Это proxy ширины архитектуры, не оценка качества кода.",
+        "type": "bar",
+        "dataset": "architecture_surface",
+        "sourceId": "repo_inventory",
+        "encodings": {
+          "x": {
+            "field": "domain",
+            "type": "nominal"
+          },
+          "y": {
+            "field": "table_count",
+            "type": "quantitative"
+          }
+        }
+      }
+    ],
+    "sources": [
+      {
+        "id": "repo_inventory",
+        "label": "Memento migration table inventory",
+        "path": "docs/memento-product-strategy/product_surface_inventory.csv"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "report_title",
+        "type": "markdown",
+        "body": "# Memento: от заметок о встрече к приватной рабочей памяти"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n\n- **Memento стоит развивать не как ещё один AI meeting notes, а как локальную долговременную память о рабочих разговорах.** Продукт должен надёжно записать, точно понять, сохранить проверяемые факты, связать их с прошлым и вернуть нужный контекст перед следующим решением.\n- **Первый приоритет — доверие к основанию.** Пока ломаются аудио, язык, имена, стабильность спикеров или заголовки, summary, mind map и generic insights только умножают недоверие.\n- **Compounding value достижим без обучения большой модели на GPU.** Улучшение дают подтверждённые speaker embeddings, словарь терминов, сущности и алиасы, связи встреч, retrieval и журнал принятых/отклонённых фактов.\n- **1-to-1, interview, standup и customer calls должны быть доменными представлениями одного ядра, а не независимыми мини-продуктами.**\n\n**Рекомендуемая позиция:** Memento — приватная память о разговорах, которая помнит людей, решения и незакрытые обязательства и всегда показывает, откуда это известно."
+      },
+      {
+        "id": "decision_frame",
+        "type": "markdown",
+        "body": "## Продукт нужно строить вокруг цикла, а не вокруг отдельной записи\n\nОсновной сценарий: разговор записался без потерь → пользователь получил пригодный транскрипт → Memento выделил проверяемые решения, обещания и вопросы → неоднозначность была исправлена один раз → исправление помогло следующим встречам → перед новым разговором вернулся релевантный контекст → любой вывод открывается в исходном таймкоде.\n\n`Ценность = доверие к текущей записи × полезность памяти во времени × способность довести разговор до действия.`\n\nЭто мультипликативная система: если аудио не проигрывается или speaker name меняется после перезапуска, ценность следующих слоёв стремится к нулю."
+      },
+      {
+        "id": "architecture_finding",
+        "type": "markdown",
+        "sourceId": "repo_inventory",
+        "body": "## Сильное основание уже построено, но сложность опередила продукт\n\nВ migrations присутствуют 73 уникальные таблицы. Из них 28 относятся к cross-meeting learning и ещё 17 — к специализированным workflow. Это означает, что значительная часть будущего moat уже существует: speaker memory, terminology, reconciliation, entities, collections и domain records.\n\nОдновременно это сигнал риска: архитектурная ширина выросла до того, как основной сценарий стал очевидным и надёжным. Следующий этап должен собирать существующие возможности в один продукт, а не добавлять ещё одну вертикаль."
+      },
+      {
+        "id": "architecture_chart_block",
+        "type": "chart",
+        "chartId": "architecture_surface_chart"
+      },
+      {
+        "id": "market_finding",
+        "type": "markdown",
+        "body": "## Рынок сделал transcript + summary + tasks + chat минимальной комплектацией\n\n[Otter](https://otter.ai/chat), [Fireflies](https://docs.fireflies.ai/askfred/use-cases), [Read AI](https://www.read.ai/) и [Fathom](https://fathom.video/for/hubspot) уже предлагают разные варианты summary, actions, follow-up и поиска по архиву. Копирование этого набора не создаёт позицию.\n\nПродукт со скрина похож на [NoteFlow](https://note-flow.fr/): одна запись превращается в summary, transcript, tasks, insights и mind map. Mind map полезна для brainstorm, исследования или лекции, но это формат чтения, а не накапливаемая память.\n\n[Granola](https://www.granola.ai/) сильнее меняет поведение: bot-free capture, meeting brief до разговора и вопросы по folders после него. При этом локальность тоже становится рынком: [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper) делает on-device transcription, а [Krisp](https://krisp.ai/) сочетает bot-free capture, on-device STT и custom vocabulary.\n\n**Окно Memento:** локальное хранение + хорошая RU/EN/mixed речь + память людей/терминов/решений + evidence-first ответы."
+      },
+      {
+        "id": "target_user",
+        "type": "markdown",
+        "body": "## Первый wedge — человек с повторяющимися и чувствительными разговорами\n\nНачальный пользователь — руководитель небольшой команды, founder, researcher, interviewer или консультант, который регулярно встречается с теми же людьми и проектами.\n\nЕго job-to-be-done: **«Перед следующим разговором покажи, что мы решили, что обещали, что изменилось и где это было сказано — не заставляя меня заново организовывать архив».**\n\nНе стоит сразу начинать с продукта «для всех команд»: team sync, sharing и permissions отложат проверку основной гипотезы. Сначала личная база из нескольких повторяющихся серий должна дать измеримый memory lift."
+      },
+      {
+        "id": "product_layers",
+        "type": "markdown",
+        "body": "## Пять уровней функциональности задают порядок инвестиций\n\n### 0. Trust substrate\nCapture/recovery/playback, RU/EN/mixed transcript, таймкоды, stable speakers, confirmed names, terminology и evidence links. Это обязательное ядро.\n\n### 1. Universal meeting memory\nЕдиные объекты `decision`, `commitment`, `question`, `risk`, `claim`, `topic`, `note`. У каждого есть evidence, scope, version и состояние `proposed / confirmed / rejected / superseded`.\n\n### 2. Longitudinal memory\nСвязи объектов с человеком, recurring series, project/client и workspace. Здесь возникают «что изменилось», «что ещё открыто» и pre-meeting brief.\n\n### 3. Action surfaces\nToday/Inbox, Ask с citations, confirmed commitments, people/project/series pages и controlled export.\n\n### 4. Domain packs\nProject, 1-to-1, Interview, Research и Customer packs задают extraction schema, renderer, privacy defaults и suggested questions, но используют общую модель истины."
+      },
+      {
+        "id": "learning_without_gpu",
+        "type": "markdown",
+        "body": "## Memento может улучшаться без обучения LLM на GPU\n\nОсновной механизм — обновляемая непараметрическая память:\n\n- transcript correction пополняет scoped vocabulary и post-correction rules;\n- явное подтверждение спикера добавляет качественный embedding sample и обновляет centroid;\n- подтверждённые aliases связываются с canonical person;\n- accepted decisions и commitments попадают в pre-brief;\n- reviewed series relation улучшает retrieval scope;\n- feedback на Ask улучшает ranking, а не переписывает факты.\n\n[RAG](https://papers.neurips.cc/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html) разделяет модель и обновляемую внешнюю память, что позволяет индексировать, цитировать и удалять новые знания без изменения весов LLM. Speaker diarization на базе [ECAPA-TDNN embeddings](https://www.isca-archive.org/interspeech_2021/dawalatabad21_interspeech.html) позволяет сравнивать компактные голосовые представления без обучения speaker model с нуля.\n\nСырая база не гарантирует улучшения. Влияние должно зависеть от trust state: `raw`, `inferred`, `confirmed`, `rejected`, `superseded`. Fine-tuning рассматривается только после stable schema, held-out evaluation, достаточного consented corpus и доказанного остаточного gap."
+      },
+      {
+        "id": "ux_redesign",
+        "type": "markdown",
+        "body": "## Редизайн должен скрыть устройство системы и показать работу пользователя\n\n**Главная навигация:** Сегодня / Память / Спросить / Действия; Настройки находятся вне основного потока. Collections становятся понятными scopes: Projects, Clients, Series, Topics.\n\n**Экран встречи:** стабильный header и три вкладки — Итоги, Транскрипт, Контекст. Summary показывает decisions, commitments и open questions; Transcript объединяет audio, speaker и terminology correction; Context показывает связанные прошлые встречи и изменения.\n\nModel, provider и template не должны быть постоянными кнопками. Approved pipeline выбирается из настроек, а advanced reprocessing находится в overflow. Пользователь выбирает цель — «Обычная встреча», «Project sync», «1-to-1», «Interview» — и видит, что будет извлечено.\n\nMind map добавляется позже как evidence-linked on-demand projection. Generic Insights нужно заменить конкретными views: «что изменилось», «повторяющиеся риски», «незакрытые вопросы», «темы интервью»."
+      },
+      {
+        "id": "roadmap",
+        "type": "markdown",
+        "body": "## Дорожная карта на 12 месяцев\n\n### Phase 0 — Trust reset, 0–6 недель\nИсправить capture/save/playback, locale leakage, stable speaker identity, title ownership, processing state и recovery. Exit: ≥99% успешных happy paths в test matrix, ноль silent title mutations, стабильные speaker labels, полная локализация core journey.\n\n### Phase 1 — One obvious product, 6–12 недель\nНовая навигация и meeting screen, progressive disclosure, human-readable meeting modes, evidence links, единый Ask вместо раздельных search/chat. Exit: новые пользователи без подсказки проходят golden path; большинство встреч не требует model/template settings.\n\n### Phase 2 — Compounding memory, 3–5 месяцев\nCanonical memory objects, speaker/terminology loop, people/project/series pages, hybrid retrieval, cited Ask, pre-brief и high-impact review queue. Exit: ≥95% speaker-name precision и cited-answer support на held-out corpus; correction rate снижается в повторяющихся сериях.\n\n### Phase 3 — From memory to action, 5–8 месяцев\nConfirmed commitments inbox, decision history, controlled reminders/integrations и два domain pack, выбранных по usage. Exit: zero silent outbound actions и возврат пользователей до следующей встречи.\n\n### Phase 4 — Selective expansion, 8–12 месяцев\nMobile capture, encrypted sync, shared project memory, SDK/import API, connectors, evidence-linked mind map и optional adapters. Выбрать одно направление, не запускать все одновременно."
+      },
+      {
+        "id": "priority_portfolio",
+        "type": "markdown",
+        "body": "## Core нужно защищать от отвлекающего функционала\n\n**P0 сейчас:** capture/recovery/playback; transcript quality и timestamps; stable speakers/names/terminology; evidence-backed summary; simple library + cited Ask; longitudinal review states.\n\n**P1 после ядра:** people/project/series pages; pre-meeting briefs; confirmed commitments; calendar/import/export; один или два domain pack.\n\n**P2 расширение:** controlled integrations, mobile, encrypted sync, research/customer views.\n\n**P3 только после доказанной потребности:** mind map как постоянная вкладка, generic insights, sentiment/coaching, пользовательское fine-tuning больших моделей.\n\nНужно прекратить добавлять template и workflow panel на каждый новый тип встречи, показывать provider как ежедневное решение, автоматически менять пользовательскую истину и отправлять неподтверждённые actions наружу."
+      },
+      {
+        "id": "metrics_next_steps",
+        "type": "markdown",
+        "body": "## Измерять нужно использование доверенной памяти\n\n**North Star:** Trusted memory uses per active user per week — случаи, когда пользователь открыл, принял, использовал или экспортировал факт из прошлой встречи с валидным source link. Minutes recorded и summaries generated остаются input metrics.\n\nCore metrics: capture/recovery success, correction rate по номеру встречи в серии, speaker-name precision, Unknown calibration, timestamp validity, unsupported decision/action rate, citation precision, groundedness и latency по hardware cohort.\n\nProduct metrics: time to first trusted result, возврат до следующей встречи, pre-brief use, cross-meeting Ask success, memory lift и week-4 retention после нескольких записей.\n\n**Ближайшие 30 дней:** утвердить позиционирование; зафиксировать canonical evidence model; собрать regression corpus RU/EN/mixed; завершить bug-fix пакет; протестировать прототип Today/Meeting/Ask; провести usability sessions; запустить пилот `speaker + terminology + pre-brief` на повторяющейся серии."
+      },
+      {
+        "id": "questions",
+        "type": "markdown",
+        "body": "## Вопросы, которые должны определить следующий выбор\n\n- Какой wedge подтверждается usage: project leads, 1-to-1 managers, researchers или interviewers?\n- Какая единица организации естественнее: project, person, series или client?\n- Какой уровень cloud processing допустим по умолчанию?\n- Какая retention policy нужна для audio после подтверждения transcript?\n- Какие два external action дают наибольшую ценность без team infrastructure?\n- Нужен ли shared workspace до доказанного personal memory lift?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Допущения и ограничения\n\nЭто product/architecture audit, а не поведенческое исследование: usage funnel и retention data не были доступны. Количественные признаки репозитория описывают архитектурную поверхность на 18 июля 2026 года и не оценивают качество кода. Рыночное сравнение основано на публичных продуктовых страницах, без независимого benchmark качества. Пороговые значения roadmap являются release targets и должны быть откалиброваны по реальному hardware и consented corpus."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-18T00:00:00+03:00",
+    "status": "ready",
+    "datasets": {
+      "architecture_surface": [
+        {
+          "domain": "Cross-meeting learning",
+          "table_count": 28,
+          "total_tables": 73,
+          "classification_basis": "Primary responsibility assigned by repository audit"
+        },
+        {
+          "domain": "Domain-specific workflows",
+          "table_count": 17,
+          "total_tables": 73,
+          "classification_basis": "Primary responsibility assigned by repository audit"
+        },
+        {
+          "domain": "Foundation: capture and processing",
+          "table_count": 17,
+          "total_tables": 73,
+          "classification_basis": "Primary responsibility assigned by repository audit"
+        },
+        {
+          "domain": "Knowledge and organization",
+          "table_count": 11,
+          "total_tables": 73,
+          "classification_basis": "Primary responsibility assigned by repository audit"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "repo_inventory",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT domain, COUNT(*) AS table_count FROM product_surface_inventory GROUP BY domain ORDER BY table_count DESC, domain",
+        "description": "Counts unique migration tables by analyst-assigned primary product domain.",
+        "tables_used": [
+          "product_surface_inventory"
+        ],
+        "filters": [
+          "One row per unique CREATE TABLE IF NOT EXISTS name in frontend/src-tauri/migrations as of 2026-07-18",
+          "Each table assigned to exactly one primary domain"
+        ],
+        "metric_definitions": {
+          "table_count": "Count of unique migration table names assigned to the domain; an architecture-surface proxy, not a feature or quality score."
+        },
+        "executed_at": "2026-07-18T00:00:00+03:00"
+      }
+    }
+  ]
+}

@@ -141,17 +141,6 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     }
   }, [isTitleDirty, handleSaveMeetingTitle]);
 
-  // Update meeting title from external source (e.g., AI summary)
-  const updateMeetingTitle = useCallback((newTitle: string) => {
-    console.log('📝 Updating meeting title to:', newTitle);
-    setMeetingTitle(newTitle);
-    const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
-      m.id === meeting.id ? { id: m.id, title: newTitle } : m
-    );
-    setMeetings(updatedMeetings);
-    setCurrentMeeting({ id: meeting.id, title: newTitle });
-  }, [meeting.id, sidebarMeetings, setMeetings, setCurrentMeeting]);
-
   return {
     // State
     transcripts,
@@ -174,6 +163,5 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     handleSaveSummary,
     handleSaveMeetingTitle,
     saveAllChanges,
-    updateMeetingTitle,
   };
 }

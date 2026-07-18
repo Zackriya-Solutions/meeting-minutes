@@ -19,6 +19,7 @@ import { useT } from "@/lib/i18n";
 
 interface DetectSpeakersButtonProps {
     meetingId?: string;
+    speakerCount?: number;
     /** Called after a successful diarization so the caller can refresh speakers + transcripts. */
     onDetected?: () => Promise<void> | void;
 }
@@ -34,10 +35,11 @@ const errString = (err: unknown, fallback: string): string =>
  * exist (offering a one-time ~35 MB download if not), runs `diarize_meeting`,
  * and reports the outcome via toast — matching the retranscription idiom.
  */
-export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersButtonProps) {
+export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected }: DetectSpeakersButtonProps) {
     const t = useT();
     const [phase, setPhase] = useState<Phase>("idle");
     const [showDownload, setShowDownload] = useState(false);
+    const [downloadPurpose, setDownloadPurpose] = useState<'fallback' | 'identity'>('fallback');
     const [showRerunConfirmation, setShowRerunConfirmation] = useState(false);
     const [existingSpeakerCount, setExistingSpeakerCount] = useState(0);
     const [downloading, setDownloading] = useState(false);
@@ -58,6 +60,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
             const message = errString(err, t("Speaker detection failed"));
             if (message.includes("local diarization models are not downloaded")) {
                 setShowDownload(true);
+                setDownloadPurpose('fallback');
                 toast.warning(t("SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud."));
             } else {
                 toast.error(message);
@@ -89,14 +92,15 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
             }
 
             if (provider === "salutespeech") {
-                if (!saluteReady) {
-                    const localStatus = await invoke<DiarizationStatus>("diarization_status");
-                    if (!localStatus.available) {
-                        setPhase("idle");
-                        setShowDownload(true);
+                const localStatus = await invoke<DiarizationStatus>("diarization_status");
+                if (!localStatus.available) {
+                    setPhase("idle");
+                    setDownloadPurpose(saluteReady ? 'identity' : 'fallback');
+                    setShowDownload(true);
+                    if (!saluteReady) {
                         toast.warning(t("SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud."));
-                        return;
                     }
+                    return;
                 }
                 await runDiarize();
                 return;
@@ -157,7 +161,9 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                 className="xl:px-4"
                 onClick={handleClick}
                 disabled={busy}
-                title={t('Detect and label speakers in this meeting')}
+                title={speakerCount > 0
+                    ? `${t('Currently detected')}: ${speakerCount}. ${t('Detect and label speakers in this meeting')}`
+                    : t('Detect and label speakers in this meeting')}
             >
                 {busy ? (
                     <Loader2 className="xl:mr-2 animate-spin" size={18} />
@@ -165,7 +171,7 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                     <Users className="xl:mr-2" size={18} />
                 )}
                 <span className="hidden lg:inline">
-                    {phase === "diarizing" ? t('Detecting...') : t('Speakers')}
+                    {phase === "diarizing" ? t('Detecting...') : `${t('Speakers')}${speakerCount > 0 ? ` · ${speakerCount}` : ''}`}
                 </span>
             </Button>
 
@@ -207,28 +213,44 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                 open={showDownload}
                 onOpenChange={(o) => { if (!downloading) setShowDownload(o); }}
             >
-                <DialogContent className="sm:max-w-[420px]">
+                <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[580px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Users className="h-5 w-5 text-[var(--gold)]" />
                             {t('Detect Speakers')}
                         </DialogTitle>
                         <DialogDescription>
-                            {t('Speaker detection needs a one-time download of the diarization models (~35 MB). They are stored locally and reused for future meetings.')}
+                            {downloadPurpose === 'identity'
+                                ? t('Cloud detection can separate speakers without a download. To recognize confirmed voices across meetings, download the local voice models once. Audio and voice profiles stay on this device.')
+                                : t('Speaker detection needs a one-time download of the diarization models (~35 MB). They are stored locally and reused for future meetings.')}
                         </DialogDescription>
                     </DialogHeader>
-                    <DialogFooter>
-                        <Button
-                            variant="outline"
-                            onClick={() => setShowDownload(false)}
-                            disabled={downloading}
-                        >
-                            {t('Cancel')}
-                        </Button>
+                    <DialogFooter className="grid gap-2 sm:grid-cols-2 sm:space-x-0">
+                        {downloadPurpose === 'identity' ? (
+                            <Button
+                                variant="outline"
+                                onClick={async () => {
+                                    setShowDownload(false);
+                                    await runDiarize();
+                                }}
+                                disabled={downloading}
+                                className="h-auto min-h-10 whitespace-normal px-4 py-2 text-center"
+                            >
+                                {t('Continue without remembering voices')}
+                            </Button>
+                        ) : (
+                            <Button
+                                variant="outline"
+                                onClick={() => setShowDownload(false)}
+                                disabled={downloading}
+                            >
+                                {t('Cancel')}
+                            </Button>
+                        )}
                         <Button
                             onClick={handleDownloadAndDetect}
                             disabled={downloading}
-                            className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                            className="h-auto min-h-10 whitespace-normal bg-[var(--gold)] px-4 py-2 text-center hover:bg-[var(--gold-active)]"
                         >
                             {downloading ? (
                                 <>
@@ -238,7 +260,9 @@ export function DetectSpeakersButton({ meetingId, onDetected }: DetectSpeakersBu
                             ) : (
                                 <>
                                     <Download className="h-4 w-4 mr-2" />
-                                    {t('Download & Detect')}
+                                    {downloadPurpose === 'identity'
+                                        ? t('Download and remember voices')
+                                        : t('Download & Detect')}
                                 </>
                             )}
                         </Button>

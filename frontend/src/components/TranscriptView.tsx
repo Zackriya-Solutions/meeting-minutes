@@ -1,6 +1,6 @@
 'use client';
 
-import { Transcript, resolveSpeakerLabel } from '@/types';
+import { Transcript, localizeSpeakerLabel, resolveSpeakerLabel } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -276,7 +276,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           || (originalWasEmpty && !isStreaming ? t('[Silence]') : '');
 
         // Speaker attribution label ("You" for mic, "Others" for system audio)
-        const speakerLabel = resolveSpeakerLabel(transcript);
+        const speakerLabel = localizeSpeakerLabel(resolveSpeakerLabel(transcript), t);
 
         return (
           <motion.div

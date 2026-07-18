@@ -1,5 +1,7 @@
+use crate::summary::interview::{
+    generate_interview_report, InterviewGenerationRequest, InterviewReport,
+};
 use crate::summary::llm_client::{generate_summary, LLMProvider};
-use crate::summary::interview::{generate_interview_report, InterviewGenerationRequest, InterviewReport};
 use crate::summary::one_on_one::{
     generate_one_on_one_report, OneOnOneGenerationRequest, OneOnOneReport,
 };
@@ -43,7 +45,8 @@ impl StructuredSummaryReport {
     ) -> anyhow::Result<usize> {
         match self {
             Self::Standup(report) => {
-                crate::summary::standup_workflow::sync_standup_records(pool, meeting_id, report).await
+                crate::summary::standup_workflow::sync_standup_records(pool, meeting_id, report)
+                    .await
             }
             Self::Interview(report) => {
                 crate::summary::interview_workflow::sync_records(pool, meeting_id, report).await
@@ -156,6 +159,7 @@ fn build_final_report_system_prompt(
 6. Output **only** the completed Markdown report.
 7. If unsure about something, omit it.
 8. Transcript lines may be prefixed with a speaker name and a colon (e.g. `Alice:`, `You:`); treat that prefix as who spoke the line and attribute statements, decisions, and action items to that speaker.
+9. Translate every visible template section heading and table-column label into {output_language}. English wording inside the template describes structure; it is not wording to preserve in the report.
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
@@ -275,18 +279,116 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
     trimmed.to_string()
 }
 
-/// Extracts meeting name from the first heading in markdown
-///
-/// # Arguments
-/// * `markdown` - Markdown content
-///
-/// # Returns
-/// Meeting name if found, None otherwise
-pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
+fn russian_summary_label(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "Summary" => "Краткое содержание",
+        "Key Decisions" => "Ключевые решения",
+        "Action Items" => "Задачи",
+        "Discussion Highlights" => "Основные темы обсуждения",
+        "Meeting Date & Time" => "Дата и время встречи",
+        "Meeting Metadata" => "Сведения о встрече",
+        "Attendees" | "Attendance" => "Участники",
+        "Milestones & Status" => "Этапы и статус",
+        "Progress Summary" => "Краткий отчёт о прогрессе",
+        "Top Risks & Mitigations" => "Основные риски и меры",
+        "Related Documents" => "Связанные документы",
+        "Client Goals & Success Criteria" => "Цели клиента и критерии успеха",
+        "Agreed Deliverables" => "Согласованные результаты",
+        "Commercial Terms Discussed" => "Обсуждённые коммерческие условия",
+        "Risks & Concerns" => "Риски и опасения",
+        "Next Steps" => "Следующие шаги",
+        "Owner" => "Ответственный",
+        "Task" => "Задача",
+        "Due" | "Due Date" => "Срок",
+        "Reference Transcript Segment" => "Фрагмент расшифровки",
+        "Segment Time stamp" | "Timestamp" | "Evidence timestamp" => "Таймкод",
+        "Status" => "Статус",
+        "Priority" => "Приоритет",
+        "Decision" => "Решение",
+        "Rationale" => "Обоснование",
+        "Risk" => "Риск",
+        "Impact" => "Влияние",
+        "Mitigation" => "Меры",
+        "Milestone" => "Этап",
+        "Document Title" => "Название документа",
+        "Type" => "Тип",
+        "Action" => "Действие",
+        "Deliverable" => "Результат",
+        "Concern" => "Опасение",
+        _ => return None,
+    })
+}
+
+fn localize_russian_table_line(line: &str) -> String {
+    if !line.trim_start().starts_with('|') {
+        return line.to_string();
+    }
+    line.split('|')
+        .map(|cell| {
+            let trimmed = cell.trim();
+            let (label, bold) = trimmed
+                .strip_prefix("**")
+                .and_then(|value| value.strip_suffix("**"))
+                .map(|value| (value, true))
+                .unwrap_or((trimmed, false));
+            match russian_summary_label(label) {
+                Some(translated) if bold => format!(" **{translated}** "),
+                Some(translated) => format!(" {translated} "),
+                None => cell.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// Built-in templates use English source keys. The model is still instructed to write in
+/// the selected language, but deterministic structural localization prevents smaller or
+/// instruction-following models from leaking those keys into an otherwise Russian report.
+pub(crate) fn localize_generated_markdown(markdown: &str, output_language: &str) -> String {
+    if output_language != "Russian" {
+        return markdown.to_string();
+    }
+
     markdown
         .lines()
-        .find(|line| line.starts_with("# "))
-        .map(|line| line.trim_start_matches("# ").trim().to_string())
+        .map(|line| {
+            let trimmed = line.trim();
+            if let Some(label) = trimmed
+                .strip_prefix("**")
+                .and_then(|value| value.strip_suffix("**"))
+            {
+                if let Some(translated) = russian_summary_label(label) {
+                    return format!("**{translated}**");
+                }
+            }
+            if trimmed.starts_with('#') {
+                let marker_len = trimmed
+                    .chars()
+                    .take_while(|character| *character == '#')
+                    .count();
+                let label = trimmed[marker_len..].trim();
+                if let Some(translated) = russian_summary_label(label) {
+                    return format!("{} {translated}", "#".repeat(marker_len));
+                }
+            }
+            localize_russian_table_line(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn localize_summary_result_for_display(result: &mut serde_json::Value) {
+    let output_language = result
+        .pointer("/summary_generation/output_language")
+        .and_then(serde_json::Value::as_str);
+    if output_language != Some("Russian") {
+        return;
+    }
+    if let Some(markdown) = result.get_mut("markdown") {
+        if let Some(value) = markdown.as_str() {
+            *markdown = serde_json::Value::String(localize_generated_markdown(value, "Russian"));
+        }
+    }
 }
 
 /// Generates a complete meeting summary with conditional chunking strategy
@@ -336,12 +438,7 @@ pub async fn generate_meeting_summary(
     cancellation_token: Option<&CancellationToken>,
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
-) -> Result<(
-    String,
-    String,
-    i64,
-    Option<StructuredSummaryReport>,
-), String> {
+) -> Result<(String, String, i64, Option<StructuredSummaryReport>), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
             return Err("Summary generation was cancelled".to_string());
@@ -358,22 +455,22 @@ pub async fn generate_meeting_summary(
     match crate::summary::memory_workflow::MemoryWorkflow::from_template(template) {
         crate::summary::memory_workflow::MemoryWorkflow::StandupV2 => {
             let generated = generate_standup_report(StandupGenerationRequest {
-            client,
-            provider,
-            model_name,
-            api_key,
-            meeting_id,
-            transcript: text,
-            custom_prompt,
-            token_threshold,
-            output_language,
-            ollama_endpoint,
-            custom_openai_endpoint,
-            deepseek_base_url,
-            max_tokens,
-            app_data_dir,
-            cancellation_token,
-        })
+                client,
+                provider,
+                model_name,
+                api_key,
+                meeting_id,
+                transcript: text,
+                custom_prompt,
+                token_threshold,
+                output_language,
+                ollama_endpoint,
+                custom_openai_endpoint,
+                deepseek_base_url,
+                max_tokens,
+                app_data_dir,
+                cancellation_token,
+            })
             .await?;
             return Ok((
                 generated.markdown,
@@ -384,22 +481,22 @@ pub async fn generate_meeting_summary(
         }
         crate::summary::memory_workflow::MemoryWorkflow::InterviewV1 => {
             let generated = generate_interview_report(InterviewGenerationRequest {
-            client,
-            provider,
-            model_name,
-            api_key,
-            meeting_id,
-            transcript: text,
-            custom_prompt,
-            token_threshold,
-            output_language,
-            ollama_endpoint,
-            custom_openai_endpoint,
-            deepseek_base_url,
-            max_tokens,
-            app_data_dir,
-            cancellation_token,
-        })
+                client,
+                provider,
+                model_name,
+                api_key,
+                meeting_id,
+                transcript: text,
+                custom_prompt,
+                token_threshold,
+                output_language,
+                ollama_endpoint,
+                custom_openai_endpoint,
+                deepseek_base_url,
+                max_tokens,
+                app_data_dir,
+                cancellation_token,
+            })
             .await?;
             return Ok((
                 generated.markdown,
@@ -410,22 +507,22 @@ pub async fn generate_meeting_summary(
         }
         crate::summary::memory_workflow::MemoryWorkflow::OneOnOneV1 => {
             let generated = generate_one_on_one_report(OneOnOneGenerationRequest {
-            client,
-            provider,
-            model_name,
-            api_key,
-            meeting_id,
-            transcript: text,
-            custom_prompt,
-            token_threshold,
-            output_language,
-            ollama_endpoint,
-            custom_openai_endpoint,
-            deepseek_base_url,
-            max_tokens,
-            app_data_dir,
-            cancellation_token,
-        })
+                client,
+                provider,
+                model_name,
+                api_key,
+                meeting_id,
+                transcript: text,
+                custom_prompt,
+                token_threshold,
+                output_language,
+                ollama_endpoint,
+                custom_openai_endpoint,
+                deepseek_base_url,
+                max_tokens,
+                app_data_dir,
+                cancellation_token,
+            })
             .await?;
             return Ok((
                 generated.markdown,
@@ -616,7 +713,8 @@ pub async fn generate_meeting_summary(
     )
     .await?;
 
-    let final_markdown = clean_llm_markdown_output(&raw_markdown);
+    let final_markdown =
+        localize_generated_markdown(&clean_llm_markdown_output(&raw_markdown), output_language);
     if final_markdown.trim().is_empty() {
         return Err("Summary generation returned an empty Markdown document".to_string());
     }
@@ -680,6 +778,26 @@ mod tests {
         assert!(prompt.contains("directly in Russian"));
         assert!(prompt.contains("briefly in Russian"));
         assert!(prompt.contains("SECTION-SPECIFIC INSTRUCTIONS"));
+        assert!(prompt.contains("Translate every visible template section heading"));
+    }
+
+    #[test]
+    fn russian_report_structure_is_localized_deterministically() {
+        let markdown = "**Summary**\nТекст\n\n**Action Items**\n| **Owner** | Task | Due | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |";
+        let localized = localize_generated_markdown(markdown, "Russian");
+
+        assert!(localized.contains("**Краткое содержание**"));
+        assert!(localized.contains("**Задачи**"));
+        assert!(localized
+            .contains("| **Ответственный** | Задача | Срок | Фрагмент расшифровки | Таймкод |"));
+        assert!(!localized.contains("**Summary**"));
+        assert!(!localized.contains("Reference Transcript Segment"));
+    }
+
+    #[test]
+    fn non_russian_report_structure_is_not_rewritten() {
+        let markdown = "**Summary**\nText";
+        assert_eq!(localize_generated_markdown(markdown, "English"), markdown);
     }
 
     #[test]

@@ -1551,6 +1551,19 @@ async fn run_import<R: Runtime>(
         processable_count,
         transcribed_count,
         avg_confidence,
+        provider.as_deref().unwrap_or("whisper"),
+        model.as_deref().unwrap_or_else(|| {
+            if use_salutespeech {
+                "salutespeech-stream-v2"
+            } else if use_gigaam {
+                "gigaam-v3-e2e-ctc"
+            } else if use_parakeet {
+                DEFAULT_PARAKEET_MODEL
+            } else {
+                DEFAULT_WHISPER_MODEL
+            }
+        }),
+        language.as_deref(),
     ) {
         if let Err(cleanup_error) = delete_newly_imported_meeting(pool, &meeting_id).await {
             // The DB row still points at this folder. Keep it intact rather than
@@ -1879,6 +1892,9 @@ fn write_import_metadata(
     processable_segments: usize,
     transcribed_segments: usize,
     average_confidence: Option<f32>,
+    transcription_provider: &str,
+    transcription_model: &str,
+    transcription_language: Option<&str>,
 ) -> Result<()> {
     let metadata_path = folder.join("metadata.json");
     let temp_path = folder.join(".metadata.json.tmp");
@@ -1897,6 +1913,13 @@ fn write_import_metadata(
         "source": source,
         "source_filename": source_filename,
         "source_sha256": source_sha256,
+        "transcription": {
+            "provider": transcription_provider,
+            "model": transcription_model,
+            "language": transcription_language.unwrap_or("auto"),
+            "transcribed_at": now,
+            "source": "import"
+        },
         "transcription_quality": {
             "processable_segments": processable_segments,
             "transcribed_segments": transcribed_segments,
@@ -2608,6 +2631,9 @@ mod tests {
             10,
             8,
             Some(0.75),
+            "salutespeech",
+            "salutespeech-stream-v2",
+            Some("ru"),
         );
         assert!(result.is_ok(), "write_import_metadata failed: {:?}", result);
 
@@ -2625,6 +2651,8 @@ mod tests {
         assert_eq!(parsed["source"], "import");
         assert_eq!(parsed["source_filename"], "source.mp4");
         assert_eq!(parsed["source_sha256"], "abc123");
+        assert_eq!(parsed["transcription"]["provider"], "salutespeech");
+        assert_eq!(parsed["transcription"]["model"], "salutespeech-stream-v2");
         assert_eq!(parsed["transcription_quality"]["processable_segments"], 10);
         assert_eq!(parsed["transcription_quality"]["transcribed_segments"], 8);
         assert_eq!(parsed["transcription_quality"]["empty_segments"], 2);
@@ -2651,6 +2679,9 @@ mod tests {
             "def456",
             0,
             0,
+            None,
+            "whisper",
+            "large-v3-turbo",
             None,
         )
         .unwrap();

@@ -74,12 +74,10 @@ impl SummaryProcessesRepository {
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<Option<SummaryProcess>, sqlx::Error> {
-        sqlx::query_as::<_, SummaryProcess>(
-            "SELECT p.* FROM summary_processes p JOIN transcript_chunks t ON p.meeting_id = t.meeting_id WHERE p.meeting_id = ?",
-        )
-        .bind(meeting_id)
-        .fetch_optional(pool)
-        .await
+        // A completed summary is durable user data. `transcript_chunks` is only generation
+        // input/cache and may be absent after migration, cleanup, or an interrupted rewrite.
+        // Joining it here made a valid persisted summary look like `idle` in the UI.
+        Self::get_summary_data(pool, meeting_id).await
     }
 
     pub async fn create_or_reset_process(
@@ -217,5 +215,63 @@ impl SummaryProcessesRepository {
             meeting_id
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn persisted_summary_does_not_depend_on_transcript_chunk_cache() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE summary_processes (
+                meeting_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error TEXT,
+                result TEXT,
+                start_time TEXT,
+                end_time TEXT,
+                chunk_count INTEGER NOT NULL DEFAULT 0,
+                processing_time REAL NOT NULL DEFAULT 0,
+                metadata TEXT,
+                result_backup TEXT,
+                result_backup_timestamp TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO summary_processes \
+             (meeting_id, status, created_at, updated_at, result) \
+             VALUES ('meeting-1', 'completed', '2026-07-18T10:00:00Z', \
+                     '2026-07-18T10:01:00Z', '{\"markdown\":\"durable\"}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Deliberately do not create transcript_chunks: it is not part of summary ownership.
+        let summary = SummaryProcessesRepository::get_summary_data_for_meeting(
+            &pool,
+            "meeting-1",
+        )
+        .await
+        .unwrap()
+        .expect("summary remains visible");
+
+        assert_eq!(summary.status, "completed");
+        assert!(summary.result.unwrap().contains("durable"));
     }
 }

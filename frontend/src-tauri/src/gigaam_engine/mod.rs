@@ -42,7 +42,10 @@ pub fn load_global(variant: GigaamVariant, dir: PathBuf) -> anyhow::Result<()> {
     let model = match variant.decode_kind() {
         DecodeKind::Ctc => {
             let files = variant.model_files();
-            LoadedModel::Ctc(CtcModel::load(&dir.join(files[0]), &dir.join(variant.vocab_file()))?)
+            LoadedModel::Ctc(CtcModel::load(
+                &dir.join(files[0]),
+                &dir.join(variant.vocab_file()),
+            )?)
         }
         DecodeKind::Rnnt => {
             let f = variant.model_files();
@@ -86,7 +89,9 @@ pub async fn transcribe(waveform: Vec<f32>) -> Option<Result<String, String>> {
     }
     tokio::task::spawn_blocking(move || {
         let mut guard = ENGINE.lock().unwrap();
-        guard.as_mut().map(|m| m.transcribe(&waveform).map_err(|e| e.to_string()))
+        guard
+            .as_mut()
+            .map(|m| m.transcribe(&waveform).map_err(|e| e.to_string()))
     })
     .await
     .ok()

@@ -1,6 +1,6 @@
 {
-  "name": "Project Sync / Status Update",
-  "description": "Weekly or bi-weekly project status meeting focusing on milestones and risks.",
+      "name": "Project Status",
+      "description": "Progress, milestones, blockers, risks, owners, and next steps for a project.",
   "sections": [
     {
       "title": "Meeting Date & Time",

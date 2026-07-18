@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { getCollectionDisplayText } from '@/lib/collectionDisplay';
 import { useLanguage, useT } from '@/lib/i18n';
 import { getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 import { cn } from '@/lib/utils';
@@ -266,6 +267,7 @@ export default function CollectionsPage() {
   const [collectionSearch, setCollectionSearch] = useState('');
   const [meetingSearch, setMeetingSearch] = useState('');
   const [manageSearch, setManageSearch] = useState('');
+  const [collectionQuestion, setCollectionQuestion] = useState('');
   const [savingAutoAdd, setSavingAutoAdd] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
   const [converting, setConverting] = useState(false);
@@ -273,6 +275,10 @@ export default function CollectionsPage() {
   const selected = useMemo(
     () => collections.find((collection) => collection.id === selectedId) ?? null,
     [collections, selectedId],
+  );
+  const selectedDisplay = useMemo(
+    () => (selected ? getCollectionDisplayText(selected, t) : null),
+    [selected, t],
   );
   const selectedMeetings = useMemo(
     () => meetings.filter((meeting) => meeting.in_collection),
@@ -283,10 +289,13 @@ export default function CollectionsPage() {
   const filteredCollections = useMemo(() => {
     const query = normalizeSearch(collectionSearch);
     if (!query) return collections;
-    return collections.filter((collection) =>
-      collection.name.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US').includes(query),
-    );
-  }, [collectionSearch, collections, lang]);
+    return collections.filter((collection) => {
+      const displayName = getCollectionDisplayText(collection, t).name;
+      return `${displayName} ${collection.name}`
+        .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+        .includes(query);
+    });
+  }, [collectionSearch, collections, lang, t]);
   const filteredSelectedMeetings = useMemo(() => {
     const query = normalizeSearch(meetingSearch);
     if (!query) return selectedMeetings;
@@ -334,6 +343,9 @@ export default function CollectionsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const requestedCollectionId = Number(
+      new URLSearchParams(window.location.search).get('collectionId'),
+    );
     Promise.all([
       invoke<CollectionRow[]>('list_collections'),
       invoke<SeriesSuggestion[]>('suggest_meeting_series'),
@@ -342,7 +354,12 @@ export default function CollectionsPage() {
         if (cancelled) return;
         const next = Array.isArray(collectionRows) ? collectionRows : [];
         setCollections(next);
-        setSelectedId(next[0]?.id ?? null);
+        setSelectedId(
+          Number.isInteger(requestedCollectionId)
+            && next.some((collection) => collection.id === requestedCollectionId)
+            ? requestedCollectionId
+            : next[0]?.id ?? null,
+        );
         setSuggestions(Array.isArray(suggestionRows) ? suggestionRows : []);
       })
       .catch((error) => {
@@ -598,6 +615,24 @@ export default function CollectionsPage() {
     }
   };
 
+  const openCollectionChat = (question?: string) => {
+    if (!selected) return;
+    const params = new URLSearchParams({
+      scope: 'collection',
+      collectionId: String(selected.id),
+      from: 'collection',
+    });
+    const normalizedQuestion = question?.trim();
+    if (normalizedQuestion) params.set('question', normalizedQuestion);
+    router.push(`/chat?${params.toString()}`);
+  };
+
+  const submitCollectionQuestion = () => {
+    const question = collectionQuestion.trim();
+    if (!question) return;
+    openCollectionChat(question);
+  };
+
   return (
     <div className="mm-page min-w-0">
       <header className="mm-page-header justify-between">
@@ -639,29 +674,32 @@ export default function CollectionsPage() {
             ) : filteredCollections.length === 0 ? (
               <div className="px-3 py-6 text-sm text-[var(--fg3)]">{t('No collections found')}</div>
             ) : (
-              filteredCollections.map((collection) => (
-                <button
-                  key={collection.id}
-                  onClick={() => setSelectedId(collection.id)}
-                  className={cn(
-                    'flex items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors',
-                    selectedId === collection.id
-                      ? 'bg-[var(--gold-soft)] text-[var(--fg1)]'
-                      : 'text-[var(--fg2)] hover:bg-[var(--bg-elevated)]',
-                  )}
-                >
-                  <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', selectedId === collection.id ? 'bg-[var(--gold-soft-strong)] text-[var(--gold)]' : 'bg-[var(--bg-elevated)]')}>
-                    <Icon name={collection.kind === 'series' ? 'refresh' : 'folder'} size={18} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{collection.name}</span>
-                    <span className="mt-0.5 block text-xs text-[var(--fg3)]">
-                      {collection.meeting_count} {t('meetings')}
-                      {collection.kind === 'series' && collection.auto_add ? ` · ${t('auto')}` : ''}
+              filteredCollections.map((collection) => {
+                const display = getCollectionDisplayText(collection, t);
+                return (
+                  <button
+                    key={collection.id}
+                    onClick={() => setSelectedId(collection.id)}
+                    className={cn(
+                      'flex items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors',
+                      selectedId === collection.id
+                        ? 'bg-[var(--gold-soft)] text-[var(--fg1)]'
+                        : 'text-[var(--fg2)] hover:bg-[var(--bg-elevated)]',
+                    )}
+                  >
+                    <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', selectedId === collection.id ? 'bg-[var(--gold-soft-strong)] text-[var(--gold)]' : 'bg-[var(--bg-elevated)]')}>
+                      <Icon name={collection.kind === 'series' ? 'refresh' : 'folder'} size={18} />
                     </span>
-                  </span>
-                </button>
-              ))
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{display.name}</span>
+                      <span className="mt-0.5 block text-xs text-[var(--fg3)]">
+                        {collection.meeting_count} {t('meetings')}
+                        {collection.kind === 'series' && collection.auto_add ? ` · ${t('auto')}` : ''}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
             )}
           </div>
 
@@ -767,18 +805,14 @@ export default function CollectionsPage() {
                 <div className="min-w-0">
                   <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[.12em] text-[var(--fg3)]">
                     <Icon name={selected.system_key === 'inbox' ? 'spark' : selected.kind === 'series' ? 'refresh' : 'folder'} size={14} />
-                    {selected.system_key === 'inbox' ? t('Learning Inbox') : selected.kind === 'series' ? t('Recurring series') : t('Manual collection')}
+                    {selectedDisplay?.category}
                   </div>
-                  <h2 className="truncate text-3xl font-semibold tracking-[-.04em]">{selected.name}</h2>
+                  <h2 className="truncate text-3xl font-semibold tracking-[-.04em]">{selectedDisplay?.name}</h2>
                   <p className="mt-2 text-sm text-[var(--fg3)]">
                     {selected.meeting_count} {t('meetings in this collection')}
                   </p>
                   <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--fg2)]">
-                    {selected.system_key === 'inbox'
-                      ? t('Automatically captured meetings wait here until you review their type, people, terminology, and destination. Open a meeting to review it.')
-                      : selected.kind === 'series'
-                      ? t('A recurring series combines repeated meetings and builds a cross-meeting digest. Automatic additions are controlled below.')
-                      : t('A manual collection contains only the meetings you select. Use it for a project, client, or topic, then search or ask questions within that scope.')}
+                    {selectedDisplay?.description}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -800,12 +834,6 @@ export default function CollectionsPage() {
                     icon={<Icon name="search" size={16} />}
                   >
                     {t('Search collection content')}
-                  </Button>
-                  <Button
-                    onClick={() => router.push(`/chat?scope=collection&collectionId=${selected.id}`)}
-                    icon={<Icon name="chat" size={16} />}
-                  >
-                    {t('Ask this collection')}
                   </Button>
                   {!selected.is_system && <button onClick={openRename} className="mm-icon-button" aria-label={t('Rename collection')}>
                     <Icon name="edit" size={17} />
@@ -990,6 +1018,59 @@ export default function CollectionsPage() {
                     })}
                   </div>
                 )}
+
+                <section className="mt-6 rounded-3xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[var(--gold-soft-strong)] text-[var(--gold)]">
+                        <Icon name="chat" size={18} />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-semibold text-[var(--fg1)]">{t('Ask this collection')}</h3>
+                        <p className="mt-1 text-sm leading-relaxed text-[var(--fg3)]">
+                          {t('The answer will use only meetings from this collection and include links to source moments.')}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => openCollectionChat()}
+                      icon={<Icon name="chat" size={15} />}
+                    >
+                      {t('Open previous conversation')}
+                    </Button>
+                  </div>
+                  <div className="mt-4 flex items-end gap-2">
+                    <textarea
+                      value={collectionQuestion}
+                      onChange={(event) => setCollectionQuestion(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          submitCollectionQuestion();
+                        }
+                      }}
+                      rows={1}
+                      placeholder={t('Ask about this collection…')}
+                      className="mm-field max-h-40 min-h-[48px] flex-1 resize-none bg-[var(--bg-surface)] py-3 text-sm outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={submitCollectionQuestion}
+                      disabled={!collectionQuestion.trim()}
+                      className={cn(
+                        'flex h-11 w-11 flex-none items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
+                        collectionQuestion.trim()
+                          ? 'bg-[var(--gold)] hover:bg-[var(--gold-active)]'
+                          : 'cursor-not-allowed bg-[var(--bg-elevated)]',
+                      )}
+                      aria-label={t('Ask this collection')}
+                    >
+                      <Icon name="send" size={18} />
+                    </button>
+                  </div>
+                </section>
               </div>
             </>
           )}

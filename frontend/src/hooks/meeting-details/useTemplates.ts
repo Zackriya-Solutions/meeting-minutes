@@ -162,8 +162,8 @@ export function useTemplates(meetingId?: string) {
         const oneOnOne = suggestion.templateId === 'one_on_one';
         const title = oneOnOne ? t('One-on-one template suggested') : t('Standup template suggested');
         const description = explanation || t(oneOnOne
-          ? 'Local signals suggest One-on-One Memory. Confirm before generating.'
-          : 'Local signals suggest Standup V2. Confirm before generating.');
+          ? 'Local signals suggest a one-on-one meeting template. Confirm before generating.'
+          : 'Local signals suggest a daily standup template. Confirm before generating.');
         setTemplateSuggestion({
           templateId: suggestion.templateId,
           title,
@@ -174,10 +174,10 @@ export function useTemplates(meetingId?: string) {
           description,
           duration: Infinity,
           action: {
-            label: t(oneOnOne ? 'Use One-on-One Memory' : 'Use Standup V2'),
+            label: t(oneOnOne ? 'Use One-on-One' : 'Use Daily Standup'),
             onClick: () => handleTemplateSelection(
               oneOnOne ? 'one_on_one' : 'daily_standup',
-              oneOnOne ? 'One-on-One Memory' : 'Daily Standup',
+              oneOnOne ? 'One-on-One' : 'Daily Standup',
             ),
           },
         });

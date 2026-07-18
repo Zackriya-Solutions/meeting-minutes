@@ -224,12 +224,10 @@ impl MeetingsRepository {
             ));
         }
 
-        sqlx::query_as(
-            "SELECT memory_type, sensitivity FROM meetings WHERE id = ?",
-        )
-        .bind(meeting_id)
-        .fetch_optional(pool)
-        .await
+        sqlx::query_as("SELECT memory_type, sensitivity FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
     }
 
     /// Persist the workflow identity. Validation lives here so Tauri commands and future
@@ -255,8 +253,8 @@ impl MeetingsRepository {
                 "unsupported sensitivity '{sensitivity}'"
             )));
         }
-        let new_private = memory_type == MEMORY_TYPE_INTERVIEW
-            || sensitivity == SENSITIVITY_SENSITIVE;
+        let new_private =
+            memory_type == MEMORY_TYPE_INTERVIEW || sensitivity == SENSITIVITY_SENSITIVE;
 
         let rows_affected = sqlx::query(
             "UPDATE meetings SET memory_type = ?, sensitivity = ?, \
@@ -288,7 +286,9 @@ impl MeetingsRepository {
         meeting_id: &str,
     ) -> Result<Option<String>, SqlxError> {
         if meeting_id.trim().is_empty() {
-            return Err(SqlxError::Protocol("meeting_id cannot be empty".to_string()));
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
         }
         sqlx::query_scalar("SELECT summary_template_id FROM meetings WHERE id = ?")
             .bind(meeting_id)
@@ -325,18 +325,27 @@ impl MeetingsRepository {
         template_id: &str,
     ) -> Result<bool, SqlxError> {
         if meeting_id.trim().is_empty() {
-            return Err(SqlxError::Protocol("meeting_id cannot be empty".to_string()));
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
         }
         if !valid_memory_type(memory_type) {
-            return Err(SqlxError::Protocol(format!("unsupported memory_type '{memory_type}'")));
+            return Err(SqlxError::Protocol(format!(
+                "unsupported memory_type '{memory_type}'"
+            )));
         }
         if !valid_sensitivity(sensitivity) {
-            return Err(SqlxError::Protocol(format!("unsupported sensitivity '{sensitivity}'")));
+            return Err(SqlxError::Protocol(format!(
+                "unsupported sensitivity '{sensitivity}'"
+            )));
         }
         if !valid_summary_template(template_id) {
-            return Err(SqlxError::Protocol(format!("unsupported summary template '{template_id}'")));
+            return Err(SqlxError::Protocol(format!(
+                "unsupported summary template '{template_id}'"
+            )));
         }
-        let new_private = memory_type == MEMORY_TYPE_INTERVIEW || sensitivity == SENSITIVITY_SENSITIVE;
+        let new_private =
+            memory_type == MEMORY_TYPE_INTERVIEW || sensitivity == SENSITIVITY_SENSITIVE;
         let result = sqlx::query(
             "UPDATE meetings SET memory_type=?,sensitivity=?,summary_template_id=?, \
              cloud_processing_allowed=CASE \
@@ -429,47 +438,6 @@ impl MeetingsRepository {
         {
             warn!(
                 "Could not apply automatic series rules after renaming meeting {}: {}",
-                meeting_id, error
-            );
-        }
-        Ok(true)
-    }
-
-    pub async fn update_meeting_name(
-        pool: &SqlitePool,
-        meeting_id: &str,
-        new_title: &str,
-    ) -> Result<bool, SqlxError> {
-        let mut transaction = pool.begin().await?;
-        let now = Utc::now();
-
-        // Update meetings table
-        let meeting_update =
-            sqlx::query("UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?")
-                .bind(new_title)
-                .bind(now)
-                .bind(meeting_id)
-                .execute(&mut *transaction)
-                .await?;
-
-        if meeting_update.rows_affected() == 0 {
-            transaction.rollback().await?;
-            return Ok(false); // Meeting not found
-        }
-
-        // Update transcript_chunks table
-        sqlx::query("UPDATE transcript_chunks SET meeting_name = ? WHERE meeting_id = ?")
-            .bind(new_title)
-            .bind(meeting_id)
-            .execute(&mut *transaction)
-            .await?;
-
-        transaction.commit().await?;
-        if let Err(error) =
-            crate::collections::auto_assign_meeting(pool, meeting_id, new_title).await
-        {
-            warn!(
-                "Could not apply automatic series rules after generated title for {}: {}",
                 meeting_id, error
             );
         }
@@ -817,12 +785,16 @@ mod tests {
     #[tokio::test]
     async fn memory_config_rejects_unsupported_states() {
         let pool = memory_test_pool().await;
-        assert!(MeetingsRepository::set_memory_config(&pool, "m1", "ranking", "standard")
-            .await
-            .is_err());
-        assert!(MeetingsRepository::set_memory_config(&pool, "m1", "interview", "public")
-            .await
-            .is_err());
+        assert!(
+            MeetingsRepository::set_memory_config(&pool, "m1", "ranking", "standard")
+                .await
+                .is_err()
+        );
+        assert!(
+            MeetingsRepository::set_memory_config(&pool, "m1", "interview", "public")
+                .await
+                .is_err()
+        );
         assert!(!MeetingsRepository::set_memory_config(
             &pool,
             "missing",
@@ -842,22 +814,22 @@ mod tests {
                 .unwrap(),
             Some(TEMPLATE_STANDARD.to_string())
         );
-        assert!(MeetingsRepository::set_summary_template_id(
-            &pool,
-            "m1",
-            TEMPLATE_ONE_ON_ONE
-        )
-        .await
-        .unwrap());
+        assert!(
+            MeetingsRepository::set_summary_template_id(&pool, "m1", TEMPLATE_ONE_ON_ONE)
+                .await
+                .unwrap()
+        );
         assert_eq!(
             MeetingsRepository::get_summary_template_id(&pool, "m1")
                 .await
                 .unwrap(),
             Some(TEMPLATE_ONE_ON_ONE.to_string())
         );
-        assert!(MeetingsRepository::set_summary_template_id(&pool, "m1", "../ranking")
-            .await
-            .is_err());
+        assert!(
+            MeetingsRepository::set_summary_template_id(&pool, "m1", "../ranking")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -879,7 +851,16 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(row, ("general".into(), "sensitive".into(), TEMPLATE_ONE_ON_ONE.into(), 0, 0));
+        assert_eq!(
+            row,
+            (
+                "general".into(),
+                "sensitive".into(),
+                TEMPLATE_ONE_ON_ONE.into(),
+                0,
+                0
+            )
+        );
 
         assert!(MeetingsRepository::set_memory_and_template_config(
             &pool,
@@ -890,12 +871,11 @@ mod tests {
         )
         .await
         .is_err());
-        let unchanged: (String, String) = sqlx::query_as(
-            "SELECT sensitivity,summary_template_id FROM meetings WHERE id='m1'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let unchanged: (String, String) =
+            sqlx::query_as("SELECT sensitivity,summary_template_id FROM meetings WHERE id='m1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(unchanged, ("sensitive".into(), TEMPLATE_ONE_ON_ONE.into()));
     }
 

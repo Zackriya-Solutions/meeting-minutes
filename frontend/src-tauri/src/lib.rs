@@ -38,12 +38,16 @@ pub(crate) use perf_trace;
 
 // Declare audio module
 pub mod analytics;
+pub mod anthropic;
 pub mod api;
 pub mod audio;
 pub mod collections;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod gateway_identity;
+pub mod gigaam_engine;
+pub mod groq;
 pub mod jobs;
 pub mod learning;
 pub mod llm;
@@ -52,11 +56,7 @@ pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
-pub mod anthropic;
-pub mod groq;
-pub mod gateway_identity;
 pub mod openrouter;
-pub mod gigaam_engine;
 pub mod parakeet_engine;
 pub mod pipeline;
 pub mod salutespeech;
@@ -68,7 +68,7 @@ pub mod utils;
 pub mod vector;
 pub mod whisper_engine;
 
-use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
+use audio::{list_audio_devices, trigger_audio_permission, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
@@ -137,10 +137,7 @@ async fn start_recording<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             } else {
                 log_info!("Successfully showed recording started notification");
             }
@@ -198,10 +195,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording stopped notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording stopped notification: {}", e);
             } else {
                 log_info!("Successfully showed recording stopped notification");
             }
@@ -362,10 +356,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             }
 
             Ok(())
@@ -767,6 +758,7 @@ pub fn run() {
             meeting_detection::merge_meeting_windows,
             audio::export::get_meeting_audio_path,
             audio::export::get_meeting_audio_playback_info,
+            audio::transcription_provenance::get_meeting_transcription_provenance,
             audio::export::export_meeting_audio_mp3,
             save_transcript,
             analytics::commands::init_analytics,
@@ -1016,6 +1008,7 @@ pub fn run() {
             // Database and Models path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
+            database::commands::get_meeting_source_title,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
             onboarding::get_onboarding_status,

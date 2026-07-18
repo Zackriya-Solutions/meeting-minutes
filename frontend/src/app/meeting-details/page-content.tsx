@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Summary, SummaryResponse } from '@/types';
 import { getMarkedMoments } from '@/lib/markedMoments';
@@ -41,6 +41,10 @@ function readStoredTranscriptWidth(): number | null {
 export default function PageContent({
   meeting,
   summaryData,
+  summaryLoadStatus = 'loaded',
+  summaryLoadError = null,
+  onRetrySummary,
+  onSummaryDataChange,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -54,11 +58,16 @@ export default function PageContent({
   onLoadMore,
   seekToSeconds = null,
   speakersById = null,
+  speakerCount = 0,
   onRenameSpeaker,
   onSpeakersDetected,
 }: {
   meeting: any;
   summaryData: Summary | null;
+  summaryLoadStatus?: 'loading' | 'loaded' | 'absent' | 'error';
+  summaryLoadError?: string | null;
+  onRetrySummary?: () => Promise<void> | void;
+  onSummaryDataChange?: (summary: Summary | null) => void;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -74,6 +83,7 @@ export default function PageContent({
   seekToSeconds?: number | null;
   // Speaker diarization props
   speakersById?: Map<number, string> | null;
+  speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
 }) {
@@ -170,6 +180,10 @@ export default function PageContent({
   // Custom hooks
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const templates = useTemplates(meeting.id);
+  const setAiSummaryDurably = useCallback((summary: Summary | null) => {
+    meetingData.setAiSummary(summary);
+    onSummaryDataChange?.(summary);
+  }, [meetingData.setAiSummary, onSummaryDataChange]);
 
   // Callback to register the modal open function
   const handleRegisterModalOpen = (openFn: () => void) => {
@@ -217,8 +231,7 @@ export default function PageContent({
     isModelConfigLoading: false, // ConfigContext loads on mount
     selectedTemplate: templates.selectedTemplate,
     onMeetingUpdated,
-    updateMeetingTitle: meetingData.updateMeetingTitle,
-    setAiSummary: meetingData.setAiSummary,
+    setAiSummary: setAiSummaryDurably,
     onOpenModelSettings: handleOpenModelSettings,
   });
 
@@ -319,6 +332,7 @@ export default function PageContent({
           onSeekToMoment={handleSeekToMoment}
           // Speaker diarization props
           speakersById={speakersById}
+          speakerCount={speakerCount}
           onRenameSpeaker={onRenameSpeaker}
           onSpeakersDetected={onSpeakersDetected}
         />
@@ -351,6 +365,12 @@ export default function PageContent({
             router.push(`/chat?scope=meeting&meetingId=${encodeURIComponent(meeting.id)}`);
           }}
           aiSummary={meetingData.aiSummary}
+          summaryLoadStatus={summaryLoadStatus}
+          summaryLoadError={summaryLoadError}
+          onRetrySummary={onRetrySummary}
+          speakerAttributionStale={Boolean(
+            (meetingData.aiSummary as any)?.summary_freshness?.speaker_attribution_stale
+          )}
           summaryStatus={summaryGeneration.summaryStatus}
           transcripts={meetingData.transcripts}
           modelConfig={modelConfig}

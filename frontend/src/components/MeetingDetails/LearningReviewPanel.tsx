@@ -32,6 +32,7 @@ interface IdentityReviewItem {
   cluster_id: number;
   local_cluster_id: number;
   operational_speaker_id?: number | null;
+  operational_display_name?: string | null;
   speech_duration_ms: number;
   speech_quality?: number | null;
   policy_result: string;
@@ -89,6 +90,22 @@ const meetingTypes = [
   'interview', 'client_sync', 'technical_deep_dive', 'uncertain',
 ];
 
+const meetingTypeLabelKeys: Record<string, string> = {
+  general: 'General meeting',
+  standup: 'Standup',
+  planning: 'Planning',
+  project_sync: 'Project sync',
+  one_on_one: 'One-on-one',
+  interview: 'Interview',
+  client_sync: 'Client sync',
+  technical_deep_dive: 'Technical deep dive',
+  uncertain: 'Uncertain',
+};
+
+function meetingTypeLabel(type: string, t: (value: string) => string) {
+  return t(meetingTypeLabelKeys[type] ?? type);
+}
+
 function percent(value: number | null | undefined) {
   return `${Math.round((value ?? 0) * 100)}%`;
 }
@@ -110,6 +127,7 @@ export function LearningReviewPanel({
   const [windows, setWindows] = useState<MeetingWindowRow[]>([]);
   const [windowEdits, setWindowEdits] = useState<Record<number, { start: number; end: number }>>({});
   const [allowLearning, setAllowLearning] = useState<Record<number, boolean>>({});
+  const [identityNames, setIdentityNames] = useState<Record<number, string>>({});
   const [advancedProfiles, setAdvancedProfiles] = useState<Record<number, AdvancedLearningProfile>>({});
   const [profileVersions, setProfileVersions] = useState<Record<number, SpeakerProfileVersion[]>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -197,6 +215,7 @@ export function LearningReviewPanel({
     item: IdentityReviewItem,
     decision: 'confirm' | 'reject' | 'unknown',
     speakerId?: number,
+    displayName?: string,
   ) => {
     setBusy(`identity-${item.cluster_id}`);
     try {
@@ -205,12 +224,18 @@ export function LearningReviewPanel({
           clusterId: item.cluster_id,
           decision,
           speakerId: decision === 'confirm' ? speakerId ?? null : null,
+          displayName: decision === 'confirm' ? displayName?.trim() || null : null,
           rejectedSpeakerId: decision === 'reject' ? speakerId ?? null : null,
           allowLearning: decision === 'confirm' && !!allowLearning[item.cluster_id],
           scope: 'cluster',
         },
       });
       toast.success(t('Speaker identity reviewed'));
+      setIdentityNames((current) => {
+        const next = { ...current };
+        delete next[item.cluster_id];
+        return next;
+      });
       await load();
       await onChanged?.();
     } catch (error) {
@@ -364,7 +389,7 @@ export function LearningReviewPanel({
   return (
     <details className="mx-4 mt-4 rounded-xl border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3" open={totalPending > 0}>
       <summary className="cursor-pointer select-none text-sm font-semibold text-[var(--fg1)]">
-        {t('Memento learning review')} · {totalPending} {t('pending')}
+        {t('Memento learning review')} · {totalPending} {t('items pending review')}
       </summary>
       {loadError && <p className="mt-3 text-xs text-[var(--danger)]">{loadError}</p>}
       <div className="mt-3 grid gap-3 xl:grid-cols-2">
@@ -372,7 +397,7 @@ export function LearningReviewPanel({
           <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
             <div className="text-xs font-semibold text-[var(--fg1)]">{t('Meeting type')}</div>
             <p className="mt-1 text-xs text-[var(--fg3)]">
-              {t('Suggested')} {classification.suggested_type} · {percent(classification.confidence)}
+              {t('Suggested')} {meetingTypeLabel(classification.suggested_type, t)} · {percent(classification.confidence)}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <select
@@ -380,7 +405,9 @@ export function LearningReviewPanel({
                 onChange={(event) => setSelectedType(event.target.value)}
                 className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
               >
-                {meetingTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                {meetingTypes.map((type) => (
+                  <option key={type} value={type}>{meetingTypeLabel(type, t)}</option>
+                ))}
               </select>
               <button disabled={busy != null} onClick={() => void reviewType('accepted')} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Accept')}</button>
               <button disabled={busy != null} onClick={() => void reviewType('rejected')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Reject')}</button>
@@ -409,8 +436,21 @@ export function LearningReviewPanel({
                 {t('Voice cluster')} {item.local_cluster_id + 1} · {Math.round(item.speech_duration_ms / 1000)}s
               </div>
               <p className="mt-1 text-xs text-[var(--fg3)]">
-                {top ? `${top.display_name} · voice ${percent(top.voice_score)} · ${top.confidence_band}` : t('No reliable identity candidate')}
+                {top
+                  ? `${top.display_name} · ${t('voice match')} ${percent(top.voice_score)} · ${t(top.confidence_band)}`
+                  : t('No reliable identity candidate')}
               </p>
+              {!top && (
+                <input
+                  value={identityNames[item.cluster_id] ?? ''}
+                  onChange={(event) => setIdentityNames((current) => ({
+                    ...current,
+                    [item.cluster_id]: event.target.value,
+                  }))}
+                  placeholder={t('Enter speaker name')}
+                  className="mt-2 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-1.5 text-xs"
+                />
+              )}
               <label className="mt-2 flex items-center gap-2 text-[11px] text-[var(--fg2)]">
                 <input
                   type="checkbox"
@@ -422,7 +462,21 @@ export function LearningReviewPanel({
               <div className="mt-2 flex flex-wrap gap-2">
                 {top && <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'confirm', top.speaker_id)} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Confirm')} {top.display_name}</button>}
                 {top && <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'reject', top.speaker_id)} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Not this person')}</button>}
-                <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'unknown')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">Unknown</button>
+                {!top && (
+                  <button
+                    disabled={busy != null || !identityNames[item.cluster_id]?.trim()}
+                    onClick={() => void reviewIdentity(
+                      item,
+                      'confirm',
+                      undefined,
+                      identityNames[item.cluster_id],
+                    )}
+                    className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)] disabled:opacity-50"
+                  >
+                    {t('Confirm speaker name')}
+                  </button>
+                )}
+                <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'unknown')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Unknown')}</button>
               </div>
             </section>
           );
@@ -436,7 +490,7 @@ export function LearningReviewPanel({
           return (
             <section key={`speaker-memory-${speakerId}`} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
               <div className="text-xs font-semibold text-[var(--fg1)]">
-                {t('Speaker memory')} · {candidate?.display_name ?? `Speaker ${speakerId}`}
+                {t('Speaker memory')} · {candidate?.display_name ?? item.operational_display_name ?? `Speaker ${speakerId}`}
               </div>
               <label className="mt-2 flex items-center gap-2 text-[11px] text-[var(--fg2)]">
                 <input
