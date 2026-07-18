@@ -78,7 +78,7 @@ is driven through our own API (steps above), and the plugin is only a fallback. 
 could self-update to upstream Meetily). **Upstream edit made (authorized):**
 `frontend/src-tauri/tauri.conf.json` — `plugins.updater.endpoints` repointed to a ValueOS-owned
 URL so a stray plugin check can never pull upstream. `plugins.updater.pubkey` is unused by our
-flow (we distribute plain installers via `publish-agent.yml` and verify with SHA-256, not Tauri
+flow (we distribute plain installers via `publish.yml` and verify with SHA-256, not Tauri
 signed updater bundles); it would only need a ValueOS-owned minisign key if we ever adopt the
 plugin's signed-bundle update path.
 

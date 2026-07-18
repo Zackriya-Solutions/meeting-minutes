@@ -1,0 +1,213 @@
+# ValueOS Agent — Publish a release (manual, with a confirmation gate).
+#   workflow_dispatch (run from main): build installers → preview the ValueOS-assigned version →
+#   PAUSE for approval (the `agent-release` environment) → upload to S3 + register the release.
+# Publishing lives in THIS repo (the ValueOS platform removed its own publish workflow). See valueos/CI.md.
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Release notes (optional)"
+        type: string
+        default: ""
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build the release installers on all three platforms → one artifact per platform.
+  # Bundle formats are pinned so the extensions match the ValueOS contract: .exe (windows),
+  # .dmg (macos), .AppImage (linux) — platform is inferred by extension server-side.
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true # a partial release is worse than none — all platforms or nothing
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+            target: aarch64-apple-darwin
+            feat: "--features metal"
+            sidecar_src: target/release/llama-helper
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin
+            bundles: dmg
+          - os: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+            feat: ""
+            sidecar_src: target/release/llama-helper.exe
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe
+            bundles: nsis
+          - os: ubuntu-latest
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+            feat: ""
+            sidecar_src: target/release/llama-helper
+            sidecar_dst: frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+            bundles: appimage
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libopenblas-dev \
+            libx11-dev libxtst-dev libxrandr-dev fuse libfuse2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache cargo registry + build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: cd frontend && pnpm install --no-frozen-lockfile
+
+      - name: Build llama-helper sidecar
+        shell: bash
+        run: |
+          cargo build --release -p llama-helper ${{ matrix.feat }}
+          mkdir -p frontend/src-tauri/binaries
+          cp "${{ matrix.sidecar_src }}" "${{ matrix.sidecar_dst }}"
+
+      - name: Apply ValueOS branding (icons)
+        shell: bash
+        run: bash valueos/branding/apply-branding.sh
+
+      - name: Build installer
+        shell: bash
+        working-directory: frontend
+        run: |
+          export NEXT_PUBLIC_VALUEOS_BUILD="${GITHUB_SHA:0:7}"
+          export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export NEXT_PUBLIC_VALUEOS_REAL="on"
+          node ../valueos/branding/make-ci-config.js valueos-ci.config.json
+          pnpm exec tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config valueos-ci.config.json
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: valueos-agent-${{ matrix.platform }}
+          path: frontend/src-tauri/target/${{ matrix.target }}/release/bundle
+          if-no-files-found: error
+          retention-days: 7
+
+  # Preview the version ValueOS will assign (read-only), shown BEFORE the approval gate.
+  preview:
+    name: Preview next version
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      next_version: ${{ steps.p.outputs.next_version }}
+    env:
+      VALUEOS_API: ${{ vars.VALUEOS_API }}
+      API_KEY: ${{ secrets.API_KEY }}
+    steps:
+      - name: GET next-version
+        id: p
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o nv.json -w '%{http_code}' -H "x-api-key: $API_KEY" "$VALUEOS_API/api/agent/releases/next-version")"
+          echo "Response:"; cat nv.json; echo
+          [ "$code" = 200 ] || { echo "::error::next-version preview failed (HTTP $code)"; exit 1; }
+          nv="$(jq -r '.result.next_version' nv.json)"
+          echo "next_version=$nv" >> "$GITHUB_OUTPUT"
+          {
+            echo "## ValueOS Agent — release preview"
+            echo ""
+            echo "Next version (auto-assigned by ValueOS): **\`$nv\`**"
+            echo ""
+            echo "Approve the **\`agent-release\`** environment below to publish. A concurrent publish"
+            echo "could bump the seq — the POST response returns the authoritative version."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publish — GitHub PAUSES here for the required reviewer of the `agent-release` environment
+  # ("confirm the version is correct"). On approval: upload to S3 + register the release.
+  publish:
+    name: Publish release
+    needs: [build, preview]
+    runs-on: ubuntu-latest
+    environment: agent-release
+    env:
+      VALUEOS_API: ${{ vars.VALUEOS_API }}
+      API_KEY: ${{ secrets.API_KEY }}
+      AGENT_RELEASES_BUCKET: ${{ vars.AGENT_RELEASES_BUCKET }}
+      NOTES: ${{ github.event.inputs.notes }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-2
+      - name: Download built installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: valueos-agent-*
+          path: dist
+          merge-multiple: true
+      - name: Upload to S3 + register the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREFIX="agent-releases/${GITHUB_SHA::12}-$(date -u +%Y%m%d%H%M%S)"
+          arts='[]'
+          add() { # $1=platform  $2=file
+            [ -f "$2" ] || return 0
+            local base key ct size sum
+            base="$(basename "$2")"; key="$PREFIX/$1/$base"
+            case "$2" in
+              *.exe) ct=application/vnd.microsoft.portable-executable ;;
+              *.dmg) ct=application/x-apple-diskimage ;;
+              *.AppImage) ct=application/x-executable ;;
+              *) ct=application/octet-stream ;;
+            esac
+            size="$(wc -c <"$2" | tr -d ' ')"; sum="$(sha256sum "$2" | awk '{print $1}')"
+            aws s3 cp "$2" "s3://$AGENT_RELEASES_BUCKET/$key" --content-type "$ct" --only-show-errors
+            arts="$(jq -c --arg p "$1" --arg k "$key" --argjson sz "$size" --arg s "$sum" --arg c "$ct" \
+              '. + [{platform:$p,s3_key:$k,size_bytes:$sz,checksum:$s,content_type:$c}]' <<<"$arts")"
+          }
+          add windows "$(find dist -type f -name '*.exe'      2>/dev/null | head -1)"
+          add macos   "$(find dist -type f -name '*.dmg'      2>/dev/null | head -1)"
+          add linux   "$(find dist -type f -name '*.AppImage' 2>/dev/null | head -1)"
+          [ "$arts" != '[]' ] || { echo "no binaries found in dist/" >&2; exit 1; }
+          body="$(jq -n --arg r "$GITHUB_SHA" --arg n "${NOTES:-}" --argjson a "$arts" '{git_ref:$r,notes:$n,artifacts:$a}')"
+          code="$(curl -sS -o resp.json -w '%{http_code}' -X POST "$VALUEOS_API/api/agent/releases" \
+            -H "x-api-key: $API_KEY" -H 'content-type: application/json' --data "$body")"
+          echo "Response:"; cat resp.json; echo
+          [ "$code" = 201 ] || { echo "publish failed ($code)" >&2; exit 1; }
+          echo "Published ValueOS Agent $(jq -r .result.version resp.json)" >> "$GITHUB_STEP_SUMMARY"

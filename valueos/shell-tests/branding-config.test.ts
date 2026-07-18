@@ -18,8 +18,8 @@ const brandingDir = path.resolve(repoRoot, 'valueos/branding');
 const overlaySrc = path.resolve(brandingDir, 'tauri.valueos.json');
 const generator = path.resolve(brandingDir, 'make-ci-config.js');
 const upstreamConf = path.resolve(repoRoot, 'frontend/src-tauri/tauri.conf.json');
-const branchWorkflow = path.resolve(repoRoot, '.github/workflows/valueos-branch.yml');
-const mainWorkflow = path.resolve(repoRoot, '.github/workflows/valueos-main.yml');
+const ciWorkflow = path.resolve(repoRoot, '.github/workflows/ci.yml');
+const publishWorkflow = path.resolve(repoRoot, '.github/workflows/publish.yml');
 
 function readJson(p: string) {
   return JSON.parse(readFileSync(p, 'utf8'));
@@ -58,7 +58,7 @@ describe('branding overlay CSP fix', () => {
 
   it('every build workflow forces REAL transport (no accidental mock in packaged builds)', () => {
     // Inlined at build so the packaged app never falls back to the Acme/Ada mock seed.
-    for (const wf of [branchWorkflow, mainWorkflow]) {
+    for (const wf of [ciWorkflow, publishWorkflow]) {
       expect(readFileSync(wf, 'utf8')).toMatch(/NEXT_PUBLIC_VALUEOS_REAL\s*=\s*"?on"?/);
     }
   });
