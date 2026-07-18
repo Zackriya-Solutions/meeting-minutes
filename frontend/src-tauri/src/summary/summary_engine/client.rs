@@ -183,6 +183,8 @@ pub async fn generate_with_builtin(
     let request = Request::Generate {
         prompt: formatted_prompt,
         max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        // Upper cap on the context window; llama-helper right-sizes the
+        // actual KV-cache allocation to each request's prompt + max_tokens
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),

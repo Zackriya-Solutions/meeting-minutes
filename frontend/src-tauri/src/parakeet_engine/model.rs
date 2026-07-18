@@ -60,9 +60,15 @@ impl Drop for ParakeetModel {
 
 impl ParakeetModel {
     pub fn new<P: AsRef<Path>>(model_dir: P, quantized: bool) -> Result<Self, ParakeetError> {
-        let encoder = Self::init_session(&model_dir, "encoder-model", None, quantized)?;
-        let decoder_joint = Self::init_session(&model_dir, "decoder_joint-model", None, quantized)?;
-        let preprocessor = Self::init_session(&model_dir, "nemo128", None, false)?;
+        // The encoder does the heavy per-chunk work: parallel execution with ORT's
+        // default thread pool. decoder_joint runs once per greedy-decode step on
+        // [1, 1] inputs and nemo128 is a small preprocessor — for those, full-size
+        // parallel thread pools cost more in synchronization than they save, so run
+        // them sequentially on a single intra-op thread.
+        let encoder = Self::init_session(&model_dir, "encoder-model", true, None, quantized)?;
+        let decoder_joint =
+            Self::init_session(&model_dir, "decoder_joint-model", false, Some(1), quantized)?;
+        let preprocessor = Self::init_session(&model_dir, "nemo128", false, Some(1), false)?;
 
         let (vocab, blank_idx) = Self::load_vocab(&model_dir)?;
         let vocab_size = vocab.len();
@@ -86,6 +92,7 @@ impl ParakeetModel {
     fn init_session<P: AsRef<Path>>(
         model_dir: P,
         model_name: &str,
+        parallel_execution: bool,
         intra_threads: Option<usize>,
         try_quantized: bool,
     ) -> Result<Session, ParakeetError> {
@@ -114,13 +121,15 @@ impl ParakeetModel {
 
         let mut builder = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
-            .with_execution_providers(providers)?
-            .with_parallel_execution(true)?;
+            .with_execution_providers(providers)?;
+
+        // ORT defaults to sequential execution; only opt in to parallel mode.
+        if parallel_execution {
+            builder = builder.with_parallel_execution(true)?;
+        }
 
         if let Some(threads) = intra_threads {
-            builder = builder
-                .with_intra_threads(threads)?
-                .with_inter_threads(threads)?;
+            builder = builder.with_intra_threads(threads)?;
         }
 
         let session = builder.commit_from_file(model_dir.as_ref().join(&model_filename))?;

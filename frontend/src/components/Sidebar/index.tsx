@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
@@ -237,15 +237,36 @@ const Sidebar: React.FC = () => {
     }
   };
 
+  // Debounce timer for transcript search (avoids invoking on every keystroke)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, []);
+
   // Handle search input changes
-  const handleSearchChange = useCallback(async (value: string) => {
+  const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
 
-    // If search query is empty, just return to normal view
-    if (!value.trim()) return;
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
 
-    // Search through transcripts
-    await searchTranscripts(value);
+    // Skip empty/1-char queries: clear results and return to normal view
+    if (value.trim().length < 2) {
+      searchTranscripts('');
+      return;
+    }
+
+    // Search through transcripts after the user pauses typing
+    searchDebounceRef.current = setTimeout(() => {
+      searchTranscripts(value);
+    }, 300);
 
     // Make sure the meetings folder is expanded when searching
     if (!expandedFolders.has('meetings')) {

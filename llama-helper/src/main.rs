@@ -274,6 +274,28 @@ fn get_default_gpu_layers(model_path: &PathBuf, context_size: u32) -> u32 {
     calculate_gpu_layers(model_path, estimated_layers, vram, context_size)
 }
 
+/// Extra tokens reserved beyond prompt + max_tokens when sizing a context.
+const CTX_MARGIN_TOKENS: u32 = 64;
+
+/// Round a needed token count up to a multiple of 256 (llama.cpp pads n_ctx
+/// to 256 internally) and clamp to [1024, cap]. The client-sent context_size
+/// is an upper cap, not the allocation size: allocating the full cap builds
+/// a multi-GB KV cache on every request even for short prompts.
+fn right_size_ctx(needed_tokens: u32, cap: u32) -> u32 {
+    let rounded = needed_tokens.saturating_add(255) / 256 * 256;
+    rounded.max(1024).min(cap)
+}
+
+/// Estimate needed tokens before the model (and its tokenizer) is available.
+/// ~3 bytes per token over-estimates for typical text, so the GPU-layer
+/// budget errs on the safe side.
+fn estimate_needed_tokens(prompt: &str, max_tokens: i32) -> u32 {
+    u32::try_from(prompt.len() / 3)
+        .unwrap_or(u32::MAX)
+        .saturating_add(max_tokens.max(0) as u32)
+        .saturating_add(CTX_MARGIN_TOKENS)
+}
+
 // ============================================================================
 // Model State Management
 // ============================================================================
@@ -282,7 +304,10 @@ struct ModelState {
     backend: LlamaBackend,
     model: Option<LlamaModel>,
     model_path: Option<PathBuf>,
+    /// Upper cap on the per-request context window (client-sent context_size)
     context_size: u32,
+    /// Context size the current GPU-layer split was budgeted for
+    kv_budget_ctx: u32,
     last_activity: Arc<AtomicU64>,
 }
 
@@ -294,6 +319,7 @@ impl ModelState {
             model: None,
             model_path: None,
             context_size: 2048,
+            kv_budget_ctx: 0,
             last_activity: Arc::new(AtomicU64::new(Self::current_timestamp())),
         })
     }
@@ -314,10 +340,18 @@ impl ModelState {
         Self::current_timestamp() - self.last_activity.load(Ordering::SeqCst)
     }
 
-    fn load_model_if_needed(&mut self, model_path: PathBuf, context_size: u32) -> Result<()> {
-        // Check if model is already loaded
+    fn load_model_if_needed(
+        &mut self,
+        model_path: PathBuf,
+        context_size: u32,
+        kv_budget_ctx: u32,
+    ) -> Result<()> {
+        // Check if model is already loaded with a large enough KV budget
         if let Some(ref loaded_path) = self.model_path {
-            if loaded_path == &model_path && self.context_size == context_size {
+            if loaded_path == &model_path
+                && self.context_size == context_size
+                && kv_budget_ctx <= self.kv_budget_ctx
+            {
                 eprintln!("✓ Model already loaded");
                 self.update_activity();
                 return Ok(());
@@ -326,8 +360,9 @@ impl ModelState {
 
         eprintln!("📥 Loading model: {}", model_path.display());
 
-        // Detect GPU layers
-        let gpu_layers = get_default_gpu_layers(&model_path, context_size);
+        // Detect GPU layers, budgeting the KV cache at the right-sized
+        // context for this request rather than the full cap
+        let gpu_layers = get_default_gpu_layers(&model_path, kv_budget_ctx);
 
         // Configure model parameters with GPU offload
         let model_params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
@@ -339,6 +374,7 @@ impl ModelState {
         self.model = Some(model);
         self.model_path = Some(model_path);
         self.context_size = context_size;
+        self.kv_budget_ctx = kv_budget_ctx;
         self.update_activity();
 
         eprintln!("✅ Model loaded successfully");
@@ -364,11 +400,54 @@ impl ModelState {
             })
             .unwrap_or(2);
 
+        // Tokenize before creating the context so it can be right-sized to
+        // this request (the prompt is fed back as these exact tokens, so
+        // there is no double-BOS risk)
+        let tokens_list = model
+            .str_to_token(&prompt, AddBos::Always)
+            .with_context(|| "failed to tokenize prompt")?;
+
+        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
+
+        let n_prompt_tokens = i32::try_from(tokens_list.len()).context("Prompt too long")?;
+
+        // self.context_size is an upper cap; allocate only what this request
+        // needs so the per-request KV cache stays small
+        let needed = u32::try_from(tokens_list.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(max_tokens.max(0) as u32)
+            .saturating_add(CTX_MARGIN_TOKENS);
+        let n_ctx = right_size_ctx(needed, self.context_size);
+        let n_batch = n_ctx.min(2048);
+        if n_ctx < needed {
+            eprintln!(
+                "⚠️ Request needs {} tokens but context cap is {}; output may be truncated",
+                needed, self.context_size
+            );
+        }
+        eprintln!(
+            "📐 Context: {} tokens (cap {}), batch: {}",
+            n_ctx, self.context_size, n_batch
+        );
+
+        // The GPU-layer split was budgeted from a pre-tokenizer byte estimate,
+        // which can undershoot (e.g. CJK/emoji-heavy prompts). If the real
+        // requirement exceeds that budget, reload with the larger budget so
+        // the actual KV cache never overruns the VRAM the split assumed.
+        if n_ctx > self.kv_budget_ctx {
+            let model_path = self.model_path.clone().context("Model not loaded")?;
+            let cap = self.context_size;
+            eprintln!(
+                "📊 Re-budgeting GPU offload: real ctx {} exceeds budgeted {}",
+                n_ctx, self.kv_budget_ctx
+            );
+            self.load_model_if_needed(model_path, cap, n_ctx)?;
+        }
+        let model = self.model.as_ref().context("Model not loaded")?;
+
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(
-                NonZeroU32::new(self.context_size).context("Invalid ctx size")?,
-            ))
-            .with_n_batch(self.context_size)
+            .with_n_ctx(Some(NonZeroU32::new(n_ctx).context("Invalid ctx size")?))
+            .with_n_batch(n_batch)
             .with_n_threads(threads)
             .with_n_threads_batch(threads);
 
@@ -376,28 +455,24 @@ impl ModelState {
             .new_context(&self.backend, ctx_params)
             .context("unable to create the llama_context")?;
 
-        let tokens_list = model
-            .str_to_token(&prompt, AddBos::Always)
-            .with_context(|| "failed to tokenize prompt")?;
+        let mut batch = LlamaBatch::new(n_batch as usize, 1);
 
-        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
-
-        // Use context size for batch capacity to handle long prompts
-        let batch_size = self.context_size as usize;
-        let mut batch = LlamaBatch::new(batch_size, 1);
-
-        let last_index: i32 = (tokens_list.len() - 1) as i32;
-        for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
-            let is_last = i == last_index;
-            batch
-                .add(token, i, &[0], is_last)
-                .context("Failed to add token to batch")?;
+        // llama_decode rejects batches larger than n_batch, so feed the
+        // prompt in n_batch-sized chunks; only the final token needs logits
+        for (chunk_idx, chunk) in tokens_list.chunks(n_batch as usize).enumerate() {
+            batch.clear();
+            let chunk_start = (chunk_idx * n_batch as usize) as i32;
+            for (i, &token) in chunk.iter().enumerate() {
+                let pos = chunk_start + i as i32;
+                let is_last = pos == n_prompt_tokens - 1;
+                batch
+                    .add(token, pos, &[0], is_last)
+                    .context("Failed to add token to batch")?;
+            }
+            ctx.decode(&mut batch).context("llama_decode() failed")?;
         }
-
-        ctx.decode(&mut batch).context("llama_decode() failed")?;
         let prompt_time = start_time.elapsed();
 
-        let n_prompt_tokens = batch.n_tokens();
         let mut n_cur = n_prompt_tokens;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
@@ -615,10 +690,19 @@ fn main() -> Result<()> {
                         );
                         let stop_tokens = stop_tokens.unwrap_or_else(Vec::new);
 
-                        // Load model if path provided
+                        // Load model if path provided. The GPU-layer split is
+                        // budgeted at this request's right-sized context (the
+                        // tokenizer needs the model, so estimate from bytes);
+                        // it is recomputed if a later request needs more.
                         if let Some(path_str) = model_path {
                             let path = PathBuf::from(path_str);
-                            if let Err(e) = state.load_model_if_needed(path, context_size) {
+                            let kv_budget_ctx = right_size_ctx(
+                                estimate_needed_tokens(&prompt, max_tokens),
+                                context_size,
+                            );
+                            if let Err(e) =
+                                state.load_model_if_needed(path, context_size, kv_budget_ctx)
+                            {
                                 send_response(&Response::Response {
                                     text: String::new(),
                                     error: Some(format!("Failed to load model: {}", e)),

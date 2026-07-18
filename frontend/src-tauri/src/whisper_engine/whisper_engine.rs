@@ -3,8 +3,8 @@
 use std::path::{PathBuf};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
+use tokio::sync::{Mutex, RwLock};
+use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy, WhisperState};
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use reqwest::Client;
@@ -36,6 +36,13 @@ pub struct ModelInfo {
 pub struct WhisperEngine {
     models_dir: PathBuf,
     current_context: Arc<RwLock<Option<WhisperContext>>>,
+    // Reusable whisper state: creating one pays GPU backend init and
+    // KV-cache/compute-buffer allocation, so it is created once per loaded
+    // model instead of per transcription call (whisper_full resets it per run)
+    current_state: Arc<Mutex<Option<WhisperState>>>,
+    // Cached auto-detected language; avoids whisper.cpp re-running language
+    // detection (a full extra encoder pass) on every chunk when set to auto
+    detected_language: Arc<Mutex<Option<String>>>,
     current_model: Arc<RwLock<Option<String>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     // State tracking for smart logging
@@ -152,6 +159,8 @@ impl WhisperEngine {
         let engine = Self {
             models_dir,
             current_context: Arc::new(RwLock::new(None)),
+            current_state: Arc::new(Mutex::new(None)),
+            detected_language: Arc::new(Mutex::new(None)),
             current_model: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             // Initialize state tracking
@@ -265,8 +274,13 @@ impl WhisperEngine {
 
         match model_info.status {
             ModelStatus::Available => {
-                // FIX 5: Check if this model is already loaded
-                if let Some(current_model) = self.current_model.read().await.as_ref() {
+                // FIX 5: Check if this model is already loaded.
+                // Clone the name out so the read guard is dropped before
+                // unload_model(), which write-locks the same RwLock — an
+                // edition-2021 `if let` keeps the scrutinee guard alive for
+                // the whole block, deadlocking the task on model switch.
+                let current = self.current_model.read().await.clone();
+                if let Some(current_model) = current {
                     if current_model == model_name {
                         log::info!("Model {} is already loaded, skipping reload", model_name);
                         return Ok(());
@@ -315,8 +329,15 @@ impl WhisperEngine {
                     // Suppressor dropped here, stderr restored
                 };
 
-                // Update current context and model
+                // Create the reusable transcription state up front so per-chunk
+                // calls skip backend/state initialization entirely
+                let state = ctx.create_state()
+                    .map_err(|e| anyhow!("Failed to create state for model {}: {}", model_name, e))?;
+
+                // Update current context, state, and model
                 *self.current_context.write().await = Some(ctx);
+                *self.current_state.lock().await = Some(state);
+                *self.detected_language.lock().await = None;
                 *self.current_model.write().await = Some(model_name.to_string());
 
                 // Enhanced acceleration status reporting
@@ -344,6 +365,8 @@ impl WhisperEngine {
 
     pub async fn unload_model(&self) -> bool  {
         let mut ctx_guard = self.current_context.write().await;
+        self.current_state.lock().await.take();
+        self.detected_language.lock().await.take();
         let unloaded = ctx_guard.take().is_some();
         if unloaded {
             log::info!("📉Whisper model unloaded");
@@ -537,7 +560,14 @@ impl WhisperEngine {
             Some("auto-translate") => (None, true),
             Some(lang) => (Some(lang), false),
         };
-        params.set_language(language_code);
+        // Reuse the language detected on an earlier chunk: passing None makes
+        // whisper.cpp run a full extra encoder pass for detection on every chunk
+        let cached_language = match language_code {
+            None => self.detected_language.lock().await.clone(),
+            Some(_) => None,
+        };
+        let effective_language = language_code.or(cached_language.as_deref());
+        params.set_language(effective_language);
         params.set_translate(should_translate);
 
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
@@ -567,32 +597,39 @@ impl WhisperEngine {
         params.set_max_len(200);
         params.set_single_segment(false);
 
-        // Set thread count based on hardware (if supported by whisper.cpp)
-        if let Some(_max_threads) = adaptive_config.max_threads {
-            // Note: whisper.cpp may or may not expose thread control through params
-            // Removed debug log to reduce I/O overhead in transcription hot path
-        }
+        // Set thread count based on hardware (fallback matches whisper.cpp's
+        // own default of min(4, hardware cores))
+        let n_threads = adaptive_config.max_threads
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get().min(4)));
+        params.set_n_threads(n_threads as i32);
 
         let duration_seconds = audio_data.len() as f64 / 16000.0;
         let is_partial = duration_seconds < 15.0; // Consider chunks under 15s as partial
 
-        // PERFORMANCE: Suppress verbose C library logs during transcription
-        // This hides whisper_full_with_state debug logs and beam search details
-        let (num_segments, state) = {
-            // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
+        // Reuse the state created at model load; recreate only if missing
+        let mut state_guard = self.current_state.lock().await;
+        if state_guard.is_none() {
+            *state_guard = Some(ctx.create_state()?);
+        }
+        let state = state_guard.as_mut()
+            .ok_or_else(|| anyhow!("No whisper state available"))?;
 
-            let mut state = ctx.create_state()?;
-            state.full(params, &audio_data)?;
-            let num_segments = state.full_n_segments();
+        state.full(params, &audio_data)?;
+        let num_segments = state.full_n_segments()?;
 
-            (num_segments, state)
-            // Suppressor dropped here, stderr restored
-        };
+        // Cache the language whisper.cpp just auto-detected so later chunks
+        // skip the detection encoder pass. Only trust detections from chunks
+        // long enough to carry a real signal that also produced output — a
+        // misdetection here would be forced on the rest of the session.
+        if effective_language.is_none() && duration_seconds >= 2.0 && num_segments > 0 {
+            if let Some(lang) = whisper_rs::get_lang_str(state.full_lang_id_from_state()?) {
+                *self.detected_language.lock().await = Some(lang.to_string());
+            }
+        }
+
         let mut result = String::new();
         let mut total_confidence = 0.0;
         let mut segment_count = 0;
-
-        let num_segments = num_segments?;
         for i in 0..num_segments {
             let segment_text = match state.full_get_segment_text_lossy(i) {
                 Ok(text) => text,
@@ -654,7 +691,14 @@ impl WhisperEngine {
             Some("auto-translate") => (None, true),
             Some(lang) => (Some(lang), false),
         };
-        params.set_language(language_code);
+        // Reuse the language detected on an earlier chunk: passing None makes
+        // whisper.cpp run a full extra encoder pass for detection on every chunk
+        let cached_language = match language_code {
+            None => self.detected_language.lock().await.clone(),
+            Some(_) => None,
+        };
+        let effective_language = language_code.or(cached_language.as_deref());
+        params.set_language(effective_language);
         params.set_translate(should_translate);
 
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
@@ -683,6 +727,12 @@ impl WhisperEngine {
         // Reasonable length limits
         params.set_max_len(200);                 // Reasonable length
         params.set_single_segment(false);        // Allow multiple segments for better accuracy
+
+        // Set thread count based on hardware (fallback matches whisper.cpp's
+        // own default of min(4, hardware cores))
+        let n_threads = adaptive_config.max_threads
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get().min(4)));
+        params.set_n_threads(n_threads as i32);
 
         // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
         // This would help detect repetitive outputs: params.set_compression_ratio_threshold(2.4);
@@ -736,11 +786,28 @@ impl WhisperEngine {
             log::info!("Starting transcription #{} of {} samples ({:.1}s duration)",
                       transcription_count, audio_data.len(), duration_seconds);
         }
-        let mut state = ctx.create_state()?;
+        // Reuse the state created at model load; recreate only if missing
+        let mut state_guard = self.current_state.lock().await;
+        if state_guard.is_none() {
+            *state_guard = Some(ctx.create_state()?);
+        }
+        let state = state_guard.as_mut()
+            .ok_or_else(|| anyhow!("No whisper state available"))?;
+
         state.full(params, &audio_data)?;
 
         // Extract text with improved segment handling
         let num_segments = state.full_n_segments()?;
+
+        // Cache the language whisper.cpp just auto-detected so later chunks
+        // skip the detection encoder pass. Only trust detections from chunks
+        // long enough to carry a real signal that also produced output — a
+        // misdetection here would be forced on the rest of the session.
+        if effective_language.is_none() && duration_seconds >= 2.0 && num_segments > 0 {
+            if let Some(lang) = whisper_rs::get_lang_str(state.full_lang_id_from_state()?) {
+                *self.detected_language.lock().await = Some(lang.to_string());
+            }
+        }
 
         // Performance optimization: reduce segment completion logging
         // Only log for significant transcriptions to avoid I/O overhead
@@ -1133,5 +1200,51 @@ impl WhisperEngine {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    // Regression test: load_model used to hold the current_model read guard
+    // across unload_model()'s write-lock on the same RwLock (edition-2021
+    // `if let` scrutinee lifetime), deadlocking whenever a different model
+    // was loaded while one was already resident.
+    #[tokio::test]
+    async fn switching_models_does_not_deadlock() {
+        let engine = WhisperEngine::new_with_models_dir(Some(std::env::temp_dir()))
+            .expect("engine construction");
+
+        {
+            let mut models = engine.available_models.write().await;
+            for name in ["model-a", "model-b"] {
+                models.insert(
+                    name.to_string(),
+                    ModelInfo {
+                        name: name.to_string(),
+                        path: PathBuf::from("/nonexistent").join(name),
+                        size_mb: 1,
+                        accuracy: String::new(),
+                        speed: String::new(),
+                        status: ModelStatus::Available,
+                        description: String::new(),
+                    },
+                );
+            }
+        }
+        *engine.current_model.write().await = Some("model-a".to_string());
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            engine.load_model("model-b"),
+        )
+        .await;
+
+        // Must return within the timeout; the load itself fails on the fake
+        // path, which is fine — the regression was hanging forever here.
+        let outcome = result.expect("load_model deadlocked while switching models");
+        assert!(outcome.is_err());
     }
 }

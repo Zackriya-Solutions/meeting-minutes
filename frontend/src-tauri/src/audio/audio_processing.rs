@@ -150,6 +150,9 @@ pub struct LoudnessNormalizer {
     gain_linear: f32,
     loudness_buffer: Vec<f32>,
     true_peak_limit: f32,
+    samples_since_gain_update: usize,
+    gain_update_interval_samples: usize,
+    has_valid_measurement: bool,
 }
 
 impl LoudnessNormalizer {
@@ -161,9 +164,18 @@ impl LoudnessNormalizer {
     pub fn new(channels: u32, sample_rate: u32) -> Result<Self> {
         const TRUE_PEAK_LIMIT: f64 = -1.0;
         const ANALYZE_CHUNK_SIZE: usize = 512;
+        const GAIN_UPDATE_INTERVAL_MS: usize = 500;
 
-        let ebur128 = ebur128::EbuR128::new(channels, sample_rate, ebur128::Mode::I | ebur128::Mode::TRUE_PEAK)
-            .map_err(|e| anyhow::anyhow!("Failed to create EBU R128 normalizer: {}", e))?;
+        // Mode::HISTOGRAM keeps the integrated-loudness history in a fixed 1000-bin
+        // histogram, making loudness_global() constant-time and constant-memory.
+        // Without it the crate queues one energy value per 100ms forever and
+        // loudness_global() scans the whole queue — O(recording duration) per call.
+        let ebur128 = ebur128::EbuR128::new(
+            channels,
+            sample_rate,
+            ebur128::Mode::I | ebur128::Mode::TRUE_PEAK | ebur128::Mode::HISTOGRAM,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to create EBU R128 normalizer: {}", e))?;
 
         let true_peak_limit = 10_f32.powf(TRUE_PEAK_LIMIT as f32 / 20.0);
 
@@ -173,6 +185,11 @@ impl LoudnessNormalizer {
             gain_linear: 1.0,
             loudness_buffer: Vec::with_capacity(ANALYZE_CHUNK_SIZE),
             true_peak_limit,
+            samples_since_gain_update: 0,
+            gain_update_interval_samples: (sample_rate as usize * channels as usize
+                * GAIN_UPDATE_INTERVAL_MS)
+                / 1000,
+            has_valid_measurement: false,
         })
     }
 
@@ -202,11 +219,24 @@ impl LoudnessNormalizer {
                 if let Err(e) = self.ebur128.add_frames_f32(&self.loudness_buffer) {
                     warn!("Failed to add frames to EBU R128: {}", e);
                 } else {
-                    // Update gain based on cumulative loudness
-                    if let Ok(current_lufs) = self.ebur128.loudness_global() {
-                        if current_lufs.is_finite() && current_lufs < 0.0 {
-                            let gain_db = TARGET_LUFS - current_lufs;
-                            self.gain_linear = 10_f32.powf(gain_db as f32 / 20.0);
+                    self.samples_since_gain_update += self.loudness_buffer.len();
+
+                    // Integrated loudness moves slowly by design, so recompute the
+                    // gain only ~every 500ms of audio. Until the first valid
+                    // measurement (needs ~400ms of audio) retry every chunk so the
+                    // gain engages as early as it did before.
+                    if !self.has_valid_measurement
+                        || self.samples_since_gain_update >= self.gain_update_interval_samples
+                    {
+                        self.samples_since_gain_update = 0;
+
+                        // Update gain based on cumulative loudness
+                        if let Ok(current_lufs) = self.ebur128.loudness_global() {
+                            if current_lufs.is_finite() && current_lufs < 0.0 {
+                                self.has_valid_measurement = true;
+                                let gain_db = TARGET_LUFS - current_lufs;
+                                self.gain_linear = 10_f32.powf(gain_db as f32 / 20.0);
+                            }
                         }
                     }
                 }

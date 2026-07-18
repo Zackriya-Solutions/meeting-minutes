@@ -94,11 +94,20 @@ impl TranscriptsRepository {
 
         let search_query = format!("%{}%", query.to_lowercase());
 
+        // SQLite LIKE is already ASCII-case-insensitive (and its LOWER() is
+        // ASCII-only), so wrapping the column in LOWER() only adds per-row work.
+        // One row per meeting: the bare t.transcript comes from the row holding
+        // MAX(t.timestamp) (documented SQLite bare-column-with-MAX behavior),
+        // so the snippet is taken from the meeting's latest matching segment.
+        // Without the GROUP BY, one chatty meeting could exhaust the LIMIT.
         let rows = sqlx::query_as::<_, (String, String, String, String)>(
-            "SELECT m.id, m.title, t.transcript, t.timestamp
+            "SELECT m.id, m.title, t.transcript, MAX(t.timestamp) AS timestamp
              FROM meetings m
              JOIN transcripts t ON m.id = t.meeting_id
-             WHERE LOWER(t.transcript) LIKE ?",
+             WHERE t.transcript LIKE ?
+             GROUP BY m.id
+             ORDER BY m.created_at DESC
+             LIMIT 100",
         )
         .bind(&search_query)
         .fetch_all(pool)

@@ -163,10 +163,18 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     // The actual recording start/stop is handled in the Home component
   };
 
+  // Monotonically-increasing id so late responses from superseded searches are dropped
+  const searchRequestIdRef = React.useRef(0);
+
   // Function to search through meeting transcripts
   const searchTranscripts = async (query: string) => {
+    const requestId = ++searchRequestIdRef.current;
+
     if (!query.trim()) {
       setSearchResults([]);
+      // The bumped requestId supersedes any in-flight search, whose gated
+      // finally-block will no longer reset the flag — reset it here.
+      setIsSearching(false);
       return;
     }
 
@@ -175,12 +183,18 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 
       const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
-      setSearchResults(results);
+      if (requestId === searchRequestIdRef.current) {
+        setSearchResults(results);
+      }
     } catch (error) {
-      console.error('Error searching transcripts:', error);
-      setSearchResults([]);
+      if (requestId === searchRequestIdRef.current) {
+        console.error('Error searching transcripts:', error);
+        setSearchResults([]);
+      }
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestIdRef.current) {
+        setIsSearching(false);
+      }
     }
   };
 

@@ -236,15 +236,10 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
     };
 
     if let Some(engine) = engine {
-        // Check if a model is currently loaded
-        if engine.is_model_loaded().await {
-            if let Some(current_model) = engine.get_current_model().await {
-                log::info!("Parakeet model already loaded: {}", current_model);
-                return Ok(current_model);
-            }
-        }
-
-        // No model loaded - try to load user's configured model from transcript config
+        // Resolve the user's configured model first: the model now stays
+        // resident across recordings, so an already-loaded model must be
+        // re-checked against the transcript config or a settings change
+        // between recordings would be silently ignored.
         let model_to_load = match crate::api::api::api_get_transcript_config(
             app.clone(),
             app.state(),
@@ -281,6 +276,26 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
                 None
             }
         };
+
+        // Fast path: keep the resident model when it matches the config
+        // (or when no specific Parakeet model is configured).
+        if engine.is_model_loaded().await {
+            if let Some(current_model) = engine.get_current_model().await {
+                match model_to_load.as_deref() {
+                    Some(configured) if configured != current_model => {
+                        log::info!(
+                            "Parakeet model '{}' is loaded but config selects '{}'; switching",
+                            current_model,
+                            configured
+                        );
+                    }
+                    _ => {
+                        log::info!("Parakeet model already loaded: {}", current_model);
+                        return Ok(current_model);
+                    }
+                }
+            }
+        }
 
         // Check available models
         let models = engine

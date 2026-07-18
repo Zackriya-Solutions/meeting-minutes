@@ -381,8 +381,13 @@ impl ParakeetEngine {
 
         match model_info.status {
             ModelStatus::Available => {
-                // Check if this model is already loaded
-                if let Some(current_model) = self.current_model_name.read().await.as_ref() {
+                // Check if this model is already loaded.
+                // Clone the name out so the read guard is dropped before
+                // unload_model(), which write-locks the same RwLock — an
+                // edition-2021 `if let` keeps the scrutinee guard alive for
+                // the whole block, deadlocking the task on model switch.
+                let current = self.current_model_name.read().await.clone();
+                if let Some(current_model) = current {
                     if current_model == model_name {
                         log::info!("Parakeet model {} is already loaded, skipping reload", model_name);
                         return Ok(());
@@ -397,8 +402,15 @@ impl ParakeetEngine {
 
                 // Load model based on quantization type
                 let quantized = model_info.quantization == QuantizationType::Int8;
-                let model = ParakeetModel::new(&model_info.path, quantized)
-                    .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
+                let model_path = model_info.path.clone();
+                // ParakeetModel::new synchronously parses hundreds of MB of ONNX graphs;
+                // run it on the blocking pool so the async runtime is not stalled.
+                let model = tokio::task::spawn_blocking(move || {
+                    ParakeetModel::new(&model_path, quantized)
+                })
+                .await
+                .map_err(|e| anyhow!("Parakeet model load task failed: {}", e))?
+                .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
 
                 // Update current model and model name
                 *self.current_model.write().await = Some(model);

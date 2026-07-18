@@ -647,29 +647,11 @@ pub async fn stop_recording<R: Runtime>(
 
     match config.as_deref() {
         Some("parakeet") => {
-            info!("🦜 Unloading Parakeet model...");
-            let engine_clone = {
-                let engine_guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Parakeet model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!("✅ Parakeet model '{}' unloaded successfully", current_model);
-                } else {
-                    warn!("⚠️ Failed to unload Parakeet model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Parakeet engine found to unload model");
-            }
+            // Keep the Parakeet model resident across recordings: reloading re-parses
+            // the ~652MB int8 encoder with Level3 graph optimization, costing seconds
+            // on every recording start. Batch jobs still unload via
+            // unload_engine_after_batch.
+            info!("🦜 Keeping Parakeet model loaded for the next recording (skipping unload)");
         }
         _ => {
             // Default to Whisper
