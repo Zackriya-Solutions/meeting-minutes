@@ -348,4 +348,53 @@ mod tests {
 
         manager.cleanup().await.unwrap();
     }
+
+    #[tokio::test]
+    async fn speaker_name_evidence_vocabulary_accepts_current_extractors() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("meeting_minutes.sqlite");
+        let legacy_path = directory.path().join("missing.db");
+        let manager = DatabaseManager::new_with_background_jobs(
+            database_path.to_str().unwrap(),
+            legacy_path.to_str().unwrap(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO meetings(id, title, created_at, updated_at) \
+             VALUES ('m1', '1to1 with Andrew', datetime('now'), datetime('now'))",
+        )
+        .execute(manager.pool())
+        .await
+        .unwrap();
+
+        for (kind, hash) in [
+            ("meeting_title", "title-hash"),
+            ("direct_address_unassigned", "address-hash"),
+        ] {
+            sqlx::query(
+                "INSERT INTO speaker_name_candidates( \
+                    meeting_id, proposed_speaker_key, candidate_hash, evidence_kind, confidence \
+                 ) VALUES ('m1', -1, ?, ?, 0.55)",
+            )
+            .bind(hash)
+            .bind(kind)
+            .execute(manager.pool())
+            .await
+            .unwrap();
+        }
+
+        let stored: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM speaker_name_candidates \
+             WHERE evidence_kind IN ('meeting_title', 'direct_address_unassigned')",
+        )
+        .fetch_one(manager.pool())
+        .await
+        .unwrap();
+        assert_eq!(stored, 2);
+
+        manager.cleanup().await.unwrap();
+    }
 }
