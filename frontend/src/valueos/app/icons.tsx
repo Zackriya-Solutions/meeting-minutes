@@ -65,5 +65,7 @@ export const IcArrowLeft = ({ className, size }: P) => svg(<path d="M19 12H5M11 
 export const IcPlus = ({ className, size }: P) => svg(<path d="M12 5v14M5 12h14" />, size, className);
 export const IcLogout = ({ className, size }: P) =>
   svg(<><path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13A1.5 1.5 0 0 1 18.5 20H15" /><path d="M10 12h10M17 9l3 3-3 3" /><path d="M10 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H10" /></>, size, className);
+export const IcBug = ({ className, size }: P) =>
+  svg(<><path d="M8 6a4 4 0 0 1 8 0" /><rect x="7" y="8" width="10" height="10" rx="5" /><path d="M12 9v9M3 11h4M17 11h4M3.5 6l3 2M20.5 6l-3 2M3.5 17l3-2M20.5 17l-3-2" /></>, size, className);
 export const IcRefresh = ({ className, size }: P) =>
   svg(<><path d="M20 11a8 8 0 0 0-14-4.5L4 8" /><path d="M4 4v4h4" /><path d="M4 13a8 8 0 0 0 14 4.5L20 16" /><path d="M20 20v-4h-4" /></>, size, className);

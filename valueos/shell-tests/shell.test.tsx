@@ -9,6 +9,7 @@ import { MockDigestGenerator } from '@/valueos/digest/digest';
 import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
 import { InMemoryTranscriptHistory } from '@/valueos/history/transcriptHistory';
 import { createUpdater } from '@/valueos/updater/updater';
+import { MockBugReportService } from '@/valueos/bugreport/service';
 import type { ValueOsServices } from '@/valueos/context/ValueOsProvider';
 import type { EntitlementState } from '@/valueos/api/types';
 
@@ -71,6 +72,7 @@ function servicesFromSeed(seed: MockSeed) {
       },
       store: { get: (k) => mem.get(k) ?? null, set: (k, v) => void mem.set(k, v) },
     }),
+    bugReport: new MockBugReportService(),
   };
   return { services, client };
 }
@@ -370,5 +372,25 @@ describe('ValueOS redesigned flow', () => {
 
     expect(removeSpy).toHaveBeenCalledTimes(1);
     expect(deleteFileSpy).toHaveBeenCalledTimes(1); // stored .txt removed too
+  });
+
+  it('reports a bug from Settings — bundle is scrubbed before submit', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    fireEvent.click(screen.getByTestId('valueos-nav-settings'));
+    fireEvent.click(await screen.findByTestId('valueos-settings-report-bug'));
+    fireEvent.change(await screen.findByTestId('valueos-bugreport-desc'), {
+      target: { value: 'upload failed — reach me at me@example.com' },
+    });
+    fireEvent.click(screen.getByTestId('valueos-bugreport-submit'));
+    await screen.findByTestId('valueos-bugreport-success');
+
+    const svc = services.bugReport as MockBugReportService;
+    expect(svc.submissions).toHaveLength(1);
+    expect(svc.submissions[0].description).toContain('[EMAIL]'); // scrubbed
+    expect(svc.submissions[0].description).not.toContain('me@example.com');
+    expect(svc.submissions[0].metadata.tenant_id).toBe('tenant-acme');
   });
 });

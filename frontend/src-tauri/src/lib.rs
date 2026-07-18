@@ -754,6 +754,7 @@ pub fn run() {
             valueos::valueos_validate_writable,
             valueos::valueos_write_transcript_file,
             valueos::valueos_delete_file,
+            valueos::valueos_save_bug_report,
             // VALUEOS: WS4 updater + telemetry
             valueos::valueos_install_id,
             valueos::valueos_app_info,

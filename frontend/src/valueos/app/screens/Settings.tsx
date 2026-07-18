@@ -9,7 +9,8 @@ import { BUILD_INFO } from '../../buildInfo';
 import { getAccessTokenClaims } from '../../debug/tokenClaims';
 import type { UpdateCheckResult } from '../../api/types';
 import { Avatar } from '../parts';
-import { IcFolder, IcLogout, IcRefresh } from '../icons';
+import { IcFolder, IcLogout, IcRefresh, IcBug } from '../icons';
+import { BugReportDialog } from '../../bugreport/BugReportDialog';
 
 export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantId?: string }) {
   const { config, updater } = useValueOs();
@@ -20,6 +21,7 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
   const [applying, setApplying] = useState(false);
+  const [bugOpen, setBugOpen] = useState(false);
 
   useEffect(() => {
     void config.getTranscriptFolder().then((f) => f && setFolder(f));
@@ -168,6 +170,15 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
           </button>
         </div>
       </Card>
+
+      {/* help / bug report */}
+      <Card title="Help" desc="Something not working? Send us the details so we can fix it.">
+        <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-settings-report-bug" onClick={() => setBugOpen(true)}>
+          <IcBug size={15} /> Report a bug
+        </button>
+      </Card>
+
+      {bugOpen && <BugReportDialog onClose={() => setBugOpen(false)} tenantId={tenantId} />}
     </div>
   );
 }

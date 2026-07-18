@@ -12,6 +12,8 @@ import { DigestGenerator, MockDigestGenerator } from '../digest/digest';
 import { InMemoryPendingUploadStore, PendingUploadQueue } from '../upload/pendingQueue';
 import { InMemoryTranscriptHistory, TranscriptHistory } from '../history/transcriptHistory';
 import { createUpdater, type Updater, type UpdaterNative, type UpdaterStore } from '../updater/updater';
+import { MockBugReportService } from '../bugreport/service';
+import type { BugReportService } from '../bugreport/types';
 import { createRealServices, valueosRealTransportEnabled } from './realServices';
 
 export interface ValueOsServices {
@@ -22,6 +24,7 @@ export interface ValueOsServices {
   uploadQueue: PendingUploadQueue;
   history: TranscriptHistory;
   updater: Updater;
+  bugReport: BugReportService;
 }
 
 /** ⚠️ MOCK updater backing — no real download/apply; telemetry is recorded on the mock client. */
@@ -56,7 +59,7 @@ export function createMockServices(opts?: { seed?: MockSeed }): ValueOsServices 
   const uploadQueue = new PendingUploadQueue(client, new InMemoryPendingUploadStore());
   const history = new InMemoryTranscriptHistory();
   const updater = createUpdater({ client, native: mockUpdaterNative(), store: memoryUpdaterStore() });
-  return { client, auth, config, digest, uploadQueue, history, updater };
+  return { client, auth, config, digest, uploadQueue, history, updater, bugReport: new MockBugReportService() };
 }
 
 const Ctx = createContext<ValueOsServices | null>(null);

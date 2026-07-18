@@ -559,6 +559,22 @@ pub async fn valueos_write_transcript_file(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// VALUEOS WS3: save a scrubbed bug-report bundle to the app data dir (interim — until the
+/// ValueOS bug-report endpoint exists). Returns the file path. Content is already scrubbed
+/// (no tokens/PII/transcript text) by the webview before it reaches here.
+#[tauri::command]
+pub async fn valueos_save_bug_report<R: Runtime>(app: AppHandle<R>, content: String) -> Result<String, ValueOsErr> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| ValueOsErr::transport(format!("app_data_dir: {e}")))?
+        .join("bug-reports");
+    std::fs::create_dir_all(&dir).map_err(|e| ValueOsErr::transport(format!("mkdir: {e}")))?;
+    let path = dir.join(format!("report-{}.json", new_uuid_v4()));
+    std::fs::write(&path, content).map_err(|e| ValueOsErr::transport(format!("write bug report: {e}")))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Delete a local transcript file (best-effort). A missing file is NOT an error — the user
 /// just wants it gone. Only touches the local file; never the ValueOS cloud copy.
 #[tauri::command]

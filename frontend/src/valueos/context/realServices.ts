@@ -13,6 +13,7 @@ import { LocalStoragePendingUploadStore } from '../upload/localStorageQueueStore
 import { LocalStorageTranscriptHistory } from '../history/transcriptHistory';
 import { createUpdater } from '../updater/updater';
 import { realUpdaterNative, localStorageUpdaterStore } from '../updater/nativeUpdater';
+import { LocalFileBugReportService } from '../bugreport/service';
 
 // Real transport is now the DEFAULT (config is baked in the native module). Set
 // NEXT_PUBLIC_VALUEOS_REAL=off for mock/dev (tests inject services directly and are
@@ -30,5 +31,6 @@ export function createRealServices(): ValueOsServices {
     uploadQueue: new PendingUploadQueue(client, new LocalStoragePendingUploadStore()),
     history: new LocalStorageTranscriptHistory(),
     updater: createUpdater({ client, native: realUpdaterNative, store: localStorageUpdaterStore }),
+    bugReport: new LocalFileBugReportService(),
   };
 }
