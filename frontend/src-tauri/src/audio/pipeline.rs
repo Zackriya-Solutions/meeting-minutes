@@ -21,20 +21,18 @@ fn valueos_rms(samples: &[f32]) -> f32 {
     (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
 }
 
-// VALUEOS: decide Me/Other for one utterance from the RAW system stream. Returns System
-// ('Other') when the mean per-window system energy this utterance is BOTH above a tiny absolute
-// floor (guards a stack with no system capture at all) AND clearly above the self-calibrating
-// system noise floor (the remote/video was audibly playing). Otherwise the speech came from the
-// mic → Microphone ('Me'). The mic is loudness-normalized so it is deliberately NOT used here.
-// Constants are first-cut and tuned from the `🗣️ VALUEOS speaker=` logs on the desktop build.
-fn valueos_attribute(sys_energy_sum: f32, sys_windows: u32, sys_floor: f32) -> DeviceType {
-    if sys_windows == 0 {
-        return DeviceType::Microphone;
-    }
-    let mean_sys = sys_energy_sum / sys_windows as f32;
-    const SYS_ABS_MIN: f32 = 0.0035; // below this the system stream is effectively silent
-    const SYS_ACTIVATION: f32 = 3.5; // how far above its own floor system must rise to be "active"
-    if mean_sys > SYS_ABS_MIN && mean_sys > sys_floor * SYS_ACTIVATION {
+// VALUEOS: decide Me/Other for one utterance by comparing RAW energies — the mean system energy
+// this utterance against the RAW mic RMS (published by the capture BEFORE loudness normalization,
+// via RecordingState). Returns System ('Other') when the system stream clearly DOMINATES the mic
+// (a video/remote was playing while the local mic was quiet); otherwise the speech came from the
+// mic → Microphone ('Me'). This is self-calibrating: no absolute-level assumption, and no temporal
+// noise floor that a continuously-active source (a played-back video) can drag upward. SYS_ABS_MIN
+// only guards the degenerate "no system capture at all" case. Tune from the `🗣️ VALUEOS speaker=`
+// logs (mean_sys / mic_rms) on the desktop build.
+fn valueos_attribute(mean_sys: f32, mic_rms: f32) -> DeviceType {
+    const SYS_ABS_MIN: f32 = 0.0015; // system effectively silent below this → never 'Other'
+    const DOMINANCE: f32 = 1.4; // system must exceed the mic by this factor to be the speaker
+    if mean_sys > SYS_ABS_MIN && mean_sys > mic_rms * DOMINANCE {
         DeviceType::System
     } else {
         DeviceType::Microphone
@@ -537,6 +535,13 @@ impl AudioCapture {
         }
 
         // AUDIO ENHANCEMENT PIPELINE (Microphone Only)
+        // VALUEOS: publish the RAW mic RMS (BEFORE the enhancement chain normalizes it to a
+        // near-constant loudness) so the pipeline can compare it against the raw system energy for
+        // honest Me/Other attribution. Mic only — the system stream is already raw.
+        if matches!(self.device_type, DeviceType::Microphone) {
+            self.state.valueos_update_mic_rms(valueos_rms(&mono_data));
+        }
+
         // Processing order is critical: high-pass → noise suppression → normalization
         // This ensures noise is removed before being amplified by the normalizer
         if matches!(self.device_type, DeviceType::Microphone) {
@@ -722,14 +727,11 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
-    // VALUEOS: best-effort Me/Other tagging. The mic is loudness-normalized (EBU R128, no gate
-    // → near-constant energy whether or not anyone talks), so it can't tell speech from silence.
-    // We therefore key attribution off the RAW system stream: accumulate its per-window energy
-    // for the current utterance and keep a self-calibrating noise floor; when the utterance's
-    // mean system energy clearly rises above that floor, the remote/'Other' was audible.
+    // VALUEOS: best-effort Me/Other tagging. Accumulate the RAW system energy for the current
+    // utterance; at segment close compare its mean against the RAW mic RMS (published by the
+    // capture, via RecordingState) — system-dominant → 'Other', else 'Me'. See valueos_attribute.
     valueos_sys_energy: f32,   // sum of per-window system RMS for the in-progress utterance
     valueos_sys_windows: u32,  // number of windows accumulated for the in-progress utterance
-    valueos_sys_floor: f32,    // running system noise-floor estimate (persists across utterances)
     // VALUEOS: throttle for streaming interim ("preview") transcription of the in-progress utterance.
     valueos_last_partial: std::time::Instant,
 }
@@ -792,10 +794,9 @@ impl AudioPipeline {
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
-            // VALUEOS: system-energy accumulators + noise floor for Me/Other tagging
+            // VALUEOS: system-energy accumulators for Me/Other tagging (raw mic RMS comes from state)
             valueos_sys_energy: 0.0,
             valueos_sys_windows: 0,
-            valueos_sys_floor: 0.0,
             valueos_last_partial: std::time::Instant::now(),
             // Initialize metrics batcher for smart batching
             metrics_batcher: Some(AudioMetricsBatcher::new()),
@@ -865,19 +866,10 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // VALUEOS: accumulate raw system energy for this utterance and keep a
-                            // self-calibrating noise floor (tracks the quiet gaps: falls fast, rises
-                            // very slowly) so we can tell when the system stream is genuinely active.
-                            let sys_rms = valueos_rms(&sys_window);
-                            self.valueos_sys_energy += sys_rms;
+                            // VALUEOS: accumulate raw system energy for this utterance (compared
+                            // against the raw mic RMS at segment close to attribute Me/Other).
+                            self.valueos_sys_energy += valueos_rms(&sys_window);
                             self.valueos_sys_windows += 1;
-                            self.valueos_sys_floor = if self.valueos_sys_floor == 0.0 {
-                                sys_rms
-                            } else if sys_rms < self.valueos_sys_floor {
-                                self.valueos_sys_floor * 0.9 + sys_rms * 0.1 // adapt down fast
-                            } else {
-                                self.valueos_sys_floor * 0.998 + sys_rms * 0.002 // rise very slowly
-                            };
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
@@ -897,22 +889,16 @@ impl AudioPipeline {
                                             info!("📤 Sending VAD segment: {:.1}ms, {} samples",
                                                   duration_ms, segment.samples.len());
 
-                                            // VALUEOS: the system stream is RAW, so its energy is
-                                            // meaningful. Attribute to 'Other' when this utterance's
-                                            // mean system energy clearly cleared the system noise
-                                            // floor (remote/video was audibly playing); otherwise the
-                                            // speech came from the (normalized) mic → 'Me'.
-                                            let valueos_source = valueos_attribute(
-                                                self.valueos_sys_energy,
-                                                self.valueos_sys_windows,
-                                                self.valueos_sys_floor,
-                                            );
+                                            // VALUEOS: attribute Me/Other by comparing this
+                                            // utterance's mean RAW system energy against the RAW mic
+                                            // RMS (system-dominant → 'Other', else 'Me').
+                                            let mean_sys = self.valueos_sys_energy
+                                                / self.valueos_sys_windows.max(1) as f32;
+                                            let mic_rms = self.state.valueos_mic_rms();
+                                            let valueos_source = valueos_attribute(mean_sys, mic_rms);
                                             info!(
-                                                "🗣️ VALUEOS speaker={:?} mean_sys={:.4} floor={:.4}",
-                                                valueos_source,
-                                                self.valueos_sys_energy
-                                                    / self.valueos_sys_windows.max(1) as f32,
-                                                self.valueos_sys_floor
+                                                "🗣️ VALUEOS speaker={:?} mean_sys={:.4} mic_rms={:.4}",
+                                                valueos_source, mean_sys, mic_rms
                                             );
                                             self.valueos_sys_energy = 0.0;
                                             self.valueos_sys_windows = 0;
@@ -965,11 +951,10 @@ impl AudioPipeline {
                             let len = inprogress.len();
                             if len >= 8_000 && len <= 16_000 * 25 {
                                 self.valueos_last_partial = std::time::Instant::now();
-                                let valueos_source = valueos_attribute(
-                                    self.valueos_sys_energy,
-                                    self.valueos_sys_windows,
-                                    self.valueos_sys_floor,
-                                );
+                                let mean_sys = self.valueos_sys_energy
+                                    / self.valueos_sys_windows.max(1) as f32;
+                                let valueos_source =
+                                    valueos_attribute(mean_sys, self.state.valueos_mic_rms());
                                 let partial_chunk = AudioChunk {
                                     data: inprogress,
                                     sample_rate: 16000,
