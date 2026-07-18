@@ -121,7 +121,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: valueos-agent-${{ matrix.platform }}
-          path: frontend/src-tauri/target/${{ matrix.target }}/release/bundle
+          # Repo root is a Cargo workspace → bundles land in the REPO-ROOT target/.
+          path: target/${{ matrix.target }}/release/bundle
           if-no-files-found: error
           retention-days: 7
 

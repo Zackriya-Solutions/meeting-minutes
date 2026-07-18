@@ -4,16 +4,20 @@ Two GitHub Actions workflows in `.github/workflows/`:
 
 | Workflow | Fires on | What it does |
 |---|---|---|
-| **`ci.yml`** | push (any branch) + pull requests | Build & test. **Secondary branches + PRs → macOS only** (fast feedback); **`main` → full matrix `ubuntu-latest` + `macos-latest` + `windows-latest`.** |
+| **`ci.yml`** | push (any branch) + pull requests | Build (into a real installer, uploaded as a run artifact) & test. **Secondary branches + PRs → macOS only** (fast feedback); **`main` → full matrix `ubuntu-latest` + `macos-latest` + `windows-latest`.** |
 | **`publish.yml`** | manual (`workflow_dispatch`, run from `main`) | Build the release installers → **preview** the ValueOS-assigned version → **pause for your approval** → upload to S3 + register the release. |
 
 ## 1 & 2 — CI (`ci.yml`)
 
 A tiny `set-matrix` job picks the OS list from the ref (`main` → all three, else `[macos-latest]`);
 the `build` job consumes `matrix.os` and runs: checkout (submodules) → pnpm/Node + Rust toolchain +
-caches → install deps → build the sidecar → **build** (`tauri build --no-bundle` — compiles the app +
-frontend, skips slow installer packaging) → **test** (`npm test` in `valueos/shell-tests`, our vitest
-suite; the engine/HTTP layer is mocked). Tests run on every push/PR.
+caches → install deps → build the sidecar → **build** (`tauri build` with installer packaging) →
+**verify + upload** the resulting installer as the run artifact **`valueos-agent-<platform>`** (macos
+`.dmg`, windows `.msi`/`.exe`, linux `.deb`/`.AppImage`) → **test** (`npm test` in
+`valueos/shell-tests`, our vitest suite; the engine/HTTP layer is mocked). Tests run on every push/PR.
+CI uploads the artifact to the run for download but does **not** register a release — that is
+`publish.yml`'s job. Bundles land in the **repo-root** `target/<triple>/release/bundle` (the repo root
+is a Cargo workspace), which is what both workflows upload.
 
 ## 3 — Publish (`publish.yml`)
 

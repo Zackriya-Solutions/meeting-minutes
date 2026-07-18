@@ -59,17 +59,23 @@ jobs:
               echo "target=aarch64-apple-darwin"
               echo "feat=--features metal"
               echo "src=target/release/llama-helper"
-              echo "dst=frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin" ;;
+              echo "dst=frontend/src-tauri/binaries/llama-helper-aarch64-apple-darwin"
+              echo "platform=macos"
+              echo "bundles=" ;;
             Windows)
               echo "target=x86_64-pc-windows-msvc"
               echo "feat="
               echo "src=target/release/llama-helper.exe"
-              echo "dst=frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe" ;;
+              echo "dst=frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe"
+              echo "platform=windows"
+              echo "bundles=" ;;
             Linux)
               echo "target=x86_64-unknown-linux-gnu"
               echo "feat="
               echo "src=target/release/llama-helper"
-              echo "dst=frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu" ;;
+              echo "dst=frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu"
+              echo "platform=linux"
+              echo "bundles=--bundles deb,appimage" ;;
           esac >> "$GITHUB_OUTPUT"
 
       - name: Install Linux system dependencies
@@ -80,7 +86,8 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf libasound2-dev libopenblas-dev \
-            libx11-dev libxtst-dev libxrandr-dev
+            libx11-dev libxtst-dev libxrandr-dev \
+            fuse libfuse2
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -118,8 +125,8 @@ jobs:
         shell: bash
         run: bash valueos/branding/apply-branding.sh
 
-      # BUILD — real Tauri build, but --no-bundle (compile + frontend build, skip installer
-      # packaging) for fast CI feedback. Packaging happens in publish.yml.
+      # BUILD — real Tauri build, WITH installer packaging so every push produces a
+      # downloadable installer artifact (macos .dmg, windows .msi/.exe, linux .deb/.AppImage).
       - name: Build
         shell: bash
         working-directory: frontend
@@ -128,7 +135,27 @@ jobs:
           export NEXT_PUBLIC_VALUEOS_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           export NEXT_PUBLIC_VALUEOS_REAL="on"
           node ../valueos/branding/make-ci-config.js valueos-ci.config.json
-          pnpm exec tauri build --target ${{ steps.v.outputs.target }} --no-bundle --config valueos-ci.config.json
+          pnpm exec tauri build --target ${{ steps.v.outputs.target }} ${{ steps.v.outputs.bundles }} --config valueos-ci.config.json
+
+      # The repo root is a Cargo workspace, so bundles land in the REPO-ROOT target/, not
+      # frontend/src-tauri/target/. Fail loudly if packaging produced nothing.
+      - name: Verify installers
+        shell: bash
+        run: |
+          dir="target/${{ steps.v.outputs.target }}/release/bundle"
+          echo "Looking for installers in $dir"
+          if [ ! -d "$dir" ] || [ -z "$(find "$dir" -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.AppImage' -o -name '*.deb' \) 2>/dev/null)" ]; then
+            echo "::error::No installer produced in $dir"; ls -R "$dir" 2>/dev/null || true; exit 1
+          fi
+          find "$dir" -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.AppImage' -o -name '*.deb' \) -print
+
+      - name: Upload installer artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valueos-agent-${{ steps.v.outputs.platform }}
+          path: target/${{ steps.v.outputs.target }}/release/bundle
+          if-no-files-found: error
 
       # TEST — our vitest suite (mocks the engine/HTTP layer). Runs on every push/PR.
       - name: Test (ValueOS shell tests)

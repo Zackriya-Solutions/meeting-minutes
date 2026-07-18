@@ -18,12 +18,14 @@ are in [`valueos/CI.md`](valueos/CI.md).
 
 | Workflow | Trigger | What it does | Use it for |
 |---|---|---|---|
-| **`ci.yml`** | every `push` + every pull request | Builds the app (`tauri build --no-bundle` — compile + frontend build, no installer packaging) and runs our vitest suite. **Secondary branches / PRs → macOS only** (fast feedback); **`main` → the full matrix `ubuntu` + `macOS` + `windows`.** Publishes nothing. | Continuous validation — "does it still compile on the target OSes, and do the tests pass?" |
+| **`ci.yml`** | every `push` + every pull request | Builds the app **into a real installer** (macOS `.dmg`, windows `.msi`/`.exe`, linux `.deb`/`.AppImage`), uploads it as a downloadable run artifact (`valueos-agent-<platform>`), and runs our vitest suite. **Secondary branches / PRs → macOS only** (fast feedback); **`main` → the full matrix `ubuntu` + `macOS` + `windows`.** It does **not** publish/register a release (that's `publish.yml`). | Continuous validation + grabbing a test build — "does it still compile on the target OSes, do the tests pass, and can I download the resulting app to try it?" |
 | **`publish.yml`** | **manual** (`workflow_dispatch`, run from `main`) | Builds the real installers (`.dmg` / `.exe` / `.AppImage`), **previews** the version ValueOS will assign (`YYYY.MM.DD.<seq>`), **pauses for your approval** (the `agent-release` environment), then uploads them to the private S3 bucket and registers the release with ValueOS. | Cutting a release. |
 
 **Day-to-day**
-- Push a branch or open a PR → `ci.yml` gives a **macOS** build + test result (fast).
-- Merge to `main` → `ci.yml` runs the **full 3-OS** matrix.
+- Push a branch or open a PR → `ci.yml` gives a **macOS** build + test result (fast), and
+  attaches the built installer to the run as the **`valueos-agent-macos`** artifact
+  (Actions → the run → *Artifacts*) so you can download and try that exact build.
+- Merge to `main` → `ci.yml` runs the **full 3-OS** matrix (one installer artifact per OS).
 
 **To release**
 1. GitHub → **Actions** → **Publish** → **Run workflow** (from `main`; optional release notes).
