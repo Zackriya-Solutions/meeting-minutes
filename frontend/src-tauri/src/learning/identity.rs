@@ -6,7 +6,9 @@ use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
-use crate::database::repositories::speaker::{decode_embedding, encode_embedding};
+use crate::database::repositories::speaker::{
+    decode_embedding, encode_embedding, is_automatic_speaker_name,
+};
 use crate::pipeline::diarization::{cosine_similarity, SpeakerTurn};
 
 pub const VOICE_MODEL_VERSION: &str = "wespeaker_campp_v1";
@@ -160,6 +162,14 @@ struct CentroidCandidate {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct IdentityReviewSample {
+    pub transcript_id: String,
+    pub start_seconds: f64,
+    pub end_seconds: Option<f64>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct IdentityReviewItem {
     pub cluster_id: i64,
     pub local_cluster_id: i64,
@@ -171,6 +181,7 @@ pub struct IdentityReviewItem {
     pub policy_result: String,
     pub candidates: Vec<IdentityCandidate>,
     pub latest_assertion: Option<String>,
+    pub samples: Vec<IdentityReviewSample>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -642,20 +653,90 @@ pub async fn list_identity_review(
     .await
     .map_err(|error| format!("Failed to load identity review: {error}"))?;
 
+    // Use the exact same meeting-local labels as the transcript UI. Persisted automatic
+    // speaker names contain global row ids (for example `Speaker 37`), while the meeting
+    // UI intentionally presents stable local ordinals (`Speaker 1`). A review card must
+    // never ask the user to infer that mapping from a technical cluster number.
+    let meeting_labels =
+        crate::database::repositories::speaker::SpeakersRepository::meeting_speakers(
+            pool, meeting_id,
+        )
+        .await
+        .map_err(|error| format!("Failed to load meeting-local speaker labels: {error}"))?
+        .into_iter()
+        .map(|speaker| (speaker.id, speaker.display_name))
+        .collect::<HashMap<_, _>>();
+
+    // Pick up to three concise, high-overlap transcript fragments for each cluster. These
+    // are review evidence, not training samples: the UI uses their timestamps to play the
+    // original recording and lets the user identify a voice before confirming a name.
+    let sample_rows = sqlx::query(
+        "WITH ranked AS ( \
+            SELECT scs.cluster_id, t.id AS transcript_id, t.audio_start_time, \
+                   t.audio_end_time, t.transcript, \
+                   ROW_NUMBER() OVER (PARTITION BY scs.cluster_id ORDER BY \
+                     CASE WHEN COALESCE(t.audio_end_time - t.audio_start_time, 0.0) \
+                               BETWEEN 2.0 AND 18.0 THEN 0 ELSE 1 END, \
+                     scs.overlap_ratio DESC, \
+                     ABS(COALESCE(t.audio_end_time - t.audio_start_time, 8.0) - 8.0), \
+                     t.audio_start_time ASC) AS sample_rank \
+            FROM speaker_cluster_segments scs \
+            JOIN speaker_clusters sc ON sc.id=scs.cluster_id \
+            JOIN transcripts t ON t.id=scs.transcript_id \
+            WHERE sc.meeting_id=? AND sc.diarization_run_id=( \
+                SELECT diarization_run_id FROM speaker_clusters WHERE meeting_id=? \
+                ORDER BY id DESC LIMIT 1 \
+            ) AND t.audio_start_time IS NOT NULL AND length(trim(t.transcript)) > 0 \
+         ) \
+         SELECT cluster_id, transcript_id, audio_start_time, audio_end_time, transcript \
+         FROM ranked WHERE sample_rank <= 3 ORDER BY cluster_id, sample_rank",
+    )
+    .bind(meeting_id)
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("Failed to load speaker review samples: {error}"))?;
+    let mut samples_by_cluster = HashMap::<i64, Vec<IdentityReviewSample>>::new();
+    for row in sample_rows {
+        samples_by_cluster
+            .entry(row.get("cluster_id"))
+            .or_default()
+            .push(IdentityReviewSample {
+                transcript_id: row.get("transcript_id"),
+                start_seconds: row.get("audio_start_time"),
+                end_seconds: row.get("audio_end_time"),
+                text: row.get("transcript"),
+            });
+    }
+
     Ok(rows
         .into_iter()
-        .map(|row| IdentityReviewItem {
-            cluster_id: row.get("id"),
-            local_cluster_id: row.get("local_cluster_id"),
-            placeholder_speaker_id: row.get("placeholder_speaker_id"),
-            operational_speaker_id: row.get("operational_speaker_id"),
-            operational_display_name: row.get("operational_display_name"),
-            speech_duration_ms: row.get("speech_duration_ms"),
-            speech_quality: row.get("speech_quality"),
-            policy_result: row.get("policy_result"),
-            candidates: serde_json::from_str(&row.get::<String, _>("candidate_scores_json"))
-                .unwrap_or_default(),
-            latest_assertion: row.get("latest_assertion"),
+        .map(|row| {
+            let cluster_id = row.get("id");
+            let operational_speaker_id: Option<i64> = row.get("operational_speaker_id");
+            let stored_display_name: Option<String> = row.get("operational_display_name");
+            let meeting_display_name = operational_speaker_id
+                .and_then(|speaker_id| meeting_labels.get(&speaker_id).cloned())
+                .or_else(|| {
+                    // An unassigned cluster may still point at its database placeholder.
+                    // Do not leak that global/autoincrement number as if it were the
+                    // meeting-local `Speaker N` shown in the transcript.
+                    stored_display_name.filter(|name| !is_automatic_speaker_name(name))
+                });
+            IdentityReviewItem {
+                cluster_id,
+                local_cluster_id: row.get("local_cluster_id"),
+                placeholder_speaker_id: row.get("placeholder_speaker_id"),
+                operational_speaker_id,
+                operational_display_name: meeting_display_name,
+                speech_duration_ms: row.get("speech_duration_ms"),
+                speech_quality: row.get("speech_quality"),
+                policy_result: row.get("policy_result"),
+                candidates: serde_json::from_str(&row.get::<String, _>("candidate_scores_json"))
+                    .unwrap_or_default(),
+                latest_assertion: row.get("latest_assertion"),
+                samples: samples_by_cluster.remove(&cluster_id).unwrap_or_default(),
+            }
         })
         .collect())
 }

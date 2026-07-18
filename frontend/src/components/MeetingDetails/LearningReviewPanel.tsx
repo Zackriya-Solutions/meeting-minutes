@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
+import { Play } from '@/components/memento/LucideCompat';
 
 interface MeetingTypeSuggestion {
   id: number;
@@ -38,6 +39,14 @@ interface IdentityReviewItem {
   policy_result: string;
   candidates: IdentityCandidate[];
   latest_assertion?: string | null;
+  samples: IdentityReviewSample[];
+}
+
+export interface IdentityReviewSample {
+  transcript_id: string;
+  start_seconds: number;
+  end_seconds?: number | null;
+  text: string;
 }
 
 interface AdvancedLearningProfile {
@@ -110,12 +119,29 @@ function percent(value: number | null | undefined) {
   return `${Math.round((value ?? 0) * 100)}%`;
 }
 
+function clock(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+    : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function localizedSpeakerLabel(label: string | null | undefined, t: (value: string) => string) {
+  const automatic = label?.match(/^Speaker (\d+)$/);
+  return automatic ? `${t('Speaker')} ${automatic[1]}` : label;
+}
+
 export function LearningReviewPanel({
   meetingId,
   onChanged,
+  onPlayIdentitySample,
 }: {
   meetingId: string;
   onChanged?: () => Promise<void> | void;
+  onPlayIdentitySample?: (sample: IdentityReviewSample) => void;
 }) {
   const t = useT();
   const [classification, setClassification] = useState<MeetingTypeSuggestion | null>(null);
@@ -430,16 +456,48 @@ export function LearningReviewPanel({
 
         {pendingIdentities.map((item) => {
           const top = item.candidates[0];
+          const speakerLabel = localizedSpeakerLabel(item.operational_display_name, t);
           return (
             <section key={item.cluster_id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
               <div className="text-xs font-semibold text-[var(--fg1)]">
-                {t('Voice cluster')} {item.local_cluster_id + 1} · {Math.round(item.speech_duration_ms / 1000)}s
+                {speakerLabel ?? `${t('Unassigned voice')} ${item.local_cluster_id + 1}`} · {Math.round(item.speech_duration_ms / 1000)}s
               </div>
+              <p className="mt-1 text-[11px] text-[var(--fg3)]">
+                {t('Voice detection group')} {item.local_cluster_id + 1} ·{' '}
+                {speakerLabel
+                  ? t('linked to this speaker label in the transcript')
+                  : t('not linked to a speaker in the transcript yet')}
+              </p>
               <p className="mt-1 text-xs text-[var(--fg3)]">
                 {top
                   ? `${top.display_name} · ${t('voice match')} ${percent(top.voice_score)} · ${t(top.confidence_band)}`
                   : t('No reliable identity candidate')}
               </p>
+              <div className="mt-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-2">
+                <p className="mb-1.5 text-[11px] text-[var(--fg2)]">
+                  {t('Listen to excerpts before assigning a name')}
+                </p>
+                {item.samples.length > 0 ? (
+                  <div className="grid gap-1">
+                    {item.samples.map((sample) => (
+                      <button
+                        key={sample.transcript_id}
+                        type="button"
+                        disabled={!onPlayIdentitySample}
+                        onClick={() => onPlayIdentitySample?.(sample)}
+                        title={t('Play voice excerpt and open it in the transcript')}
+                        className="flex min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--fg2)] transition-colors hover:bg-[var(--gold-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Play className="h-3.5 w-3.5 shrink-0 text-[var(--gold)]" />
+                        <span className="mm-numeric shrink-0 text-[var(--gold)]">{clock(sample.start_seconds)}</span>
+                        <span className="min-w-0 truncate">{sample.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[var(--fg3)]">{t('No timed voice excerpts are available')}</p>
+                )}
+              </div>
               {!top && (
                 <input
                   value={identityNames[item.cluster_id] ?? ''}
@@ -487,10 +545,14 @@ export function LearningReviewPanel({
           const candidate = item.candidates.find((value) => value.speaker_id === speakerId);
           const advanced = advancedProfiles[speakerId];
           const versions = profileVersions[speakerId] ?? [];
+          const confirmedLabel = localizedSpeakerLabel(
+            candidate?.display_name ?? item.operational_display_name,
+            t,
+          ) ?? t('Confirmed speaker');
           return (
             <section key={`speaker-memory-${speakerId}`} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
               <div className="text-xs font-semibold text-[var(--fg1)]">
-                {t('Speaker memory')} · {candidate?.display_name ?? item.operational_display_name ?? `Speaker ${speakerId}`}
+                {t('Speaker memory')} · {confirmedLabel}
               </div>
               <label className="mt-2 flex items-center gap-2 text-[11px] text-[var(--fg2)]">
                 <input

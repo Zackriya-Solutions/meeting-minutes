@@ -168,6 +168,63 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    async fn identity_review_exposes_transcript_label_and_playable_evidence() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "review-meeting", "Product sync").await;
+        for (id, text, start, end) in [
+            ("long", "Длинная вводная реплика", 0.0, 30.0),
+            ("best", "Короткий узнаваемый фрагмент", 40.0, 48.0),
+            ("second", "Ещё один фрагмент голоса", 60.0, 70.0),
+            ("third", "Третий фрагмент голоса", 80.0, 91.0),
+            ("fourth", "Лишний четвёртый фрагмент", 100.0, 112.0),
+        ] {
+            insert_transcript(&pool, id, "review-meeting", text, start, end).await;
+        }
+        let turns = vec![crate::pipeline::diarization::SpeakerTurn {
+            start_ms: 0,
+            end_ms: 120_000,
+            cluster_id: 0,
+        }];
+        let mapping = super::identity::resolve_clusters(
+            &pool,
+            "review-meeting",
+            "review-run",
+            &turns,
+            &[(0, vec![1.0, 0.0, 0.0])],
+        )
+        .await
+        .unwrap();
+        let (speaker_id, cluster_id) = mapping[&0];
+        for transcript_id in ["long", "best", "second", "third", "fourth"] {
+            super::identity::link_cluster_segment(&pool, cluster_id, transcript_id, 1.0)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE transcripts SET speaker_id=? WHERE id=?")
+                .bind(speaker_id)
+                .bind(transcript_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let review = super::identity::list_identity_review(&pool, "review-meeting")
+            .await
+            .unwrap();
+        assert_eq!(review.len(), 1);
+        assert_eq!(
+            review[0].operational_display_name.as_deref(),
+            Some("Speaker 1")
+        );
+        assert_eq!(review[0].samples.len(), 3);
+        assert_eq!(review[0].samples[0].transcript_id, "best");
+        assert_eq!(review[0].samples[0].start_seconds, 40.0);
+        assert!(review[0]
+            .samples
+            .iter()
+            .all(|sample| sample.transcript_id != "long"));
+    }
+
+    #[tokio::test]
     async fn confirmed_term_creates_reviewable_historical_backfill() {
         let pool = migrated_pool().await;
         insert_meeting(&pool, "term-source", "Product sync").await;

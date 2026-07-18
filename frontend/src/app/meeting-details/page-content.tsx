@@ -9,7 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
-import { LearningReviewPanel } from '@/components/MeetingDetails/LearningReviewPanel';
+import { LearningReviewPanel, type IdentityReviewSample } from '@/components/MeetingDetails/LearningReviewPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
@@ -110,12 +110,35 @@ export default function PageContent({
   // the same moment twice still re-triggers the scroll (the transcript view
   // dedupes identical values).
   const [seekTarget, setSeekTarget] = useState<number | null>(seekToSeconds);
+  const [identityPlaybackRequest, setIdentityPlaybackRequest] = useState<{
+    requestId: number;
+    meetingId: string;
+    startSeconds: number;
+    endSeconds: number;
+  } | null>(null);
   useEffect(() => {
     if (seekToSeconds != null) setSeekTarget(seekToSeconds);
   }, [seekToSeconds]);
   const handleSeekToMoment = (seconds: number) => {
     setSeekTarget(seconds + Math.random() * 0.02);
   };
+  const handlePlayIdentitySample = useCallback((sample: IdentityReviewSample) => {
+    const startSeconds = Math.max(0, sample.start_seconds);
+    const reportedEnd = sample.end_seconds ?? startSeconds + 12;
+    // Keep review snippets short enough to compare several voices, but never cut a
+    // very short utterance before it becomes recognizable.
+    const endSeconds = Math.min(
+      Math.max(reportedEnd, startSeconds + 2),
+      startSeconds + 15,
+    );
+    setSeekTarget(startSeconds + Math.random() * 0.02);
+    setIdentityPlaybackRequest({
+      requestId: Date.now() + Math.random(),
+      meetingId: meeting.id,
+      startSeconds,
+      endSeconds,
+    });
+  }, [meeting.id]);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -285,6 +308,7 @@ export default function PageContent({
     >
       <LearningReviewPanel
         meetingId={meeting.id}
+        onPlayIdentitySample={handlePlayIdentitySample}
         onChanged={async () => {
           await onRefetchTranscripts?.();
           await onSpeakersDetected?.();
@@ -330,6 +354,7 @@ export default function PageContent({
           scrollToTimestamp={seekTarget}
           markedMoments={markedMoments}
           onSeekToMoment={handleSeekToMoment}
+          playbackRequest={identityPlaybackRequest}
           // Speaker diarization props
           speakersById={speakersById}
           speakerCount={speakerCount}

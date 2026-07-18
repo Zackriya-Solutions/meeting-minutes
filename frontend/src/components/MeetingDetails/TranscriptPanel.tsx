@@ -6,7 +6,7 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { Icon } from '@/components/memento/Icon';
 import { useT } from '@/lib/i18n';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useAudioPlayer } from '@/hooks/useAudioPlayer';
@@ -44,6 +44,14 @@ interface TranscriptPanelProps {
   /** Jump-to-timestamp (seconds) from search results / RAG citations. */
   scrollToTimestamp?: number | null;
 
+  /** A bounded audio excerpt requested by the speaker identity review panel. */
+  playbackRequest?: {
+    requestId: number;
+    meetingId: string;
+    startSeconds: number;
+    endSeconds: number;
+  } | null;
+
   /** Marked moments (elapsed seconds) captured during recording. */
   markedMoments?: number[];
   /** Jump the transcript to a marked moment. */
@@ -76,6 +84,7 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
   scrollToTimestamp = null,
+  playbackRequest = null,
   markedMoments = [],
   onSeekToMoment,
   speakersById = null,
@@ -88,6 +97,8 @@ export function TranscriptPanel({
   const [savedAudioDuration, setSavedAudioDuration] = useState(0);
   const [audioUnavailable, setAudioUnavailable] = useState(false);
   const [isExportingMp3, setIsExportingMp3] = useState(false);
+  const [activeExcerptEnd, setActiveExcerptEnd] = useState<number | null>(null);
+  const handledPlaybackRequest = useRef<number | null>(null);
   const audio = useAudioPlayer(audioSources);
 
   useEffect(() => {
@@ -95,6 +106,7 @@ export function TranscriptPanel({
     setAudioSources([]);
     setSavedAudioDuration(0);
     setAudioUnavailable(false);
+    setActiveExcerptEnd(null);
     if (!meetingId || !meetingFolderPath) return;
 
     invoke<{ path: string; playback_url?: string; duration_seconds: number }>('get_meeting_audio_playback_info', { meetingId })
@@ -114,6 +126,28 @@ export function TranscriptPanel({
     return () => { cancelled = true; };
   }, [meetingId, meetingFolderPath]);
 
+  useEffect(() => {
+    if (!playbackRequest || handledPlaybackRequest.current === playbackRequest.requestId) return;
+    if (playbackRequest.meetingId !== meetingId) return;
+    if (audioUnavailable) {
+      handledPlaybackRequest.current = playbackRequest.requestId;
+      toast.error(t('Audio is not available for this meeting'));
+      return;
+    }
+    // Playback metadata is loaded asynchronously. Leave the request pending until at least
+    // one source is ready instead of silently dropping the user's first click.
+    if (audioSources.length === 0) return;
+    handledPlaybackRequest.current = playbackRequest.requestId;
+    setActiveExcerptEnd(playbackRequest.endSeconds);
+    void audio.playFrom(playbackRequest.startSeconds);
+  }, [audio.playFrom, audioSources.length, audioUnavailable, meetingId, playbackRequest, t]);
+
+  useEffect(() => {
+    if (activeExcerptEnd == null || !audio.isPlaying || audio.currentTime < activeExcerptEnd) return;
+    audio.pause();
+    setActiveExcerptEnd(null);
+  }, [activeExcerptEnd, audio.currentTime, audio.isPlaying, audio.pause]);
+
   const handleExportMp3 = useCallback(async () => {
     if (!meetingId || isExportingMp3) return;
     setIsExportingMp3(true);
@@ -130,6 +164,7 @@ export function TranscriptPanel({
 
   const handlePlayTimestamp = useCallback((seconds: number) => {
     if (audioSources.length === 0) return;
+    setActiveExcerptEnd(null);
     void audio.playFrom(seconds);
   }, [audio, audioSources.length]);
 
@@ -204,9 +239,9 @@ export function TranscriptPanel({
           currentTime={audio.currentTime}
           duration={audio.duration > 0 ? audio.duration : savedAudioDuration}
           error={audio.error}
-          onPlay={() => { void audio.play(); }}
+          onPlay={() => { setActiveExcerptEnd(null); void audio.play(); }}
           onPause={audio.pause}
-          onSeek={(seconds) => { void audio.seek(seconds); }}
+          onSeek={(seconds) => { setActiveExcerptEnd(null); void audio.seek(seconds); }}
           onExportMp3={() => { void handleExportMp3(); }}
           onOpenFolder={() => { void onOpenMeetingFolder(); }}
         />

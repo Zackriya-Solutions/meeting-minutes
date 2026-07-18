@@ -71,7 +71,7 @@ pub fn decode_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
 
 pub struct SpeakersRepository;
 
-fn is_automatic_speaker_name(display_name: &str) -> bool {
+pub(crate) fn is_automatic_speaker_name(display_name: &str) -> bool {
     display_name.strip_prefix("Speaker ").is_some_and(|suffix| {
         !suffix.is_empty() && suffix.chars().all(|character| character.is_ascii_digit())
     })
