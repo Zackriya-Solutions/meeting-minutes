@@ -161,7 +161,8 @@ export function Recording({
       {/* live transcript */}
       <div className="va-ovl" style={{ margin: '26px 0 4px' }}>Live transcript</div>
       <p className="va-muted" style={{ fontSize: 13, margin: '0 0 12px' }}>
-        Faded, italic text is still being confirmed.
+        Faded, italic text is still being confirmed. Speaker labels (Me / Other) in the saved
+        transcript are best-effort.
       </p>
 
       <div ref={liveRef} className="va-scroll" data-testid="valueos-recording-live" style={{ maxHeight: 360, overflowY: 'auto' }}>

@@ -13,6 +13,15 @@ use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType}
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
+// VALUEOS: RMS energy of a sample window — used for best-effort Me/Other speaker tagging
+// (the mic vs system stream that is louder over an utterance is attributed the speech).
+fn valueos_rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -694,6 +703,9 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // VALUEOS: per-utterance mic/system energy accumulators for best-effort Me/Other tagging.
+    valueos_mic_energy: f32,
+    valueos_sys_energy: f32,
 }
 
 impl AudioPipeline {
@@ -754,6 +766,9 @@ impl AudioPipeline {
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
+            // VALUEOS: Me/Other energy accumulators
+            valueos_mic_energy: 0.0,
+            valueos_sys_energy: 0.0,
             // Initialize metrics batcher for smart batching
             metrics_batcher: Some(AudioMetricsBatcher::new()),
             // Initialize professional audio mixing
@@ -822,6 +837,10 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
+                            // VALUEOS: accumulate per-source energy so we can attribute each
+                            // utterance to the louder stream (mic = Me, system = Other).
+                            self.valueos_mic_energy += valueos_rms(&mic_window);
+                            self.valueos_sys_energy += valueos_rms(&sys_window);
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
@@ -841,12 +860,25 @@ impl AudioPipeline {
                                             info!("📤 Sending VAD segment: {:.1}ms, {} samples",
                                                   duration_ms, segment.samples.len());
 
+                                            // VALUEOS: attribute this utterance to the louder
+                                            // source since the last segment; require system to be
+                                            // clearly louder (non-assertive → defaults to Me).
+                                            let valueos_source = if self.valueos_sys_energy
+                                                > self.valueos_mic_energy * 1.15
+                                            {
+                                                DeviceType::System
+                                            } else {
+                                                DeviceType::Microphone
+                                            };
+                                            self.valueos_mic_energy = 0.0;
+                                            self.valueos_sys_energy = 0.0;
+
                                             let transcription_chunk = AudioChunk {
                                                 data: segment.samples,
                                                 sample_rate: 16000,
                                                 timestamp: segment.start_timestamp_ms / 1000.0,
                                                 chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
+                                                device_type: valueos_source,  // VALUEOS: best-effort Me/Other
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {

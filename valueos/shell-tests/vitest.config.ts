@@ -16,6 +16,7 @@ export default defineConfig({
       // Stub Tauri APIs (native calls are unused/mocked in tests). Must precede '@'.
       '@tauri-apps/api/core': path.resolve(here, 'tauri-stub.ts'),
       '@tauri-apps/api/path': path.resolve(here, 'tauri-stub.ts'),
+      '@tauri-apps/api/event': path.resolve(here, 'tauri-stub.ts'),
       '@': frontendSrc,
     },
     // Ensure a single React instance even though components live outside this root.

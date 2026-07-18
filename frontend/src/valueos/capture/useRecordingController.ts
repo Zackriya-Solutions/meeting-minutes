@@ -5,15 +5,17 @@
 // build (recording needs the native backend) — verify there. We intentionally do NOT use
 // upstream's useRecordingStop (it saves to the upstream DB + navigates); ValueOS does its
 // own store + digest + upload in FinalizeScreen instead.
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
+import { listen } from '@tauri-apps/api/event';
 import { recordingService } from '@/services/recordingService';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { applyConfiguredSaveFolder } from './recordingLocation';
 import { labelTranscript } from './speakerLabels';
+import { formatTranscript, type TranscriptSegment } from './transcriptFormat';
 import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
 export interface RecordingController {
@@ -66,6 +68,13 @@ export function useRecordingController(): RecordingController {
   const { isRecording, status } = useRecordingState();
   const { selectedDevices } = useConfig();
 
+  // VALUEOS WS1/WS2: capture the per-segment speaker `source` (Me/Other) from the raw
+  // transcript-update event, keyed by sequence_id — the upstream Transcript object drops it.
+  // Merged into the final segments in stop() so the enriched .txt + upload carry speaker labels.
+  const sourceMapRef = useRef<Map<number, string>>(new Map());
+  const unlistenRef = useRef<null | (() => void)>(null);
+  const startedAtRef = useRef<number>(0);
+
   // Live text — recomputed on every new segment so the capture screen can show real-time
   // recognition (drives a re-render as `transcripts` grows).
   const transcriptText = useMemo(() => labelTranscript(transcripts), [transcripts]);
@@ -98,6 +107,22 @@ export function useRecordingController(): RecordingController {
         /* keep the upstream default recordings folder if preferences can't be set */
       }
       clearTranscripts();
+      // Capture speaker source per segment (Me/Other) as the engine emits it.
+      sourceMapRef.current = new Map();
+      startedAtRef.current = Date.now();
+      try {
+        unlistenRef.current = await listen<{ sequence_id?: number; source?: string }>(
+          'transcript-update',
+          (event) => {
+            const p = event.payload;
+            if (p && typeof p.sequence_id === 'number' && p.source) {
+              sourceMapRef.current.set(p.sequence_id, p.source);
+            }
+          },
+        );
+      } catch {
+        /* no speaker source without the event — the transcript still renders with fallbacks */
+      }
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice ?? null,
         selectedDevices?.systemDevice ?? null,
@@ -118,7 +143,19 @@ export function useRecordingController(): RecordingController {
     flushBuffer?.();
     await new Promise((r) => setTimeout(r, 300)); // let the flush's state update settle into the ref
     const finalSegments = transcriptsRef?.current ?? transcripts;
-    return labelTranscript(finalSegments);
+    // Merge the captured speaker source (by sequence_id) onto each segment, then format the
+    // labelled + timestamped transcript used for BOTH the file and the upload.
+    const enriched: TranscriptSegment[] = finalSegments.map((t) => ({
+      text: t.text,
+      source: t.sequence_id != null ? sourceMapRef.current.get(t.sequence_id) : undefined,
+      audio_start_time: t.audio_start_time,
+      audio_end_time: t.audio_end_time,
+      is_partial: t.is_partial,
+      sequence_id: t.sequence_id,
+    }));
+    unlistenRef.current?.();
+    unlistenRef.current = null;
+    return formatTranscript(enriched, { startedAt: startedAtRef.current || undefined });
   }, [transcriptsRef, transcripts, flushBuffer]);
 
   const pause = useCallback(async () => {

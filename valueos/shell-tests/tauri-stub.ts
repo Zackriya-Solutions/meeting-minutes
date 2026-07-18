@@ -4,3 +4,5 @@
 export const invoke = async (): Promise<unknown> => undefined;
 export const appDataDir = async (): Promise<string> => '/mock/appdata';
 export const join = async (...parts: string[]): Promise<string> => parts.join('/');
+// event API — listen returns a no-op unlisten (no native events fire in tests).
+export const listen = async (): Promise<() => void> => () => {};
