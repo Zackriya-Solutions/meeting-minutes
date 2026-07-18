@@ -397,4 +397,24 @@ describe('ValueOS redesigned flow', () => {
     expect(svc.submissions[0].description).not.toContain('me@example.com');
     expect(svc.submissions[0].metadata.tenant_id).toBe('tenant-acme');
   });
+
+  it('reports a bug from the sidebar utility item — reachable on any screen, not just Settings', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    // On the Dashboard (NOT Settings): the pinned sidebar "Report a bug" item opens the same
+    // dialog directly — the fast path this placement exists to provide.
+    expect(screen.getByTestId('valueos-dashboard')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('valueos-nav-report-bug'));
+    fireEvent.change(await screen.findByTestId('valueos-bugreport-desc'), {
+      target: { value: 'sidebar path works' },
+    });
+    fireEvent.click(screen.getByTestId('valueos-bugreport-submit'));
+    await screen.findByTestId('valueos-bugreport-success');
+
+    const svc = services.bugReport as MockBugReportService;
+    expect(svc.submissions).toHaveLength(1);
+    expect(svc.submissions[0].metadata.tenant_id).toBe('tenant-acme');
+  });
 });

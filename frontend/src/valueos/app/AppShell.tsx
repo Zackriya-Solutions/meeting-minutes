@@ -1,21 +1,25 @@
 'use client';
 // VALUEOS: the persistent app frame for all main screens — dark left sidebar (brand + nav +
-// Settings pinned) and a light content area. Onboarding screens render OUTSIDE this frame
-// (full-bleed blue). Nav is Dashboard / Transcripts only; there is deliberately no "Live
-// Call" nav item (UI_GUIDE §2) — a live call is reached from the on-air banner/row.
+// a pinned bottom utility zone: Settings and Report a bug) and a light content area.
+// Onboarding screens render OUTSIDE this frame (full-bleed blue). Route nav is Dashboard /
+// Transcripts only; there is deliberately no "Live Call" nav item (UI_GUIDE §2) — a live call
+// is reached from the on-air banner/row. "Report a bug" is an ACTION (opens a dialog, hoisted
+// in AppFlow), not a route, so it lives in the utility zone and never shows an active state.
 import React from 'react';
 import { VaMark } from '../ds/ds';
-import { IcDashboard, IcTranscripts, IcSettings } from './icons';
+import { IcDashboard, IcTranscripts, IcSettings, IcBug } from './icons';
 
 export type MainRoute = 'dashboard' | 'transcripts' | 'settings' | 'recording';
 
 export function AppShell({
   route,
   onNavigate,
+  onReportBug,
   children,
 }: {
   route: MainRoute;
   onNavigate: (r: MainRoute) => void;
+  onReportBug: () => void;
   children: React.ReactNode;
 }) {
   const navActive = (r: MainRoute) => (route === r ? 'va-navitem on' : 'va-navitem');
@@ -44,6 +48,9 @@ export function AppShell({
         <nav className="va-navlist">
           <button className={navActive('settings')} data-testid="valueos-nav-settings" onClick={() => onNavigate('settings')}>
             <IcSettings /> Settings
+          </button>
+          <button className="va-navitem" data-testid="valueos-nav-report-bug" onClick={onReportBug}>
+            <IcBug /> Report a bug
           </button>
         </nav>
       </aside>

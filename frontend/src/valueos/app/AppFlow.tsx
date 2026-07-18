@@ -16,6 +16,7 @@ import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
 import type { TranscriptRecord } from '../history/transcriptHistory';
 import type { CaptureResult } from '../shell/flowTypes';
 import { finalizeCall } from '../upload/finalizeCall';
+import { BugReportDialog } from '../bugreport/BugReportDialog';
 import { AppShell, type MainRoute } from './AppShell';
 import { Dashboard } from './screens/Dashboard';
 import { Transcripts } from './screens/Transcripts';
@@ -51,6 +52,10 @@ export function AppFlow() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [guardError, setGuardError] = useState<string | null>(null);
   const [fileWarning, setFileWarning] = useState<string | null>(null);
+  // Bug report is reachable from the sidebar "Report a bug" utility item (fast path, every
+  // screen) AND the Settings → Help card (fallback). The dialog is hoisted here so ONE instance
+  // serves both entry points.
+  const [bugOpen, setBugOpen] = useState(false);
 
   const refreshRecords = useCallback(async () => {
     setRecords(await history.list());
@@ -213,7 +218,8 @@ export function AppFlow() {
 
   // ── main app (shell) ──────────────────────────────────────────────────────
   return (
-    <AppShell route={route} onNavigate={navigate}>
+    <>
+    <AppShell route={route} onNavigate={navigate} onReportBug={() => setBugOpen(true)}>
       {guardError && (
         <div
           data-testid="valueos-guard-error"
@@ -292,7 +298,9 @@ export function AppFlow() {
         />
       )}
 
-      {route === 'settings' && <Settings onLogout={logout} tenantId={entitled[0]?.tenant.id} />}
+      {route === 'settings' && (
+        <Settings onLogout={logout} tenantId={entitled[0]?.tenant.id} onReportBug={() => setBugOpen(true)} />
+      )}
 
       {route === 'recording' &&
         (activeCall ? (
@@ -320,6 +328,8 @@ export function AppFlow() {
         />
       )}
     </AppShell>
+    {bugOpen && <BugReportDialog onClose={() => setBugOpen(false)} tenantId={entitled[0]?.tenant.id} />}
+    </>
   );
 }
 

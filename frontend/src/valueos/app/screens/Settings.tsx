@@ -10,9 +10,16 @@ import { getAccessTokenClaims } from '../../debug/tokenClaims';
 import type { UpdateCheckResult } from '../../api/types';
 import { Avatar } from '../parts';
 import { IcFolder, IcLogout, IcRefresh, IcBug } from '../icons';
-import { BugReportDialog } from '../../bugreport/BugReportDialog';
 
-export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantId?: string }) {
+export function Settings({
+  onLogout,
+  tenantId,
+  onReportBug,
+}: {
+  onLogout: () => void;
+  tenantId?: string;
+  onReportBug: () => void;
+}) {
   const { config, updater } = useValueOs();
   const [folder, setFolder] = useState('');
   const [saved, setSaved] = useState<'idle' | 'saved' | 'error'>('idle');
@@ -21,7 +28,6 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
   const [applying, setApplying] = useState(false);
-  const [bugOpen, setBugOpen] = useState(false);
 
   useEffect(() => {
     void config.getTranscriptFolder().then((f) => f && setFolder(f));
@@ -171,14 +177,13 @@ export function Settings({ onLogout, tenantId }: { onLogout: () => void; tenantI
         </div>
       </Card>
 
-      {/* help / bug report */}
+      {/* help / bug report — the fast path is the sidebar "Report a bug" item; this stays as a
+          discoverable fallback in Settings. Both open the same hoisted dialog (AppFlow). */}
       <Card title="Help" desc="Something not working? Send us the details so we can fix it.">
-        <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-settings-report-bug" onClick={() => setBugOpen(true)}>
+        <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-settings-report-bug" onClick={onReportBug}>
           <IcBug size={15} /> Report a bug
         </button>
       </Card>
-
-      {bugOpen && <BugReportDialog onClose={() => setBugOpen(false)} tenantId={tenantId} />}
     </div>
   );
 }
