@@ -26,7 +26,11 @@ export interface BugReportBundle {
 
 export interface BugReportResult {
   reportId: string;
-  /** True when the bundle was only saved locally (no remote endpoint yet / send failed). */
+  /** GitHub issue number ValueOS created server-side (real API path). */
+  issueNumber?: number;
+  /** GitHub issue URL (private repo — for support reference, not necessarily user-openable). */
+  issueUrl?: string;
+  /** True when the bundle was only saved locally (transient send failure → not lost). */
   savedLocally?: boolean;
   localPath?: string;
 }

@@ -82,6 +82,7 @@ export function createMockAuthService(
           'valueos/write:transcripts',
           'valueos/read:releases',
           'valueos/write:telemetry',
+          'valueos/write:bug-reports',
         ],
       };
       await store.save(tokens);

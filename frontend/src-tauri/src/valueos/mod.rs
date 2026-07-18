@@ -33,9 +33,11 @@ fn cfg_api_base() -> String {
     env_or("VALUEOS_API_BASE", "https://d2luofz0a4v7f3.cloudfront.net/api/agent/v1")
 }
 fn cfg_ports() -> Vec<u16> { vec![8765, 14321] }
-// VALUEOS_AGENT_API.md §1: standard `openid` + the six ValueOS agent scopes.
+// VALUEOS_AGENT_API.md §1: standard `openid` + the ValueOS agent scopes (incl. write:bug-reports,
+// required by POST /bug-reports — must be in the AUTHORIZE request, not merely allowed on the
+// client, or the endpoint returns 403 {scope}).
 const SCOPES: &str =
-    "openid valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts valueos/read:releases valueos/write:telemetry";
+    "openid valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts valueos/read:releases valueos/write:telemetry valueos/write:bug-reports";
 
 // ---- error envelope (serialized to the JS side; TS maps to ValueOsApiError) ------------
 #[derive(Debug, Serialize)]
@@ -668,6 +670,16 @@ pub async fn valueos_api_report_telemetry(
     let path = format!("/tenants/{}/telemetry", enc(&tenant_id));
     api_post(&path, &event).await?;
     Ok(())
+}
+
+/// POST /bug-reports (scope write:bug-reports; NOT feat_agent-gated, tenant optional — reporting
+/// works even if the tenant's Agent add-on lapsed). ValueOS creates the GitHub issue server-side;
+/// the agent never holds the GitHub token. `report` is the JSON body (`description` required;
+/// title/version/route/userAgent/platform/context/logs/tenant_name/screenshot optional). Returns
+/// `{ issue_number, issue_url }`; the API's server-side redaction runs on logs/context/title.
+#[tauri::command]
+pub async fn valueos_api_report_bug(report: serde_json::Value) -> Result<serde_json::Value, ValueOsErr> {
+    api_post("/bug-reports", &report).await
 }
 
 /// Download the presigned installer and VERIFY its checksum (when provided) BEFORE it can be

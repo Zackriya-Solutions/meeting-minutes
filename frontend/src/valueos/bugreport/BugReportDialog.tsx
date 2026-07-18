@@ -39,8 +39,8 @@ export function BugReportDialog({ onClose, tenantId }: { onClose: () => void; te
       setPhase('success');
       setMessage(
         res.savedLocally
-          ? `Saved on this device${res.localPath ? ` (${res.localPath})` : ''}. It will be sent to Value Accelerator once reporting is enabled.`
-          : `Thanks — your report was sent. Reference: ${res.reportId}.`,
+          ? `We couldn’t reach ValueOS just now, so your report was saved on this device${res.localPath ? ` (${res.localPath})` : ''}. Please try again in a bit — nothing was lost.`
+          : `Thanks — your report was sent to Value Accelerator. Reference: ${res.reportId}.`,
       );
     } catch (e) {
       setPhase('error');

@@ -11,6 +11,7 @@ export const VALUEOS_SCOPES = [
   'valueos/write:transcripts',
   'valueos/read:releases',
   'valueos/write:telemetry',
+  'valueos/write:bug-reports',
 ] as const;
 export type ValueOsScope = (typeof VALUEOS_SCOPES)[number];
 
