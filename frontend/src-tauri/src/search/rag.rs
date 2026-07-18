@@ -8,18 +8,39 @@
 
 use crate::llm::prompts::RAG_NOT_FOUND;
 use crate::llm::router;
-use crate::search::hybrid::{HybridSearch, SearchFilters, SearchHit};
+use crate::search::hybrid::{
+    diversify_by_meeting, HybridSearch, SearchDiagnostics, SearchFilters, SearchHit,
+};
 
 /// Number of chunks fed to the answer prompt (PLAN.md Phase 4: top 12).
 pub const RAG_TOP_K: usize = 12;
+const RAG_CANDIDATE_K: usize = RAG_TOP_K * 5;
 
-/// Low-confidence floor on the top fused RRF score. Below this we return "not found"
-/// rather than prompting the model (avoids grounding on noise). Tunable; the default
-/// requires the best hit to land within ~top-10 of at least one branch.
-pub const MIN_CONFIDENCE: f64 = 1.0 / (crate::search::hybrid::DEFAULT_RRF_K + 10.0);
+fn rag_system_prompt() -> String {
+    format!(
+        "Отвечай только на основе фрагментов и цитируй источники как [N]. \
+         Если подтверждена лишь часть вопроса, ответь на подтверждённую часть и явно \
+         перечисли, чего не хватает. Только если фрагменты не отвечают ни на одну \
+         существенную часть, верни ровно: «{RAG_NOT_FOUND}»."
+    )
+}
+
+/// Evidence thresholds after lexical/fuzzy/semantic scoring. RRF is retained only as
+/// a ranking tie-breaker; it must never be treated as semantic confidence.
+pub const MIN_CONFIDENCE: f64 = 0.25;
+pub const STRONG_CONFIDENCE: f64 = 0.38;
 
 pub fn retrieval_is_sufficient(hits: &[SearchHit]) -> bool {
-    hits.first().is_some_and(|hit| hit.score >= MIN_CONFIDENCE)
+    let Some(first) = hits.first() else {
+        return false;
+    };
+    if first.score >= STRONG_CONFIDENCE {
+        return true;
+    }
+    hits.iter()
+        .filter(|hit| hit.score >= MIN_CONFIDENCE)
+        .count()
+        >= 2
 }
 
 /// A source the answer can cite. `index` is the 1-based `[N]` marker.
@@ -149,6 +170,62 @@ pub struct RagAnswer {
     pub found: bool,
     /// Set when the answer was accepted despite missing citations (shown as a warning).
     pub warning: Option<String>,
+    pub diagnostics: RetrievalDiagnostics,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct RetrievalDiagnostics {
+    /// `no_index` | `index_incomplete` | `no_relevant_evidence` |
+    /// `answer_not_found` | `answer_ungrounded` | `ok`.
+    pub reason: String,
+    pub indexable_meetings: i64,
+    pub indexed_meetings: i64,
+    pub best_score: f64,
+    pub query_rewritten: bool,
+    pub semantic_available: bool,
+    pub lexical_hits: usize,
+    pub fuzzy_hits: usize,
+    pub semantic_hits: usize,
+    pub transcript_fallback_hits: usize,
+    pub candidates_considered: usize,
+}
+
+impl RetrievalDiagnostics {
+    fn with_reason(mut self, reason: &str) -> Self {
+        self.reason = reason.to_string();
+        self
+    }
+
+    fn from_search(
+        search: &SearchDiagnostics,
+        indexable_meetings: i64,
+        indexed_meetings: i64,
+        best_score: f64,
+        sufficient: bool,
+    ) -> Self {
+        let reason = if sufficient {
+            "ok"
+        } else if indexable_meetings == 0 {
+            "no_index"
+        } else if indexed_meetings < indexable_meetings {
+            "index_incomplete"
+        } else {
+            "no_relevant_evidence"
+        };
+        Self {
+            reason: reason.to_string(),
+            indexable_meetings,
+            indexed_meetings,
+            best_score,
+            query_rewritten: search.query_rewritten,
+            semantic_available: search.semantic_available,
+            lexical_hits: search.lexical_hits,
+            fuzzy_hits: search.fuzzy_hits,
+            semantic_hits: search.semantic_hits,
+            transcript_fallback_hits: search.transcript_fallback_hits,
+            candidates_considered: search.candidates_considered,
+        }
+    }
 }
 
 /// Answer a question over the archive (PLAN.md Phase 4), wired the same way as `extract`:
@@ -166,27 +243,51 @@ pub async fn ask(
 
     let (filters, router_scope, _label) = scope.resolve();
 
-    let hits = {
+    let mut plan = crate::search::query::QueryPlan::build(query);
+    if let Err(error) = plan.enrich_from_confirmed_terminology(pool).await {
+        log::warn!("could not load confirmed terminology for RAG retrieval: {error}");
+    }
+    let mut search = {
         let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
-        // Embed the question for the vector branch (None → FTS-only when no model is loaded).
-        let query_embedding = crate::pipeline::embedder::embed_query(query.to_string())
+        // Embed the deterministic corrected form. The original question is still sent
+        // to the answer model; normalization only improves local retrieval.
+        let query_embedding = crate::pipeline::embedder::embed_query(plan.semantic_query.clone())
             .await
             .and_then(|r| r.ok());
-        HybridSearch::search(pool, query, query_embedding.as_deref(), &filters, RAG_TOP_K)
-            .await
-            .map_err(|e| format!("retrieval failed: {e}"))?
+        HybridSearch::search_planned(
+            pool,
+            &plan,
+            query_embedding.as_deref(),
+            &filters,
+            RAG_CANDIDATE_K,
+        )
+        .await
+        .map_err(|e| format!("retrieval failed: {e}"))?
     };
-    if !retrieval_is_sufficient(&hits) {
+    search.hits = diversify_by_meeting(std::mem::take(&mut search.hits), RAG_TOP_K);
+    let (indexable_meetings, indexed_meetings) = index_health(pool, &filters)
+        .await
+        .map_err(|error| format!("index health failed: {error}"))?;
+    let sufficient = retrieval_is_sufficient(&search.hits);
+    let top_score = search.hits.first().map(|hit| hit.score).unwrap_or(0.0);
+    let diagnostics = RetrievalDiagnostics::from_search(
+        &search.diagnostics,
+        indexable_meetings,
+        indexed_meetings,
+        top_score,
+        sufficient,
+    );
+    if !sufficient {
         // Empty or low-confidence retrieval → don't call the LLM at all.
         return Ok(RagAnswer {
             answer: NOT_FOUND_MESSAGE.to_string(),
             citations: vec![],
             found: false,
             warning: None,
+            diagnostics,
         });
     }
-    let top_score = hits.first().map(|h| h.score).unwrap_or(0.0);
-    let (context, citations) = build_context(&hits);
+    let (context, citations) = build_context(&search.hits);
 
     // Last-6-turns history (PLAN.md Phase 4 context management) prepended to the prompt.
     let mut history_block = String::new();
@@ -198,14 +299,13 @@ pub async fn ask(
         }
     }
     let user = prompts::fill(
-        prompts::rag_answer_v1(),
+        prompts::rag_answer_v2(),
         &[("question", query), ("context", &context)],
     ) + &history_block;
-    let system = "Отвечай только на основе фрагментов. Цитируй источники как [N]. \
-                  Если ответа нет — верни «в записях не найдено».";
+    let system = rag_system_prompt();
     let qchars = query.len();
 
-    let raw = complete_routed(pool, Purpose::Chat, router_scope, qchars, system, &user)
+    let raw = complete_routed(pool, Purpose::Chat, router_scope, qchars, &system, &user)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -215,16 +315,18 @@ pub async fn ask(
             citations: vec![],
             found: false,
             warning: None,
+            diagnostics: diagnostics.with_reason("answer_not_found"),
         }),
         AnswerVerdict::Found { citations: cited } => Ok(RagAnswer {
             answer: raw,
             citations: cited,
             found: true,
             warning: None,
+            diagnostics,
         }),
         AnswerVerdict::NeedsCitation => {
             // Reject + regenerate once (PLAN.md Phase 4), then accept with a warning.
-            let raw2 = complete_routed(pool, Purpose::Chat, router_scope, qchars, system, &user)
+            let raw2 = complete_routed(pool, Purpose::Chat, router_scope, qchars, &system, &user)
                 .await
                 .map_err(|e| e.to_string())?;
             match evaluate_answer(&raw2, top_score, &citations) {
@@ -233,22 +335,126 @@ pub async fn ask(
                     citations: cited,
                     found: true,
                     warning: None,
+                    diagnostics,
                 }),
                 AnswerVerdict::NotFound => Ok(RagAnswer {
                     answer: NOT_FOUND_MESSAGE.to_string(),
                     citations: vec![],
                     found: false,
                     warning: None,
+                    diagnostics: diagnostics.with_reason("answer_not_found"),
                 }),
-                AnswerVerdict::NeedsCitation => Ok(RagAnswer {
-                    answer: raw2,
-                    citations: vec![],
-                    found: true,
-                    warning: Some("ответ без ссылок на источники".to_string()),
-                }),
+                AnswerVerdict::NeedsCitation => {
+                    // A fluent answer without a resolvable source is not a successful
+                    // knowledge-base answer. Fail closed after the single retry.
+                    let mut diagnostics = diagnostics;
+                    diagnostics.reason = "answer_ungrounded".to_string();
+                    Ok(RagAnswer {
+                        answer: NOT_FOUND_MESSAGE.to_string(),
+                        citations: vec![],
+                        found: false,
+                        warning: Some(
+                            "Модель не смогла подтвердить ответ ссылками на записи.".to_string(),
+                        ),
+                        diagnostics,
+                    })
+                }
             }
         }
     }
+}
+
+async fn index_health(
+    pool: &sqlx::SqlitePool,
+    filters: &SearchFilters,
+) -> Result<(i64, i64), sqlx::Error> {
+    let mut predicate = String::from(
+        "m.indexing_allowed=1 AND EXISTS (SELECT 1 FROM transcripts t \
+         WHERE t.meeting_id=m.id AND length(trim(t.transcript)) > 0)",
+    );
+    if filters.date_from.is_some() {
+        predicate.push_str(" AND m.created_at >= ?");
+    }
+    if filters.date_to.is_some() {
+        predicate.push_str(" AND m.created_at <= ?");
+    }
+    if !filters.meeting_ids.is_empty() {
+        predicate.push_str(&format!(
+            " AND m.id IN ({})",
+            vec!["?"; filters.meeting_ids.len()].join(",")
+        ));
+    }
+    if !filters.collection_ids.is_empty() {
+        let ids = filters
+            .collection_ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        predicate.push_str(&format!(
+            " AND m.id IN (SELECT meeting_id FROM meeting_collections WHERE collection_id IN ({ids}))"
+        ));
+    }
+    if !filters.speaker_ids.is_empty() {
+        let speakers = filters
+            .speaker_ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        predicate.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM transcripts st WHERE st.meeting_id=m.id \
+             AND st.speaker_id IN ({speakers}))"
+        ));
+    }
+
+    async fn count_with_bindings(
+        pool: &sqlx::SqlitePool,
+        sql: &str,
+        filters: &SearchFilters,
+    ) -> Result<i64, sqlx::Error> {
+        let mut query = sqlx::query_scalar::<_, i64>(sql);
+        if let Some(from) = &filters.date_from {
+            query = query.bind(from);
+        }
+        if let Some(to) = &filters.date_to {
+            query = query.bind(to);
+        }
+        for meeting_id in &filters.meeting_ids {
+            query = query.bind(meeting_id);
+        }
+        query.fetch_one(pool).await
+    }
+
+    let indexable = count_with_bindings(
+        pool,
+        &format!("SELECT COUNT(*) FROM meetings m WHERE {predicate}"),
+        filters,
+    )
+    .await?;
+    let indexed_scope = if filters.speaker_ids.is_empty() {
+        "AND EXISTS (SELECT 1 FROM chunks c WHERE c.meeting_id=m.id)".to_string()
+    } else {
+        let speakers = filters
+            .speaker_ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "AND EXISTS (SELECT 1 FROM chunks c WHERE c.meeting_id=m.id \
+             AND EXISTS (SELECT 1 FROM transcripts st WHERE st.meeting_id=c.meeting_id \
+             AND st.speaker_id IN ({speakers}) \
+             AND CAST(st.audio_start_time * 1000 AS INTEGER) BETWEEN c.start_ms AND c.end_ms))"
+        )
+    };
+    let indexed = count_with_bindings(
+        pool,
+        &format!("SELECT COUNT(*) FROM meetings m WHERE {predicate} {indexed_scope}"),
+        filters,
+    )
+    .await?;
+    Ok((indexable, indexed))
 }
 
 #[cfg(test)]
@@ -262,9 +468,29 @@ mod tests {
             meeting_title: title.into(),
             start_ms: chunk_id * 1000,
             text: text.into(),
-            score: 0.05,
+            score: 0.60,
+            lexical_score: 0.60,
+            semantic_score: 0.0,
+            match_sources: vec!["keyword".into()],
             matched_terms: vec![],
         }
+    }
+
+    #[test]
+    fn answer_model_not_found_has_a_distinct_diagnostic_reason() {
+        let diagnostics = RetrievalDiagnostics {
+            reason: "ok".into(),
+            ..Default::default()
+        }
+        .with_reason("answer_not_found");
+        assert_eq!(diagnostics.reason, "answer_not_found");
+    }
+
+    #[test]
+    fn system_prompt_supports_partial_grounded_answers() {
+        let prompt = rag_system_prompt();
+        assert!(prompt.contains("подтверждённую часть"));
+        assert!(prompt.contains(RAG_NOT_FOUND));
     }
 
     #[test]
@@ -301,12 +527,12 @@ mod tests {
         );
         // sentinel -> NotFound
         assert_eq!(
-            evaluate_answer(RAG_NOT_FOUND, 0.05, &cites),
+            evaluate_answer(RAG_NOT_FOUND, 0.50, &cites),
             AnswerVerdict::NotFound
         );
         // no sources -> NotFound
         assert_eq!(
-            evaluate_answer("ответ [1]", 0.05, &[]),
+            evaluate_answer("ответ [1]", 0.50, &[]),
             AnswerVerdict::NotFound
         );
     }
@@ -316,12 +542,74 @@ mod tests {
         assert!(!retrieval_is_sufficient(&[]));
         let mut low = hit(1, "Noise", "случайный фрагмент");
         low.score = MIN_CONFIDENCE / 2.0;
+        low.lexical_score = MIN_CONFIDENCE / 2.0;
         assert!(!retrieval_is_sufficient(&[low]));
         assert!(retrieval_is_sufficient(&[hit(
             2,
             "Relevant",
             "проект альфа"
         )]));
+
+        let mut one_word_from_long_question = hit(3, "Noise", "развитие бюджета");
+        one_word_from_long_question.score = 0.125;
+        one_word_from_long_question.lexical_score = 0.125;
+        assert!(!retrieval_is_sufficient(&[one_word_from_long_question]));
+    }
+
+    #[tokio::test]
+    async fn index_health_respects_speaker_scope_and_chunk_overlap() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE meetings(id TEXT PRIMARY KEY, created_at TEXT, indexing_allowed INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts(meeting_id TEXT, transcript TEXT, audio_start_time REAL, speaker_id INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE chunks(id INTEGER PRIMARY KEY, meeting_id TEXT, start_ms INTEGER, end_ms INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO meetings VALUES('ready','2026-01-01',1),('pending','2026-01-02',1),('other','2026-01-03',1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts VALUES \
+             ('ready','alpha',5.0,7),('pending','beta',3.0,7),('other','gamma',2.0,9)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO chunks VALUES(1,'ready',0,10000),(2,'other',0,10000)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let speaker_seven = SearchFilters {
+            speaker_ids: vec![7],
+            ..Default::default()
+        };
+        assert_eq!(index_health(&pool, &speaker_seven).await.unwrap(), (2, 1));
+
+        let absent_speaker = SearchFilters {
+            speaker_ids: vec![42],
+            ..Default::default()
+        };
+        assert_eq!(index_health(&pool, &absent_speaker).await.unwrap(), (0, 0));
     }
 
     #[test]
@@ -333,7 +621,7 @@ mod tests {
             start_ms: 0,
         }];
         assert_eq!(
-            evaluate_answer("ответ без ссылок", 0.05, &cites),
+            evaluate_answer("ответ без ссылок", 0.50, &cites),
             AnswerVerdict::NeedsCitation
         );
     }
@@ -354,7 +642,7 @@ mod tests {
                 start_ms: 5000,
             },
         ];
-        match evaluate_answer("Мы решили X [2].", 0.05, &cites) {
+        match evaluate_answer("Мы решили X [2].", 0.50, &cites) {
             AnswerVerdict::Found { citations } => {
                 assert_eq!(citations.len(), 1);
                 assert_eq!(citations[0].chunk_id, 22);

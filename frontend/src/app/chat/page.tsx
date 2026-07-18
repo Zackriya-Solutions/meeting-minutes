@@ -29,6 +29,21 @@ interface RagAskResponse {
   citations: Citation[];
   found: boolean;
   warning: string | null;
+  diagnostics: RetrievalDiagnostics;
+}
+
+interface RetrievalDiagnostics {
+  reason: 'ok' | 'no_index' | 'index_incomplete' | 'no_relevant_evidence' | 'answer_not_found' | 'answer_ungrounded' | string;
+  indexable_meetings: number;
+  indexed_meetings: number;
+  best_score: number;
+  query_rewritten: boolean;
+  semantic_available: boolean;
+  lexical_hits: number;
+  fuzzy_hits: number;
+  semantic_hits: number;
+  transcript_fallback_hits: number;
+  candidates_considered: number;
 }
 
 interface ChatMessage {
@@ -37,6 +52,7 @@ interface ChatMessage {
   citations?: Citation[];
   found?: boolean;
   warning?: string | null;
+  diagnostics?: RetrievalDiagnostics;
   error?: boolean;
 }
 
@@ -253,6 +269,7 @@ export default function ChatPage() {
             citations: res.citations ?? [],
             found: res.found,
             warning: res.warning,
+            diagnostics: res.diagnostics,
           },
         ]);
       } catch (e) {
@@ -520,6 +537,10 @@ function MessageBubble({
         )}
         <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
 
+        {notFound && msg.diagnostics && (
+          <RetrievalExplanation diagnostics={msg.diagnostics} />
+        )}
+
         {msg.warning && (
           <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
             <Icon name="alert" size={14} />
@@ -545,6 +566,36 @@ function MessageBubble({
         )}
       </div>
     </motion.div>
+  );
+}
+
+function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDiagnostics }) {
+  const t = useT();
+  let explanation: string;
+  if (diagnostics.reason === 'no_index') {
+    explanation = t('There are no searchable transcripts in this scope yet.');
+  } else if (diagnostics.reason === 'index_incomplete') {
+    explanation = t('The archive index is incomplete: {indexed} of {total} meetings are ready.')
+      .replace('{indexed}', String(diagnostics.indexed_meetings))
+      .replace('{total}', String(diagnostics.indexable_meetings));
+  } else if (diagnostics.reason === 'answer_ungrounded') {
+    explanation = t('Relevant fragments were found, but the generated answer could not be verified against source links.');
+  } else if (diagnostics.reason === 'answer_not_found') {
+    explanation = t('Relevant fragments were checked, but they do not contain an answer to this question.');
+  } else {
+    explanation = t('Memento checked close spellings and related fragments, but did not find enough evidence for a grounded answer.');
+  }
+
+  return (
+    <div className="mt-2 rounded-lg bg-[var(--bg-canvas)]/60 px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
+      <p>{explanation}</p>
+      {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
+        <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
+      )}
+      {diagnostics.query_rewritten && (
+        <p className="mt-1">{t('Common ASR spellings and transliterated product names were included automatically.')}</p>
+      )}
+    </div>
   );
 }
 

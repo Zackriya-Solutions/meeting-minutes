@@ -246,7 +246,7 @@ pub struct IndexingStatus {
 pub async fn indexing_status(state: tauri::State<'_, AppState>) -> Result<IndexingStatus, String> {
     let pool = state.db_manager.pool();
     let indexable_meetings: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM meetings m WHERE EXISTS ( \
+        "SELECT COUNT(*) FROM meetings m WHERE m.indexing_allowed=1 AND EXISTS ( \
            SELECT 1 FROM transcripts t \
            WHERE t.meeting_id=m.id AND length(trim(t.transcript)) > 0 \
          )",
@@ -254,7 +254,10 @@ pub async fn indexing_status(state: tauri::State<'_, AppState>) -> Result<Indexi
     .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
-    let chunked_meetings: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT meeting_id) FROM chunks")
+    let chunked_meetings: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT c.meeting_id) FROM chunks c \
+         JOIN meetings m ON m.id=c.meeting_id WHERE m.indexing_allowed=1",
+    )
         .fetch_one(pool)
         .await
         .map_err(|e| e.to_string())?;

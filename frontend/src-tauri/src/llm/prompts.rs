@@ -12,6 +12,12 @@ pub fn rag_answer_v1() -> &'static str {
     include_str!("../../prompts/rag_answer_v1.md")
 }
 
+/// Cross-meeting synthesis prompt. Keeps partial grounded answers instead of treating
+/// a missing sub-question as total retrieval failure.
+pub fn rag_answer_v2() -> &'static str {
+    include_str!("../../prompts/rag_answer_v2.md")
+}
+
 /// Sentinel the RAG model returns when the answer is not in the provided context
 /// (PLAN.md Phase 4 low-confidence guard). Must match `rag_answer_v1.md` exactly.
 pub const RAG_NOT_FOUND: &str = "в записях не найдено";
@@ -42,5 +48,6 @@ mod tests {
     fn prompts_embedded_and_nonempty() {
         assert!(extract_v1().contains("action_items"));
         assert!(rag_answer_v1().contains(RAG_NOT_FOUND));
+        assert!(rag_answer_v2().contains(RAG_NOT_FOUND));
     }
 }

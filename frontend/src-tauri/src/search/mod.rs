@@ -2,4 +2,5 @@
 
 pub mod commands;
 pub mod hybrid;
+pub mod query;
 pub mod rag;

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::search::hybrid::{HybridSearch, SearchFilters, SearchHit};
-use crate::search::rag::{self, Citation, RagScope};
+use crate::search::rag::{self, Citation, RagScope, RetrievalDiagnostics};
 use crate::state::AppState;
 
 /// Filter payload from the frontend filter panel. All fields optional.
@@ -47,20 +47,25 @@ pub async fn search_meetings(
     let pool = state.db_manager.pool();
     let filters: SearchFilters = filters.unwrap_or_default().into();
 
+    let mut plan = crate::search::query::QueryPlan::build(&query);
+    if let Err(error) = plan.enrich_from_confirmed_terminology(pool).await {
+        log::warn!("could not load confirmed terminology for search: {error}");
+    }
     let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
     // Embed the query for the vector branch (None → FTS-only when no model is loaded).
-    let query_embedding = crate::pipeline::embedder::embed_query(query.clone())
+    let query_embedding = crate::pipeline::embedder::embed_query(plan.semantic_query.clone())
         .await
         .and_then(|r| r.ok());
-    HybridSearch::search(
+    Ok(HybridSearch::search_planned(
         pool,
-        &query,
+        &plan,
         query_embedding.as_deref(),
         &filters,
         limit.unwrap_or(20),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?
+    .hits)
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +94,7 @@ pub struct RagAskResponse {
     pub citations: Vec<Citation>,
     pub found: bool,
     pub warning: Option<String>,
+    pub diagnostics: RetrievalDiagnostics,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +132,7 @@ pub struct RagHistoryMessage {
     pub citations: Vec<Citation>,
     pub found: bool,
     pub warning: Option<String>,
+    pub diagnostics: RetrievalDiagnostics,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,8 +164,8 @@ pub async fn rag_get_latest_session(
         return Ok(None);
     };
 
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT role, content, citations
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT role, content, citations, retrieval_diagnostics
          FROM chat_messages
          WHERE session_id = ?
          ORDER BY id ASC",
@@ -169,8 +176,9 @@ pub async fn rag_get_latest_session(
     .map_err(|error| error.to_string())?;
     let messages = rows
         .into_iter()
-        .map(|(role, content, citations_json)| {
+        .map(|(role, content, citations_json, diagnostics_json)| {
             let citations = serde_json::from_str(&citations_json).unwrap_or_default();
+            let diagnostics = serde_json::from_str(&diagnostics_json).unwrap_or_default();
             let found = role != "assistant" || content.trim() != rag::NOT_FOUND_MESSAGE;
             RagHistoryMessage {
                 role,
@@ -178,6 +186,7 @@ pub async fn rag_get_latest_session(
                 citations,
                 found,
                 warning: None,
+                diagnostics,
             }
         })
         .collect();
@@ -262,10 +271,13 @@ pub async fn rag_ask(
         .map_err(|e| e.to_string())?;
     let citations_json =
         serde_json::to_string(&answer.citations).unwrap_or_else(|_| "[]".to_string());
-    sqlx::query("INSERT INTO chat_messages(session_id, role, content, citations) VALUES(?, 'assistant', ?, ?)")
+    let diagnostics_json =
+        serde_json::to_string(&answer.diagnostics).unwrap_or_else(|_| "{}".to_string());
+    sqlx::query("INSERT INTO chat_messages(session_id, role, content, citations, retrieval_diagnostics) VALUES(?, 'assistant', ?, ?, ?)")
         .bind(session_id)
         .bind(&answer.answer)
         .bind(citations_json)
+        .bind(diagnostics_json)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -289,5 +301,6 @@ pub async fn rag_ask(
         citations: answer.citations,
         found: answer.found,
         warning: answer.warning,
+        diagnostics: answer.diagnostics,
     })
 }
