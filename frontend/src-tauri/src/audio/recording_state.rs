@@ -457,6 +457,7 @@ impl Default for RecordingState {
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
+            valueos_mic_rms: AtomicU32::new(0),
         }
     }
 }
