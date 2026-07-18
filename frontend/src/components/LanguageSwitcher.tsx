@@ -17,6 +17,7 @@ const languages = [
   { code: 'ko', label: '한국어', native: '한국어' },
   { code: 'de', label: 'Deutsch', native: 'Deutsch' },
   { code: 'fr', label: 'Français', native: 'Français' },
+  { code: 'es', label: 'Español', native: 'Español' },
 ];
 
 export function LanguageSwitcher() {
