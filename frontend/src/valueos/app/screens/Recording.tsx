@@ -43,7 +43,7 @@ export function Recording({
   onDiscard: () => void;
 }) {
   const rec = useRecordingController();
-  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'discarding' | 'error'>(
+  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'error'>(
     hasStarted ? 'live' : 'starting',
   );
   const [paused, setPaused] = useState(false);
@@ -125,18 +125,14 @@ export function Recording({
     }
   };
 
-  // Discard: stop the capture and drop the call WITHOUT uploading or recording it. Guarded by the
-  // confirmation dialog below — this is destructive and cannot be undone.
-  const discard = async () => {
+  // Discard: drop the call WITHOUT uploading or recording it. Guarded by the confirmation dialog.
+  // We DON'T await stop() — a discard throws the recording away, so its result is irrelevant, and
+  // blocking on the native stop (which can be slow or hang) would strand the user on "Discarding…".
+  // Fire the stop best-effort and leave IMMEDIATELY.
+  const discard = () => {
     setConfirmDiscard(false);
-    setPhase('discarding');
-    try {
-      await rec.stop(); // stop native capture; the returned text is intentionally discarded
-      onDiscard(); // AppFlow drops the in-progress call (no upload, no history) and navigates away
-    } catch (e) {
-      setError((e as Error)?.message ?? 'Could not stop the recording.');
-      setPhase('error');
-    }
+    void rec.stop().catch(() => {}); // best-effort native stop; result + errors intentionally ignored
+    onDiscard(); // AppFlow drops the in-progress call (no upload, no history) and navigates away
   };
 
   const elapsedMs = now - startedAt;
@@ -191,14 +187,14 @@ export function Recording({
           className="va-btn va-btn-danger-outline va-btn-sm"
           data-testid="valueos-recording-discard"
           onClick={() => setConfirmDiscard(true)}
-          disabled={phase === 'ending' || phase === 'discarding'}
+          disabled={phase === 'ending'}
         >
-          {phase === 'discarding' ? 'Discarding…' : 'Discard'}
+          Discard
         </button>
         <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-recording-pause" onClick={togglePause} disabled={phase !== 'live'}>
           {paused ? 'Resume' : 'Pause'}
         </button>
-        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending' || phase === 'discarding'}>
+        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending'}>
           {phase === 'ending' ? 'Uploading…' : 'End & upload'}
         </button>
       </div>

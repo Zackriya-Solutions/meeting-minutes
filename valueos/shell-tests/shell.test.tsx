@@ -319,6 +319,23 @@ describe('ValueOS redesigned flow', () => {
     expect(screen.getByTestId('valueos-transcripts')).not.toHaveTextContent('Ada Lovelace');
   });
 
+  it('discard is NOT blocked by a hung native stop — leaves the recording screen anyway', async () => {
+    const { services } = makeServices('active');
+    // Simulate the native stop hanging (never resolves) — discard must not get stuck on it.
+    rec.stop.mockImplementationOnce(() => new Promise<string>(() => {}));
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    await openWizardToRecord();
+    fireEvent.click(screen.getByTestId('valueos-wizard-start'));
+    await screen.findByTestId('valueos-recording');
+    fireEvent.click(screen.getByTestId('valueos-recording-discard'));
+    fireEvent.click(await screen.findByTestId('valueos-discard-confirm-btn'));
+    // Even though stop() never resolves, we still return to the dashboard (no stuck "Discarding…").
+    await screen.findByTestId('valueos-dashboard');
+    expect(rec.stop).toHaveBeenCalled();
+  });
+
   it('reuses the user-chosen call name when creating the call', async () => {
     const { services, client } = makeServices('active');
     const callSpy = vi.spyOn(client, 'createCall');
