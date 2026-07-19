@@ -8,7 +8,7 @@ import React from 'react';
 import type { TranscriptRecord } from '../../history/transcriptHistory';
 import type { ActiveCall } from '../types';
 import { StatusPill, statusFromUpload, Avatar } from '../parts';
-import { IcPlus, IcMic, IcCheck } from '../icons';
+import { IcPlus, IcMic, IcCheck, IcTrash } from '../icons';
 import { relTime } from '../format';
 
 export function Transcripts({
@@ -18,6 +18,7 @@ export function Transcripts({
   onSelect,
   onNew,
   onOpenRecording,
+  onDelete,
 }: {
   records: TranscriptRecord[];
   activeCall: ActiveCall | null;
@@ -25,6 +26,7 @@ export function Transcripts({
   onSelect: (id: string) => void;
   onNew: () => void;
   onOpenRecording: () => void;
+  onDelete: (id: string) => void;
 }) {
   const selected = records.find((r) => r.id === selectedId) ?? null;
 
@@ -80,7 +82,7 @@ export function Transcripts({
 
       {/* reader */}
       <div className="va-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-        {selected ? <Reader record={selected} /> : (
+        {selected ? <Reader record={selected} onDelete={onDelete} /> : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
             <p className="va-muted" data-testid="valueos-transcripts-placeholder">Select a transcript to read it.</p>
           </div>
@@ -90,20 +92,49 @@ export function Transcripts({
   );
 }
 
-function Reader({ record }: { record: TranscriptRecord }) {
+function Reader({ record, onDelete }: { record: TranscriptRecord; onDelete: (id: string) => void }) {
   const status = statusFromUpload(record.uploadStatus);
   const points = digestPoints(record.digest ?? '');
   const lines = (record.transcript ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
 
+  const [confirming, setConfirming] = React.useState(false);
+
   return (
     <div data-testid="valueos-transcripts-reader" style={{ maxWidth: 720, margin: '0 auto', padding: '28px 32px 56px' }}>
-      <StatusPill status={status} />
-      <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, margin: '12px 0 6px' }}>
-        {record.targetLabel}
-      </h1>
-      <p className="va-muted" style={{ fontSize: 14, margin: 0 }}>
-        {new Date(record.createdAt).toLocaleString()}
-      </p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <StatusPill status={status} />
+          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, margin: '12px 0 6px' }}>
+            {record.targetLabel}
+          </h1>
+          <p className="va-muted" style={{ fontSize: 14, margin: 0 }}>
+            {new Date(record.createdAt).toLocaleString()}
+          </p>
+        </div>
+        {confirming ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: '0 0 auto' }}>
+            <span className="va-muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
+              Delete locally?{record.uploadStatus === 'uploaded' ? ' (ValueOS copy kept)' : ''}
+            </span>
+            <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-transcript-delete-confirm" onClick={() => onDelete(record.id)}>
+              Delete
+            </button>
+            <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-transcript-delete-cancel" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            className="va-btn va-btn-danger-outline va-btn-sm"
+            data-testid="valueos-transcript-delete"
+            onClick={() => setConfirming(true)}
+            title="Delete this local transcript (does not affect the ValueOS cloud copy)"
+            style={{ flex: '0 0 auto' }}
+          >
+            <IcTrash size={15} /> Delete
+          </button>
+        )}
+      </div>
 
       {/* filing card */}
       <div className="va-card" style={{ marginTop: 20, padding: 16, boxShadow: 'none', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -127,7 +158,7 @@ function Reader({ record }: { record: TranscriptRecord }) {
         {status === 'synced'
           ? 'Synced to ValueOS · Transcript delivered'
           : status === 'failed'
-            ? 'Upload failed · Saved locally, will retry'
+            ? `Upload failed · ${record.error ?? 'not sent'} · Saved locally`
             : status === 'pending'
               ? 'Pending · Saved locally, will upload'
               : 'Syncing to ValueOS…'}

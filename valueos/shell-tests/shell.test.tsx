@@ -8,6 +8,8 @@ import { createMockConfigService } from '@/valueos/config/configService';
 import { MockDigestGenerator } from '@/valueos/digest/digest';
 import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
 import { InMemoryTranscriptHistory } from '@/valueos/history/transcriptHistory';
+import { createUpdater } from '@/valueos/updater/updater';
+import { MockBugReportService } from '@/valueos/bugreport/service';
 import type { ValueOsServices } from '@/valueos/context/ValueOsProvider';
 import type { EntitlementState } from '@/valueos/api/types';
 
@@ -52,6 +54,7 @@ vi.mock('@/valueos/capture/useRecordingController', () => ({
 
 function servicesFromSeed(seed: MockSeed) {
   const client = new MockValueOsClient(seed);
+  const mem = new Map<string, string>();
   const services: ValueOsServices = {
     client,
     auth: createMockAuthService(client, new InMemoryTokenStore()),
@@ -59,6 +62,17 @@ function servicesFromSeed(seed: MockSeed) {
     digest: new MockDigestGenerator(),
     uploadQueue: new PendingUploadQueue(client, new InMemoryPendingUploadStore()),
     history: new InMemoryTranscriptHistory(),
+    updater: createUpdater({
+      client,
+      native: {
+        appInfo: async () => ({ platform: 'test', version: '0.0.0' }),
+        installId: async () => 'test-install',
+        download: async () => '/tmp/update',
+        apply: async () => {},
+      },
+      store: { get: (k) => mem.get(k) ?? null, set: (k, v) => void mem.set(k, v) },
+    }),
+    bugReport: new MockBugReportService(),
   };
   return { services, client };
 }
@@ -237,6 +251,10 @@ describe('ValueOS redesigned flow', () => {
     const partial = screen.getByTestId('valueos-recording-partial');
     expect(partial).toHaveTextContent('before the deal even reaches');
     expect(partial).toHaveStyle({ fontStyle: 'italic' });
+    // live activity indicator is present during capture (fallback signal); an in-flight interim
+    // makes it "recognizing".
+    const activity = await screen.findByTestId('valueos-recording-activity');
+    expect(activity).toHaveAttribute('data-activity', 'recognizing');
   });
 
   it('End & upload creates a call with BOTH artifacts via the composite /calls path', async () => {
@@ -262,6 +280,35 @@ describe('ValueOS redesigned flow', () => {
     expect(req.idempotency_key).toBeTruthy();
     // the captured transcript now appears in the list
     expect(screen.getByTestId('valueos-transcripts')).toHaveTextContent('Ada Lovelace');
+  });
+
+  it('discards a transcript (with confirmation) — stops capture, no upload, no history entry', async () => {
+    const { services, client } = makeServices('active');
+    const callSpy = vi.spyOn(client, 'createCall');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    await openWizardToRecord();
+    fireEvent.click(screen.getByTestId('valueos-wizard-start'));
+    await screen.findByTestId('valueos-recording');
+
+    // Discard is GUARDED: clicking it opens a confirmation and does nothing on its own.
+    fireEvent.click(screen.getByTestId('valueos-recording-discard'));
+    await screen.findByTestId('valueos-discard-confirm');
+    // Backing out ("Keep recording") leaves the call running — still on the recording screen.
+    fireEvent.click(screen.getByTestId('valueos-discard-cancel'));
+    expect(screen.queryByTestId('valueos-discard-confirm')).toBeNull();
+    expect(screen.getByTestId('valueos-recording')).toBeTruthy();
+
+    // Confirming discards: capture stops, we return to the dashboard, nothing is uploaded.
+    fireEvent.click(screen.getByTestId('valueos-recording-discard'));
+    fireEvent.click(await screen.findByTestId('valueos-discard-confirm-btn'));
+    await screen.findByTestId('valueos-dashboard');
+    expect(rec.stop).toHaveBeenCalled();
+    expect(callSpy).not.toHaveBeenCalled(); // never uploaded
+    // and it left NO transcript in the list
+    fireEvent.click(screen.getByTestId('valueos-nav-transcripts'));
+    expect(screen.getByTestId('valueos-transcripts')).not.toHaveTextContent('Ada Lovelace');
   });
 
   it('reuses the user-chosen call name when creating the call', async () => {
@@ -336,5 +383,67 @@ describe('ValueOS redesigned flow', () => {
     const reader = await screen.findByTestId('valueos-transcripts-reader');
     expect(within(reader).getByText(/Digest/i)).toBeInTheDocument();
     expect(reader).toHaveTextContent('We discussed pricing and agreed next steps.');
+  });
+
+  it('deletes a local transcript (list entry + stored file), keeping the ValueOS copy', async () => {
+    const { services } = makeServices('active');
+    const removeSpy = vi.spyOn(services.history, 'remove');
+    const deleteFileSpy = vi.spyOn(services.config, 'deleteTranscriptFile');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    await openWizardToRecord();
+    fireEvent.click(screen.getByTestId('valueos-wizard-start'));
+    await screen.findByTestId('valueos-recording');
+    fireEvent.click(screen.getByTestId('valueos-recording-end'));
+    await screen.findByTestId('valueos-transcripts-reader');
+
+    // delete → inline confirm → gone
+    fireEvent.click(screen.getByTestId('valueos-transcript-delete'));
+    fireEvent.click(screen.getByTestId('valueos-transcript-delete-confirm'));
+    await screen.findByTestId('valueos-transcripts-placeholder'); // reader cleared
+
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(deleteFileSpy).toHaveBeenCalledTimes(1); // stored .txt removed too
+  });
+
+  it('reports a bug from Settings — bundle is scrubbed before submit', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    fireEvent.click(screen.getByTestId('valueos-nav-settings'));
+    fireEvent.click(await screen.findByTestId('valueos-settings-report-bug'));
+    fireEvent.change(await screen.findByTestId('valueos-bugreport-desc'), {
+      target: { value: 'upload failed — reach me at me@example.com' },
+    });
+    fireEvent.click(screen.getByTestId('valueos-bugreport-submit'));
+    await screen.findByTestId('valueos-bugreport-success');
+
+    const svc = services.bugReport as MockBugReportService;
+    expect(svc.submissions).toHaveLength(1);
+    expect(svc.submissions[0].description).toContain('[EMAIL]'); // scrubbed
+    expect(svc.submissions[0].description).not.toContain('me@example.com');
+    expect(svc.submissions[0].metadata.tenant_id).toBe('tenant-acme');
+  });
+
+  it('reports a bug from the sidebar utility item — reachable on any screen, not just Settings', async () => {
+    const { services } = makeServices('active');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    // On the Dashboard (NOT Settings): the pinned sidebar "Report a bug" item opens the same
+    // dialog directly — the fast path this placement exists to provide.
+    expect(screen.getByTestId('valueos-dashboard')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('valueos-nav-report-bug'));
+    fireEvent.change(await screen.findByTestId('valueos-bugreport-desc'), {
+      target: { value: 'sidebar path works' },
+    });
+    fireEvent.click(screen.getByTestId('valueos-bugreport-submit'));
+    await screen.findByTestId('valueos-bugreport-success');
+
+    const svc = services.bugReport as MockBugReportService;
+    expect(svc.submissions).toHaveLength(1);
+    expect(svc.submissions[0].metadata.tenant_id).toBe('tenant-acme');
   });
 });

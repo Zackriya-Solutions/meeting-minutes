@@ -15,11 +15,14 @@ export interface TranscriptRecord {
   uploadStatus: 'uploaded' | 'pending' | 'failed';
   digest?: string; // the high-level recap (shown in the detail pane)
   transcript?: string; // the transcript text (shown in the detail pane)
+  error?: string; // upload failure reason (shown when uploadStatus === 'failed')
 }
 
 export interface TranscriptHistory {
   list(): Promise<TranscriptRecord[]>;
   add(record: TranscriptRecord): Promise<void>;
+  /** Remove a record from the LOCAL history only (never touches the ValueOS cloud copy). */
+  remove(id: string): Promise<void>;
 }
 
 /** ⚠️ MOCK — in-memory (per session). */
@@ -30,6 +33,9 @@ export class InMemoryTranscriptHistory implements TranscriptHistory {
   }
   async add(record: TranscriptRecord) {
     this.records = [record, ...this.records.filter((r) => r.id !== record.id)];
+  }
+  async remove(id: string) {
+    this.records = this.records.filter((r) => r.id !== id);
   }
 }
 
@@ -50,5 +56,8 @@ export class LocalStorageTranscriptHistory implements TranscriptHistory {
   async add(record: TranscriptRecord) {
     const next = [record, ...this.read().filter((r) => r.id !== record.id)];
     localStorage.setItem(KEY, JSON.stringify(next));
+  }
+  async remove(id: string) {
+    localStorage.setItem(KEY, JSON.stringify(this.read().filter((r) => r.id !== id)));
   }
 }

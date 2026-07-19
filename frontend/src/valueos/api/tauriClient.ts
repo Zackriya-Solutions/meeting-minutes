@@ -12,6 +12,8 @@ import {
   Opportunity,
   Paginated,
   Tenant,
+  TelemetryEvent,
+  UpdateCheckResult,
   UploadRequest,
   UploadResult,
 } from './types';
@@ -63,5 +65,11 @@ export class TauriValueOsClient implements ValueOsClient {
       targetId,
       request: req,
     });
+  }
+  checkUpdate(tenantId: string, platform: string, currentVersion: string): Promise<UpdateCheckResult> {
+    return callValueOs('valueos_api_check_update', { tenantId, platform, currentVersion });
+  }
+  reportTelemetry(tenantId: string, event: TelemetryEvent): Promise<void> {
+    return callValueOs('valueos_api_report_telemetry', { tenantId, event });
   }
 }

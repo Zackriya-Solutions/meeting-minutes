@@ -10,7 +10,7 @@ import { useValueOs } from '../../context/ValueOsProvider';
 import type { EntitlementSummary } from '../../auth/authService';
 import { getAccessTokenClaims } from '../../debug/tokenClaims';
 import { useOnboarding } from '@/contexts/OnboardingContext';
-import { IcArrowRight, IcFolder } from '../icons';
+import { IcFolder } from '../icons';
 
 export const VALUEOS_PURCHASE_URL = 'https://www.value-accelerator.io';
 
@@ -22,14 +22,15 @@ function Foot() {
 export function WelcomeScreen({ onProceed }: { onProceed: () => void }) {
   return (
     <div className="va-onb va-root" data-testid="valueos-welcome">
-      <VaMark height={52} tone="white" />
-      <h1>Capture every call.<br />File it in ValueOS.</h1>
+      {/* Logo-dominant hero (matches the preferred design): big V✦A mark, then the wordmark. */}
+      <VaMark height={160} tone="white" />
+      <h1 style={{ fontSize: 48, margin: '10px 0 14px' }}>ValueOS Agent</h1>
       <p>
-        ValueOS Agent records and transcribes your calls on this device, then files each one
-        into ValueOS — under the right tenant and the exact lead or opportunity.
+        Your private, on-device meeting agent. Captures and transcribes meetings locally, then
+        feeds them into your ValueOS workflows.
       </p>
       <button className="va-btn va-btn-white" data-testid="valueos-proceed" onClick={onProceed}>
-        Get started <IcArrowRight size={16} />
+        Get started
       </button>
       <Foot />
     </div>

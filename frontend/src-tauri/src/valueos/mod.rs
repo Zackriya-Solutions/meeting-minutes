@@ -9,7 +9,7 @@
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 const KEYCHAIN_SERVICE: &str = "com.valueos.io";
 const KEYCHAIN_USER: &str = "agent-tokens";
@@ -33,8 +33,11 @@ fn cfg_api_base() -> String {
     env_or("VALUEOS_API_BASE", "https://d2luofz0a4v7f3.cloudfront.net/api/agent/v1")
 }
 fn cfg_ports() -> Vec<u16> { vec![8765, 14321] }
+// VALUEOS_AGENT_API.md §1: standard `openid` + the ValueOS agent scopes (incl. write:bug-reports,
+// required by POST /bug-reports — must be in the AUTHORIZE request, not merely allowed on the
+// client, or the endpoint returns 403 {scope}).
 const SCOPES: &str =
-    "valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts";
+    "openid valueos/read:tenants valueos/read:leads valueos/read:opportunities valueos/write:transcripts valueos/read:releases valueos/write:telemetry valueos/write:bug-reports";
 
 // ---- error envelope (serialized to the JS side; TS maps to ValueOsApiError) ------------
 #[derive(Debug, Serialize)]
@@ -130,7 +133,7 @@ struct TokenResponse {
 }
 
 async fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result<StoredTokens, ValueOsErr> {
-    let client = reqwest::Client::new();
+    let client = http_client(HTTP_GET_TIMEOUT_SECS);
     let params = [
         ("grant_type", "authorization_code"),
         ("client_id", &cfg_client_id()),
@@ -163,7 +166,7 @@ async fn refresh(tokens: &StoredTokens) -> Result<StoredTokens, ValueOsErr> {
         .refresh_token
         .clone()
         .ok_or_else(|| ValueOsErr::new(401, "No refresh token"))?;
-    let client = reqwest::Client::new();
+    let client = http_client(HTTP_GET_TIMEOUT_SECS);
     let params = [
         ("grant_type", "refresh_token"),
         ("client_id", &cfg_client_id()),
@@ -225,10 +228,23 @@ async fn map_http_error(resp: reqwest::Response) -> ValueOsErr {
     }
 }
 
+// VALUEOS: a reqwest client with a hard total-request timeout so a stalled ValueOS call can
+// never hang the app forever (e.g. an upload that stops making progress). On the resulting
+// transport error the pending-upload queue keeps the local copy and lets the user retry — far
+// better than an infinite "Uploading…". Falls back to a default client if the builder fails.
+fn http_client(timeout_secs: u64) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+const HTTP_GET_TIMEOUT_SECS: u64 = 30;
+const HTTP_POST_TIMEOUT_SECS: u64 = 90; // uploads (transcript + digest) may be larger
+
 async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
     let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let mut resp = reqwest::Client::new()
+    let mut resp = http_client(HTTP_GET_TIMEOUT_SECS)
         .get(url.as_str())
         .bearer_auth(token)
         .send()
@@ -237,7 +253,7 @@ async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
     // Contract §2.6: on 401, force one token refresh and retry the call once.
     if resp.status().as_u16() == 401 {
         let token = force_refresh().await?;
-        resp = reqwest::Client::new()
+        resp = http_client(HTTP_GET_TIMEOUT_SECS)
             .get(url.as_str())
             .bearer_auth(token)
             .send()
@@ -254,7 +270,7 @@ async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
 async fn api_post(path: &str, payload: &serde_json::Value) -> Result<serde_json::Value, ValueOsErr> {
     let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let mut resp = reqwest::Client::new()
+    let mut resp = http_client(HTTP_POST_TIMEOUT_SECS)
         .post(url.as_str())
         .bearer_auth(token)
         .json(payload)
@@ -265,7 +281,7 @@ async fn api_post(path: &str, payload: &serde_json::Value) -> Result<serde_json:
     // the retried upload safe — the server replays the same ids, never duplicates).
     if resp.status().as_u16() == 401 {
         let token = force_refresh().await?;
-        resp = reqwest::Client::new()
+        resp = http_client(HTTP_POST_TIMEOUT_SECS)
             .post(url.as_str())
             .bearer_auth(token)
             .json(payload)
@@ -556,4 +572,176 @@ pub async fn valueos_write_transcript_file(
     let path = std::path::Path::new(&folder).join(&file_name);
     std::fs::write(&path, content).map_err(|e| ValueOsErr::transport(e.to_string()))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// VALUEOS WS3: save a scrubbed bug-report bundle to the app data dir (interim — until the
+/// ValueOS bug-report endpoint exists). Returns the file path. Content is already scrubbed
+/// (no tokens/PII/transcript text) by the webview before it reaches here.
+#[tauri::command]
+pub async fn valueos_save_bug_report<R: Runtime>(app: AppHandle<R>, content: String) -> Result<String, ValueOsErr> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| ValueOsErr::transport(format!("app_data_dir: {e}")))?
+        .join("bug-reports");
+    std::fs::create_dir_all(&dir).map_err(|e| ValueOsErr::transport(format!("mkdir: {e}")))?;
+    let path = dir.join(format!("report-{}.json", new_uuid_v4()));
+    std::fs::write(&path, content).map_err(|e| ValueOsErr::transport(format!("write bug report: {e}")))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Delete a local transcript file (best-effort). A missing file is NOT an error — the user
+/// just wants it gone. Only touches the local file; never the ValueOS cloud copy.
+#[tauri::command]
+pub async fn valueos_delete_file(path: String) -> Result<(), ValueOsErr> {
+    match std::fs::remove_file(&path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(ValueOsErr::transport(format!("delete file: {e}"))),
+    }
+}
+
+// ---- WS4: updater + telemetry -----------------------------------------------------------
+// Prompt-first, notify-only. The webview never sees the token: check + telemetry go through
+// the same authenticated api_get/api_post as every other ValueOS call, and the presigned
+// installer is downloaded + checksum-verified natively before the user's confirmed apply.
+
+// A UUIDv4 string built from the already-present `rand` (no new dependency).
+fn new_uuid_v4() -> String {
+    use rand::RngCore;
+    let mut b = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut b);
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    )
+}
+
+fn open_path(path: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/C", "start", "", path]).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+}
+
+/// Stable, agent-generated install id, persisted in the app data dir and generated ONCE.
+/// Survives updates (app data is not touched by an install).
+#[tauri::command]
+pub async fn valueos_install_id<R: Runtime>(app: AppHandle<R>) -> Result<String, ValueOsErr> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| ValueOsErr::transport(format!("app_data_dir: {e}")))?;
+    let path = dir.join("valueos-install-id");
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| ValueOsErr::transport(format!("mkdir: {e}")))?;
+    let id = new_uuid_v4();
+    std::fs::write(&path, &id).map_err(|e| ValueOsErr::transport(format!("write install id: {e}")))?;
+    Ok(id)
+}
+
+/// Platform + current app version, for the updates/check query and telemetry.
+#[tauri::command]
+pub async fn valueos_app_info<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, ValueOsErr> {
+    Ok(serde_json::json!({
+        "platform": std::env::consts::OS, // "macos" | "windows" | "linux"
+        "version": app.package_info().version.to_string(),
+    }))
+}
+
+/// GET /tenants/{tid}/updates/check?platform=&current_version= (read:releases + feat_agent).
+#[tauri::command]
+pub async fn valueos_api_check_update(
+    tenant_id: String,
+    platform: String,
+    current_version: String,
+) -> Result<serde_json::Value, ValueOsErr> {
+    let path = format!(
+        "/tenants/{}/updates/check?platform={}&current_version={}",
+        enc(&tenant_id),
+        enc(&platform),
+        enc(&current_version)
+    );
+    api_get(&path).await
+}
+
+/// POST /tenants/{tid}/telemetry (write:telemetry + feat_agent). `event` is the JSON body.
+#[tauri::command]
+pub async fn valueos_api_report_telemetry(
+    tenant_id: String,
+    event: serde_json::Value,
+) -> Result<(), ValueOsErr> {
+    let path = format!("/tenants/{}/telemetry", enc(&tenant_id));
+    api_post(&path, &event).await?;
+    Ok(())
+}
+
+/// POST /bug-reports (scope write:bug-reports; NOT feat_agent-gated, tenant optional — reporting
+/// works even if the tenant's Agent add-on lapsed). ValueOS creates the GitHub issue server-side;
+/// the agent never holds the GitHub token. `report` is the JSON body (`description` required;
+/// title/version/route/userAgent/platform/context/logs/tenant_name/screenshot optional). Returns
+/// `{ issue_number, issue_url }`; the API's server-side redaction runs on logs/context/title.
+#[tauri::command]
+pub async fn valueos_api_report_bug(report: serde_json::Value) -> Result<serde_json::Value, ValueOsErr> {
+    api_post("/bug-reports", &report).await
+}
+
+/// Download the presigned installer and VERIFY its checksum (when provided) BEFORE it can be
+/// applied. Returns the staged file path. No auth header — the URL is already presigned.
+#[tauri::command]
+pub async fn valueos_download_update(
+    download_url: String,
+    expected_sha256: Option<String>,
+) -> Result<String, ValueOsErr> {
+    let resp = reqwest::Client::new()
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(ValueOsErr::new(
+            resp.status().as_u16(),
+            format!("update download failed: HTTP {}", resp.status().as_u16()),
+        ));
+    }
+    let bytes = resp.bytes().await.map_err(|e| ValueOsErr::transport(e.to_string()))?;
+    let data: &[u8] = &bytes;
+    if let Some(expected) = expected_sha256.filter(|s| !s.trim().is_empty()) {
+        // Hex-encode the digest manually (GenericArray has no LowerHex; avoids a hex dep).
+        let actual: String = Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect();
+        if !actual.eq_ignore_ascii_case(expected.trim()) {
+            return Err(ValueOsErr::new(0, "checksum mismatch — update rejected".to_string()));
+        }
+    }
+    let fname = download_url
+        .split('?')
+        .next()
+        .and_then(|p| p.rsplit('/').next())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("valueos-agent-update")
+        .to_string();
+    let dir = std::env::temp_dir().join("valueos-updates");
+    std::fs::create_dir_all(&dir).map_err(|e| ValueOsErr::transport(format!("mkdir: {e}")))?;
+    let path = dir.join(fname);
+    std::fs::write(&path, data).map_err(|e| ValueOsErr::transport(format!("write update: {e}")))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Apply a downloaded+verified installer: hand it to the OS and exit so it can replace the app
+/// (the user relaunches the new version). We NEVER auto-install — this only runs after the user
+/// confirmed. No user data is touched.
+#[tauri::command]
+pub async fn valueos_apply_update<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), ValueOsErr> {
+    open_path(&path);
+    app.exit(0);
+    Ok(())
 }

@@ -18,6 +18,7 @@ vi.mock('./tauri-stub', () => ({
   invoke: (...a: unknown[]) => state.invoke(...a),
   appDataDir: async () => '/appdata',
   join: async (...p: string[]) => p.join('/'),
+  listen: async () => () => {}, // no native events fire in this unit test
 }));
 vi.mock('@/contexts/TranscriptContext', () => ({
   useTranscripts: () => ({
@@ -75,7 +76,7 @@ describe('useRecordingController', () => {
     expect(state.startRec).not.toHaveBeenCalled();
   });
 
-  it('stop() flushes and returns the joined transcript from the live ref', async () => {
+  it('stop() flushes and returns the enriched (timestamped + labelled) transcript', async () => {
     state.segments = [{ text: 'Hello Ada.' }, { text: 'Discussed pricing.' }, { text: '  ' }];
     const { result } = renderHook(() => useRecordingController());
     let text = '';
@@ -84,7 +85,11 @@ describe('useRecordingController', () => {
     });
     expect(state.stopRec).toHaveBeenCalled();
     expect(state.flushBuffer).toHaveBeenCalled();
-    expect(text).toBe('Hello Ada.\nDiscussed pricing.'); // blanks dropped, joined by newline
+    // Enriched format: "[HH:MM:SS] Label: text". No speaker source in this stub → fallback label;
+    // no times → 00:00:00. Blanks dropped.
+    expect(text).toContain('[00:00:00] Speaker: Hello Ada.');
+    expect(text).toContain('[00:00:00] Speaker: Discussed pricing.');
+    expect(text).not.toContain('Speaker: \n'); // the blank segment produced no line
   });
 
   it('exposes live transcriptText from the current segments', () => {

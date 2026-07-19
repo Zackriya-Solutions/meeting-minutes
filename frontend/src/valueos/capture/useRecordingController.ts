@@ -5,13 +5,19 @@
 // build (recording needs the native backend) — verify there. We intentionally do NOT use
 // upstream's useRecordingStop (it saves to the upstream DB + navigates); ValueOS does its
 // own store + digest + upload in FinalizeScreen instead.
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
+import { listen } from '@tauri-apps/api/event';
 import { recordingService } from '@/services/recordingService';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { applyConfiguredSaveFolder } from './recordingLocation';
+import { labelTranscript } from './speakerLabels';
+import { reduceLive, emptyLive, type LiveState } from './liveTranscript';
+import { formatTranscript, type TranscriptSegment } from './transcriptFormat';
+import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
 export interface RecordingController {
   isRecording: boolean;
@@ -31,30 +37,8 @@ export interface RecordingController {
   resume: () => Promise<void>;
 }
 
-function joinTranscripts(transcripts: { text: string }[]): string {
-  return transcripts
-    .map((t) => t.text?.trim())
-    .filter(Boolean)
-    .join('\n');
-}
-
-/** Split segments into the confirmed body and the trailing hypothesis. Only the most-recent
- *  utterance carries a tentative tail (UI_GUIDE §4): if the last segment is still partial it
- *  is the faded/italic tail; everything before it is confirmed. */
-function splitConfirmedPartial(transcripts: { text: string; is_partial?: boolean }[]): {
-  confirmed: string;
-  partial: string;
-} {
-  if (transcripts.length === 0) return { confirmed: '', partial: '' };
-  const last = transcripts[transcripts.length - 1];
-  if (last?.is_partial) {
-    return {
-      confirmed: joinTranscripts(transcripts.slice(0, -1)),
-      partial: last.text?.trim() ?? '',
-    };
-  }
-  return { confirmed: joinTranscripts(transcripts), partial: '' };
-}
+// VALUEOS: transcript text is produced via labelTranscript (speakerLabels.ts) so speaker
+// prefixes appear automatically once the stack provides a per-segment source (WS2: Me/Other).
 
 function countWords(s: string): number {
   const t = s.trim();
@@ -66,13 +50,26 @@ export function useRecordingController(): RecordingController {
   const { isRecording, status } = useRecordingState();
   const { selectedDevices } = useConfig();
 
-  // Live text — recomputed on every new segment so the capture screen can show real-time
-  // recognition (drives a re-render as `transcripts` grows).
-  const transcriptText = useMemo(() => joinTranscripts(transcripts), [transcripts]);
-  const { confirmedText, partialText } = useMemo(() => {
-    const s = splitConfirmedPartial(transcripts);
-    return { confirmedText: s.confirmed, partialText: s.partial };
-  }, [transcripts]);
+  // VALUEOS WS1/WS2: capture the per-segment speaker `source` (Me/Other) from the raw
+  // transcript-update event, keyed by sequence_id — the upstream Transcript object drops it.
+  // Merged into the final segments in stop() so the enriched .txt + upload carry speaker labels.
+  const sourceMapRef = useRef<Map<number, string>>(new Map());
+  const unlistenRef = useRef<null | (() => void)>(null);
+  const startedAtRef = useRef<number>(0);
+
+  // VALUEOS: live-transcript model fed directly from the transcript-update event stream via
+  // reduceLive — INTERIM (is_partial) updates replace the single preview buffer, FINAL updates
+  // commit (deduped by sequence_id). We deliberately do NOT derive the live split from the
+  // upstream `transcripts` array: it dedupes+appends by sequence_id, so it cannot model a
+  // replacing partial stream. The upstream array remains the source for the final export (stop()).
+  const [live, setLive] = useState<LiveState>(emptyLive);
+
+  const confirmedText = useMemo(() => labelTranscript(live.committed), [live]);
+  const partialText = useMemo(() => live.interim?.text?.trim() ?? '', [live]);
+  // Full recognized text keyed to the upstream (final-only) array — kept for parity with the final
+  // export and existing callers. The live VIEW (confirmedText/partialText above) is driven by the
+  // streaming reducer instead, so preview words appear before a segment finalizes.
+  const transcriptText = useMemo(() => labelTranscript(transcripts), [transcripts]);
   const wordCount = useMemo(() => countWords(confirmedText), [confirmedText]);
 
   const start = useCallback(
@@ -87,7 +84,49 @@ export function useRecordingController(): RecordingController {
           'The transcription model isn’t ready yet. Finish the model download, then try again.',
         );
       }
+      // VALUEOS: colocate the upstream audio meeting folder with the configured transcript
+      // folder. Best-effort — a failure here must never block recording (the ValueOS .txt is
+      // written to the configured folder regardless, in finalizeCall).
+      try {
+        const folder =
+          typeof localStorage !== 'undefined' ? localStorage.getItem(TRANSCRIPT_FOLDER_KEY) : null;
+        await applyConfiguredSaveFolder(invoke, folder);
+      } catch {
+        /* keep the upstream default recordings folder if preferences can't be set */
+      }
       clearTranscripts();
+      setLive(emptyLive);
+      // Capture speaker source per segment (Me/Other) as the engine emits it.
+      sourceMapRef.current = new Map();
+      startedAtRef.current = Date.now();
+      try {
+        unlistenRef.current = await listen<{
+          sequence_id?: number;
+          source?: string;
+          text?: string;
+          is_partial?: boolean;
+          audio_start_time?: number;
+        }>('transcript-update', (event) => {
+          const p = event.payload;
+          if (!p) return;
+          // Only FINAL segments contribute speaker labels to the export (keyed by sequence_id).
+          if (typeof p.sequence_id === 'number' && p.source && !p.is_partial) {
+            sourceMapRef.current.set(p.sequence_id, p.source);
+          }
+          // Drive the live view: an interim (is_partial) replaces the preview, a final commits it.
+          setLive((prev) =>
+            reduceLive(prev, {
+              text: p.text ?? '',
+              is_partial: p.is_partial,
+              sequence_id: p.sequence_id,
+              source: p.source,
+              audio_start_time: p.audio_start_time,
+            }),
+          );
+        });
+      } catch {
+        /* no live stream without the event — the transcript still renders from the final export */
+      }
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice ?? null,
         selectedDevices?.systemDevice ?? null,
@@ -108,7 +147,19 @@ export function useRecordingController(): RecordingController {
     flushBuffer?.();
     await new Promise((r) => setTimeout(r, 300)); // let the flush's state update settle into the ref
     const finalSegments = transcriptsRef?.current ?? transcripts;
-    return joinTranscripts(finalSegments);
+    // Merge the captured speaker source (by sequence_id) onto each segment, then format the
+    // labelled + timestamped transcript used for BOTH the file and the upload.
+    const enriched: TranscriptSegment[] = finalSegments.map((t) => ({
+      text: t.text,
+      source: t.sequence_id != null ? sourceMapRef.current.get(t.sequence_id) : undefined,
+      audio_start_time: t.audio_start_time,
+      audio_end_time: t.audio_end_time,
+      is_partial: t.is_partial,
+      sequence_id: t.sequence_id,
+    }));
+    unlistenRef.current?.();
+    unlistenRef.current = null;
+    return formatTranscript(enriched, { startedAt: startedAtRef.current || undefined });
   }, [transcriptsRef, transcripts, flushBuffer]);
 
   const pause = useCallback(async () => {

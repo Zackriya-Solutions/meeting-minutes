@@ -9,13 +9,14 @@
 // CONSTRAINT (one ongoing transcript): there can be only ONE on-air call. While a call is
 // recording, "New transcript" is blocked with an explicit error telling the user to end the
 // current one first.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useValueOs } from '../context/ValueOsProvider';
 import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
 import type { TranscriptRecord } from '../history/transcriptHistory';
 import type { CaptureResult } from '../shell/flowTypes';
-import { finalizeCall } from '../upload/finalizeCall';
+import { enqueueCall, flushCallUploads } from '../upload/finalizeCall';
+import { BugReportDialog } from '../bugreport/BugReportDialog';
 import { AppShell, type MainRoute } from './AppShell';
 import { Dashboard } from './screens/Dashboard';
 import { Transcripts } from './screens/Transcripts';
@@ -38,7 +39,7 @@ const ONGOING_ERROR =
   'A transcript is already in progress. End it (End & upload) before starting a new one — only one call can be recorded at a time.';
 
 export function AppFlow() {
-  const { auth, config, digest, uploadQueue, history } = useValueOs();
+  const { auth, config, digest, uploadQueue, history, updater } = useValueOs();
   const [stage, setStage] = useState<Stage>('welcome');
   const [route, setRoute] = useState<MainRoute>('dashboard');
   const [entitled, setEntitled] = useState<EntitledTenant[]>([]);
@@ -50,6 +51,11 @@ export function AppFlow() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [guardError, setGuardError] = useState<string | null>(null);
+  const [fileWarning, setFileWarning] = useState<string | null>(null);
+  // Bug report is reachable from the sidebar "Report a bug" utility item (fast path, every
+  // screen) AND the Settings → Help card (fallback). The dialog is hoisted here so ONE instance
+  // serves both entry points.
+  const [bugOpen, setBugOpen] = useState(false);
 
   const refreshRecords = useCallback(async () => {
     setRecords(await history.list());
@@ -58,6 +64,34 @@ export function AppFlow() {
   useEffect(() => {
     if (stage === 'main') void refreshRecords();
   }, [stage, refreshRecords]);
+
+  // On reaching the app, retry any uploads left "pending" (e.g. an upload interrupted by a quit or
+  // network drop). Best-effort + background — never blocks the UI; reconciles record statuses.
+  const flushedRef = useRef(false);
+  useEffect(() => {
+    if (stage !== 'main' || flushedRef.current) return;
+    flushedRef.current = true;
+    void (async () => {
+      await flushCallUploads({ uploadQueue, history });
+      await refreshRecords();
+    })();
+  }, [stage, uploadQueue, history, refreshRecords]);
+
+  // WS4: on entering the app, register the install once (+ report update_success if we came
+  // up on a newer version than last run), then heartbeat on a long interval. Best-effort —
+  // telemetry never blocks the user, and this touches no user data.
+  const registeredRef = useRef(false);
+  useEffect(() => {
+    if (stage !== 'main') return;
+    const tenantId = entitled[0]?.tenant.id;
+    if (!tenantId) return;
+    if (!registeredRef.current) {
+      registeredRef.current = true;
+      void updater.registerAndReconcile(tenantId);
+    }
+    const id = setInterval(() => void updater.heartbeat(tenantId), 6 * 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [stage, entitled, updater]);
 
   const contactSales = () => {
     void invoke('open_external_url', { url: VALUEOS_PURCHASE_URL }).catch(() => {});
@@ -131,25 +165,50 @@ export function AppFlow() {
     setRoute('recording');
   };
 
-  // End & upload — write file, generate digest, composite /calls upload, record history.
+  // End & upload — DECOUPLED from the network so the UI never hangs on the upload:
+  //   1) fast: write file + digest + enqueue + record the call as "pending", then return to the
+  //      transcript list immediately (it shows an "uploading" status);
+  //   2) background: flush the queue and reconcile the record's status — retrying, not blocking.
   const endCall = async (transcriptText: string) => {
     const call = activeCall;
     if (!call) return;
     const capture: CaptureResult = { ...call.meta, transcriptText };
-    const outcome = await finalizeCall({ digest, config, uploadQueue, history }, capture);
+    const { record, fileSaved, fileError } = await enqueueCall(
+      { digest, config, uploadQueue, history },
+      capture,
+    );
     await refreshRecords();
     setActiveCall(null);
     setCallStarted(false);
-    setSelectedId(outcome.record.id);
-    if (outcome.status === 'reauth') {
-      setStage('login');
-      return;
-    }
-    if (outcome.status === 'deEntitled') {
-      reGate();
-      return;
-    }
+    setSelectedId(record.id);
+    // Folder problem at save time: nothing is lost (queued for upload with the text retained on
+    // the record), but tell the user and point them to Settings to re-select a folder.
+    setFileWarning(
+      fileSaved
+        ? null
+        : `Your transcript is safe (queued for upload with the full text retained), but the local copy couldn’t be written: ${fileError} Choose a writable folder in Settings — the next capture will save there.`,
+    );
     setRoute('transcripts');
+
+    // Background upload — does not block the UI. Reconcile the record and surface reauth / lost access.
+    void (async () => {
+      const status = await flushCallUploads({ uploadQueue, history });
+      await refreshRecords();
+      if (status === 'reauth') setStage('login');
+      else if (status === 'deEntitled') reGate();
+    })();
+  };
+
+  // Discard the in-progress call: the native capture is already stopped by the Recording screen.
+  // Drop it WITHOUT finalizing/uploading and WITHOUT a history entry — the user explicitly
+  // confirmed they want it deleted — and return to the dashboard.
+  const discardCall = () => {
+    setActiveCall(null);
+    setCallStarted(false);
+    setSelectedId(null);
+    setGuardError(null);
+    setFileWarning(null);
+    setRoute('dashboard');
   };
 
   const openTranscript = (id: string) => {
@@ -157,8 +216,25 @@ export function AppFlow() {
     setRoute('transcripts');
   };
 
+  // Delete a transcript from LOCAL history + its stored file. Never touches the ValueOS cloud
+  // copy (an already-uploaded transcript stays in ValueOS).
+  const deleteTranscript = async (id: string) => {
+    const rec = records.find((r) => r.id === id);
+    await history.remove(id);
+    if (rec?.path) {
+      try {
+        await config.deleteTranscriptFile(rec.path);
+      } catch {
+        /* file already gone / unwritable — the history entry is removed regardless */
+      }
+    }
+    await refreshRecords();
+    setSelectedId((cur) => (cur === id ? null : cur));
+  };
+
   const navigate = (r: MainRoute) => {
     setGuardError(null);
+    setFileWarning(null);
     setRoute(r);
   };
 
@@ -172,7 +248,8 @@ export function AppFlow() {
 
   // ── main app (shell) ──────────────────────────────────────────────────────
   return (
-    <AppShell route={route} onNavigate={navigate}>
+    <>
+    <AppShell route={route} onNavigate={navigate} onReportBug={() => setBugOpen(true)}>
       {guardError && (
         <div
           data-testid="valueos-guard-error"
@@ -204,6 +281,31 @@ export function AppFlow() {
         </div>
       )}
 
+      {fileWarning && (
+        <div
+          data-testid="valueos-file-warning"
+          role="alert"
+          style={{
+            margin: '20px 32px 0',
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(206,54,68,.06)',
+            color: 'var(--va-signal-red)',
+            border: '1px solid rgba(206,54,68,.22)',
+            fontSize: 14,
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            alignItems: 'center',
+          }}
+        >
+          <span>{fileWarning}</span>
+          <button className="va-btn va-btn-danger-outline va-btn-sm" onClick={() => navigate('settings')}>
+            Open Settings
+          </button>
+        </div>
+      )}
+
       {route === 'dashboard' && (
         <Dashboard
           records={records}
@@ -222,10 +324,13 @@ export function AppFlow() {
           onSelect={setSelectedId}
           onNew={requestNew}
           onOpenRecording={() => setRoute('recording')}
+          onDelete={deleteTranscript}
         />
       )}
 
-      {route === 'settings' && <Settings onLogout={logout} />}
+      {route === 'settings' && (
+        <Settings onLogout={logout} tenantId={entitled[0]?.tenant.id} onReportBug={() => setBugOpen(true)} />
+      )}
 
       {route === 'recording' &&
         (activeCall ? (
@@ -236,6 +341,7 @@ export function AppFlow() {
             hasStarted={callStarted}
             onStarted={() => setCallStarted(true)}
             onEnd={endCall}
+            onDiscard={discardCall}
           />
         ) : (
           <NoActiveCall onNew={requestNew} />
@@ -253,6 +359,8 @@ export function AppFlow() {
         />
       )}
     </AppShell>
+    {bugOpen && <BugReportDialog onClose={() => setBugOpen(false)} tenantId={entitled[0]?.tenant.id} />}
+    </>
   );
 }
 

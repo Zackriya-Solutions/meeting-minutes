@@ -1,12 +1,17 @@
 // VALUEOS: Types for the ValueOS Agent API (/api/agent/v1) — source of truth is the
 // pasted contract "ValueOS Agent API (Part 28)". Kept in OUR namespace; no upstream types.
 
-/** The four (and only four) OAuth2 scopes the agent client is granted. */
+/** The OAuth2 scopes the agent client requests (VALUEOS_AGENT_API.md §1): standard `openid`
+ *  plus the six ValueOS agent scopes. The token can never exceed this set. */
 export const VALUEOS_SCOPES = [
+  'openid',
   'valueos/read:tenants',
   'valueos/read:leads',
   'valueos/read:opportunities',
   'valueos/write:transcripts',
+  'valueos/read:releases',
+  'valueos/write:telemetry',
+  'valueos/write:bug-reports',
 ] as const;
 export type ValueOsScope = (typeof VALUEOS_SCOPES)[number];
 
@@ -113,26 +118,29 @@ export interface UploadRequest {
   title?: string;
 }
 
-/** The transcript sub-object of the composite POST /calls request. */
+/** The transcript sub-object of POST /calls — a REQUIRED NESTED object (VALUEOS_AGENT_API.md
+ *  §4 explicitly: "do NOT flatten these"). raw_content + digest are required; digest is
+ *  generated LOCALLY by the agent (ValueOS does not generate it). */
 export interface CallTranscript {
-  raw_content: string; // the transcript text (required)
-  digest: string; // the high-level recap — generated LOCALLY by the agent (required)
-  title?: string; // defaults to the call name
+  raw_content: string; // required — the transcript text
+  digest: string; // required — the high-level recap (agent-generated)
   digest_source?: string; // default 'ai_generated'
+  content_type?: TranscriptContentType; // must be in the allowed set (else 422)
   file_name?: string; // default transcript.txt
-  content_type?: TranscriptContentType;
+  title?: string; // defaults to name/file_name
 }
 
-/** Body for POST /api/agent/v1/tenants/{tenantId}/calls — creates a call activity AND
- *  attaches its transcript+digest in one atomic op. The link is in the body: EXACTLY ONE
- *  of lead_id / opportunity_id (XOR). */
+/** Body for POST /api/agent/v1/tenants/{tenantId}/calls (VALUEOS_AGENT_API.md §4) — creates a
+ *  call activity AND attaches its transcript+digest in one atomic op. The transcript is a
+ *  NESTED object (do NOT flatten). The link is EXACTLY ONE of lead_id / opportunity_id (XOR;
+ *  both or neither → 422 {fields.link}). */
 export interface CreateCallRequest {
   name: string; // required — the call activity's title (user-chosen at capture time)
   lead_id?: string; // XOR with opportunity_id
   opportunity_id?: string;
-  transcript: CallTranscript;
+  transcript: CallTranscript; // required, nested
+  occurred_at?: string; // optional (must start yyyy-mm-dd, else ignored)
   notes?: string; // optional → stored on the call activity
-  occurred_at?: string; // optional (default: now)
   idempotency_key?: string; // optional here; if sent, reuse the SAME key on every retry
 }
 
@@ -142,6 +150,33 @@ export interface UploadResult {
   transcript_id: string;
   file_id: string | null;
   s3_stored?: boolean;
+}
+
+/** GET /tenants/{tid}/updates/check (VALUEOS_AGENT_API.md §5) — NOTIFY-ONLY (never
+ *  auto-install). `download_url` is a short-lived (~5-min) presigned GET, null when no update.
+ *  No build → update_available:false, latest:null. */
+export interface UpdateCheckResult {
+  update_available: boolean;
+  current?: string | null;
+  latest: string | null;
+  platform?: string | null;
+  download_url?: string | null;
+  expires_in?: number | null;
+  /** Optional integrity checksum the agent verifies before applying, when the server sends it. */
+  sha256?: string | null;
+  notes?: string | null;
+}
+
+/** POST /tenants/{tid}/telemetry (VALUEOS_AGENT_API.md §6) — event_type lifecycle. */
+export type TelemetryEventType = 'install' | 'check' | 'update_success' | 'update_failure';
+export interface TelemetryEvent {
+  install_id: string; // agent-generated, persisted locally, stable forever
+  platform: string;
+  current_version: string;
+  event_type: TelemetryEventType;
+  from_version?: string;
+  to_version?: string;
+  detail?: string;
 }
 
 /** Structured error mirroring the contract's error envelope + codes. */

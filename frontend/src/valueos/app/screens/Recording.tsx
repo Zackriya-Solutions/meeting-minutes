@@ -5,6 +5,8 @@
 // Pause (real pause_recording), and End & upload (stop → write file → composite /calls upload).
 import React, { useEffect, useRef, useState } from 'react';
 import { useRecordingController } from '@/valueos/capture/useRecordingController';
+import { useMicLevel } from '@/valueos/capture/useMicLevel';
+import { recognitionActivity, type RecognitionActivity } from '@/valueos/capture/liveTranscript';
 import type { StartCallMeta } from '../types';
 import { Avatar, StatusPill } from '../parts';
 import { IcMic } from '../icons';
@@ -28,6 +30,7 @@ export function Recording({
   hasStarted,
   onStarted,
   onEnd,
+  onDiscard,
 }: {
   meta: StartCallMeta;
   startedAt: number;
@@ -36,14 +39,34 @@ export function Recording({
   hasStarted: boolean;
   onStarted: () => void;
   onEnd: (transcriptText: string) => Promise<void>;
+  /** Stop the capture and DISCARD it — no upload, no history entry (user confirmed). */
+  onDiscard: () => void;
 }) {
   const rec = useRecordingController();
-  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'error'>(hasStarted ? 'live' : 'starting');
+  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'discarding' | 'error'>(
+    hasStarted ? 'live' : 'starting',
+  );
   const [paused, setPaused] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const liveRef = useRef<HTMLDivElement>(null);
   const startedOnce = useRef(false);
+
+  // Live signals (fallback path — no true interim stream): a REAL VU meter from the webview's
+  // own mic + an activity indicator + "seconds since the last recognized line".
+  const micLevel = useMicLevel(phase === 'live' && !paused);
+  const activity = recognitionActivity({
+    recording: phase === 'live',
+    paused,
+    hasInterim: !!rec.partialText,
+    speaking: micLevel > 0.08,
+  });
+  const lastLineRef = useRef(startedAt);
+  useEffect(() => {
+    lastLineRef.current = Date.now(); // a new committed line arrived → reset the "since last line" timer
+  }, [rec.confirmedText]);
+  const sinceLineSec = Math.max(0, Math.round((now - lastLineRef.current) / 1000));
 
   // Start the engine + capture once, on mount — but only if this call hasn't started yet
   // (returning to an in-progress call must not restart it).
@@ -63,9 +86,9 @@ export function Recording({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 1s timer.
+  // 1s timer (drives the running clock + the "seconds since last line" signal).
   useEffect(() => {
-    if (phase !== 'live') return;
+    if (phase !== 'live' && phase !== 'starting') return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [phase]);
@@ -98,6 +121,20 @@ export function Recording({
       // onEnd navigates away (this screen unmounts); nothing more to do.
     } catch (e) {
       setError((e as Error)?.message ?? 'Could not finish the upload.');
+      setPhase('error');
+    }
+  };
+
+  // Discard: stop the capture and drop the call WITHOUT uploading or recording it. Guarded by the
+  // confirmation dialog below — this is destructive and cannot be undone.
+  const discard = async () => {
+    setConfirmDiscard(false);
+    setPhase('discarding');
+    try {
+      await rec.stop(); // stop native capture; the returned text is intentionally discarded
+      onDiscard(); // AppFlow drops the in-progress call (no upload, no history) and navigates away
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Could not stop the recording.');
       setPhase('error');
     }
   };
@@ -145,26 +182,72 @@ export function Recording({
         className="va-card"
         style={{ marginTop: 18, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 16 }}
       >
-        <Waveform paused={paused || phase !== 'live'} />
+        <VuMeter level={micLevel} paused={paused || phase !== 'live'} />
         <span className="va-muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }} data-testid="valueos-recording-words">
           <strong style={{ color: 'var(--va-near-black)' }}>{rec.wordCount.toLocaleString()}</strong> words
         </span>
         <span style={{ flex: 1 }} />
+        <button
+          className="va-btn va-btn-danger-outline va-btn-sm"
+          data-testid="valueos-recording-discard"
+          onClick={() => setConfirmDiscard(true)}
+          disabled={phase === 'ending' || phase === 'discarding'}
+        >
+          {phase === 'discarding' ? 'Discarding…' : 'Discard'}
+        </button>
         <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-recording-pause" onClick={togglePause} disabled={phase !== 'live'}>
           {paused ? 'Resume' : 'Pause'}
         </button>
-        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending'}>
+        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending' || phase === 'discarding'}>
           {phase === 'ending' ? 'Uploading…' : 'End & upload'}
         </button>
       </div>
 
       {/* live transcript */}
-      <div className="va-ovl" style={{ margin: '26px 0 4px' }}>Live transcript</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '26px 0 4px', flexWrap: 'wrap' }}>
+        <div className="va-ovl">Live transcript</div>
+        <ActivityChip activity={activity} secondsSinceLine={sinceLineSec} />
+      </div>
       <p className="va-muted" style={{ fontSize: 13, margin: '0 0 12px' }}>
-        Faded, italic text is still being confirmed.
+        Recognized speech appears as each phrase is confirmed. Faded, italic text is still being
+        confirmed. Speaker labels (Me / Other) in the saved transcript are best-effort.
       </p>
 
       <div ref={liveRef} className="va-scroll" data-testid="valueos-recording-live" style={{ maxHeight: 360, overflowY: 'auto' }}>
+        {confirmDiscard && (
+          <div
+            className="va-scrim va-root"
+            data-testid="valueos-discard-confirm"
+            onMouseDown={(e) => e.target === e.currentTarget && setConfirmDiscard(false)}
+          >
+            <div className="va-modal" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
+                Discard this transcript?
+              </h2>
+              <p className="va-body" style={{ margin: '0 0 18px' }}>
+                This stops the recording and permanently deletes the transcript. It will{' '}
+                <strong>not</strong> be uploaded to ValueOS, and this can’t be undone.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  className="va-btn va-btn-ghost-light va-btn-sm"
+                  data-testid="valueos-discard-cancel"
+                  onClick={() => setConfirmDiscard(false)}
+                >
+                  Keep recording
+                </button>
+                <button
+                  className="va-btn va-btn-danger va-btn-sm"
+                  data-testid="valueos-discard-confirm-btn"
+                  onClick={discard}
+                >
+                  Discard transcript
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {phase === 'starting' && !rec.confirmedText && !rec.partialText ? (
           <div className="va-muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <IcMic size={16} /> Listening… recognized speech will appear here in real time.
@@ -208,6 +291,56 @@ export function Recording({
         )}
       </div>
     </div>
+  );
+}
+
+/** Real VU meter driven by the mic level (0..1). level < 0 → mic unavailable, fall back to the
+ *  animated waveform so there's always a live signal. */
+function VuMeter({ level, paused }: { level: number; paused: boolean }) {
+  if (level < 0) return <Waveform paused={paused} />;
+  const bars = 28;
+  return (
+    <div aria-hidden="true" data-testid="valueos-recording-vu" style={{ display: 'flex', alignItems: 'center', gap: 3, height: 30 }}>
+      {Array.from({ length: bars }).map((_, i) => {
+        const center = 1 - Math.abs(i - (bars - 1) / 2) / ((bars - 1) / 2); // taller in the middle
+        const h = paused ? 0.12 : Math.max(0.08, Math.min(1, level * (0.55 + center * 0.9)));
+        return (
+          <span
+            key={i}
+            style={{
+              width: 3,
+              height: `${h * 100}%`,
+              borderRadius: 2,
+              background: paused ? 'var(--va-gray-200)' : 'var(--va-blue)',
+              transition: 'height 80ms linear',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** The always-on live signal: Listening / Recognizing (+ seconds since the last committed line). */
+function ActivityChip({ activity, secondsSinceLine }: { activity: RecognitionActivity; secondsSinceLine: number }) {
+  if (activity === 'idle') return null;
+  const label = activity === 'recognizing' ? 'Recognizing…' : activity === 'paused' ? 'Paused' : 'Listening…';
+  const color = activity === 'paused' ? 'var(--va-gray-400)' : activity === 'recognizing' ? 'var(--va-blue)' : 'var(--va-gray-600)';
+  return (
+    <span
+      data-testid="valueos-recording-activity"
+      data-activity={activity}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, color }}
+    >
+      <span
+        className="va-dot"
+        style={{ background: color, animation: activity === 'paused' ? 'none' : 'vaPulse 1.2s var(--ease) infinite' }}
+      />
+      {label}
+      {activity !== 'paused' && secondsSinceLine >= 2 && (
+        <span className="va-muted" style={{ fontWeight: 500 }}>· {secondsSinceLine}s since last line</span>
+      )}
+    </span>
   );
 }
 

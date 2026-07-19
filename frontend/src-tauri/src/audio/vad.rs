@@ -109,6 +109,18 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
+    /// VALUEOS: the 16 kHz audio accumulated for the CURRENTLY in-progress (not-yet-closed) speech
+    /// segment, or `None` when not currently in speech. Read-only snapshot (clone) used to produce
+    /// streaming interim ("preview") transcription hypotheses between finalizations — it never
+    /// mutates VAD state, so it cannot change what segments are ultimately emitted.
+    pub fn valueos_in_progress_speech(&self) -> Option<Vec<f32>> {
+        if self.in_speech && !self.current_speech.is_empty() {
+            Some(self.current_speech.clone())
+        } else {
+            None
+        }
+    }
+
     /// Improved resampling from input sample rate to 16kHz with anti-aliasing
     /// Uses linear interpolation and basic low-pass filtering for better quality
     fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {

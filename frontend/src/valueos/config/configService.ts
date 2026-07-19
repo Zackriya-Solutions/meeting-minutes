@@ -15,6 +15,9 @@ export interface ConfigService {
   validateWritable(path: string): Promise<boolean>;
   /** Write a transcript file under the configured folder; returns the full path. */
   writeTranscriptFile(fileName: string, content: string): Promise<string>;
+  /** Delete a local transcript file by its full path (best-effort; a missing file is not an
+   *  error). Only touches the local file — never the ValueOS cloud copy. */
+  deleteTranscriptFile(path: string): Promise<void>;
 }
 
 export interface MockConfigOptions {
@@ -42,6 +45,9 @@ export function createMockConfigService(opts: MockConfigOptions = {}): ConfigSer
     async writeTranscriptFile(fileName: string, _content: string) {
       // MOCK: no real file write; returns the intended path. Phase 3 writes via Tauri fs.
       return `${folder ?? '/mock'}/${fileName}`;
+    },
+    async deleteTranscriptFile(_path: string) {
+      // MOCK: no real file to delete.
     },
   };
 }
