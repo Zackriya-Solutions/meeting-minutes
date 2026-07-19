@@ -9,6 +9,8 @@
 // INTERIM IS DISPLAY-ONLY. Only committed (final) segments flow into the enriched export/upload
 // (see transcriptFormat.ts, which drops is_partial segments).
 
+import { sourceToLabel } from './speakerLabels';
+
 export interface LiveSegment {
   text: string;
   is_partial?: boolean;
@@ -59,6 +61,50 @@ export function deriveLive(segments: LiveSegment[]): LiveState {
     return { committed: segments.slice(0, -1).filter(nonEmpty), interim: nonEmpty(last) ? last : null };
   }
   return { committed: segments.filter(nonEmpty), interim: null };
+}
+
+/** One rendered chat line in the live view. `me` = the local user (label "You", blue, left side);
+ *  `other` = someone else, e.g. system/remote audio (label "Other", grey, right side). */
+export interface LiveLine {
+  role: 'me' | 'other';
+  label: string;
+  text: string;
+  /** true for the in-progress (interim) hypothesis — rendered faded/italic. */
+  partial?: boolean;
+}
+
+// Only an explicit "Other" speaker goes to the right; everything else (incl. no speaker signal)
+// stays as the local user ("You"), so an un-attributed segment never renders as a stranger.
+function roleOf(source?: string | null): 'me' | 'other' {
+  return sourceToLabel(source) === 'Other' ? 'other' : 'me';
+}
+
+/**
+ * Turn the live state into speaker-aligned chat lines. Consecutive same-speaker COMMITTED segments
+ * merge into one bubble (clean chat look); the interim hypothesis, if any, is ALWAYS its own
+ * trailing partial line (never merged, since it will be replaced). Empty text is dropped.
+ */
+export function toLiveLines(state: LiveState): LiveLine[] {
+  const lines: LiveLine[] = [];
+  for (const seg of state.committed) {
+    const text = (seg.text ?? '').trim();
+    if (!text) continue;
+    const role = roleOf(seg.source);
+    const last = lines[lines.length - 1];
+    if (last && last.role === role && !last.partial) {
+      last.text += ' ' + text;
+    } else {
+      lines.push({ role, label: role === 'me' ? 'You' : 'Other', text, partial: false });
+    }
+  }
+  if (state.interim) {
+    const text = (state.interim.text ?? '').trim();
+    if (text) {
+      const role = roleOf(state.interim.source);
+      lines.push({ role, label: role === 'me' ? 'You' : 'Other', text, partial: true });
+    }
+  }
+  return lines;
 }
 
 export type RecognitionActivity = 'idle' | 'listening' | 'recognizing' | 'paused';

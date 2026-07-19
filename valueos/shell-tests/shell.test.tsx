@@ -32,6 +32,7 @@ vi.mock('@/contexts/OnboardingContext', () => ({
 const rec = vi.hoisted(() => ({
   confirmedText: '',
   partialText: '',
+  lines: [] as { role: 'me' | 'other'; label: string; text: string; partial?: boolean }[],
   start: vi.fn(() => Promise.resolve()),
   stop: vi.fn(() => Promise.resolve('We discussed pricing and agreed next steps.')),
   pause: vi.fn(() => Promise.resolve()),
@@ -44,6 +45,7 @@ vi.mock('@/valueos/capture/useRecordingController', () => ({
     transcriptText: [rec.confirmedText, rec.partialText].filter(Boolean).join(' '),
     confirmedText: rec.confirmedText,
     partialText: rec.partialText,
+    lines: rec.lines,
     wordCount: rec.confirmedText ? rec.confirmedText.trim().split(/\s+/).length : 0,
     start: rec.start,
     stop: rec.stop,
@@ -122,6 +124,7 @@ beforeEach(() => {
   rec.resume.mockClear();
   rec.confirmedText = '';
   rec.partialText = '';
+  rec.lines = [];
 });
 
 describe('ValueOS redesigned flow', () => {
@@ -236,9 +239,12 @@ describe('ValueOS redesigned flow', () => {
     expect(cont().disabled).toBe(false);
   });
 
-  it('renders confirmed vs. tentative words live while recording', async () => {
-    rec.confirmedText = 'And the piece that would really move the needle for us is getting finance the numbers';
-    rec.partialText = 'earlier in the cycle, before the deal even reaches';
+  it('renders speaker-aligned chat lines (You vs Other) with a faded interim', async () => {
+    // You (me) = blue/left; Other (someone else) = grey/right; interim = faded/italic.
+    rec.lines = [
+      { role: 'me', label: 'You', text: 'And the piece that would really move the needle', partial: false },
+      { role: 'other', label: 'Other', text: 'earlier in the cycle, before the deal even reaches', partial: true },
+    ];
     const { services } = makeServices('active');
     render(<ValueOsShell services={services} />);
     await loginToStorage();
@@ -247,12 +253,14 @@ describe('ValueOS redesigned flow', () => {
     fireEvent.click(screen.getByTestId('valueos-wizard-start'));
     await screen.findByTestId('valueos-recording');
     expect(rec.start).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('valueos-recording-confirmed')).toHaveTextContent('move the needle');
-    const partial = screen.getByTestId('valueos-recording-partial');
-    expect(partial).toHaveTextContent('before the deal even reaches');
-    expect(partial).toHaveStyle({ fontStyle: 'italic' });
-    // live activity indicator is present during capture (fallback signal); an in-flight interim
-    // makes it "recognizing".
+
+    const me = screen.getByTestId('valueos-line-me');
+    expect(me).toHaveTextContent('really move the needle');
+    const other = screen.getByTestId('valueos-line-other');
+    expect(other).toHaveTextContent('before the deal even reaches');
+    expect(other).toHaveStyle({ fontStyle: 'italic' }); // interim
+    expect(other).toHaveAttribute('data-partial', 'true');
+    // An in-flight interim makes the activity indicator "recognizing".
     const activity = await screen.findByTestId('valueos-recording-activity');
     expect(activity).toHaveAttribute('data-activity', 'recognizing');
   });
@@ -309,6 +317,23 @@ describe('ValueOS redesigned flow', () => {
     // and it left NO transcript in the list
     fireEvent.click(screen.getByTestId('valueos-nav-transcripts'));
     expect(screen.getByTestId('valueos-transcripts')).not.toHaveTextContent('Ada Lovelace');
+  });
+
+  it('discard is NOT blocked by a hung native stop — leaves the recording screen anyway', async () => {
+    const { services } = makeServices('active');
+    // Simulate the native stop hanging (never resolves) — discard must not get stuck on it.
+    rec.stop.mockImplementationOnce(() => new Promise<string>(() => {}));
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    await openWizardToRecord();
+    fireEvent.click(screen.getByTestId('valueos-wizard-start'));
+    await screen.findByTestId('valueos-recording');
+    fireEvent.click(screen.getByTestId('valueos-recording-discard'));
+    fireEvent.click(await screen.findByTestId('valueos-discard-confirm-btn'));
+    // Even though stop() never resolves, we still return to the dashboard (no stuck "Discarding…").
+    await screen.findByTestId('valueos-dashboard');
+    expect(rec.stop).toHaveBeenCalled();
   });
 
   it('reuses the user-chosen call name when creating the call', async () => {

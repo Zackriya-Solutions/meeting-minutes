@@ -15,7 +15,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { applyConfiguredSaveFolder } from './recordingLocation';
 import { labelTranscript } from './speakerLabels';
-import { reduceLive, emptyLive, type LiveState } from './liveTranscript';
+import { reduceLive, emptyLive, toLiveLines, type LiveState, type LiveLine } from './liveTranscript';
 import { formatTranscript, type TranscriptSegment } from './transcriptFormat';
 import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
@@ -29,6 +29,9 @@ export interface RecordingController {
   /** The current hypothesis tail (last partial segment) — the faded/italic words. '' when
    *  the recognizer has nothing tentative in flight. */
   partialText: string;
+  /** Speaker-aligned chat lines for the live view (You/left/blue vs Other/right/grey), including
+   *  the trailing interim as a partial line. */
+  lines: LiveLine[];
   /** Running word count over the confirmed text (shown on the recording control bar). */
   wordCount: number;
   start: (meetingName: string) => Promise<void>;
@@ -66,6 +69,7 @@ export function useRecordingController(): RecordingController {
 
   const confirmedText = useMemo(() => labelTranscript(live.committed), [live]);
   const partialText = useMemo(() => live.interim?.text?.trim() ?? '', [live]);
+  const lines = useMemo(() => toLiveLines(live), [live]);
   // Full recognized text keyed to the upstream (final-only) array — kept for parity with the final
   // export and existing callers. The live VIEW (confirmedText/partialText above) is driven by the
   // streaming reducer instead, so preview words appear before a segment finalizes.
@@ -139,7 +143,13 @@ export function useRecordingController(): RecordingController {
   const stop = useCallback(async (): Promise<string> => {
     const dir = await appDataDir();
     const savePath = await join(dir, `valueos-recording-${Date.now()}.wav`);
-    await recordingService.stopRecording(savePath);
+    // The native stop can occasionally be slow or hang; never let it strand the caller (End &
+    // upload would sit on "Uploading…"). Bound it, then proceed to flush + read whatever was
+    // transcribed so far — nothing already recognized is lost (it's in the upstream buffer).
+    await Promise.race([
+      recordingService.stopRecording(savePath).catch(() => {}),
+      new Promise((r) => setTimeout(r, 6000)),
+    ]);
     // Let the final in-flight segments arrive and flush, then read the AUTHORITATIVE ref
     // (not the closed-over `transcripts`, which is stale at call time). The ref is kept in
     // sync with the newest segments by TranscriptContext.
@@ -169,5 +179,5 @@ export function useRecordingController(): RecordingController {
     await recordingService.resumeRecording();
   }, []);
 
-  return { isRecording, status: String(status), transcriptText, confirmedText, partialText, wordCount, start, stop, pause, resume };
+  return { isRecording, status: String(status), transcriptText, confirmedText, partialText, lines, wordCount, start, stop, pause, resume };
 }

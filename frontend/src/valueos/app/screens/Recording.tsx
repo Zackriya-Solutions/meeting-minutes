@@ -6,10 +6,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRecordingController } from '@/valueos/capture/useRecordingController';
 import { useMicLevel } from '@/valueos/capture/useMicLevel';
-import { recognitionActivity, type RecognitionActivity } from '@/valueos/capture/liveTranscript';
+import { recognitionActivity, type RecognitionActivity, type LiveLine } from '@/valueos/capture/liveTranscript';
 import type { StartCallMeta } from '../types';
-import { Avatar, StatusPill } from '../parts';
-import { IcMic } from '../icons';
+import { StatusPill } from '../parts';
+import { IcMic, IcTrash } from '../icons';
 
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -43,7 +43,7 @@ export function Recording({
   onDiscard: () => void;
 }) {
   const rec = useRecordingController();
-  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'discarding' | 'error'>(
+  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'error'>(
     hasStarted ? 'live' : 'starting',
   );
   const [paused, setPaused] = useState(false);
@@ -59,7 +59,7 @@ export function Recording({
   const activity = recognitionActivity({
     recording: phase === 'live',
     paused,
-    hasInterim: !!rec.partialText,
+    hasInterim: rec.lines.some((l) => l.partial),
     speaking: micLevel > 0.08,
   });
   const lastLineRef = useRef(startedAt);
@@ -125,18 +125,14 @@ export function Recording({
     }
   };
 
-  // Discard: stop the capture and drop the call WITHOUT uploading or recording it. Guarded by the
-  // confirmation dialog below — this is destructive and cannot be undone.
-  const discard = async () => {
+  // Discard: drop the call WITHOUT uploading or recording it. Guarded by the confirmation dialog.
+  // We DON'T await stop() — a discard throws the recording away, so its result is irrelevant, and
+  // blocking on the native stop (which can be slow or hang) would strand the user on "Discarding…".
+  // Fire the stop best-effort and leave IMMEDIATELY.
+  const discard = () => {
     setConfirmDiscard(false);
-    setPhase('discarding');
-    try {
-      await rec.stop(); // stop native capture; the returned text is intentionally discarded
-      onDiscard(); // AppFlow drops the in-progress call (no upload, no history) and navigates away
-    } catch (e) {
-      setError((e as Error)?.message ?? 'Could not stop the recording.');
-      setPhase('error');
-    }
+    void rec.stop().catch(() => {}); // best-effort native stop; result + errors intentionally ignored
+    onDiscard(); // AppFlow drops the in-progress call (no upload, no history) and navigates away
   };
 
   const elapsedMs = now - startedAt;
@@ -191,14 +187,14 @@ export function Recording({
           className="va-btn va-btn-danger-outline va-btn-sm"
           data-testid="valueos-recording-discard"
           onClick={() => setConfirmDiscard(true)}
-          disabled={phase === 'ending' || phase === 'discarding'}
+          disabled={phase === 'ending'}
         >
-          {phase === 'discarding' ? 'Discarding…' : 'Discard'}
+          Discard
         </button>
         <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-recording-pause" onClick={togglePause} disabled={phase !== 'live'}>
           {paused ? 'Resume' : 'Pause'}
         </button>
-        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending' || phase === 'discarding'}>
+        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending'}>
           {phase === 'ending' ? 'Uploading…' : 'End & upload'}
         </button>
       </div>
@@ -208,86 +204,148 @@ export function Recording({
         <div className="va-ovl">Live transcript</div>
         <ActivityChip activity={activity} secondsSinceLine={sinceLineSec} />
       </div>
-      <p className="va-muted" style={{ fontSize: 13, margin: '0 0 12px' }}>
-        Recognized speech appears as each phrase is confirmed. Faded, italic text is still being
-        confirmed. Speaker labels (Me / Other) in the saved transcript are best-effort.
+      <p className="va-muted" style={{ fontSize: 13, margin: '0 0 16px' }}>
+        Live, on-device. Faded text is still being confirmed; speaker labels are best-effort.
       </p>
 
-      <div ref={liveRef} className="va-scroll" data-testid="valueos-recording-live" style={{ maxHeight: 360, overflowY: 'auto' }}>
-        {confirmDiscard && (
-          <div
-            className="va-scrim va-root"
-            data-testid="valueos-discard-confirm"
-            onMouseDown={(e) => e.target === e.currentTarget && setConfirmDiscard(false)}
-          >
-            <div className="va-modal" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
-                Discard this transcript?
-              </h2>
-              <p className="va-body" style={{ margin: '0 0 18px' }}>
-                This stops the recording and permanently deletes the transcript. It will{' '}
-                <strong>not</strong> be uploaded to ValueOS, and this can’t be undone.
-              </p>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button
-                  className="va-btn va-btn-ghost-light va-btn-sm"
-                  data-testid="valueos-discard-cancel"
-                  onClick={() => setConfirmDiscard(false)}
-                >
-                  Keep recording
-                </button>
-                <button
-                  className="va-btn va-btn-danger va-btn-sm"
-                  data-testid="valueos-discard-confirm-btn"
-                  onClick={discard}
-                >
-                  Discard transcript
-                </button>
-              </div>
+      {confirmDiscard && (
+        <div
+          className="va-scrim va-root"
+          data-testid="valueos-discard-confirm"
+          onMouseDown={(e) => e.target === e.currentTarget && setConfirmDiscard(false)}
+        >
+          <div className="va-modal" role="dialog" aria-modal="true" style={{ maxWidth: 500, padding: 30 }}>
+            <div
+              aria-hidden="true"
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 13,
+                background: 'rgba(206,54,68,.10)',
+                color: 'var(--va-signal-red)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+              }}
+            >
+              <IcTrash size={23} />
+            </div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 23, margin: '0 0 12px' }}>
+              Discard this transcript?
+            </h2>
+            <p className="va-body" style={{ margin: '0 0 28px', fontSize: 15.5, lineHeight: 1.65 }}>
+              This stops the recording and permanently deletes the transcript. It will{' '}
+              <strong>not</strong> be uploaded to ValueOS, and this can’t be undone.
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                className="va-btn va-btn-ghost-light"
+                data-testid="valueos-discard-cancel"
+                onClick={() => setConfirmDiscard(false)}
+                style={{ flex: 1 }}
+              >
+                Keep recording
+              </button>
+              <button
+                className="va-btn va-btn-danger"
+                data-testid="valueos-discard-confirm-btn"
+                onClick={discard}
+                style={{ flex: 1 }}
+              >
+                Discard transcript
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {phase === 'starting' && !rec.confirmedText && !rec.partialText ? (
+      <div ref={liveRef} className="va-scroll" data-testid="valueos-recording-live" style={{ maxHeight: 400, overflowY: 'auto', paddingRight: 4 }}>
+        {rec.lines.length === 0 ? (
           <div className="va-muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <IcMic size={16} /> Listening… recognized speech will appear here in real time.
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Avatar name="You" you />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontWeight: 700, color: 'var(--va-blue)' }}>You</span>
-                <span className="va-muted" style={{ fontSize: 12 }}>{fmt(elapsedMs / 1000)}</span>
-              </div>
-              <p className="va-body" style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--va-gray-800)' }}>
-                <span data-testid="valueos-recording-confirmed">{rec.confirmedText}</span>
-                {rec.partialText && (
-                  <>
-                    {rec.confirmedText ? ' ' : ''}
-                    <span
-                      data-testid="valueos-recording-partial"
-                      style={{ color: 'var(--va-gray-400)', fontStyle: 'italic' }}
-                    >
-                      {rec.partialText}
-                    </span>
-                  </>
-                )}
-                <span
-                  aria-hidden="true"
-                  style={{
-                    display: 'inline-block',
-                    width: 2,
-                    height: '1.05em',
-                    marginLeft: 2,
-                    verticalAlign: 'text-bottom',
-                    background: 'var(--va-blue)',
-                    animation: 'vaBlink 1s steps(1) infinite',
-                  }}
-                />
-              </p>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {rec.lines.map((line, i) => (
+              <SpeakerBubble
+                key={i}
+                line={line}
+                showCaret={i === rec.lines.length - 1 && line.partial === true}
+              />
+            ))}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One speaker-aligned chat bubble. "You" (the local user) is blue + left-aligned; "Other"
+ *  (someone else / system audio) is grey + right-aligned. An interim line is faded + italic. */
+function SpeakerBubble({ line, showCaret }: { line: LiveLine; showCaret: boolean }) {
+  const me = line.role === 'me';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-start' : 'flex-end' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: me ? 'row' : 'row-reverse',
+          alignItems: 'center',
+          gap: 7,
+          margin: '0 6px 5px',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{ width: 7, height: 7, borderRadius: '50%', flex: '0 0 auto', background: me ? 'var(--va-blue)' : 'var(--va-gray-400)' }}
+        />
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: '.03em',
+            textTransform: 'uppercase',
+            color: me ? 'var(--va-blue)' : 'var(--va-gray-600)',
+          }}
+        >
+          {line.label}
+        </span>
+      </div>
+      <div
+        data-testid={me ? 'valueos-line-me' : 'valueos-line-other'}
+        data-partial={line.partial ? 'true' : 'false'}
+        style={{
+          maxWidth: '78%',
+          padding: '11px 15px',
+          borderRadius: 16,
+          borderTopLeftRadius: me ? 5 : 16,
+          borderTopRightRadius: me ? 16 : 5,
+          background: me ? 'rgba(26,26,255,.05)' : 'var(--va-gray-100)',
+          border: `1px solid ${me ? 'rgba(26,26,255,.14)' : 'var(--va-gray-200)'}`,
+          color: line.partial ? 'var(--va-gray-400)' : 'var(--va-gray-800)',
+          fontStyle: line.partial ? 'italic' : 'normal',
+          fontFamily: 'var(--font-doc)',
+          fontSize: 15,
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {line.text}
+        {showCaret && (
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'inline-block',
+              width: 2,
+              height: '1.05em',
+              marginLeft: 2,
+              verticalAlign: 'text-bottom',
+              background: me ? 'var(--va-blue)' : 'var(--va-gray-400)',
+              animation: 'vaBlink 1s steps(1) infinite',
+            }}
+          />
         )}
       </div>
     </div>
