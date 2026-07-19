@@ -1,10 +1,60 @@
 import { describe, it, expect } from 'vitest';
-import { reduceLive, deriveLive, recognitionActivity, emptyLive } from '@/valueos/capture/liveTranscript';
+import { reduceLive, deriveLive, recognitionActivity, emptyLive, toLiveLines } from '@/valueos/capture/liveTranscript';
 import { rmsFromTimeDomain } from '@/valueos/capture/useMicLevel';
 import { formatTranscript } from '@/valueos/capture/transcriptFormat';
 
 // VALUEOS: live in-progress transcription — the interim state model + the fallback activity
 // signal. Engine is mocked (plain update objects).
+
+describe('toLiveLines — speaker-aligned chat lines', () => {
+  it('maps "Me" → You (left/me) and "Other" → Other (right)', () => {
+    const lines = toLiveLines({
+      committed: [
+        { text: 'This is me talking', source: 'Me' },
+        { text: 'Immigration is a hot topic', source: 'Other' },
+      ],
+      interim: null,
+    });
+    expect(lines).toEqual([
+      { role: 'me', label: 'You', text: 'This is me talking', partial: false },
+      { role: 'other', label: 'Other', text: 'Immigration is a hot topic', partial: false },
+    ]);
+  });
+
+  it('merges consecutive same-speaker committed segments into one bubble', () => {
+    const lines = toLiveLines({
+      committed: [
+        { text: "Let's try to talk.", source: 'Me' },
+        { text: 'So this is me talking.', source: 'Me' },
+        { text: 'Someone else now.', source: 'Other' },
+      ],
+      interim: null,
+    });
+    expect(lines.map((l) => l.role)).toEqual(['me', 'other']);
+    expect(lines[0].text).toBe("Let's try to talk. So this is me talking.");
+  });
+
+  it('renders the interim as its own trailing partial line (never merged)', () => {
+    const lines = toLiveLines({
+      committed: [{ text: 'Confirmed part.', source: 'Me' }],
+      interim: { text: 'still forming', source: 'Me', is_partial: true },
+    });
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toEqual({ role: 'me', label: 'You', text: 'still forming', partial: true });
+  });
+
+  it('defaults an un-attributed (no source) segment to You, never a stranger', () => {
+    const lines = toLiveLines({ committed: [{ text: 'no speaker signal' }], interim: null });
+    expect(lines[0].role).toBe('me');
+    expect(lines[0].label).toBe('You');
+  });
+
+  it('drops empty segments', () => {
+    const lines = toLiveLines({ committed: [{ text: '   ', source: 'Me' }, { text: 'real', source: 'Me' }], interim: null });
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text).toBe('real');
+  });
+});
 
 describe('reduceLive — interim stream', () => {
   it('shows the LATEST interim, replacing prior (never appends duplicates)', () => {

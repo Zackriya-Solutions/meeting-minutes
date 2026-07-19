@@ -15,7 +15,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { applyConfiguredSaveFolder } from './recordingLocation';
 import { labelTranscript } from './speakerLabels';
-import { reduceLive, emptyLive, type LiveState } from './liveTranscript';
+import { reduceLive, emptyLive, toLiveLines, type LiveState, type LiveLine } from './liveTranscript';
 import { formatTranscript, type TranscriptSegment } from './transcriptFormat';
 import { TRANSCRIPT_FOLDER_KEY } from '../config/configService';
 
@@ -29,6 +29,9 @@ export interface RecordingController {
   /** The current hypothesis tail (last partial segment) — the faded/italic words. '' when
    *  the recognizer has nothing tentative in flight. */
   partialText: string;
+  /** Speaker-aligned chat lines for the live view (You/left/blue vs Other/right/grey), including
+   *  the trailing interim as a partial line. */
+  lines: LiveLine[];
   /** Running word count over the confirmed text (shown on the recording control bar). */
   wordCount: number;
   start: (meetingName: string) => Promise<void>;
@@ -66,6 +69,7 @@ export function useRecordingController(): RecordingController {
 
   const confirmedText = useMemo(() => labelTranscript(live.committed), [live]);
   const partialText = useMemo(() => live.interim?.text?.trim() ?? '', [live]);
+  const lines = useMemo(() => toLiveLines(live), [live]);
   // Full recognized text keyed to the upstream (final-only) array — kept for parity with the final
   // export and existing callers. The live VIEW (confirmedText/partialText above) is driven by the
   // streaming reducer instead, so preview words appear before a segment finalizes.
@@ -169,5 +173,5 @@ export function useRecordingController(): RecordingController {
     await recordingService.resumeRecording();
   }, []);
 
-  return { isRecording, status: String(status), transcriptText, confirmedText, partialText, wordCount, start, stop, pause, resume };
+  return { isRecording, status: String(status), transcriptText, confirmedText, partialText, lines, wordCount, start, stop, pause, resume };
 }
