@@ -55,6 +55,7 @@ pub struct RecordingSaver {
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
     is_saving: Arc<Mutex<bool>>,
+    save_folder: PathBuf,
 }
 
 impl RecordingSaver {
@@ -67,12 +68,18 @@ impl RecordingSaver {
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
+            save_folder: super::recording_preferences::get_default_recordings_folder(),
         }
     }
 
     /// Set the meeting name for this recording session
     pub fn set_meeting_name(&mut self, name: Option<String>) {
         self.meeting_name = name;
+    }
+
+    /// Set the persisted root used for new meeting folders.
+    pub fn set_save_folder(&mut self, save_folder: PathBuf) {
+        self.save_folder = save_folder;
     }
 
     /// Set device information in metadata
@@ -137,40 +144,26 @@ impl RecordingSaver {
     ///
     /// # Arguments
     /// * `auto_save` - If true, creates checkpoints and enables saving. If false, audio chunks are discarded.
-    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::UnboundedSender<AudioChunk> {
+    pub fn start_accumulation(&mut self, auto_save: bool) -> Result<mpsc::UnboundedSender<AudioChunk>> {
         if auto_save {
             info!("Initializing incremental audio saver for recording (auto-save ENABLED)");
         } else {
             info!("Starting recording without audio saving (auto-save DISABLED - transcripts only)");
         }
 
-        // Create channel for receiving audio chunks
-        let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
-        self.chunk_receiver = Some(receiver);
-
-        // Initialize meeting folder and incremental saver ONLY if auto_save is enabled
-        if auto_save {
-            if let Some(name) = self.meeting_name.clone() {
-                match self.initialize_meeting_folder(&name, true) {
-                    Ok(()) => info!("Successfully initialized meeting folder with checkpoints"),
-                    Err(e) => {
-                        error!("Failed to initialize meeting folder: {}", e);
-                        // Continue anyway - will use fallback flat structure
-                    }
-                }
-            }
-        } else {
-            // When auto_save is false, still create meeting folder for transcripts/metadata
-            // but skip .checkpoints directory
-            if let Some(name) = self.meeting_name.clone() {
-                match self.initialize_meeting_folder(&name, false) {
-                    Ok(()) => info!("Successfully initialized meeting folder (transcripts only)"),
-                    Err(e) => {
-                        error!("Failed to initialize meeting folder: {}", e);
-                    }
-                }
+        // Initialize the output folder before starting any recording work.
+        if let Some(name) = self.meeting_name.clone() {
+            self.initialize_meeting_folder(&name, auto_save)?;
+            if auto_save {
+                info!("Successfully initialized meeting folder with checkpoints");
+            } else {
+                info!("Successfully initialized meeting folder (transcripts only)");
             }
         }
+
+        // Create the channel only after the output folder is ready.
+        let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        self.chunk_receiver = Some(receiver);
 
         // Start accumulation task
         let is_saving_clone = self.is_saving.clone();
@@ -219,7 +212,7 @@ impl RecordingSaver {
             *is_saving = true;
         }
 
-        sender
+        Ok(sender)
     }
 
     /// Initialize meeting folder structure and metadata
@@ -228,11 +221,8 @@ impl RecordingSaver {
     /// * `meeting_name` - Name of the meeting
     /// * `create_checkpoints` - Whether to create .checkpoints/ directory and IncrementalAudioSaver
     fn initialize_meeting_folder(&mut self, meeting_name: &str, create_checkpoints: bool) -> Result<()> {
-        // Load preferences to get base recordings folder
-        let base_folder = super::recording_preferences::get_default_recordings_folder();
-
         // Create meeting folder structure (with or without .checkpoints/ subdirectory)
-        let meeting_folder = create_meeting_folder(&base_folder, meeting_name, create_checkpoints)?;
+        let meeting_folder = create_meeting_folder(&self.save_folder, meeting_name, create_checkpoints)?;
 
         // Only initialize incremental saver if checkpoints are needed (auto_save is true)
         if create_checkpoints {
@@ -481,5 +471,27 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod recording_root_tests {
+    use super::RecordingSaver;
+
+    #[tokio::test]
+    async fn meeting_artifacts_are_created_under_selected_root() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let selected_root = temp_dir.path().join("knowledge-base");
+        let mut saver = RecordingSaver::new();
+
+        saver.set_save_folder(selected_root.clone());
+        saver.set_meeting_name(Some("Folder Contract".to_string()));
+        let _sender = saver.start_accumulation(false).expect("start accumulation");
+        saver.add_transcript_chunk("Stored with the meeting".to_string());
+
+        let meeting_folder = saver.get_meeting_folder().expect("meeting folder");
+        assert!(meeting_folder.starts_with(&selected_root));
+        assert!(meeting_folder.join("metadata.json").is_file());
+        assert!(meeting_folder.join("transcripts.json").is_file());
     }
 }

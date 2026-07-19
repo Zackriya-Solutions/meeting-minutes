@@ -74,7 +74,7 @@ impl RecordingManager {
         // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
         // Pipeline will mix mic + system audio professionally and send to this channel
         // Pass auto_save to control whether audio checkpoints are created
-        let recording_sender = self.recording_saver.start_accumulation(auto_save);
+        let recording_sender = self.recording_saver.start_accumulation(auto_save)?;
 
         // Start recording state first
         self.state.start_recording()?;
@@ -434,6 +434,11 @@ impl RecordingManager {
         self.recording_saver.set_meeting_name(name);
     }
 
+    /// Set the persisted root used for this recording session.
+    pub fn set_save_folder(&mut self, save_folder: std::path::PathBuf) {
+        self.recording_saver.set_save_folder(save_folder);
+    }
+
     /// Add a structured transcript segment to be saved later
     pub fn add_transcript_segment(&self, segment: super::recording_saver::TranscriptSegment) {
         self.recording_saver.add_transcript_segment(segment);
@@ -611,5 +616,26 @@ impl Drop for RecordingManager {
     fn drop(&mut self) {
         // Note: Can't call async cleanup in Drop, but streams have their own Drop implementations
         self.state.cleanup();
+    }
+}
+
+#[cfg(test)]
+mod recording_root_failure_tests {
+    use super::RecordingManager;
+
+    #[tokio::test]
+    async fn invalid_recording_root_does_not_start_recording_state() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let file_root = temp_dir.path().join("not-a-directory");
+        std::fs::write(&file_root, b"file").expect("create file root");
+        let mut manager = RecordingManager::new();
+        manager.set_meeting_name(Some("Rejected Root".to_string()));
+        manager.set_save_folder(file_root);
+
+        let result = manager.start_recording(None, None, true).await;
+
+        assert!(result.is_err());
+        assert!(!manager.is_recording());
+        assert!(manager.get_meeting_folder().is_none());
     }
 }
