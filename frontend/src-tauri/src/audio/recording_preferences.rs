@@ -1,7 +1,9 @@
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::path::PathBuf;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_store::StoreExt;
 
 use anyhow::Result;
@@ -10,6 +12,17 @@ use log::error;
 
 #[cfg(target_os = "macos")]
 use crate::audio::capture::AudioCaptureBackend;
+
+static RECORDING_PREFERENCES_SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn serialize_save_transaction<T, F, Fut>(transaction: F) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let _guard = RECORDING_PREFERENCES_SAVE_LOCK.lock().await;
+    transaction().await
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingPreferences {
@@ -78,10 +91,36 @@ pub fn get_default_recordings_folder() -> PathBuf {
 
 /// Ensure the recordings directory exists
 pub fn ensure_recordings_directory(path: &PathBuf) -> Result<()> {
-    if !path.exists() {
+    if path.exists() {
+        if !path.is_dir() {
+            return Err(anyhow::anyhow!(
+                "Recording save path is not a directory: {}",
+                path.display()
+            ));
+        }
+    } else {
         std::fs::create_dir_all(path)?;
         info!("Created recordings directory: {:?}", path);
     }
+    Ok(())
+}
+
+fn persist_preferences_value(
+    preferences: &RecordingPreferences,
+    previous_value: Option<serde_json::Value>,
+    mut update_store: impl FnMut(Option<serde_json::Value>),
+    save_store: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    ensure_recordings_directory(&preferences.save_folder)?;
+    let preferences_value = serde_json::to_value(preferences)
+        .map_err(|error| anyhow::anyhow!("Failed to serialize preferences: {}", error))?;
+
+    update_store(Some(preferences_value));
+    if let Err(error) = save_store() {
+        update_store(previous_value);
+        return Err(error);
+    }
+
     Ok(())
 }
 
@@ -143,22 +182,34 @@ pub async fn save_recording_preferences<R: Runtime>(
           preferences.save_folder, preferences.auto_save, preferences.file_format,
           preferences.preferred_mic_device, preferences.preferred_system_device);
 
-    // Get or create store
-    let store = app
-        .store("recording_preferences.json")
-        .map_err(|e| anyhow::anyhow!("Failed to access store: {}", e))?;
+    serialize_save_transaction(|| async {
+        let store = app
+            .store("recording_preferences.json")
+            .map_err(|e| anyhow::anyhow!("Failed to access store: {}", e))?;
+        let previous_value = store.get("preferences");
 
-    // Serialize preferences to JSON value
-    let prefs_value = serde_json::to_value(preferences)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize preferences: {}", e))?;
+        persist_preferences_value(
+            preferences,
+            previous_value,
+            |value| match value {
+                Some(value) => store.set("preferences", value),
+                None => {
+                    store.delete("preferences");
+                }
+            },
+            || {
+                store
+                    .save()
+                    .map_err(|error| anyhow::anyhow!("Failed to save store to disk: {}", error))
+            },
+        )?;
 
-    // Save to store
-    store.set("preferences", prefs_value);
-
-    // Persist to disk
-    store
-        .save()
-        .map_err(|e| anyhow::anyhow!("Failed to save store to disk: {}", e))?;
+        if let Err(error) = app.emit("recording-preferences-updated", preferences) {
+            warn!("Failed to emit recording preferences update: {}", error);
+        }
+        Ok(())
+    })
+    .await?;
 
     info!("Successfully persisted recording preferences to disk");
 
@@ -170,9 +221,6 @@ pub async fn save_recording_preferences<R: Runtime>(
             crate::audio::capture::set_current_backend(backend);
         }
     }
-
-    // Ensure the directory exists
-    ensure_recordings_directory(&preferences.save_folder)?;
 
     Ok(())
 }
@@ -245,13 +293,41 @@ pub async fn open_recordings_folder<R: Runtime>(app: AppHandle<R>) -> Result<(),
 
 #[tauri::command]
 pub async fn select_recording_folder<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
 ) -> Result<Option<String>, String> {
-    // Use Tauri's dialog to select folder
-    // For now, return None - this would need to be implemented with tauri-plugin-dialog
-    // when it's available in the Cargo.toml
-    warn!("Folder selection not yet implemented - using dialog plugin");
-    Ok(None)
+    let start_dir = load_recording_preferences(&app)
+        .await
+        .map(|preferences| preferences.save_folder)
+        .unwrap_or_else(|error| {
+            warn!(
+                "Failed to load recording preferences before folder selection: {}",
+                error
+            );
+            get_default_recordings_folder()
+        });
+
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file();
+        if start_dir.is_dir() {
+            dialog.set_directory(start_dir).blocking_pick_folder()
+        } else {
+            dialog.blocking_pick_folder()
+        }
+    })
+    .await
+    .map_err(|error| format!("Folder dialog task failed: {}", error))?;
+
+    selected
+        .map(|path| {
+            path.into_path()
+                .map_err(|error| format!("Selected folder is not a filesystem path: {}", error))
+                .and_then(|path| {
+                    path.into_os_string().into_string().map_err(|_| {
+                        "Selected folder path contains unsupported characters".to_string()
+                    })
+                })
+        })
+        .transpose()
 }
 
 // Backend selection commands
@@ -385,3 +461,161 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
     }
 }
 
+#[cfg(test)]
+mod persistence_tests {
+    use super::{persist_preferences_value, serialize_save_transaction, RecordingPreferences};
+    use serde_json::{json, Value};
+    use std::cell::{Cell, RefCell};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use tokio::sync::{Mutex, Notify};
+
+    #[test]
+    fn invalid_directory_is_rejected_before_store_mutation() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let file_path = temp_dir.path().join("not-a-directory");
+        std::fs::write(&file_path, b"file").expect("create file root");
+        let preferences = RecordingPreferences {
+            save_folder: file_path,
+            ..RecordingPreferences::default()
+        };
+        let mutations = RefCell::new(Vec::<Option<Value>>::new());
+        let save_called = Cell::new(false);
+
+        let result = persist_preferences_value(
+            &preferences,
+            None,
+            |value| mutations.borrow_mut().push(value),
+            || {
+                save_called.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(mutations.borrow().is_empty());
+        assert!(!save_called.get());
+    }
+
+    #[test]
+    fn save_failure_restores_previous_in_memory_value() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let preferences = RecordingPreferences {
+            save_folder: temp_dir.path().join("selected"),
+            ..RecordingPreferences::default()
+        };
+        let previous = json!({"save_folder": "/tmp/previous"});
+        let mutations = RefCell::new(Vec::<Option<Value>>::new());
+
+        let result = persist_preferences_value(
+            &preferences,
+            Some(previous.clone()),
+            |value| mutations.borrow_mut().push(value),
+            || Err(anyhow::anyhow!("simulated disk save failure")),
+        );
+
+        assert!(result.is_err());
+        let mutations = mutations.into_inner();
+        assert_eq!(mutations.len(), 2);
+        assert_eq!(
+            mutations[0],
+            Some(serde_json::to_value(&preferences).expect("serialize preferences"))
+        );
+        assert_eq!(mutations[1], Some(previous));
+    }
+
+    #[test]
+    fn save_failure_removes_new_value_when_store_was_empty() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let preferences = RecordingPreferences {
+            save_folder: temp_dir.path().join("selected"),
+            ..RecordingPreferences::default()
+        };
+        let mutations = RefCell::new(Vec::<Option<Value>>::new());
+
+        let result = persist_preferences_value(
+            &preferences,
+            None,
+            |value| mutations.borrow_mut().push(value),
+            || Err(anyhow::anyhow!("simulated disk save failure")),
+        );
+
+        assert!(result.is_err());
+        let mutations = mutations.into_inner();
+        assert_eq!(mutations.len(), 2);
+        assert_eq!(
+            mutations[0],
+            Some(serde_json::to_value(&preferences).expect("serialize preferences"))
+        );
+        assert_eq!(mutations[1], None);
+    }
+
+    #[tokio::test]
+    async fn concurrent_save_failure_cannot_rollback_a_successful_transaction() {
+        #[derive(Default)]
+        struct SimulatedStore {
+            cache: Option<&'static str>,
+            durable: Option<&'static str>,
+        }
+
+        let store = Arc::new(Mutex::new(SimulatedStore::default()));
+        let first_entered = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let second_attempting = Arc::new(Notify::new());
+        let second_entered = Arc::new(AtomicBool::new(false));
+
+        let successful = {
+            let store = store.clone();
+            let first_entered = first_entered.clone();
+            let release_first = release_first.clone();
+            tokio::spawn(async move {
+                serialize_save_transaction(|| async move {
+                    store.lock().await.cache = Some("successful");
+                    first_entered.notify_one();
+                    release_first.notified().await;
+                    store.lock().await.durable = Some("successful");
+                    Ok::<_, anyhow::Error>("successful")
+                })
+                .await
+            })
+        };
+
+        first_entered.notified().await;
+        let failed = {
+            let store = store.clone();
+            let second_attempting = second_attempting.clone();
+            let second_entered = second_entered.clone();
+            tokio::spawn(async move {
+                second_attempting.notify_one();
+                serialize_save_transaction(|| async move {
+                    second_entered.store(true, Ordering::SeqCst);
+                    let previous = store.lock().await.cache;
+                    store.lock().await.cache = Some("failed");
+                    store.lock().await.cache = previous;
+                    Err::<&'static str, _>(anyhow::anyhow!("save failed for failed payload"))
+                })
+                .await
+            })
+        };
+
+        second_attempting.notified().await;
+        tokio::task::yield_now().await;
+        assert!(!second_entered.load(Ordering::SeqCst));
+        release_first.notify_one();
+
+        assert_eq!(
+            successful.await.expect("successful task").unwrap(),
+            "successful"
+        );
+        let failed_error = failed
+            .await
+            .expect("failed task")
+            .expect_err("second transaction must fail");
+        assert!(failed_error.to_string().contains("failed payload"));
+        let store = store.lock().await;
+        assert_eq!(store.cache, Some("successful"));
+        assert_eq!(store.durable, Some("successful"));
+    }
+}
