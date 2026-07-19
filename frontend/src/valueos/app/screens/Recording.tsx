@@ -8,8 +8,8 @@ import { useRecordingController } from '@/valueos/capture/useRecordingController
 import { useMicLevel } from '@/valueos/capture/useMicLevel';
 import { recognitionActivity, type RecognitionActivity, type LiveLine } from '@/valueos/capture/liveTranscript';
 import type { StartCallMeta } from '../types';
-import { Avatar, StatusPill } from '../parts';
-import { IcMic } from '../icons';
+import { StatusPill } from '../parts';
+import { IcMic, IcTrash } from '../icons';
 
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -204,9 +204,8 @@ export function Recording({
         <div className="va-ovl">Live transcript</div>
         <ActivityChip activity={activity} secondsSinceLine={sinceLineSec} />
       </div>
-      <p className="va-muted" style={{ fontSize: 13, margin: '0 0 12px' }}>
-        Recognized speech appears as each phrase is confirmed. Faded, italic text is still being
-        confirmed. Speaker labels (Me / Other) in the saved transcript are best-effort.
+      <p className="va-muted" style={{ fontSize: 13, margin: '0 0 16px' }}>
+        Live, on-device. Faded text is still being confirmed; speaker labels are best-effort.
       </p>
 
       {confirmDiscard && (
@@ -215,26 +214,44 @@ export function Recording({
           data-testid="valueos-discard-confirm"
           onMouseDown={(e) => e.target === e.currentTarget && setConfirmDiscard(false)}
         >
-          <div className="va-modal" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
+          <div className="va-modal" role="dialog" aria-modal="true" style={{ maxWidth: 500, padding: 30 }}>
+            <div
+              aria-hidden="true"
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 13,
+                background: 'rgba(206,54,68,.10)',
+                color: 'var(--va-signal-red)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+              }}
+            >
+              <IcTrash size={23} />
+            </div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 23, margin: '0 0 12px' }}>
               Discard this transcript?
             </h2>
-            <p className="va-body" style={{ margin: '0 0 18px' }}>
+            <p className="va-body" style={{ margin: '0 0 28px', fontSize: 15.5, lineHeight: 1.65 }}>
               This stops the recording and permanently deletes the transcript. It will{' '}
               <strong>not</strong> be uploaded to ValueOS, and this can’t be undone.
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 12 }}>
               <button
-                className="va-btn va-btn-ghost-light va-btn-sm"
+                className="va-btn va-btn-ghost-light"
                 data-testid="valueos-discard-cancel"
                 onClick={() => setConfirmDiscard(false)}
+                style={{ flex: 1 }}
               >
                 Keep recording
               </button>
               <button
-                className="va-btn va-btn-danger va-btn-sm"
+                className="va-btn va-btn-danger"
                 data-testid="valueos-discard-confirm-btn"
                 onClick={discard}
+                style={{ flex: 1 }}
               >
                 Discard transcript
               </button>
@@ -275,12 +292,23 @@ function SpeakerBubble({ line, showCaret }: { line: LiveLine; showCaret: boolean
           display: 'flex',
           flexDirection: me ? 'row' : 'row-reverse',
           alignItems: 'center',
-          gap: 8,
-          margin: '0 4px 5px',
+          gap: 7,
+          margin: '0 6px 5px',
         }}
       >
-        <Avatar name={me ? 'You' : 'Other'} you={me} size={24} />
-        <span style={{ fontWeight: 700, fontSize: 12.5, color: me ? 'var(--va-blue)' : 'var(--va-gray-600)' }}>
+        <span
+          aria-hidden="true"
+          style={{ width: 7, height: 7, borderRadius: '50%', flex: '0 0 auto', background: me ? 'var(--va-blue)' : 'var(--va-gray-400)' }}
+        />
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: '.03em',
+            textTransform: 'uppercase',
+            color: me ? 'var(--va-blue)' : 'var(--va-gray-600)',
+          }}
+        >
           {line.label}
         </span>
       </div>
@@ -288,18 +316,18 @@ function SpeakerBubble({ line, showCaret }: { line: LiveLine; showCaret: boolean
         data-testid={me ? 'valueos-line-me' : 'valueos-line-other'}
         data-partial={line.partial ? 'true' : 'false'}
         style={{
-          maxWidth: '84%',
-          padding: '10px 14px',
+          maxWidth: '78%',
+          padding: '11px 15px',
           borderRadius: 16,
-          borderTopLeftRadius: me ? 4 : 16,
-          borderTopRightRadius: me ? 16 : 4,
-          background: me ? 'rgba(26,26,255,.06)' : 'var(--va-gray-100)',
-          border: `1px solid ${me ? 'rgba(26,26,255,.16)' : 'var(--va-gray-200)'}`,
+          borderTopLeftRadius: me ? 5 : 16,
+          borderTopRightRadius: me ? 16 : 5,
+          background: me ? 'rgba(26,26,255,.05)' : 'var(--va-gray-100)',
+          border: `1px solid ${me ? 'rgba(26,26,255,.14)' : 'var(--va-gray-200)'}`,
           color: line.partial ? 'var(--va-gray-400)' : 'var(--va-gray-800)',
           fontStyle: line.partial ? 'italic' : 'normal',
           fontFamily: 'var(--font-doc)',
           fontSize: 15,
-          lineHeight: 1.55,
+          lineHeight: 1.6,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
