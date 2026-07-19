@@ -116,20 +116,23 @@ impl CoreAudioCapture {
             &[tap.uid().unwrap().as_type_ref()],
         );
 
-        // Create aggregate device descriptor
-        // CRITICAL FIX: Use ONLY the tap, NOT the output device + tap
-        // Previous configuration included both sub_device_list (output device) and tap_list (tap of same device)
-        // This caused duplicate audio capture, resulting in echo (YouTube audio appeared twice)
-        // The tap alone provides all the system audio we need
+        // Create aggregate device descriptor.
+        // VALUEOS FIX (AirPods / any Bluetooth output): the aggregate must NOT be anchored to a
+        // specific physical output device. The tap is a GLOBAL system tap — it already captures all
+        // system audio regardless of where it's routed (speakers, AirPods, headphones). Previously
+        // `main_sub_device` was set to the *default output device* UID; when that output was AirPods
+        // (Bluetooth), anchoring the aggregate to it produced no audio, even though the built-in
+        // speakers worked. We now build a TAP-ONLY aggregate (self-clocked via tap_auto_start), with
+        // no physical sub-device and no main-sub-device — truly device-agnostic system capture.
+        // (sub_device_list was already removed earlier to fix a duplicate-audio/echo bug. output_uid
+        // remains referenced only by the diagnostic log above — it no longer anchors the aggregate.)
         let agg_desc = cf::DictionaryOf::with_keys_values(
             &[
                 ca::aggregate_device_keys::is_private(),
                 ca::aggregate_device_keys::is_stacked(),
                 ca::aggregate_device_keys::tap_auto_start(),
                 ca::aggregate_device_keys::name(),
-                ca::aggregate_device_keys::main_sub_device(),
                 ca::aggregate_device_keys::uid(),
-                // REMOVED: sub_device_list (was causing duplicate audio)
                 ca::aggregate_device_keys::tap_list(),
             ],
             &[
@@ -137,9 +140,7 @@ impl CoreAudioCapture {
                 cf::Boolean::value_false(),
                 cf::Boolean::value_true(),
                 cf::str!(c"meetily-audio-tap").as_type_ref(),
-                &output_uid,
                 &cf::Uuid::new().to_cf_string(),
-                // REMOVED: sub_device array (was causing echo)
                 &cf::ArrayOf::from_slice(&[sub_tap.as_ref()]),
             ],
         );

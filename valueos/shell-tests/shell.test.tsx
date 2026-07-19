@@ -86,7 +86,7 @@ function makeServices(entitlement: EntitlementState = 'active') {
 }
 
 async function loginToStorage() {
-  fireEvent.click(screen.getByTestId('valueos-proceed')); // welcome → login
+  fireEvent.click(await screen.findByTestId('valueos-proceed')); // welcome → login
   fireEvent.click(screen.getByTestId('valueos-login-start')); // login → (setup auto) → storage
   await screen.findByTestId('valueos-config');
 }
@@ -128,13 +128,13 @@ beforeEach(() => {
 });
 
 describe('ValueOS redesigned flow', () => {
-  it('welcome shows VA branding + a build stamp, and advances to login', () => {
+  it('welcome shows VA branding + a build stamp, and advances to login', async () => {
     const { services } = makeServices();
     render(<ValueOsShell services={services} />);
-    expect(screen.getByTestId('valueos-welcome')).toBeInTheDocument();
+    expect(await screen.findByTestId('valueos-welcome')).toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: /value accelerator/i }).length).toBeGreaterThan(0);
     expect(screen.getByTestId('valueos-build-stamp')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    fireEvent.click(await screen.findByTestId('valueos-proceed'));
     expect(screen.getByTestId('valueos-login')).toBeInTheDocument();
     expect(screen.getByTestId('valueos-build-stamp')).toBeInTheDocument();
   });
@@ -154,10 +154,33 @@ describe('ValueOS redesigned flow', () => {
     };
     void client;
     render(<ValueOsShell services={services} />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    fireEvent.click(await screen.findByTestId('valueos-proceed'));
     fireEvent.click(screen.getByTestId('valueos-login-start'));
     await screen.findByTestId('valueos-dashboard'); // straight to dashboard — storage skipped
     expect(screen.queryByTestId('valueos-config')).toBeNull();
+  });
+
+  it('resumes an existing session on launch — skips welcome/login (limit logins)', async () => {
+    const { services: base } = makeServices('active');
+    const services: ValueOsServices = {
+      ...base,
+      config: createMockConfigService({ initialFolder: '/tmp/tx', writable: true }),
+    };
+    await services.auth.login(); // a prior session is already stored (token in the keychain)
+    render(<ValueOsShell services={services} />);
+    // Boots straight into the app after re-verifying the subscription — no welcome, no login.
+    await screen.findByTestId('valueos-dashboard');
+    expect(screen.queryByTestId('valueos-welcome')).toBeNull();
+    expect(screen.queryByTestId('valueos-login')).toBeNull();
+  });
+
+  it('signs out on launch when the stored session no longer has an active subscription', async () => {
+    const { services } = makeServices('expired');
+    await services.auth.login(); // stored session, but the add-on has since lapsed
+    render(<ValueOsShell services={services} />);
+    // The subscription check fails → the user is signed out, back to welcome (not resumed).
+    await screen.findByTestId('valueos-welcome');
+    expect(screen.queryByTestId('valueos-dashboard')).toBeNull();
   });
 
   it.each(['expired', 'never'] as EntitlementState[])(
@@ -165,7 +188,7 @@ describe('ValueOS redesigned flow', () => {
     async (state) => {
       const { services } = makeServices(state);
       render(<ValueOsShell services={services} />);
-      fireEvent.click(screen.getByTestId('valueos-proceed'));
+      fireEvent.click(await screen.findByTestId('valueos-proceed'));
       fireEvent.click(screen.getByTestId('valueos-login-start'));
       await screen.findByTestId('valueos-blocked');
       expect(screen.getByTestId('valueos-blocked-url')).toHaveTextContent('value-accelerator.io');
@@ -186,7 +209,7 @@ describe('ValueOS redesigned flow', () => {
   it('blocks with a "no workspace" message when the user belongs to none', async () => {
     const { services } = servicesFromSeed({ tenants: [], entitlements: {}, leads: {}, opportunities: {} });
     render(<ValueOsShell services={services} />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    fireEvent.click(await screen.findByTestId('valueos-proceed'));
     fireEvent.click(screen.getByTestId('valueos-login-start'));
     await screen.findByTestId('valueos-blocked');
     expect(screen.getByTestId('valueos-blocked')).toHaveTextContent(/don't belong to any ValueOS workspace/i);
@@ -200,7 +223,7 @@ describe('ValueOS redesigned flow', () => {
       opportunities: {},
     });
     render(<ValueOsShell services={services} />);
-    fireEvent.click(screen.getByTestId('valueos-proceed'));
+    fireEvent.click(await screen.findByTestId('valueos-proceed'));
     fireEvent.click(screen.getByTestId('valueos-login-start'));
     await screen.findByTestId('valueos-blocked');
     expect(screen.getByTestId('valueos-blocked')).toHaveTextContent(
