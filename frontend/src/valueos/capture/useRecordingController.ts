@@ -143,7 +143,13 @@ export function useRecordingController(): RecordingController {
   const stop = useCallback(async (): Promise<string> => {
     const dir = await appDataDir();
     const savePath = await join(dir, `valueos-recording-${Date.now()}.wav`);
-    await recordingService.stopRecording(savePath);
+    // The native stop can occasionally be slow or hang; never let it strand the caller (End &
+    // upload would sit on "Uploading…"). Bound it, then proceed to flush + read whatever was
+    // transcribed so far — nothing already recognized is lost (it's in the upstream buffer).
+    await Promise.race([
+      recordingService.stopRecording(savePath).catch(() => {}),
+      new Promise((r) => setTimeout(r, 6000)),
+    ]);
     // Let the final in-flight segments arrive and flush, then read the AUTHORITATIVE ref
     // (not the closed-over `transcripts`, which is stale at call time). The ref is kept in
     // sync with the newest segments by TranscriptContext.
