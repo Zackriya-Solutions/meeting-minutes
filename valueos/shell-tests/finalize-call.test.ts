@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { finalizeCall } from '@/valueos/upload/finalizeCall';
+import { finalizeCall, enqueueCall, flushCallUploads } from '@/valueos/upload/finalizeCall';
 import { MockValueOsClient, defaultMockSeed } from '@/valueos/api/mockClient';
 import { MockDigestGenerator } from '@/valueos/digest/digest';
 import { PendingUploadQueue, InMemoryPendingUploadStore } from '@/valueos/upload/pendingQueue';
@@ -73,6 +73,27 @@ describe('finalizeCall', () => {
     expect(recs[0].id).toBe('key-2');
     expect(recs[0].transcript).toBe(capture.transcriptText);
     expect(recs[0].path).toBe('');
+  });
+
+  it('DECOUPLES upload from the UI: enqueueCall records "pending" with no upload; flush uploads later', async () => {
+    const s = makeServices();
+    const callSpy = vi.spyOn(s.client, 'createCall');
+    const svc = { digest: s.digest, config: s.config, uploadQueue: s.uploadQueue, history: s.history };
+
+    // Phase 1 (fast): file + digest + enqueue + "pending" record — NO network yet, so the UI can
+    // navigate away immediately.
+    const { record, fileSaved } = await enqueueCall(svc, capture, 'key-async');
+    expect(fileSaved).toBe(true);
+    expect(record.uploadStatus).toBe('pending');
+    expect(callSpy).not.toHaveBeenCalled();
+    expect((await s.history.list())[0].uploadStatus).toBe('pending');
+
+    // Phase 2 (background): the upload happens and the record is reconciled to "uploaded".
+    const status = await flushCallUploads(svc);
+    expect(status).toBe('done');
+    expect(callSpy).toHaveBeenCalledTimes(1);
+    expect(callSpy.mock.calls[0][1].transcript.raw_content).toBe(capture.transcriptText);
+    expect((await s.history.list())[0].uploadStatus).toBe('uploaded');
   });
 
   it('records the server failure reason (status + message) on a terminal reject', async () => {

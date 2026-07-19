@@ -15,7 +15,7 @@ import { useValueOs } from '../context/ValueOsProvider';
 import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
 import type { TranscriptRecord } from '../history/transcriptHistory';
 import type { CaptureResult } from '../shell/flowTypes';
-import { finalizeCall } from '../upload/finalizeCall';
+import { enqueueCall, flushCallUploads } from '../upload/finalizeCall';
 import { BugReportDialog } from '../bugreport/BugReportDialog';
 import { AppShell, type MainRoute } from './AppShell';
 import { Dashboard } from './screens/Dashboard';
@@ -64,6 +64,18 @@ export function AppFlow() {
   useEffect(() => {
     if (stage === 'main') void refreshRecords();
   }, [stage, refreshRecords]);
+
+  // On reaching the app, retry any uploads left "pending" (e.g. an upload interrupted by a quit or
+  // network drop). Best-effort + background — never blocks the UI; reconciles record statuses.
+  const flushedRef = useRef(false);
+  useEffect(() => {
+    if (stage !== 'main' || flushedRef.current) return;
+    flushedRef.current = true;
+    void (async () => {
+      await flushCallUploads({ uploadQueue, history });
+      await refreshRecords();
+    })();
+  }, [stage, uploadQueue, history, refreshRecords]);
 
   // WS4: on entering the app, register the install once (+ report update_success if we came
   // up on a newer version than last run), then heartbeat on a long interval. Best-effort —
@@ -153,32 +165,38 @@ export function AppFlow() {
     setRoute('recording');
   };
 
-  // End & upload — write file, generate digest, composite /calls upload, record history.
+  // End & upload — DECOUPLED from the network so the UI never hangs on the upload:
+  //   1) fast: write file + digest + enqueue + record the call as "pending", then return to the
+  //      transcript list immediately (it shows an "uploading" status);
+  //   2) background: flush the queue and reconcile the record's status — retrying, not blocking.
   const endCall = async (transcriptText: string) => {
     const call = activeCall;
     if (!call) return;
     const capture: CaptureResult = { ...call.meta, transcriptText };
-    const outcome = await finalizeCall({ digest, config, uploadQueue, history }, capture);
+    const { record, fileSaved, fileError } = await enqueueCall(
+      { digest, config, uploadQueue, history },
+      capture,
+    );
     await refreshRecords();
     setActiveCall(null);
     setCallStarted(false);
-    setSelectedId(outcome.record.id);
-    // Folder problem at save time: nothing is lost (uploaded/queued + text retained on the
-    // record), but tell the user clearly and point them to Settings to re-select a folder.
+    setSelectedId(record.id);
+    // Folder problem at save time: nothing is lost (queued for upload with the text retained on
+    // the record), but tell the user and point them to Settings to re-select a folder.
     setFileWarning(
-      outcome.fileSaved
+      fileSaved
         ? null
-        : `Your transcript was ${outcome.status === 'done' ? 'uploaded' : 'saved for upload'} and is safe, but the local copy couldn’t be written: ${outcome.fileError} Choose a writable folder in Settings — the next capture will save there.`,
+        : `Your transcript is safe (queued for upload with the full text retained), but the local copy couldn’t be written: ${fileError} Choose a writable folder in Settings — the next capture will save there.`,
     );
-    if (outcome.status === 'reauth') {
-      setStage('login');
-      return;
-    }
-    if (outcome.status === 'deEntitled') {
-      reGate();
-      return;
-    }
     setRoute('transcripts');
+
+    // Background upload — does not block the UI. Reconcile the record and surface reauth / lost access.
+    void (async () => {
+      const status = await flushCallUploads({ uploadQueue, history });
+      await refreshRecords();
+      if (status === 'reauth') setStage('login');
+      else if (status === 'deEntitled') reGate();
+    })();
   };
 
   // Discard the in-progress call: the native capture is already stopped by the Recording screen.
