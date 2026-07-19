@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -131,11 +131,15 @@ pub struct RecordingState {
     pause_start: Mutex<Option<Instant>>,
     total_pause_duration: Mutex<std::time::Duration>,
 
-    // VALUEOS: shared RAW microphone RMS (EMA, f32 bits), published by the mic capture BEFORE
-    // loudness normalization and read by the pipeline to attribute Me/Other. The mic stream is
-    // normalized downstream (near-constant energy), so its RAW level is the only honest "is the
-    // local user actually talking" signal — compared against the (raw) system energy.
-    valueos_mic_rms: AtomicU32,
+    // VALUEOS: monotonic accumulators for the RAW mic energy, published by the mic capture BEFORE
+    // loudness normalization. The pipeline reads DELTAS between segment closes to get the mic's
+    // mean energy over each utterance, aligned with its own system-energy accumulation, and
+    // attributes the louder stream (mic = Me, system = Other). Stored as fixed-point micro-RMS
+    // (RMS*1e6) in a u64 so fetch_add is lossless and can't overflow across a meeting. The mic is
+    // loudness-normalized downstream (near-constant energy), so its RAW level is the only honest
+    // "is the local user actually talking" signal.
+    valueos_mic_micro_sum: AtomicU64,
+    valueos_mic_count: AtomicU64,
 }
 
 impl RecordingState {
@@ -157,19 +161,25 @@ impl RecordingState {
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
-            valueos_mic_rms: AtomicU32::new(0),
+            valueos_mic_micro_sum: AtomicU64::new(0),
+            valueos_mic_count: AtomicU64::new(0),
         })
     }
 
-    // VALUEOS: publish the latest RAW mic RMS (pre-normalization) as an EMA so a single
-    // quiet/loud chunk can't swing speaker attribution; read by the pipeline at attribution time.
-    pub fn valueos_update_mic_rms(&self, rms: f32) {
-        let prev = f32::from_bits(self.valueos_mic_rms.load(Ordering::Relaxed));
-        let ema = if prev <= 0.0 { rms } else { prev * 0.8 + rms * 0.2 };
-        self.valueos_mic_rms.store(ema.to_bits(), Ordering::Relaxed);
+    // VALUEOS: accumulate one RAW mic-energy sample (pre-normalization). Monotonic — the pipeline
+    // takes deltas between segment closes, so there is no reset race with the capture thread.
+    pub fn valueos_add_mic_energy(&self, rms: f32) {
+        let micro = (rms.max(0.0) * 1_000_000.0) as u64;
+        self.valueos_mic_micro_sum.fetch_add(micro, Ordering::Relaxed);
+        self.valueos_mic_count.fetch_add(1, Ordering::Relaxed);
     }
-    pub fn valueos_mic_rms(&self) -> f32 {
-        f32::from_bits(self.valueos_mic_rms.load(Ordering::Relaxed))
+    // VALUEOS: (sum of micro-RMS, count) so far — the pipeline diffs two snapshots to get the mean
+    // raw mic energy over an utterance.
+    pub fn valueos_mic_energy_snapshot(&self) -> (u64, u64) {
+        (
+            self.valueos_mic_micro_sum.load(Ordering::Relaxed),
+            self.valueos_mic_count.load(Ordering::Relaxed),
+        )
     }
 
     // Recording control
@@ -457,7 +467,8 @@ impl Default for RecordingState {
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
-            valueos_mic_rms: AtomicU32::new(0),
+            valueos_mic_micro_sum: AtomicU64::new(0),
+            valueos_mic_count: AtomicU64::new(0),
         }
     }
 }
