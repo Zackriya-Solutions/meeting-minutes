@@ -181,6 +181,18 @@ export function AppFlow() {
     setRoute('transcripts');
   };
 
+  // Discard the in-progress call: the native capture is already stopped by the Recording screen.
+  // Drop it WITHOUT finalizing/uploading and WITHOUT a history entry — the user explicitly
+  // confirmed they want it deleted — and return to the dashboard.
+  const discardCall = () => {
+    setActiveCall(null);
+    setCallStarted(false);
+    setSelectedId(null);
+    setGuardError(null);
+    setFileWarning(null);
+    setRoute('dashboard');
+  };
+
   const openTranscript = (id: string) => {
     setSelectedId(id);
     setRoute('transcripts');
@@ -311,6 +323,7 @@ export function AppFlow() {
             hasStarted={callStarted}
             onStarted={() => setCallStarted(true)}
             onEnd={endCall}
+            onDiscard={discardCall}
           />
         ) : (
           <NoActiveCall onNew={requestNew} />

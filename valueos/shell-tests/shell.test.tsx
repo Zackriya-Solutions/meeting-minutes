@@ -282,6 +282,35 @@ describe('ValueOS redesigned flow', () => {
     expect(screen.getByTestId('valueos-transcripts')).toHaveTextContent('Ada Lovelace');
   });
 
+  it('discards a transcript (with confirmation) — stops capture, no upload, no history entry', async () => {
+    const { services, client } = makeServices('active');
+    const callSpy = vi.spyOn(client, 'createCall');
+    render(<ValueOsShell services={services} />);
+    await loginToStorage();
+    await storageToDashboard();
+    await openWizardToRecord();
+    fireEvent.click(screen.getByTestId('valueos-wizard-start'));
+    await screen.findByTestId('valueos-recording');
+
+    // Discard is GUARDED: clicking it opens a confirmation and does nothing on its own.
+    fireEvent.click(screen.getByTestId('valueos-recording-discard'));
+    await screen.findByTestId('valueos-discard-confirm');
+    // Backing out ("Keep recording") leaves the call running — still on the recording screen.
+    fireEvent.click(screen.getByTestId('valueos-discard-cancel'));
+    expect(screen.queryByTestId('valueos-discard-confirm')).toBeNull();
+    expect(screen.getByTestId('valueos-recording')).toBeTruthy();
+
+    // Confirming discards: capture stops, we return to the dashboard, nothing is uploaded.
+    fireEvent.click(screen.getByTestId('valueos-recording-discard'));
+    fireEvent.click(await screen.findByTestId('valueos-discard-confirm-btn'));
+    await screen.findByTestId('valueos-dashboard');
+    expect(rec.stop).toHaveBeenCalled();
+    expect(callSpy).not.toHaveBeenCalled(); // never uploaded
+    // and it left NO transcript in the list
+    fireEvent.click(screen.getByTestId('valueos-nav-transcripts'));
+    expect(screen.getByTestId('valueos-transcripts')).not.toHaveTextContent('Ada Lovelace');
+  });
+
   it('reuses the user-chosen call name when creating the call', async () => {
     const { services, client } = makeServices('active');
     const callSpy = vi.spyOn(client, 'createCall');

@@ -30,6 +30,7 @@ export function Recording({
   hasStarted,
   onStarted,
   onEnd,
+  onDiscard,
 }: {
   meta: StartCallMeta;
   startedAt: number;
@@ -38,10 +39,15 @@ export function Recording({
   hasStarted: boolean;
   onStarted: () => void;
   onEnd: (transcriptText: string) => Promise<void>;
+  /** Stop the capture and DISCARD it — no upload, no history entry (user confirmed). */
+  onDiscard: () => void;
 }) {
   const rec = useRecordingController();
-  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'error'>(hasStarted ? 'live' : 'starting');
+  const [phase, setPhase] = useState<'starting' | 'live' | 'ending' | 'discarding' | 'error'>(
+    hasStarted ? 'live' : 'starting',
+  );
   const [paused, setPaused] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const liveRef = useRef<HTMLDivElement>(null);
@@ -119,6 +125,20 @@ export function Recording({
     }
   };
 
+  // Discard: stop the capture and drop the call WITHOUT uploading or recording it. Guarded by the
+  // confirmation dialog below — this is destructive and cannot be undone.
+  const discard = async () => {
+    setConfirmDiscard(false);
+    setPhase('discarding');
+    try {
+      await rec.stop(); // stop native capture; the returned text is intentionally discarded
+      onDiscard(); // AppFlow drops the in-progress call (no upload, no history) and navigates away
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Could not stop the recording.');
+      setPhase('error');
+    }
+  };
+
   const elapsedMs = now - startedAt;
 
   if (phase === 'error') {
@@ -167,10 +187,18 @@ export function Recording({
           <strong style={{ color: 'var(--va-near-black)' }}>{rec.wordCount.toLocaleString()}</strong> words
         </span>
         <span style={{ flex: 1 }} />
+        <button
+          className="va-btn va-btn-danger-outline va-btn-sm"
+          data-testid="valueos-recording-discard"
+          onClick={() => setConfirmDiscard(true)}
+          disabled={phase === 'ending' || phase === 'discarding'}
+        >
+          {phase === 'discarding' ? 'Discarding…' : 'Discard'}
+        </button>
         <button className="va-btn va-btn-ghost-light va-btn-sm" data-testid="valueos-recording-pause" onClick={togglePause} disabled={phase !== 'live'}>
           {paused ? 'Resume' : 'Pause'}
         </button>
-        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending'}>
+        <button className="va-btn va-btn-danger va-btn-sm" data-testid="valueos-recording-end" onClick={end} disabled={phase === 'ending' || phase === 'discarding'}>
           {phase === 'ending' ? 'Uploading…' : 'End & upload'}
         </button>
       </div>
@@ -186,6 +214,40 @@ export function Recording({
       </p>
 
       <div ref={liveRef} className="va-scroll" data-testid="valueos-recording-live" style={{ maxHeight: 360, overflowY: 'auto' }}>
+        {confirmDiscard && (
+          <div
+            className="va-scrim va-root"
+            data-testid="valueos-discard-confirm"
+            onMouseDown={(e) => e.target === e.currentTarget && setConfirmDiscard(false)}
+          >
+            <div className="va-modal" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
+                Discard this transcript?
+              </h2>
+              <p className="va-body" style={{ margin: '0 0 18px' }}>
+                This stops the recording and permanently deletes the transcript. It will{' '}
+                <strong>not</strong> be uploaded to ValueOS, and this can’t be undone.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  className="va-btn va-btn-ghost-light va-btn-sm"
+                  data-testid="valueos-discard-cancel"
+                  onClick={() => setConfirmDiscard(false)}
+                >
+                  Keep recording
+                </button>
+                <button
+                  className="va-btn va-btn-danger va-btn-sm"
+                  data-testid="valueos-discard-confirm-btn"
+                  onClick={discard}
+                >
+                  Discard transcript
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {phase === 'starting' && !rec.confirmedText && !rec.partialText ? (
           <div className="va-muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <IcMic size={16} /> Listening… recognized speech will appear here in real time.
