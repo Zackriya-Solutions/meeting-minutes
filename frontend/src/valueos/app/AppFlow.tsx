@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useValueOs } from '../context/ValueOsProvider';
+import { ValueOsApiError } from '../api/types';
 import type { EntitledTenant, EntitlementSummary } from '../auth/authService';
 import type { TranscriptRecord } from '../history/transcriptHistory';
 import type { CaptureResult } from '../shell/flowTypes';
@@ -56,10 +57,75 @@ export function AppFlow() {
   // screen) AND the Settings → Help card (fallback). The dialog is hoisted here so ONE instance
   // serves both entry points.
   const [bugOpen, setBugOpen] = useState(false);
+  // Session persistence: while true we're checking for a resumable session (a stored token) on
+  // launch, so we don't force a fresh login every time the app is closed and reopened.
+  const [booting, setBooting] = useState(true);
 
   const refreshRecords = useCallback(async () => {
     setRecords(await history.list());
   }, [history]);
+
+  // ── resume the session on launch (limit logins) ───────────────────────────
+  // If there's a stored, still-valid token, skip the login screen: just re-verify the
+  // subscription (the entitlement gate) and go straight in. A dead token → sign in again; a lapsed
+  // subscription → sign out; a transient network error → resume optimistically (recording is local;
+  // the daily check + upload re-verify once online).
+  const bootedRef = useRef(false);
+  useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
+    void (async () => {
+      try {
+        if (await auth.isLoggedIn()) {
+          try {
+            const summary = await auth.loadEntitlementSummary();
+            if (summary.anyEntitled) {
+              setEntitled(summary.entitled);
+              setStage('setup'); // resume — model step is fast when models already exist
+              setBooting(false);
+              return;
+            }
+            await auth.logout().catch(() => {}); // logged in but subscription no longer active
+          } catch (e) {
+            if (!(e instanceof ValueOsApiError) || !e.isAuth) {
+              setStage('setup'); // transient/network — keep the session, verify later
+              setBooting(false);
+              return;
+            }
+            await auth.logout().catch(() => {}); // 401 → token dead, require re-login
+          }
+        }
+      } catch {
+        /* isLoggedIn threw — treat as logged out */
+      }
+      setStage('welcome');
+      setBooting(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── daily subscription re-check (regardless of when the user logged in) ────
+  // Verify the subscription is still valid ~once a day. If it lapsed (or the token died), sign the
+  // user out. Transient/network errors are ignored — only a definitive not-entitled or an auth
+  // failure logs out.
+  useEffect(() => {
+    if (stage !== 'main') return;
+    const id = setInterval(
+      () =>
+        void (async () => {
+          try {
+            const summary = await auth.loadEntitlementSummary();
+            if (summary.anyEntitled) setEntitled(summary.entitled);
+            else logout();
+          } catch (e) {
+            if (e instanceof ValueOsApiError && e.isAuth) logout();
+          }
+        })(),
+      24 * 60 * 60 * 1000,
+    );
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
   useEffect(() => {
     if (stage === 'main') void refreshRecords();
@@ -239,6 +305,7 @@ export function AppFlow() {
   };
 
   // ── onboarding stages (full-bleed blue, no shell) ─────────────────────────
+  if (booting) return <BootScreen />;
   if (stage === 'welcome') return <WelcomeScreen onProceed={() => setStage('login')} />;
   if (stage === 'login') return <LoginScreen onDone={handleLogin} />;
   if (stage === 'blocked')
@@ -361,6 +428,15 @@ export function AppFlow() {
     </AppShell>
     {bugOpen && <BugReportDialog onClose={() => setBugOpen(false)} tenantId={entitled[0]?.tenant.id} />}
     </>
+  );
+}
+
+function BootScreen() {
+  return (
+    <div className="va-onb va-root" data-testid="valueos-booting">
+      <div className="va-spinner" data-testid="valueos-boot-spinner" />
+      <p style={{ marginTop: 20, opacity: 0.9 }}>Resuming your session…</p>
+    </div>
   );
 }
 

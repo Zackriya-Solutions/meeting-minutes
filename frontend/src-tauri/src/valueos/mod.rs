@@ -308,7 +308,18 @@ fn open_browser(url: &str) {
 // ---- commands ---------------------------------------------------------------------------
 #[tauri::command]
 pub async fn valueos_is_logged_in() -> Result<bool, ValueOsErr> {
-    Ok(read_tokens().map(|t| t.expires_at - 30_000 > now_ms() || t.refresh_token.is_some()).unwrap_or(false))
+    Ok(read_tokens()
+        .map(|t| {
+            // A token minted before a scope was added won't carry it, and a refresh keeps the
+            // original grant — only a fresh authorize adds it. So a stored token whose scopes don't
+            // cover the current SCOPES set is treated as NOT logged in, forcing one clean re-login
+            // after an update that widened the scopes (else the resumed session would 403 on the
+            // new scope).
+            let has_all_scopes = SCOPES.split(' ').all(|s| t.scopes.iter().any(|have| have == s));
+            let alive = t.expires_at - 30_000 > now_ms() || t.refresh_token.is_some();
+            has_all_scopes && alive
+        })
+        .unwrap_or(false))
 }
 
 #[tauri::command]
