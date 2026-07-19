@@ -133,7 +133,7 @@ struct TokenResponse {
 }
 
 async fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result<StoredTokens, ValueOsErr> {
-    let client = reqwest::Client::new();
+    let client = http_client(HTTP_GET_TIMEOUT_SECS);
     let params = [
         ("grant_type", "authorization_code"),
         ("client_id", &cfg_client_id()),
@@ -166,7 +166,7 @@ async fn refresh(tokens: &StoredTokens) -> Result<StoredTokens, ValueOsErr> {
         .refresh_token
         .clone()
         .ok_or_else(|| ValueOsErr::new(401, "No refresh token"))?;
-    let client = reqwest::Client::new();
+    let client = http_client(HTTP_GET_TIMEOUT_SECS);
     let params = [
         ("grant_type", "refresh_token"),
         ("client_id", &cfg_client_id()),
@@ -228,10 +228,23 @@ async fn map_http_error(resp: reqwest::Response) -> ValueOsErr {
     }
 }
 
+// VALUEOS: a reqwest client with a hard total-request timeout so a stalled ValueOS call can
+// never hang the app forever (e.g. an upload that stops making progress). On the resulting
+// transport error the pending-upload queue keeps the local copy and lets the user retry — far
+// better than an infinite "Uploading…". Falls back to a default client if the builder fails.
+fn http_client(timeout_secs: u64) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+const HTTP_GET_TIMEOUT_SECS: u64 = 30;
+const HTTP_POST_TIMEOUT_SECS: u64 = 90; // uploads (transcript + digest) may be larger
+
 async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
     let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let mut resp = reqwest::Client::new()
+    let mut resp = http_client(HTTP_GET_TIMEOUT_SECS)
         .get(url.as_str())
         .bearer_auth(token)
         .send()
@@ -240,7 +253,7 @@ async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
     // Contract §2.6: on 401, force one token refresh and retry the call once.
     if resp.status().as_u16() == 401 {
         let token = force_refresh().await?;
-        resp = reqwest::Client::new()
+        resp = http_client(HTTP_GET_TIMEOUT_SECS)
             .get(url.as_str())
             .bearer_auth(token)
             .send()
@@ -257,7 +270,7 @@ async fn api_get(path: &str) -> Result<serde_json::Value, ValueOsErr> {
 async fn api_post(path: &str, payload: &serde_json::Value) -> Result<serde_json::Value, ValueOsErr> {
     let url = format!("{}{}", cfg_api_base(), path);
     let token = valid_access_token().await?;
-    let mut resp = reqwest::Client::new()
+    let mut resp = http_client(HTTP_POST_TIMEOUT_SECS)
         .post(url.as_str())
         .bearer_auth(token)
         .json(payload)
@@ -268,7 +281,7 @@ async fn api_post(path: &str, payload: &serde_json::Value) -> Result<serde_json:
     // the retried upload safe — the server replays the same ids, never duplicates).
     if resp.status().as_u16() == 401 {
         let token = force_refresh().await?;
-        resp = reqwest::Client::new()
+        resp = http_client(HTTP_POST_TIMEOUT_SECS)
             .post(url.as_str())
             .bearer_auth(token)
             .json(payload)
