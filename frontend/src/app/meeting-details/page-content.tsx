@@ -6,7 +6,6 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { LearningReviewPanel, type IdentityReviewSample } from '@/components/MeetingDetails/LearningReviewPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
@@ -81,28 +80,6 @@ export default function PageContent({
   // Marked moments captured during recording (elapsed seconds), keyed by the
   // saved meeting id in localStorage.
   const markedMoments = useMemo(() => getMarkedMoments(meeting.id), [meeting.id]);
-
-  // Bounded audio excerpt requested by the speaker identity review panel.
-  const [identityPlaybackRequest, setIdentityPlaybackRequest] = useState<{
-    requestId: number;
-    meetingId: string;
-    startSeconds: number;
-    endSeconds: number;
-  } | null>(null);
-
-  const handlePlayIdentitySample = useCallback((sample: IdentityReviewSample) => {
-    const startSeconds = Math.max(0, sample.start_seconds);
-    const reportedEnd = sample.end_seconds ?? startSeconds + 12;
-    // Keep review snippets short enough to compare several voices, but never cut a
-    // very short utterance before it becomes recognizable.
-    const endSeconds = Math.min(Math.max(reportedEnd, startSeconds + 2), startSeconds + 15);
-    setIdentityPlaybackRequest({
-      requestId: Date.now() + Math.random(),
-      meetingId: meeting.id,
-      startSeconds,
-      endSeconds,
-    });
-  }, [meeting.id]);
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup.
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -244,17 +221,6 @@ export default function PageContent({
       <MeetingConversation
         meetingId={meeting.id}
         meeting={meeting}
-        reviewSlot={
-          <LearningReviewPanel
-            meetingId={meeting.id}
-            onPlayIdentitySample={handlePlayIdentitySample}
-            onChanged={async () => {
-              await onRefetchTranscripts?.();
-              await onSpeakersDetected?.();
-              await onMeetingUpdated?.();
-            }}
-          />
-        }
         meetingTitle={meetingData.meetingTitle}
         onTitleChange={meetingData.handleTitleChange}
         isEditingTitle={meetingData.isEditingTitle}
@@ -278,7 +244,6 @@ export default function PageContent({
         onRefetchTranscripts={onRefetchTranscripts}
         onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
         seekToSeconds={seekToSeconds}
-        playbackRequest={identityPlaybackRequest}
         markedMoments={markedMoments}
         speakersById={speakersById}
         speakerCount={speakerCount}

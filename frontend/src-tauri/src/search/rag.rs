@@ -228,6 +228,95 @@ impl RetrievalDiagnostics {
     }
 }
 
+/// Single-meeting chat: answer over the full transcript + saved summary in context
+/// (no retrieval, no "not found" grounding gate). Used for `RagScope::Meeting`, where
+/// the whole meeting fits in the model window and the user is chatting *about this
+/// meeting* rather than searching the archive.
+async fn ask_single_meeting(
+    pool: &sqlx::SqlitePool,
+    query: &str,
+    meeting_id: &str,
+    history: &[(String, String)],
+) -> Result<RagAnswer, String> {
+    use crate::llm::router::Scope;
+    use crate::llm::{complete_routed, Purpose};
+
+    // Full transcript for the meeting, ordered by time.
+    let rows = sqlx::query_as::<_, (String, Option<f64>, Option<String>)>(
+        "SELECT transcript, audio_start_time, speaker FROM transcripts \
+         WHERE meeting_id = ? ORDER BY audio_start_time ASC",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("failed to load transcript: {e}"))?;
+
+    let mut transcript = String::new();
+    for (text, start, speaker) in rows {
+        let ts = start
+            .map(|s| {
+                let s = s.max(0.0) as u64;
+                format!("[{:02}:{:02}] ", s / 60, s % 60)
+            })
+            .unwrap_or_default();
+        let who = speaker
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| format!("{s}: "))
+            .unwrap_or_default();
+        transcript.push_str(&format!("{ts}{who}{}\n", text.trim()));
+    }
+
+    // Guard the context window on very long meetings (keep the beginning).
+    const MAX_TRANSCRIPT_CHARS: usize = 60_000;
+    if transcript.chars().count() > MAX_TRANSCRIPT_CHARS {
+        transcript = transcript.chars().take(MAX_TRANSCRIPT_CHARS).collect();
+        transcript.push_str("\n[…транскрипт сокращён…]");
+    }
+
+    // Saved summary (best-effort; optional).
+    let summary_block = match crate::database::repositories::summary::SummaryProcessesRepository::get_summary_data_for_meeting(pool, meeting_id).await {
+        Ok(Some(process)) => process
+            .result
+            .or(process.result_backup)
+            .map(|s| format!("\n\nСаммари встречи:\n{s}"))
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+
+    // Last-6-turns history (kept consistent with the retrieval path).
+    let mut history_block = String::new();
+    if !history.is_empty() {
+        history_block.push_str("\n\nИстория диалога:\n");
+        let start = history.len().saturating_sub(6);
+        for (role, content) in &history[start..] {
+            history_block.push_str(&format!("{role}: {content}\n"));
+        }
+    }
+
+    let system = "Ты — ассистент по встрече. Отвечай на вопросы пользователя, опираясь на \
+        транскрипт встречи и её саммари ниже. Отвечай на русском, кратко и по делу. Если в \
+        транскрипте и саммари действительно нет нужной информации, честно скажи об этом.";
+    let user = format!(
+        "Транскрипт встречи:\n{transcript}{summary_block}{history_block}\n\nВопрос: {query}"
+    );
+
+    let raw = complete_routed(pool, Purpose::Chat, Scope::SingleMeeting, query.len(), system, &user)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(RagAnswer {
+        answer: raw,
+        citations: vec![],
+        found: true,
+        warning: None,
+        diagnostics: RetrievalDiagnostics {
+            reason: "ok".to_string(),
+            ..Default::default()
+        },
+    })
+}
+
 /// Answer a question over the archive (PLAN.md Phase 4), wired the same way as `extract`:
 /// retrieve (hybrid, scoped) → build `[N]` context → `complete_routed` (privacy-guarded,
 /// GigaChat/DeepSeek via the router) → grounding guards (low-confidence, cite-or-regen).
@@ -240,6 +329,14 @@ pub async fn ask(
     history: &[(String, String)],
 ) -> Result<RagAnswer, String> {
     use crate::llm::{complete_routed, prompts, Purpose};
+
+    // Single-meeting chat answers over the FULL transcript + saved summary in the
+    // model context (the whole meeting fits) rather than retrieval — so questions
+    // like "how many people were in the meeting" are answerable and there is no
+    // "not found" grounding gate. Archive/collection scopes keep RAG retrieval.
+    if let RagScope::Meeting(meeting_id) = scope {
+        return ask_single_meeting(pool, query, meeting_id, history).await;
+    }
 
     let (filters, router_scope, _label) = scope.resolve();
 
