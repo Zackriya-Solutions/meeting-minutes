@@ -7,11 +7,10 @@ import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 
 /**
- * Pinned composer for the meeting conversation (variant 2a), matching the delivery
- * prototype: a single rounded "dock" (border-strong pill, bg-elevated) with an
- * auto-growing textarea and a gold circular send button. Keyboard handling
- * (Enter to send, Shift+Enter newline, ↑/↓ query history) is owned by
- * `useMeetingChat.onKeyDown`.
+ * Pinned composer for the meeting conversation (variant 3a): a rounded dock
+ * (border-strong pill, bg-sheet) with an auto-growing textarea and a neutral send
+ * button that turns gold on hover — the only gold accent kept muted per 3a.
+ * Keyboard handling (Enter / Shift+Enter / ↑↓ history) is owned by useMeetingChat.
  */
 
 interface MeetingComposerProps {
@@ -37,9 +36,9 @@ export function MeetingComposer({
   const canSend = !disabled && !sending && !!input.trim();
 
   return (
-    <div className="border-t border-[var(--border-subtle)] px-[22px] pb-4 pt-3">
-      <div className="mx-auto max-w-[760px]">
-        <div className="flex items-end gap-2.5 rounded-[999px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1.5 pl-4 pr-1.5">
+    <div className="px-[26px] pb-[18px] pt-3">
+      <div className="mx-auto max-w-[720px]">
+        <div className="flex items-end gap-2.5 rounded-[999px] border border-[var(--border-strong)] bg-[var(--bg-sheet)] py-1.5 pl-[18px] pr-2">
           <textarea
             ref={inputRef}
             value={input}
@@ -58,8 +57,8 @@ export function MeetingComposer({
             className={cn(
               'flex h-9 w-9 shrink-0 items-center justify-center self-end rounded-full transition-colors',
               canSend
-                ? 'bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]'
-                : 'cursor-not-allowed bg-[var(--bg-surface)] text-[var(--fg3)]',
+                ? 'bg-[var(--bg-elevated)] text-[var(--fg2)] hover:bg-[var(--gold)] hover:text-[var(--fg-inverse)]'
+                : 'cursor-not-allowed bg-[var(--bg-elevated)] text-[var(--fg3)]',
             )}
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon name="send" size={17} />}

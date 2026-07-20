@@ -8,12 +8,12 @@ import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 
 /**
- * Presentational chat primitives shared by the standalone archive/collection chat
- * page and the embedded meeting conversation (variant 2a). Styling matches the 2a
- * prototype: a gold user bubble (align-self end) and a bordered assistant card.
- * Assistant text is rendered as Markdown + LaTeX (KaTeX). The citation click
- * handler is injected — the archive page routes to `/meeting-details`, the meeting
- * screen expands the transcript pin and scrolls to the cited segment in place.
+ * Chat primitives shared by the archive/collection chat page and the embedded
+ * meeting conversation. Variant 3a: the user keeps a gold bubble; the assistant
+ * answer flows as plain content (no card, no border) rendered as Markdown + LaTeX,
+ * with muted (neutral, not gold) citation chips. The citation click handler is
+ * injected — the archive page routes to `/meeting-details`, the meeting screen
+ * expands the transcript pin and scrolls to the cited segment in place.
  */
 
 export function MessageBubble({
@@ -49,12 +49,7 @@ export function MessageBubble({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className={cn(
-        'max-w-[86%] self-start rounded-[16px] border px-4 py-3.5 text-[14px] leading-[1.6]',
-        msg.error
-          ? 'border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
-          : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--fg1)]',
-      )}
+      className={cn('text-[14.5px] leading-[1.65]', msg.error ? 'text-[var(--danger)]' : 'text-[var(--fg1)]')}
     >
       {notFound && (
         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
@@ -63,11 +58,7 @@ export function MessageBubble({
         </div>
       )}
 
-      {msg.error ? (
-        <div className="whitespace-pre-wrap">{msg.content}</div>
-      ) : (
-        <ChatMarkdown content={msg.content} />
-      )}
+      {msg.error ? <div className="whitespace-pre-wrap">{msg.content}</div> : <ChatMarkdown content={msg.content} />}
 
       {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
 
@@ -79,17 +70,16 @@ export function MessageBubble({
       )}
 
       {!!msg.citations?.length && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
           {msg.citations.map((c) => (
             <button
               key={c.index}
               onClick={() => onCite(c)}
               title={t('Open the meeting at this moment')}
-              className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-canvas)]/70 px-2 py-0.5 text-xs text-[var(--gold)] ring-1 ring-[var(--gold-ring)] transition-colors hover:bg-[var(--gold-soft)]"
+              className="mm-numeric inline-flex items-center gap-1 rounded-md bg-[var(--bg-elevated)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
             >
-              <Icon name="transcript" size={12} />
-              <span className="font-medium">[{c.index}]</span>
-              {showMeetingLabel && <span className="max-w-[160px] truncate">{meetingTitle(c.meeting_id)}</span>}
+              <span>[{c.index}]</span>
+              {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
             </button>
           ))}
         </div>
@@ -116,7 +106,7 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
   }
 
   return (
-    <div className="mt-2 rounded-lg bg-[var(--bg-canvas)]/60 px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
+    <div className="mt-2 rounded-lg bg-[var(--bg-elevated)] px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
       <p>{explanation}</p>
       {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
         <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
@@ -131,7 +121,7 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
 export function TypingIndicator() {
   return (
     <div className="self-start">
-      <div className="flex items-center gap-1 rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
+      <div className="flex items-center gap-1">
         {[0, 1, 2].map((i) => (
           <span
             key={i}

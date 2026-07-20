@@ -247,8 +247,8 @@ export function MeetingConversation({
       {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
 
       {/* Thread */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-2 pt-[26px]">
-        <div className="mx-auto flex max-w-[760px] flex-col gap-[18px]">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-2 pt-1.5">
+        <div className="mx-auto flex max-w-[720px] flex-col gap-6">
           {/* Pin #1 — transcript */}
           <TranscriptCard
             meetingId={meetingId}
@@ -277,6 +277,9 @@ export function MeetingConversation({
           {/* Pin #2 — summary as the first assistant message */}
           <SummaryMessage summaryPanelProps={summaryProps} />
 
+          {/* Divider before the chat thread */}
+          <div className="h-px bg-[var(--border-subtle)]" />
+
           {/* Chat thread (meeting-scoped RAG session) */}
           {loadingHistory ? (
             <div className="flex items-center justify-center py-6 text-[var(--fg3)]">
@@ -284,12 +287,6 @@ export function MeetingConversation({
             </div>
           ) : (
             <>
-              {messages.length === 0 && (
-                <div className="flex items-center gap-2 rounded-[var(--radius-12)] border border-dashed border-[var(--border-subtle)] px-4 py-3 text-xs text-[var(--fg3)]">
-                  <Icon name="chat" size={14} />
-                  {t('Ask a question below to discuss this meeting.')}
-                </div>
-              )}
               {messages.map((msg, i) => (
                 <MessageBubble
                   key={i}
