@@ -191,6 +191,22 @@ export async function startRecording(): Promise<void> {
   }
 }
 
+/**
+ * Diagnostic: how many audio chunks the native pipeline has actually
+ * processed so far (RecordingState.stats.chunks_processed). Used to tell
+ * apart "the mic isn't capturing anything" from "capture works but nothing
+ * downstream (VAD/transcription/save) is happening" while investigating a
+ * recording that produces no transcript and no saved meeting.
+ */
+export async function getRecordingChunksProcessed(): Promise<number> {
+  try {
+    const state = await invoke<{ chunks_processed?: number }>('get_recording_state');
+    return state?.chunks_processed ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function stopRecording(): Promise<void> {
   const { appDataDir } = await import('@tauri-apps/api/path');
   const dataDir = await appDataDir();

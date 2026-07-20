@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VmSegment } from './types';
 import {
+  getRecordingChunksProcessed,
   onTranscriptUpdate,
   pauseRecording,
   resumeRecording,
@@ -42,6 +43,11 @@ export function RecordingScreen({
   const [segments, setSegments] = useState<VmSegment[]>([]);
   const [levels, setLevels] = useState<number[]>(Array(LEVEL_BARS).fill(0.12));
   const [autoScroll, setAutoScroll] = useState(true);
+  // TEMP DIAGNOSTIC: surfaces RecordingState.stats.chunks_processed so we can
+  // tell "mic isn't capturing anything" apart from "capture works but VAD /
+  // transcription / save isn't" without device log access. Remove once the
+  // no-transcript / no-saved-meeting issue is confirmed fixed.
+  const [chunksProcessed, setChunksProcessed] = useState<number | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(false);
@@ -54,6 +60,7 @@ export function RecordingScreen({
     let unTranscript: (() => void) | undefined;
     let stopLevels: (() => void) | undefined;
     let tick: ReturnType<typeof setInterval> | undefined;
+    let chunksPoll: ReturnType<typeof setInterval> | undefined;
 
     (async () => {
       try {
@@ -97,11 +104,17 @@ export function RecordingScreen({
         const bars = Array.from({ length: LEVEL_BARS }, (_, i) => lv[i % lv.length] ?? 0);
         setLevels(bars);
       });
+
+      chunksPoll = setInterval(async () => {
+        const n = await getRecordingChunksProcessed();
+        if (!cancelled) setChunksProcessed(n);
+      }, 1500);
     })();
 
     return () => {
       cancelled = true;
       tick && clearInterval(tick);
+      chunksPoll && clearInterval(chunksPoll);
       unTranscript?.();
       stopLevels?.();
     };
@@ -208,6 +221,9 @@ export function RecordingScreen({
             {segments.length === 0 && (
               <p className="muted fs13" style={{ padding: '0 10px' }}>
                 Listening…
+                {chunksProcessed !== null && (
+                  <span className="mono"> (debug: {chunksProcessed} audio chunks captured)</span>
+                )}
               </p>
             )}
             {segments.slice(-100).map((seg) => (
