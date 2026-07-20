@@ -167,9 +167,16 @@ export async function startRecording(): Promise<void> {
 
   try {
     await Promise.race([
+      // Tauri's #[tauri::command] macro matches JS argument keys against the
+      // camelCase form of the Rust parameter name by default (mic_device_name
+      // -> micDeviceName) — an unmatched key isn't an error, it's silently
+      // treated as a missing Option, which is None. Every prior "No audio
+      // streams could be created" failure was this: mic_device_name (snake
+      // case) never matched, so the backend always started with mic_device =
+      // None regardless of what device we'd resolved.
       invoke('start_recording', {
-        mic_device_name: micDeviceName,
-        system_device_name: null,
+        micDeviceName,
+        systemDeviceName: null,
       }),
       timeout,
     ]);
