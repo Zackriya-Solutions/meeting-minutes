@@ -45,10 +45,12 @@ Manual, three jobs:
 **Secrets** (Settings → Secrets and variables → Actions → Secrets):
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — the ValueOS CI IAM user (`github_ci_user`) with
   `s3:PutObject` on the release bucket.
-- `API_KEY` — the ValueOS service `x-api-key` (same value as the existing `AGENT_API_KEY`).
+- `AGENT_API_KEY` — the ValueOS service `x-api-key`. (`publish.yml` reads `secrets.AGENT_API_KEY`
+  directly, so the existing agent key is reused — no duplicate `API_KEY` secret needed.)
 
 **Variables** (Settings → Secrets and variables → Actions → Variables):
-- `VALUEOS_API` — the app base URL, e.g. `https://<app-domain>` (no trailing slash).
+- `VALUEOS_API` — the app base URL, **host only, no trailing slash, no path** (the workflow appends
+  `/api/agent/releases/…`). Confirmed value: `https://d2luofz0a4v7f3.cloudfront.net`.
 - `AGENT_RELEASES_BUCKET` — `va-pptx-agents-agent-releases-018326344230`.
 - (AWS region `eu-central-2` is hardcoded in `publish.yml`.)
 
