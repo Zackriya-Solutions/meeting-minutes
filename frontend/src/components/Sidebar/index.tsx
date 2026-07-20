@@ -871,6 +871,23 @@ const Sidebar: React.FC = () => {
     );
   };
 
+  // Compact icon nav for the sidebar footer (3a).
+  const navIcon = (name: React.ComponentProps<typeof MementoIcon>['name'], label: string, onClick: () => void, active: boolean) => (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={`flex h-9 flex-1 items-center justify-center rounded-[10px] transition-colors ${
+        active
+          ? 'bg-[var(--gold-soft)] text-[var(--gold)]'
+          : 'bg-[var(--bg-elevated)] text-[var(--fg2)] hover:text-[var(--fg1)]'
+      }`}
+    >
+      <MementoIcon name={name} size={17} />
+    </button>
+  );
+
   return (
     <div className="fixed top-0 left-0 h-screen z-40">
       {/* Floating collapse button */}
@@ -954,7 +971,7 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/')}
-                className={`memento-nav-item items-center h-10 flex mx-3 mt-3 cursor-pointer ${pathname === '/' ? 'is-active' : ''}`}
+                className={`memento-nav-item items-center h-10 flex gap-2.5 mx-3 mt-3 cursor-pointer ${pathname === '/' ? 'is-active' : ''}`}
               >
                 <MementoIcon name="home" size={17} />
                 <span>{t('Home')}</span>
@@ -965,26 +982,9 @@ const Sidebar: React.FC = () => {
           {/* Content area */}
           <div className="flex-1 flex flex-col min-h-0">
             {renderCollapsedIcons()}
-            {/* Meeting Notes folder header - fixed */}
-            {!isCollapsed && (
-              <div className="flex-shrink-0">
-                {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
-                  <div key={item.id}>
-                    <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
-                    >
-                      <MementoIcon name="transcript" size={17} />
-                      <span className="text-[var(--fg2)]">{t('Meeting Notes')}</span>
-                      {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-[var(--gold)] animate-pulse">{t('Searching...')}</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
 
-            {/* Scrollable meeting items */}
+            {/* Scrollable meeting items (grouped by date; group headers replace the
+                former "Meeting Notes" folder header) */}
             {!isCollapsed && (
               <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
                 {filteredSidebarItems
@@ -1004,11 +1004,21 @@ const Sidebar: React.FC = () => {
         {/* Footer */}
         {!isCollapsed && (
 
-          <div className="flex-shrink-0 p-2 border-t border-[var(--border-subtle)]">
+          <div className="flex-shrink-0 border-t border-[var(--border-subtle)] p-2.5">
+            {/* Compact icon nav (3a) — collections · search · settings · chat */}
+            <div className="mb-2 flex gap-1.5">
+              {navIcon('folder', t('Collections'), () => router.push('/collections'), pathname === '/collections')}
+              {navIcon('search', t('Search meetings'), () => router.push('/search'), pathname === '/search')}
+              {navIcon('settings', t('Settings'), () => router.push('/settings'), pathname === '/settings')}
+              {navIcon('chat', t('Chat with archive'), () => router.push('/chat'), pathname === '/chat')}
+              {betaFeatures.importAndRetranscribe && navIcon('upload', t('Import Audio'), () => openImportDialog(), false)}
+            </div>
+
+            {/* Start recording — neutral pill with a red dot indicator */}
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
-              className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--fg1)] transition-colors ${isRecording ? 'opacity-60 cursor-not-allowed' : 'hover:bg-[var(--state-hover-bg)]'}`}
+              className={`flex w-full items-center justify-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm font-semibold text-[var(--fg1)] transition-colors ${isRecording ? 'cursor-not-allowed opacity-60' : 'hover:border-[var(--gold-border)] hover:bg-[var(--gold-soft)]'}`}
             >
               {isRecording ? (
                 <>
@@ -1022,52 +1032,6 @@ const Sidebar: React.FC = () => {
                 </>
               )}
             </button>
-
-            {betaFeatures.importAndRetranscribe && (
-              <button
-                onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)] rounded-lg transition-colors shadow-none"
-              >
-                <MementoIcon name="upload" size={17} />
-                <span>{t('Import Audio')}</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => router.push('/collections')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/collections' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
-            >
-              <MementoIcon name="folder" size={17} />
-              <span>{t('Collections')}</span>
-            </button>
-
-            <button
-              onClick={() => router.push('/search')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/search' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
-            >
-              <MementoIcon name="search" size={17} />
-              <span>{t('Search meetings')}</span>
-            </button>
-
-            <button
-              onClick={() => router.push('/chat')}
-              className={`w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium rounded-lg transition-colors shadow-none ${pathname === '/chat' ? 'text-[var(--gold)] bg-[var(--gold-soft)] hover:bg-[var(--gold-soft-strong)]' : 'text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125'}`}
-            >
-              <MementoIcon name="library" size={17} />
-              <span>{t('Chat with archive')}</span>
-            </button>
-
-            <button
-              onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg transition-colors shadow-none"
-            >
-              <MementoIcon name="settings" size={17} />
-              <span>{t('Settings')}</span>
-            </button>
-            <Info isCollapsed={isCollapsed} />
-            <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-[var(--fg3)]">
-              v0.4.0
-            </div>
           </div>
         )}
       </div>
