@@ -118,7 +118,7 @@ pub async fn get_device_and_config(
 
     #[cfg(target_os = "android")]
     {
-        use cpal::traits::{DeviceTrait, HostTrait};
+        use cpal::traits::HostTrait;
 
         // Deliberately bypasses `host.input_devices()` name-matching, unlike
         // every other platform below: cpal's oboe backend implements device
@@ -131,9 +131,25 @@ pub async fn get_device_and_config(
             let device = host
                 .default_input_device()
                 .ok_or_else(|| anyhow!("No default input device available"))?;
-            let default_config = device
-                .default_input_config()
-                .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+
+            // Also deliberately bypasses device.default_input_config(): on the
+            // oboe backend, the placeholder "default" device has no cached
+            // AudioDeviceInfo, so querying its supported configs falls back to
+            // brute-forcing every (format x channel-mask x sample-rate)
+            // combination — 2 x 2 x 13 = 52 combinations — via
+            // AudioRecord.getMinBufferSize(), a JNI call per combination. That
+            // hits the exact same hang as the enumeration call above, and the
+            // resulting buffer-size range is discarded anyway: converting
+            // SupportedStreamConfig -> cpal::StreamConfig always replaces it
+            // with BufferSize::Default (see cpal's SupportedStreamConfig::config()).
+            // Build the config directly with values matching this app's
+            // pipeline expectation (48kHz) instead of querying for them.
+            let default_config = cpal::SupportedStreamConfig::new(
+                1,
+                cpal::SampleRate(48000),
+                cpal::SupportedBufferSize::Unknown,
+                cpal::SampleFormat::F32,
+            );
             return Ok((device, default_config));
         }
         return Err(anyhow!("Device not found: {}", audio_device.name));
