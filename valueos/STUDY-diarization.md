@@ -19,10 +19,16 @@
   library.** You already ship **ONNX Runtime** (`ort`) for Parakeet + Silero VAD. The whole
   diarization pipeline can run as **ONNX models on the runtime you already have**. Bundling
   Python/PyTorch/pyannote into a Tauri app would be the wrong move (huge, fragile).
-- **Your architecture gives you a massive head start:** you capture **mic and system audio
-  separately**. The mic stream is *definitionally* the local user ("Me") — it needs **no
-  diarization**. Diarization only has to run on the **system stream** (the combined remote
-  participants). So the target output is naturally **`Me`, `Other 1`, `Other 2`, …**.
+- **Do NOT assume the mic is a single speaker.** The mic/system split is a useful *grouping* hint
+  (local-side vs. call-side), but it is **not** a speaker count. Real deployments include: you
+  alone on a call (mic = 1, system = many); you **and a colleague on the same laptop** (mic =
+  several); and a **fully in-person meeting** with no call at all (everyone — 5–10 people — on the
+  mic, system stream empty). So diarization must run on **whichever stream(s) carry speech —
+  frequently the mic too, sometimes ONLY the mic.** Output is neutral **`Speaker 1..N`** (optionally
+  tagged local/remote by stream), never a hardcoded single "Me". See §1.1 for the scenarios.
+- **The mic/system separation stays useful** (it cheaply groups local vs. remote voices and keeps
+  one physical person from appearing on both streams) — it's just not a shortcut that removes the
+  need to diarize the mic.
 - **Two viable implementations, both no-Python:**
   1. **`sherpa-onnx`** (k2-fsa, Apache-2.0) — a ready-made offline diarization pipeline
      (pyannote segmentation-3.0 ONNX + a speaker-embedding ONNX + clustering) driven from Rust.
@@ -33,9 +39,10 @@
      **live/streaming** labels; more code to own.
 - **Recommended path:** **a phased hybrid.**
   - **Phase 1 (offline, high value, low risk):** at *End & upload*, run diarization over the
-    recorded **system** track and relabel the transcript `Other 1..N`. Reuse `ort` + an embedding
-    model + `kodama` clustering. This is the 80/20 — accurate multi-speaker labels with no
-    real-time constraints.
+    recorded audio — **the mic AND system tracks, whichever carry speech** (the in-person case is
+    mic-only) — and relabel the transcript `Speaker 1..N`. Reuse `ort` + an embedding model +
+    `kodama` clustering. This is the 80/20 — accurate multi-speaker labels with no real-time
+    constraints.
   - **Phase 2 (online):** promote it to live labels during the call with incremental (online)
     clustering; keep the Phase-1 pass as an end-of-call "clean-up" re-diarization (online labels
     are provisional; the final pass fixes early mistakes).
@@ -53,23 +60,36 @@ each to an (initially anonymous) speaker label, *without* knowing the speakers i
 **not** speaker *identification* (matching to a known named person) and not *separation* (splitting
 overlapping voices into clean tracks).
 
-Your current `Me/Other` heuristic ([FEATURE-speakers.md](FEATURE-speakers.md)) is a 2-way
-*source* attribution: raw mic energy vs raw system energy per utterance. It cannot tell **two
-different remote people apart** — a 4-person Zoom call is all "Other". Real diarization is exactly
-the missing piece: distinguishing the several voices *inside* the system stream.
+Your current `Me/Other` heuristic ([FEATURE-speakers.md](FEATURE-speakers.md)) is a 2-way *source*
+attribution: raw mic energy vs raw system energy per utterance. It is **doubly** insufficient — it
+conflates **every local speaker into "Me"** and **every remote speaker into "Other"**. Real
+diarization is the missing piece: telling apart the multiple voices that can appear on *either*
+stream.
 
-**Key architectural insight — you only need to diarize ONE stream.** Because you capture mic and
-system separately:
+### 1.1 Capture scenarios — why you cannot assume "mic = one person"
 
-- **Mic stream → always "Me".** No diarization needed. (The local user is the only person on
-  their own microphone.)
-- **System stream → "Other 1..N".** This is where diarization runs. Cleaner than the usual
-  problem, because the local user's voice is *not* mixed into the stream you're clustering (no
-  need to first separate "me" from "them").
+| Scenario | Mic stream | System stream | What diarization must do |
+|---|---|---|---|
+| **Solo remote call** — you alone on Teams/Meet/Zoom | 1 speaker (you) | several remote speakers | diarize the system stream; mic is *usually* 1 — but don't hardcode it |
+| **Co-located on one laptop** — you + a colleague join the same call | **2+ speakers** | several remote speakers | diarize **both** streams |
+| **Fully in-person** — one laptop in the room, no call | **5–10 speakers** | **empty** | diarize the **mic** stream only (classic single-stream diarization) |
+| **Headsets / other media** | depends | depends | capture must route correctly (already handled by the AirPods/system-audio fix); diarization logic is unchanged |
 
-This halves the problem and removes the most error-prone part (self vs. others). It also means the
-diarizer never has to reconcile with the mic — you fuse by construction: `Me` from the mic tag,
-`Other k` from the system-stream diarizer.
+**Consequences for the design:**
+
+- **Diarize whichever stream(s) carry speech — including the mic.** The mic can hold one person,
+  a couple, or (in-person) the whole meeting. Never skip it.
+- **The mic/system split is a grouping hint, not a speaker count.** It still earns its keep: it
+  cheaply separates *local-side* from *call-side* voices and keeps one physical person from
+  appearing on both streams (a given voice is either local-on-mic or remote-on-system) — but each
+  side can contain many speakers, and the in-person case has no system side at all.
+- **Labels are neutral: `Speaker 1..N`** across the whole meeting. Optionally annotate each with its
+  origin (`Speaker 2 · local`, `Speaker 4 · remote`) from the stream it came from, and let the user
+  rename a speaker (including tagging themselves). Never assume a fixed "Me".
+- **Speaker count is unknown and can be large** (~10 in-person). Use a distance-threshold clusterer
+  (not a fixed K) and don't cap it low.
+- **The current `Me/Other` output is a strict subset** of this — once diarization ships, `Me/Other`
+  is retired in favour of `Speaker N` (+ optional local/remote tag).
 
 ---
 
@@ -192,12 +212,13 @@ Almost every high-quality diarizer is **offline**. Options for "live":
 **Pragmatic recommendation — the hybrid, which fits your app perfectly:**
 
 - **During the call:** cheap **online clustering** — maintain a running set of speaker centroids;
-  for each new *system* VAD segment, embed it and assign to the nearest centroid above a cosine
-  threshold, else spawn a new speaker. Show provisional `Other 1..N` live. (You already have the
-  faded/confirmed live model — provisional labels fit it.)
-- **At End & upload:** run the **offline pass** over the full system track (global AHC re-cluster)
-  and **relabel** the saved/uploaded transcript with the clean, globally-consistent labels. This
-  repairs the inevitable early-call online mistakes before anything is persisted/uploaded.
+  for each new VAD segment **from either stream** (mic and system), embed it and assign to the
+  nearest centroid above a cosine threshold, else spawn a new speaker. Show provisional
+  `Speaker 1..N` live. (You already have the faded/confirmed live model — provisional labels fit it.)
+- **At End & upload:** run the **offline pass** over the full recording — **both tracks, or just the
+  mic track for an in-person meeting** (global AHC re-cluster) — and **relabel** the saved/uploaded
+  transcript with the clean, globally-consistent labels. This repairs the inevitable early-call
+  online mistakes before anything is persisted/uploaded.
 
 This gives a live experience *and* a correct artifact, and it degrades gracefully: if you ship only
 the offline pass first (Phase 1), you already deliver correct multi-speaker transcripts.
@@ -229,17 +250,18 @@ Where it slots into the existing native pipeline (`frontend/src-tauri/src/audio/
 
 ```
 capture (mic + system, SEPARATE)                     ← already have both streams
-        └─ system stream ──────────────┐
-ring_buffer → mix → Silero VAD ─────────┤             ← VAD segments already exist
+        ├─ mic stream ─────────────────┐              (in-person: this is the WHOLE meeting)
+        └─ system stream ──────────────┤              (empty when there's no remote call)
+ring_buffer → mix → Silero VAD ─────────┤             ← VAD segments already exist (run per stream)
         │                               │
         │  (per closed VAD segment,     ▼
-        │   for SYSTEM-dominant ones)   [NEW] speaker-embedding ONNX  (via existing `ort`)
-        │                               ▼
-        │                               [NEW] cluster
-        │                                 · live: online centroid assign  → "Other k" (provisional)
-        │                                 · end : kodama AHC re-cluster    → "Other k" (final)
+        │   from EITHER stream)         [NEW] speaker-embedding ONNX  (via existing `ort`)
+        │   tag origin local/remote     ▼
+        │   from mic-vs-system energy    [NEW] cluster (per-stream pools, unified numbering)
+        │                                 · live: online centroid assign  → "Speaker k" (provisional)
+        │                                 · end : kodama AHC re-cluster    → "Speaker k" (final)
         ▼                               ▼
-   transcription (Parakeet/ort) ──► segment gets  source = "Me" | "Other 1" | "Other 2" …
+   transcription (Parakeet/ort) ──► segment gets  source = "Speaker 1" | "Speaker 2" … (+ local/remote)
                                           │
                                           ▼
                               transcript-update event → reduceLive → chat bubbles
@@ -247,15 +269,19 @@ ring_buffer → mix → Silero VAD ─────────┤             �
 
 **What's reused (most of it):**
 
-- The **system stream is already isolated** in the mixer ring buffer — you can tap the raw
-  system-only audio for a VAD segment without new capture work.
-- **VAD segmentation** (Silero) already produces the utterance boundaries to embed.
+- **Both streams are already isolated** in the mixer ring buffer — you can tap the raw mic-only
+  AND raw system-only audio for a VAD segment without new capture work. (In-person = the mic tap is
+  the whole meeting; the system tap is silent.)
+- **VAD segmentation** (Silero) already produces the utterance boundaries to embed — run it per
+  stream so mic-side and system-side utterances are segmented independently.
 - **`ort`** sessions + your model-download/caching machinery (Parakeet models) → add one embedding
   model the same way.
 - The **`source` field** on `TranscriptUpdate` already flows end-to-end to the UI and the enriched
-  export. Today it's `"Me"`/`"Other"`; diarization just makes it `"Me"`/`"Other 1"`/`"Other 2"`.
+  export. Today it's `"Me"`/`"Other"`; diarization replaces that with `"Speaker 1"`/`"Speaker 2"`/…
+  (optionally carrying a `local`/`remote` tag derived from which stream the utterance came from).
   The frontend `speakerLabels.ts` / `toLiveLines` and the bubble renderer already key off `source`
-  — extend the label map + assign a colour per speaker. Minimal UI change.
+  — extend the label map + assign a colour per speaker, and drop the hardcoded left/right You/Other
+  split in favour of per-speaker styling. Minimal UI change.
 
 **New pieces:**
 
@@ -268,17 +294,24 @@ ring_buffer → mix → Silero VAD ─────────┤             �
      new; update running centroid).
    - **offline:** `recluster(all_embeddings) -> labels[]` via `kodama` AHC cut at τ, then map old
      provisional ids → final ids and emit a `transcript-relabel` event.
-3. **Fusion rule:** mic-dominant segment → `Me` (skip diarization); system-dominant segment → run
-   the diarizer → `Other k`. (Reuse the existing raw-mic-vs-system energy decision you already
-   compute for `valueos_attribute`.)
-4. **Overlap (later):** if two remote people talk at once matters, add **pyannote segmentation-3.0
-   ONNX** as a pre-step on the system stream (it emits up to 2 overlapping speakers/frame); until
-   then, VAD segments + embedding + clustering is the pragmatic v1.
+3. **Fusion rule (stream is a hint, not a shortcut):** run the diarizer on **every utterance that
+   has speech, from whichever stream** — mic and system alike. Do NOT skip the mic. Use the existing
+   raw-mic-vs-system energy decision (`valueos_attribute`) only to tag each utterance's *origin*
+   (`local` vs `remote`) and to keep the two streams' embeddings in separate provisional pools, so
+   one physical person can't be split across streams. Then cluster within each pool (and, if
+   desired, present a single unified `Speaker 1..N` numbering across both). In-person, only the mic
+   pool is populated — that's ordinary single-stream diarization.
+4. **Overlap (later):** if two people talking at once matters, add **pyannote segmentation-3.0
+   ONNX** as a pre-step on **whichever stream carries overlap** — the system stream for a busy call,
+   but also the **mic** stream for co-located/in-person meetings where several people share one
+   microphone (it emits up to 2 overlapping speakers/frame). Until then, VAD segments + embedding +
+   clustering is the pragmatic v1.
 
 **Effort estimate (rough):**
 
 - **Phase 1 (offline, end-of-call):** ~2–4 focused days — add the embedding ONNX + `ort` inference,
-  `kodama` clustering over the system track, relabel the transcript. Highest value/lowest risk.
+  `kodama` clustering over **both tracks** (mic + system; mic-only in-person), relabel the
+  transcript `Speaker 1..N`. Highest value/lowest risk.
 - **Phase 2 (online/live):** ~+2–3 days — the centroid tracker, provisional labels in the live
   view, and the end-of-call re-cluster + relabel event.
 - **Alternative Phase-0 spike:** wire **sherpa-onnx** (Option A) for an offline proof in ~1–2 days
@@ -326,14 +359,16 @@ token — the MIT/Apache licenses on the weights make that redistribution legal.
 
 ## 10. Recommendation & next step
 
-1. **Adopt the hybrid, phased plan** (Phase 1 offline via `ort` + `kodama` on the system stream;
+1. **Adopt the hybrid, phased plan** (Phase 1 offline via `ort` + `kodama` on **both streams**;
    Phase 2 online labels + end-of-call re-cluster).
-2. **De-risk first with a ~1–2 day sherpa-onnx spike** on real recorded call audio to confirm the
-   *quality* of pyannote-seg + embedding + AHC on your actual meetings, before investing in the
-   hand-rolled `ort` version. If sherpa's offline quality is good, you know the model choice is
-   right and Phase 1 is "reproduce it on `ort`."
-3. **Keep `Me` free:** never diarize the mic stream — it's the local user by construction. This is
-   your unfair advantage over generic single-stream diarizers.
+2. **De-risk first with a ~1–2 day sherpa-onnx spike** on real recorded audio — and test it against
+   the hard cases, not just the easy one: a solo remote call, a **co-located** recording (two people
+   on one mic), and a **fully in-person** meeting (5–10 people, mic-only). This confirms the
+   *quality* of pyannote-seg + embedding + AHC on your actual meetings before investing in the
+   hand-rolled `ort` version. If sherpa's offline quality is good, Phase 1 is "reproduce it on `ort`."
+3. **Use the mic/system split as a grouping hint, not a shortcut:** it cheaply tags local vs. remote
+   and stops one person straddling both streams — but every stream with speech gets diarized,
+   including the mic. There is no free "Me"; the in-person case is mic-only and must work.
 
 ---
 
