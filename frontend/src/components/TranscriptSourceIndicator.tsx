@@ -1,4 +1,4 @@
-import { Mic, Volume2 } from 'lucide-react';
+import { Mic, Speaker } from 'lucide-react';
 import { TranscriptSource } from '@/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
@@ -10,8 +10,8 @@ export function TranscriptSourceIndicator({ source }: TranscriptSourceIndicatorP
   if (!source) return null;
 
   const isMicrophone = source === 'mic';
-  const Icon = isMicrophone ? Mic : Volume2;
-  const label = isMicrophone ? 'Microphone' : 'System audio';
+  const Icon = isMicrophone ? Mic : Speaker;
+  const label = isMicrophone ? 'Mic' : 'Speaker';
 
   return (
     <Tooltip>
