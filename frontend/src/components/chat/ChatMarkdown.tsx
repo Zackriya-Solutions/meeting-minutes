@@ -16,7 +16,10 @@ import { cn } from '@/lib/utils';
 export function ChatMarkdown({ content, className }: { content: string; className?: string }) {
   return (
     <div className={cn('mm-md', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { errorColor: '#ff6b6b', strict: 'ignore' }]]}
+      >
         {content}
       </ReactMarkdown>
     </div>
