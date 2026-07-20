@@ -72,7 +72,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             info!("📝 No transcript config found, defaulting to gigaam");
             crate::api::api::TranscriptConfig {
                 provider: "gigaam".to_string(),
-                model: "gigaam-v3-e2e-ctc".to_string(),
+                model: crate::gigaam_engine::model_label(),
                 api_key: None,
             }
         }
@@ -80,7 +80,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
             warn!("⚠️ Failed to get transcript config: {}, defaulting to gigaam", e);
             crate::api::api::TranscriptConfig {
                 provider: "gigaam".to_string(),
-                model: "gigaam-v3-e2e-ctc".to_string(),
+                model: crate::gigaam_engine::model_label(),
                 api_key: None,
             }
         }
@@ -190,7 +190,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             info!("📝 No transcript config found, defaulting to gigaam");
             crate::api::api::TranscriptConfig {
                 provider: "gigaam".to_string(),
-                model: "gigaam-v3-e2e-ctc".to_string(),
+                model: crate::gigaam_engine::model_label(),
                 api_key: None,
             }
         }
@@ -198,7 +198,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             warn!("⚠️ Failed to get transcript config: {}, defaulting to gigaam", e);
             crate::api::api::TranscriptConfig {
                 provider: "gigaam".to_string(),
-                model: "gigaam-v3-e2e-ctc".to_string(),
+                model: crate::gigaam_engine::model_label(),
                 api_key: None,
             }
         }

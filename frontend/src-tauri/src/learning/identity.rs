@@ -11,7 +11,12 @@ use crate::database::repositories::speaker::{
 };
 use crate::pipeline::diarization::{cosine_similarity, SpeakerTurn};
 
-pub const VOICE_MODEL_VERSION: &str = "wespeaker_campp_v1";
+/// Embedding-space version. Bumped to v2 on 2026-07-20 with the switch from WeSpeaker
+/// VoxCeleb CAM++ to 3D-Speaker CAM++ zh-en advanced (see
+/// [`crate::pipeline::diarization::EMBEDDING_FILE`]). Embeddings from different spaces
+/// are not comparable — every read path that scores similarities must filter on this,
+/// so v1 centroids/samples are retired rather than mismatched.
+pub const VOICE_MODEL_VERSION: &str = "campplus_zh_en_adv_v2";
 pub const FUSION_MODEL_VERSION: &str = "voice_series_v1";
 const MAX_CENTROIDS: usize = 5;
 const NEW_MODE_THRESHOLD: f32 = 0.78;
@@ -35,11 +40,16 @@ pub struct IdentityPolicy {
 }
 
 impl Default for IdentityPolicy {
+    // voice_floor/confirm_threshold calibrated 2026-07-20 for the v2 embedding space
+    // (campplus_zh_en_adv): on the 7-voice reference meeting, same-speaker half-profile
+    // centroids measured cos 0.832–0.973 vs cross-speaker 0.260–0.755. The floor sits
+    // just under the worst same-speaker pair; confirm clears the best cross-speaker
+    // pair with margin for cross-meeting channel variance.
     fn default() -> Self {
         Self {
             auto_assign_enabled: false,
-            voice_floor: 0.72,
-            confirm_threshold: 0.76,
+            voice_floor: 0.75,
+            confirm_threshold: 0.80,
             auto_assign_threshold: 0.90,
             min_confirm_margin: 0.03,
             min_auto_margin: 0.08,
@@ -287,9 +297,10 @@ async fn active_centroids(pool: &SqlitePool) -> Result<Vec<CentroidCandidate>, S
         "SELECT vc.speaker_id, s.display_name, vc.embedding, vc.dispersion \
          FROM voice_centroids vc \
          JOIN speakers s ON s.id=vc.speaker_id \
-         WHERE vc.is_active=1 AND s.is_confirmed=1 AND s.learning_enabled=1 \
-           AND s.consent_state='granted' AND s.deleted_at IS NULL",
+         WHERE vc.is_active=1 AND vc.model_version=? AND s.is_confirmed=1 \
+           AND s.learning_enabled=1 AND s.consent_state='granted' AND s.deleted_at IS NULL",
     )
+    .bind(VOICE_MODEL_VERSION)
     .fetch_all(pool)
     .await
     .map_err(|error| format!("Failed to load voice centroids: {error}"))?;
@@ -1112,9 +1123,10 @@ pub async fn build_profile(
     let _build_guard = PROFILE_BUILD_LOCK.lock().await;
     let rows = sqlx::query(
         "SELECT embedding, speech_quality, channel_kind FROM voice_samples \
-         WHERE speaker_id=? AND eligibility='trusted' ORDER BY id",
+         WHERE speaker_id=? AND eligibility='trusted' AND model_version=? ORDER BY id",
     )
     .bind(speaker_id)
+    .bind(VOICE_MODEL_VERSION)
     .fetch_all(pool)
     .await
     .map_err(|error| format!("Failed to load trusted voice samples: {error}"))?;

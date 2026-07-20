@@ -26,12 +26,14 @@ static RETRANSCRIPTION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static RETRANSCRIPTION_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 /// RAII guard for RETRANSCRIPTION_IN_PROGRESS flag
-/// Ensures flag is cleared even if retranscription panics or returns early
-struct RetranscriptionGuard;
+/// Ensures flag is cleared even if retranscription panics or returns early.
+/// Also acquired by the refinement pass's turn-aligned re-transcription
+/// (`audio::refinement`) so the two writers can never race on transcript rows.
+pub(crate) struct RetranscriptionGuard;
 
 impl RetranscriptionGuard {
     /// Create guard and set flag atomically
-    fn acquire() -> Result<Self, String> {
+    pub(crate) fn acquire() -> Result<Self, String> {
         if RETRANSCRIPTION_IN_PROGRESS
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
@@ -685,15 +687,15 @@ async fn run_retranscription<R: Runtime>(
         duration_seconds,
         &audio_filename,
         provider.as_deref().unwrap_or("whisper"),
-        model.as_deref().unwrap_or_else(|| {
+        &model.clone().unwrap_or_else(|| {
             if use_salutespeech {
-                "salutespeech-stream-v2"
+                "salutespeech-stream-v2".to_string()
             } else if use_gigaam {
-                "gigaam-v3-e2e-ctc"
+                crate::gigaam_engine::model_label()
             } else if use_parakeet {
-                DEFAULT_PARAKEET_MODEL
+                DEFAULT_PARAKEET_MODEL.to_string()
             } else {
-                DEFAULT_WHISPER_MODEL
+                DEFAULT_WHISPER_MODEL.to_string()
             }
         }),
         language.as_deref(),

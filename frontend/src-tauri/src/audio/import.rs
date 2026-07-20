@@ -785,6 +785,12 @@ async fn start_import<R: Runtime>(
                     "average_confidence": res.average_confidence
                 }),
             );
+            // Imported meetings are already batch-transcribed; run the speaker pass
+            // (diarize + labeled export) that recorded meetings get via refinement.
+            crate::audio::refinement::spawn_import_refinement(
+                app.clone(),
+                res.meeting_id.clone(),
+            );
         }
         Ok(ImportRunOutcome::AlreadyImported(existing)) => {
             let _ = app.emit("import-duplicate", existing);
@@ -918,6 +924,11 @@ pub async fn start_batch_import<R: Runtime>(
 
         match import_result {
             Ok(ImportRunOutcome::Imported(imported)) => {
+                // Same speaker pass single imports get (diarize + labeled export).
+                crate::audio::refinement::spawn_import_refinement(
+                    app.clone(),
+                    imported.meeting_id.clone(),
+                );
                 result.imported.push(imported);
                 emit_batch_progress(&app, index + 1, &item, &result, "completed");
             }
@@ -1552,15 +1563,15 @@ async fn run_import<R: Runtime>(
         transcribed_count,
         avg_confidence,
         provider.as_deref().unwrap_or("whisper"),
-        model.as_deref().unwrap_or_else(|| {
+        &model.clone().unwrap_or_else(|| {
             if use_salutespeech {
-                "salutespeech-stream-v2"
+                "salutespeech-stream-v2".to_string()
             } else if use_gigaam {
-                "gigaam-v3-e2e-ctc"
+                crate::gigaam_engine::model_label()
             } else if use_parakeet {
-                DEFAULT_PARAKEET_MODEL
+                DEFAULT_PARAKEET_MODEL.to_string()
             } else {
-                DEFAULT_WHISPER_MODEL
+                DEFAULT_WHISPER_MODEL.to_string()
             }
         }),
         language.as_deref(),
@@ -2873,5 +2884,246 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Research harness: full VAD→GigaAM transcription of a real meeting at three
+    /// profiles, to isolate live-chunking loss from model-inherent loss:
+    ///   batch2000  — 16 kHz input, 2000 ms redemption (shipped import path)
+    ///   batch400   — 16 kHz input, 400 ms redemption (live redemption, clean resample)
+    ///   livesim400 — 48 kHz input, 400 ms redemption (live path incl. the VAD's
+    ///                internal moving-average resampler)
+    /// Writes one JSON per profile into RESEARCH_OUT_DIR. Run with:
+    ///   TEST_AUDIO_PATH=<16k mono wav> TEST_AUDIO_PATH_48K=<48k mono wav> \
+    ///   GIGAAM_DIR=<dir with v3_e2e_rnnt_*.onnx> RESEARCH_OUT_DIR=<dir> \
+    ///   cargo test -p meetily --lib audio::import::tests::research_transcribe_profiles -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn research_transcribe_profiles() {
+        let audio_16k = match std::env::var("TEST_AUDIO_PATH") {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skip: TEST_AUDIO_PATH not set");
+                return;
+            }
+        };
+        let audio_48k = std::env::var("TEST_AUDIO_PATH_48K").ok();
+        let gigaam_dir = std::env::var("GIGAAM_DIR").expect("GIGAAM_DIR not set");
+        let out_dir = std::env::var("RESEARCH_OUT_DIR").expect("RESEARCH_OUT_DIR not set");
+
+        crate::gigaam_engine::load_global(
+            crate::gigaam_engine::variant::GigaamVariant::E2eRnntFp32,
+            gigaam_dir.into(),
+        )
+        .expect("failed to load GigaAM RNN-T fp32");
+
+        async fn transcribe_segments(
+            segments: &[SpeechSegment],
+            label: &str,
+            out_dir: &str,
+        ) {
+            let started = std::time::Instant::now();
+            let mut rows = Vec::new();
+            for (i, seg) in segments.iter().enumerate() {
+                let text = match crate::gigaam_engine::transcribe(seg.samples.clone()).await {
+                    Some(Ok(t)) => t,
+                    Some(Err(e)) => format!("<error: {e}>"),
+                    None => panic!("engine not loaded"),
+                };
+                rows.push(serde_json::json!({
+                    "start_ms": seg.start_timestamp_ms,
+                    "end_ms": seg.end_timestamp_ms,
+                    "text": text,
+                }));
+                if i % 20 == 0 {
+                    eprintln!("[{label}] {i}/{} segments", segments.len());
+                }
+            }
+            let path = format!("{out_dir}/{label}.json");
+            std::fs::write(&path, serde_json::to_string_pretty(&rows).unwrap()).unwrap();
+            eprintln!(
+                "[{label}] wrote {} segments to {path} in {:.0}s",
+                rows.len(),
+                started.elapsed().as_secs_f64()
+            );
+        }
+
+        let decoded =
+            crate::audio::decoder::decode_audio_file(Path::new(&audio_16k)).expect("decode 16k");
+        let samples_16k = decoded.to_whisper_format();
+        eprintln!(
+            "decoded 16k: {:.1}s ({} samples)",
+            samples_16k.len() as f64 / 16_000.0,
+            samples_16k.len()
+        );
+
+        let batch_profiles: &[(u32, &str)] = if std::env::var("RESEARCH_LIVESIM_ONLY").is_ok() {
+            &[]
+        } else {
+            &[(2000u32, "batch2000"), (400, "batch400")]
+        };
+        for &(redemption_ms, label) in batch_profiles {
+            let segments =
+                get_speech_chunks_with_progress(&samples_16k, redemption_ms, |_, _| true)
+                    .expect("VAD failed");
+            // Mirror the shipped import path: split oversized segments at silence.
+            const MAX_SEGMENT_SAMPLES: usize = 25 * 16000;
+            let mut split: Vec<SpeechSegment> = Vec::new();
+            for seg in segments {
+                if seg.samples.len() > MAX_SEGMENT_SAMPLES {
+                    split.extend(split_segment_at_silence(&seg, MAX_SEGMENT_SAMPLES));
+                } else {
+                    split.push(seg);
+                }
+            }
+            eprintln!("[{label}] VAD produced {} segments after splitting", split.len());
+            transcribe_segments(&split, label, &out_dir).await;
+        }
+
+        // Live simulation: 48 kHz input through the VAD's internal resampler, fed in
+        // 600 ms windows like the live pipeline's mixing window, then post-processed
+        // exactly like AudioPipeline::send_speech_segment (overlap trim + 25 s split).
+        if let Some(path_48k) = audio_48k {
+            let decoded48 =
+                crate::audio::decoder::decode_audio_file(Path::new(&path_48k)).expect("decode 48k");
+            assert_eq!(decoded48.channels, 1, "expected mono 48k wav");
+            let sr = decoded48.sample_rate;
+            let mut processor =
+                ContinuousVadProcessor::new(sr, 800).expect("VAD processor");
+            let window = (sr as f64 * 0.6) as usize;
+            let mut raw_segments: Vec<SpeechSegment> = Vec::new();
+            let mut fed = 0usize;
+            while fed < decoded48.samples.len() {
+                let end = (fed + window).min(decoded48.samples.len());
+                raw_segments.extend(
+                    processor
+                        .process_audio(&decoded48.samples[fed..end])
+                        .expect("VAD process"),
+                );
+                fed = end;
+            }
+            raw_segments.extend(processor.flush().expect("VAD flush"));
+
+            const MAX_ASR_SEGMENT_SAMPLES: usize = 25 * 16000;
+            let mut segments: Vec<SpeechSegment> = Vec::new();
+            let mut last_sent_end_ms = 0.0f64;
+            for seg in raw_segments {
+                let Some(seg) =
+                    crate::audio::pipeline::trim_leading_overlap(seg, last_sent_end_ms)
+                else {
+                    continue;
+                };
+                for piece in split_segment_at_silence(&seg, MAX_ASR_SEGMENT_SAMPLES) {
+                    if piece.samples.len() < 800 {
+                        continue;
+                    }
+                    last_sent_end_ms = last_sent_end_ms.max(piece.end_timestamp_ms);
+                    segments.push(piece);
+                }
+            }
+            eprintln!("[livesim800] VAD produced {} segments", segments.len());
+            transcribe_segments(&segments, "livesim800", &out_dir).await;
+        }
+    }
+
+    /// Research harness: turn-aligned transcription — cut the audio at diarized speaker
+    /// turns (from a turns CSV produced by `research_diarize_wav`) using the production
+    /// planner, transcribe each span with GigaAM, and dump rows for offline scoring.
+    ///   TEST_AUDIO_PATH=<16k mono wav> TURNS_CSV=<start_ms,end_ms,cluster_id>
+    ///   GIGAAM_DIR=... RESEARCH_OUT_DIR=... \
+    ///   cargo test -p meetily --lib audio::import::tests::research_turn_aligned -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn research_turn_aligned() {
+        let audio_16k = match std::env::var("TEST_AUDIO_PATH") {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skip: TEST_AUDIO_PATH not set");
+                return;
+            }
+        };
+        let turns_csv = std::env::var("TURNS_CSV").expect("TURNS_CSV not set");
+        let gigaam_dir = std::env::var("GIGAAM_DIR").expect("GIGAAM_DIR not set");
+        let out_dir = std::env::var("RESEARCH_OUT_DIR").expect("RESEARCH_OUT_DIR not set");
+
+        crate::gigaam_engine::load_global(
+            crate::gigaam_engine::variant::GigaamVariant::E2eRnntFp32,
+            gigaam_dir.into(),
+        )
+        .expect("failed to load GigaAM RNN-T fp32");
+
+        let turns: Vec<crate::pipeline::diarization::SpeakerTurn> =
+            std::fs::read_to_string(&turns_csv)
+                .expect("read turns csv")
+                .lines()
+                .skip(1)
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| {
+                    let c: Vec<&str> = l.split(',').collect();
+                    crate::pipeline::diarization::SpeakerTurn {
+                        start_ms: c[0].trim().parse().unwrap(),
+                        end_ms: c[1].trim().parse().unwrap(),
+                        cluster_id: c[2].trim().parse().unwrap(),
+                    }
+                })
+                .collect();
+
+        let decoded =
+            crate::audio::decoder::decode_audio_file(Path::new(&audio_16k)).expect("decode");
+        let samples = decoded.to_whisper_format();
+        let total = samples.len();
+
+        let spans =
+            crate::audio::refinement::plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
+        eprintln!("[turnaligned] {} turns -> {} ASR spans", turns.len(), spans.len());
+
+        // Majority cluster per span, for reporting speaker structure.
+        let cluster_of = |s: i64, e: i64| -> i64 {
+            let mut best = (-1i64, 0i64);
+            for t in &turns {
+                let ov = (e.min(t.end_ms) - s.max(t.start_ms)).max(0);
+                if ov > best.1 {
+                    best = (t.cluster_id, ov);
+                }
+            }
+            best.0
+        };
+
+        const MAX_SEGMENT_SAMPLES: usize = 25 * 16_000;
+        let mut rows = Vec::new();
+        for (i, &(start_ms, end_ms)) in spans.iter().enumerate() {
+            let s = ((start_ms as f64 / 1000.0) * 16_000.0) as usize;
+            let e = (((end_ms as f64 / 1000.0) * 16_000.0) as usize).min(total);
+            if e <= s || e - s < 1_600 {
+                continue;
+            }
+            let piece = SpeechSegment {
+                samples: samples[s..e].to_vec(),
+                start_timestamp_ms: start_ms as f64,
+                end_timestamp_ms: end_ms as f64,
+                confidence: 0.9,
+            };
+            for sub in split_segment_at_silence(&piece, MAX_SEGMENT_SAMPLES) {
+                if sub.samples.len() < 1_600 {
+                    continue;
+                }
+                let text = match crate::gigaam_engine::transcribe(sub.samples.clone()).await {
+                    Some(Ok(t)) => t,
+                    Some(Err(e)) => format!("<error: {e}>"),
+                    None => panic!("engine not loaded"),
+                };
+                rows.push(serde_json::json!({
+                    "start_ms": sub.start_timestamp_ms,
+                    "end_ms": sub.end_timestamp_ms,
+                    "cluster": cluster_of(sub.start_timestamp_ms as i64, sub.end_timestamp_ms as i64),
+                    "text": text,
+                }));
+            }
+            if i % 20 == 0 {
+                eprintln!("[turnaligned] {i}/{} spans", spans.len());
+            }
+        }
+        let path = format!("{out_dir}/turnaligned.json");
+        std::fs::write(&path, serde_json::to_string_pretty(&rows).unwrap()).unwrap();
+        eprintln!("[turnaligned] wrote {} rows to {path}", rows.len());
     }
 }

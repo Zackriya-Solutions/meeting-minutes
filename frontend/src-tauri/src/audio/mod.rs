@@ -47,6 +47,7 @@ pub(crate) mod common;
 pub mod constants;
 
 // Retranscription module (re-process stored audio with different settings)
+pub mod refinement;
 pub mod retranscription;
 
 // Import module (import external audio files as new meetings)

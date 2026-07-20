@@ -38,7 +38,13 @@ pub const MIN_OVERLAP_RATIO: f32 = 0.60;
 
 /// Model file names in the diarizer model dir (see [`crate::pipeline::diarization_commands`]).
 pub const SEGMENTATION_FILE: &str = "segmentation.onnx";
-pub const EMBEDDING_FILE: &str = "embedding.onnx";
+/// v2: 3D-Speaker CAM++ zh-en "advanced" (sherpa-onnx export). The v1 WeSpeaker
+/// VoxCeleb CAM++ ("embedding.onnx") measured non-separable on real VoIP meeting audio
+/// (same-speaker centroid cos 0.91–0.99 vs cross-speaker 0.62–0.92, overlapping ranges;
+/// 44.8% speaker agreement on a 7-voice reference meeting). Same architecture and
+/// runtime cost; the zh-en advanced training set lifts the same meeting to 85.8–93%
+/// agreement with all 7 speakers found. The new filename retires stale v1 downloads.
+pub const EMBEDDING_FILE: &str = "embedding.v2.onnx";
 
 /// Segmentation runs on 16 kHz mono; pyannote segmentation-3.0 uses 10 s chunks.
 const SEG_SAMPLE_RATE: usize = 16_000;
@@ -67,16 +73,15 @@ const SEG_NUM_LOCAL_SPEAKERS: usize = 3;
 pub const DEFAULT_CLUSTER_DISTANCE_THRESHOLD: f32 = 0.30;
 
 /// Stage-2 cut: fragments whose duration-weighted centroids have cosine similarity at or
-/// above this merge into one speaker. Calibrated end-to-end on real-speech meetings built
-/// from CMU Arctic voices (truth in parentheses): cluster counts by stage-2 value —
-///   2-speaker (2):      0.65 → 2   0.70 → 4   0.75 → 4
-///   3-speaker easy (3): 0.65 → 3   0.70 → 4   0.75 → 8
-///   3-speaker hard (3): 0.65 → 4   0.70 → 6   0.75 → 7
-/// Full-profile centroids measured same-speaker 0.82–0.93 vs distinct-voice cross ≤ 0.71,
-/// but SMALL fragments jitter well below full-profile similarity, so stricter cuts strand
-/// fragments as phantom speakers — under-merging recreates the over-counting bug this
-/// change fixes, while a rare over-merge only mislabels segments of an existing speaker.
-pub const DEFAULT_CENTROID_MERGE_MIN_SIM: f32 = 0.65;
+/// above this merge into one speaker. Recalibrated 2026-07-20 on a real 31-min 7-voice
+/// VoIP meeting with the v2 (CAM++ zh-en advanced) embedding, scored against a reference
+/// diarization: speaker agreement by stage-2 value — 0.65 → 85.8% (28 clusters),
+/// 0.75 → 93.1% (57 clusters), 0.80 → 93.3% (76 clusters), 0.85 → 93.2% (90 clusters).
+/// 0.75 is the knee. Stricter cuts strand small fragments as phantom speakers, but that
+/// is now handled by [`consolidate_minor_clusters`] (attaches minor clusters to major
+/// ones) instead of loosening this cut — the old 0.65 value collapsed distinct speakers
+/// into one giant cluster on real meeting audio.
+pub const DEFAULT_CENTROID_MERGE_MIN_SIM: f32 = 0.75;
 
 /// Turns shorter than this (after gap-merging) are dropped entirely — too little audio for
 /// even a post-hoc embedding match.
@@ -106,6 +111,13 @@ pub const DEFAULT_SHORT_TURN_ASSIGN_MIN_SIM: f32 = 0.30;
 /// their embedding is a blend of voices and would pollute a centroid. They are attached
 /// afterward like short turns.
 pub const DEFAULT_MAX_OVERLAP_FRAC: f32 = 0.50;
+
+/// Clusters whose total speaking time reaches this floor are "major" — real meeting
+/// participants. Smaller clusters are crumbs (a few stranded fragments each) and are
+/// folded into their most-similar major cluster by [`consolidate_minor_clusters`].
+/// Measured on the 7-voice reference meeting at stage-2 = 0.75: the 7 true speakers'
+/// clusters held 24–616 s each while all 50 crumb clusters held ≤ 20 s.
+pub const DEFAULT_MIN_MAJOR_CLUSTER_MS: i64 = 15_000;
 
 /// Agglomerative linkage criterion for [`cluster_embeddings`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -393,12 +405,15 @@ pub fn merge_clusters_by_centroid(
 }
 
 /// [`merge_clusters_by_centroid`] with an optional expected-speaker-count hint (the
-/// in-meeting control pill's "expected speakers"). With `num_speakers = Some(k)` the
-/// similarity floor is replaced by a count target: closest centroid pairs merge
-/// (regardless of similarity) while more than `k` clusters remain, and merging stops at
-/// exactly `k` — the hint is the true count, not a maximum, so threshold merges below it
-/// are also suppressed. If stage 1 formed fewer than `k` fragments nothing merges (a
-/// fragment cannot be split).
+/// in-meeting control pill's "expected speakers"). With `num_speakers = Some(k)`,
+/// threshold merges stop once `k` clusters remain — the user asserted at least `k`
+/// distinct voices, so stage 2 must not collapse below that. The hint does NOT force
+/// merging down to `k`: closest-centroid forced merges measured harmful on real meeting
+/// audio (85.8% → 58.2% speaker agreement on the 7-voice reference meeting — the
+/// closest pair by centroid is often two distinct voices, not two fragments of one).
+/// Reaching the hint count from above is [`consolidate_minor_clusters`]'s job, which
+/// attaches crumbs to majors instead of merging major pairs. If stage 1 formed fewer
+/// than `k` fragments nothing merges (a fragment cannot be split).
 pub fn merge_clusters_by_centroid_with_hint(
     embeddings: &[Vec<f32>],
     durations_ms: &[i64],
@@ -446,11 +461,12 @@ pub fn merge_clusters_by_centroid_with_hint(
                 }
             }
         }
-        // With a hint: merge (closest pair, any similarity) while above the target count,
-        // and never past it. Without: merge while the closest pair clears the floor.
+        // Merge while the closest pair clears the floor; with a hint, additionally stop
+        // once the asserted count is reached (never collapse below what the user said).
+        let clears_floor = best.map_or(false, |(sim, _, _)| sim >= min_similarity);
         let should_merge = match num_speakers {
-            Some(k) => live > k.max(1),
-            None => best.map_or(false, |(sim, _, _)| sim >= min_similarity),
+            Some(k) => clears_floor && live > k.max(1),
+            None => clears_floor,
         };
         match best {
             Some((_, a, b)) if should_merge => {
@@ -475,6 +491,95 @@ pub fn merge_clusters_by_centroid_with_hint(
     for (i, &c) in cluster_of_turn.iter().enumerate() {
         let next = relabel.len();
         out[i] = *relabel.entry(c).or_insert(next);
+    }
+    out
+}
+
+/// Stage 3: fold crumb clusters into meeting participants. Stage 2's tight cut (see
+/// [`DEFAULT_CENTROID_MERGE_MIN_SIM`]) deliberately leaves small stranded fragments as
+/// their own clusters rather than risk collapsing two voices; this pass reassigns each
+/// such minor cluster's turns to the most-similar *major* cluster.
+///
+/// Majors are clusters whose total speaking time reaches `min_major_ms` — or, when the
+/// user asserted a speaker count, exactly the `num_speakers` longest-speaking clusters.
+/// A minor cluster attaches when its centroid's cosine similarity to the best major
+/// reaches `attach_floor`; below the floor it stays standalone (a genuinely distinct
+/// rare voice should not be forced onto someone else) — except under a hint, where the
+/// user's count is trusted and attachment is unconditional.
+///
+/// Measured on the 7-voice reference meeting (stage-2 = 0.75): the 7 majors held 87% of
+/// attributed speech at 82–98% purity; the 50 minors were ≤ 20 s crumbs.
+pub fn consolidate_minor_clusters(
+    embeddings: &[Vec<f32>],
+    durations_ms: &[i64],
+    labels: &[usize],
+    num_speakers: Option<usize>,
+    min_major_ms: i64,
+    attach_floor: f32,
+) -> Vec<usize> {
+    let n = labels.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let k = labels.iter().copied().max().unwrap_or(0) + 1;
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); k];
+    for (i, &l) in labels.iter().enumerate() {
+        members[l].push(i);
+    }
+    let total_ms: Vec<i64> = members
+        .iter()
+        .map(|m| m.iter().map(|&i| durations_ms[i].max(0)).sum())
+        .collect();
+    let centroids: Vec<Vec<f32>> = members
+        .iter()
+        .map(|m| {
+            let items: Vec<(&[f32], i64)> = m
+                .iter()
+                .map(|&i| (embeddings[i].as_slice(), durations_ms[i]))
+                .collect();
+            duration_weighted_centroid(&items)
+        })
+        .collect();
+
+    let mut majors: Vec<usize> = match num_speakers {
+        Some(hint) => {
+            let mut by_dur: Vec<usize> = (0..k).collect();
+            by_dur.sort_by_key(|&c| std::cmp::Reverse(total_ms[c]));
+            by_dur.truncate(hint.max(1));
+            by_dur
+        }
+        None => (0..k).filter(|&c| total_ms[c] >= min_major_ms).collect(),
+    };
+    if majors.is_empty() {
+        // Short recording where nobody reaches the floor: the longest cluster is the
+        // meeting's dominant voice; everything else attaches to it or stays put.
+        if let Some(largest) = (0..k).max_by_key(|&c| total_ms[c]) {
+            majors.push(largest);
+        }
+    }
+
+    let mut target: Vec<usize> = (0..k).collect();
+    for c in 0..k {
+        if majors.contains(&c) || members[c].is_empty() {
+            continue;
+        }
+        let best = majors
+            .iter()
+            .map(|&m| (m, cosine_similarity(&centroids[c], &centroids[m])))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some((m, sim)) = best {
+            if num_speakers.is_some() || sim >= attach_floor {
+                target[c] = m;
+            }
+        }
+    }
+
+    // Dense relabel in first-seen order over the original turn order.
+    let mut relabel: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut out = vec![0usize; n];
+    for (i, &l) in labels.iter().enumerate() {
+        let next = relabel.len();
+        out[i] = *relabel.entry(target[l]).or_insert(next);
     }
     out
 }
@@ -619,9 +724,16 @@ pub struct DiarizationParams {
     /// this cosine-similar. See [`DEFAULT_CENTROID_MERGE_MIN_SIM`].
     pub centroid_merge_min_similarity: f32,
     /// Expected speaker count (user hint from the in-meeting control pill). When set,
-    /// stage 2 merges down to exactly this many clusters instead of using the
-    /// similarity floor. `None` = automatic (threshold-based) estimation.
+    /// stage 2 never merges below this many clusters, and consolidation keeps exactly
+    /// the `k` longest-speaking clusters as majors, attaching the rest to them. It does
+    /// NOT force-merge major clusters together — measured on the 7-voice reference
+    /// meeting, forcing closest-centroid merges down to the hint count dropped speaker
+    /// agreement from 85.8% to 58.2% (the greedy pair choice merges distinct voices).
+    /// `None` = automatic (threshold + duration-floor based) estimation.
     pub num_speakers: Option<usize>,
+    /// Clusters below this total speaking time are folded into a major cluster during
+    /// consolidation. See [`DEFAULT_MIN_MAJOR_CLUSTER_MS`].
+    pub min_major_cluster_ms: i64,
 }
 
 impl Default for DiarizationParams {
@@ -636,6 +748,7 @@ impl Default for DiarizationParams {
             linkage: Linkage::Complete,
             centroid_merge_min_similarity: DEFAULT_CENTROID_MERGE_MIN_SIM,
             num_speakers: None,
+            min_major_cluster_ms: DEFAULT_MIN_MAJOR_CLUSTER_MS,
         }
     }
 }
@@ -968,13 +1081,22 @@ impl Diarizer {
             self.params.linkage,
         );
         // Stage 2: consolidate fragments of one speaker via duration-weighted centroids
-        // (or down to the user's expected speaker count when a hint is set).
-        let labels = merge_clusters_by_centroid_with_hint(
+        // (with a speaker-count hint acting as a merge stop, never a forced merge).
+        let merged_labels = merge_clusters_by_centroid_with_hint(
             &formation_embs,
             &formation_durs,
             &fragment_labels,
             self.params.centroid_merge_min_similarity,
             self.params.num_speakers,
+        );
+        // Stage 3: fold crumb clusters into the meeting's major participants.
+        let labels = consolidate_minor_clusters(
+            &formation_embs,
+            &formation_durs,
+            &merged_labels,
+            self.params.num_speakers,
+            self.params.min_major_cluster_ms,
+            self.params.short_turn_assign_min_similarity,
         );
         let num_clusters = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
 
@@ -1395,10 +1517,10 @@ mod tests {
     }
 
     #[test]
-    fn speaker_count_hint_forces_merge_down_to_target() {
-        // Three fragments: two +x-ish voices that are NOT similar enough to merge at the
-        // floor (cos ≈ 0.71 < 0.85) plus one orthogonal +y voice. Without a hint the floor
-        // keeps all three apart; with num_speakers=2 the closest pair must merge anyway.
+    fn speaker_count_hint_never_forces_sub_floor_merges() {
+        // Three fragments: two +x-ish voices below the floor (cos ≈ 0.71 < 0.85) plus one
+        // orthogonal +y voice. The hint must NOT force-merge distinct voices in stage 2 —
+        // reaching the hint count from above is consolidation's job.
         let embs = vec![
             vec![1.0, 0.0],
             vec![0.71, 0.71], // cos 0.71 with both neighbors
@@ -1417,12 +1539,82 @@ mod tests {
         let hinted = merge_clusters_by_centroid_with_hint(&embs, &durs, &labels, 0.85, Some(2));
         assert_eq!(
             hinted.iter().copied().max().unwrap() + 1,
-            2,
-            "hint forces down to 2"
+            3,
+            "hint is a merge stop, never a forced merge"
         );
-        // The middle fragment joins one of its equally-close neighbors; the far pair
-        // (+x vs +y, cos 0) must remain split.
-        assert_ne!(hinted[0], hinted[2]);
+    }
+
+    #[test]
+    fn consolidation_attaches_crumbs_to_majors() {
+        // Two long-speaking majors on distinct axes plus one 2 s crumb near the +x major.
+        // The crumb folds into +x; the majors stay apart.
+        let embs = vec![
+            vec![1.0, 0.0],   // major A, 60 s
+            vec![0.0, 1.0],   // major B, 40 s
+            vec![0.95, 0.31], // crumb, cos ≈ 0.95 with A
+        ];
+        let durs = vec![60_000, 40_000, 2_000];
+        let labels = vec![0, 1, 2];
+
+        let out = consolidate_minor_clusters(&embs, &durs, &labels, None, 15_000, 0.30);
+        assert_eq!(out[0], out[2], "crumb attaches to its closest major");
+        assert_ne!(out[0], out[1], "majors stay distinct");
+    }
+
+    #[test]
+    fn consolidation_keeps_dissimilar_crumb_standalone_without_hint() {
+        // A crumb orthogonal to every major stays its own cluster (rare distinct voice)
+        // unless the user asserted a count.
+        let embs = vec![
+            vec![1.0, 0.0, 0.0], // major, 60 s
+            vec![0.0, 1.0, 0.0], // major, 40 s
+            vec![0.0, 0.0, 1.0], // orthogonal crumb, 2 s
+        ];
+        let durs = vec![60_000, 40_000, 2_000];
+        let labels = vec![0, 1, 2];
+
+        let auto = consolidate_minor_clusters(&embs, &durs, &labels, None, 15_000, 0.30);
+        assert_eq!(
+            auto.iter().copied().max().unwrap() + 1,
+            3,
+            "orthogonal crumb survives without a hint"
+        );
+
+        let hinted = consolidate_minor_clusters(&embs, &durs, &labels, Some(2), 15_000, 0.30);
+        assert_eq!(
+            hinted.iter().copied().max().unwrap() + 1,
+            2,
+            "a hint trusts the user's count and attaches unconditionally"
+        );
+    }
+
+    #[test]
+    fn consolidation_hint_picks_longest_speaking_majors() {
+        // Hint of 2 keeps the two longest-speaking clusters as majors even when a third
+        // cluster clears the duration floor.
+        let embs = vec![
+            vec![1.0, 0.0],   // 60 s
+            vec![0.0, 1.0],   // 40 s
+            vec![0.71, 0.71], // 20 s — above the 15 s floor, but hint says 2 speakers
+        ];
+        let durs = vec![60_000, 40_000, 20_000];
+        let labels = vec![0, 1, 2];
+
+        let out = consolidate_minor_clusters(&embs, &durs, &labels, Some(2), 15_000, 0.30);
+        assert_eq!(out.iter().copied().max().unwrap() + 1, 2);
+        assert_ne!(out[0], out[1], "the two longest stay distinct");
+    }
+
+    #[test]
+    fn consolidation_short_meeting_falls_back_to_largest_cluster() {
+        // Nobody reaches the major floor: the longest cluster anchors, similar crumbs
+        // attach to it.
+        let embs = vec![vec![1.0, 0.0], vec![0.98, 0.19]];
+        let durs = vec![8_000, 3_000];
+        let labels = vec![0, 1];
+
+        let out = consolidate_minor_clusters(&embs, &durs, &labels, None, 15_000, 0.30);
+        assert_eq!(out[0], out[1], "crumb folds into the dominant voice");
     }
 
     #[test]
@@ -1447,12 +1639,12 @@ mod tests {
         // Fewer fragments than the hint: nothing to split, labels pass through.
         let under = merge_clusters_by_centroid_with_hint(&embs, &durs, &[0, 1], 0.65, Some(5));
         assert_ne!(under[0], under[1]);
-        // Degenerate hint of 0 is clamped to 1 (everything merges, no infinite loop).
+        // Orthogonal voices never merge in stage 2 regardless of hint (below the floor);
+        // collapsing to the hint count is consolidation's job.
         let zero = merge_clusters_by_centroid_with_hint(&embs, &durs, &[0, 1], 0.65, Some(0));
-        assert_eq!(zero[0], zero[1]);
-        // Hint of 1 collapses orthogonal voices into one cluster.
-        let one = merge_clusters_by_centroid_with_hint(&embs, &durs, &[0, 1], 0.65, Some(1));
-        assert_eq!(one[0], one[1]);
+        assert_ne!(zero[0], zero[1]);
+        let one = consolidate_minor_clusters(&embs, &durs, &[0, 1], Some(1), 15_000, 0.30);
+        assert_eq!(one[0], one[1], "hint of 1 consolidates to one speaker");
     }
 
     #[test]
@@ -2245,5 +2437,65 @@ mod tests {
             f.write_all(&s.to_le_bytes()).unwrap();
         }
         f.flush().unwrap();
+    }
+
+    // Research harness: end-to-end diarization of a real meeting WAV with the shipped
+    // default params; writes predicted turns as CSV (start_ms,end_ms,cluster_id) for
+    // offline scoring against a ground-truth timeline. Env-gated:
+    //   MEETILY_DIARIZATION_MODEL_DIR=<dir with segmentation.onnx+embedding.onnx>
+    //   MEETILY_DIARIZATION_TEST_WAV=<meeting.wav>
+    //   RESEARCH_OUT=<turns.csv>
+    //   cargo test -p meetily --lib pipeline::diarization::tests::research_diarize_wav -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn research_diarize_wav() {
+        let model_dir = match std::env::var("MEETILY_DIARIZATION_MODEL_DIR") {
+            Ok(d) => std::path::PathBuf::from(d),
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_MODEL_DIR not set");
+                return;
+            }
+        };
+        let wav = match std::env::var("MEETILY_DIARIZATION_TEST_WAV") {
+            Ok(p) => std::path::PathBuf::from(p),
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_TEST_WAV not set");
+                return;
+            }
+        };
+        let out = std::env::var("RESEARCH_OUT").unwrap_or_else(|_| "research_turns.csv".into());
+        let num_speakers = std::env::var("RESEARCH_NUM_SPEAKERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok());
+        let centroid_merge_min_similarity = std::env::var("RESEARCH_CENTROID_MERGE_SIM")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(DEFAULT_CENTROID_MERGE_MIN_SIM);
+        let cluster_distance_threshold = std::env::var("RESEARCH_CLUSTER_DIST")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(DEFAULT_CLUSTER_DISTANCE_THRESHOLD);
+
+        let params = DiarizationParams {
+            num_speakers,
+            centroid_merge_min_similarity,
+            cluster_distance_threshold,
+            ..Default::default()
+        };
+        let diarizer = Diarizer::load_with_params(DiarizerConfig { model_dir }, params).unwrap();
+        let started = std::time::Instant::now();
+        let result = diarizer.diarize(&wav).unwrap();
+        eprintln!(
+            "diarize: {} turns, {} clusters, {:.1}s wall",
+            result.turns.len(),
+            result.cluster_embeddings.len(),
+            started.elapsed().as_secs_f64()
+        );
+        let mut csv = String::from("start_ms,end_ms,cluster_id\n");
+        for t in &result.turns {
+            csv.push_str(&format!("{},{},{}\n", t.start_ms, t.end_ms, t.cluster_id));
+        }
+        std::fs::write(&out, csv).unwrap();
+        eprintln!("wrote {out}");
     }
 }

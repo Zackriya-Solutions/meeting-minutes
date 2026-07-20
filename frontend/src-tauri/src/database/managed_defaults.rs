@@ -23,11 +23,14 @@ pub struct MigrationReport {
     pub summary_changed: bool,
 }
 
-fn is_legacy_transcription(provider: &str, model: &str) -> bool {
-    matches!(
-        (provider, model),
-        ("gigaam", "gigaam-v3-e2e-ctc") | ("parakeet", "parakeet-tdt-0.6b-v3-int8")
-    )
+/// Transcription is never migrated to the cloud anymore. Measured 2026-07-20 on a real
+/// 31-min meeting: SaluteSpeech matched 80.4% of reference words (395 dropped) vs
+/// GigaAM's 92.4% on identical segmentation, and its diarization found 4 of 7 speakers
+/// (68.8% agreement) vs the local engine's 7/7 (92.5%). Local models are the default;
+/// installs previously migrated to salutespeech are moved back by the
+/// `default_local_models` DB migration.
+fn is_legacy_transcription(_provider: &str, _model: &str) -> bool {
+    false
 }
 
 fn is_legacy_summary(provider: &str, model: &str) -> bool {
@@ -198,7 +201,7 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
             .bind(MARKER)
             .fetch_optional(pool)
             .await?;
-    let Some((pending_transcription, pending_summary)) =
+    let Some((_pending_transcription, pending_summary)) =
         marker.as_deref().and_then(pending_candidates)
     else {
         return Ok(MigrationReport {
@@ -208,9 +211,11 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
     };
 
     if accept {
-        let (transcription_available, summary_available) =
-            managed_targets_available(pool, pending_transcription, pending_summary).await;
-        if !transcription_available || !summary_available {
+        // Transcription no longer migrates to the cloud (see is_legacy_transcription);
+        // only the summary target's availability can block acceptance of a stale marker.
+        let (_, summary_available) =
+            managed_targets_available(pool, false, pending_summary).await;
+        if !summary_available {
             return Err(sqlx::Error::Protocol(
                 "managed providers are unavailable; local providers remain unchanged".to_string(),
             ));
@@ -263,28 +268,9 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
     }
 
     let mut report = MigrationReport::default();
-    if pending_transcription {
-        if let Some(row) =
-            sqlx::query("SELECT provider, model FROM transcript_settings WHERE id = '1'")
-                .fetch_optional(&mut *tx)
-                .await?
-        {
-            let provider: String = row.try_get("provider")?;
-            let model: String = row.try_get("model")?;
-            if is_legacy_transcription(&provider, &model) {
-                let updated = sqlx::query(
-                    "UPDATE transcript_settings SET provider='salutespeech', model=? \
-                     WHERE id='1' AND provider=? AND model=?",
-                )
-                .bind(SALUTESPEECH_MODEL)
-                .bind(provider)
-                .bind(model)
-                .execute(&mut *tx)
-                .await?;
-                report.transcription_changed = updated.rows_affected() > 0;
-            }
-        }
-    }
+    // A stale PENDING_TRANSCRIPTION/PENDING_BOTH marker from an older build resolves
+    // with the transcription config untouched — transcription stays on local models.
+    let _ = pending_transcription;
 
     if pending_summary {
         if let Some(row) = sqlx::query("SELECT provider, model FROM settings WHERE id = '1'")
@@ -423,11 +409,15 @@ mod tests {
         );
 
         let report = resolve(&pool, true).await.unwrap();
-        assert!(report.transcription_changed);
+        assert!(
+            !report.transcription_changed,
+            "transcription never migrates to the cloud"
+        );
         assert!(report.summary_changed);
         assert_eq!(
             values(&pool, "transcript_settings").await,
-            ("salutespeech".into(), SALUTESPEECH_MODEL.into())
+            ("gigaam".into(), "gigaam-v3-e2e-ctc".into()),
+            "transcription config stays local"
         );
         assert_eq!(
             values(&pool, "settings").await,
@@ -513,7 +503,10 @@ mod tests {
             ("builtin-ai".into(), "qwen3.5:4b".into())
         );
         let report = resolve(&pool, true).await.unwrap();
-        assert!(report.transcription_changed);
+        assert!(
+            !report.transcription_changed,
+            "transcription never migrates to the cloud"
+        );
         assert!(report.summary_changed);
     }
 
@@ -547,7 +540,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn confirmation_describes_and_changes_only_the_matching_default() {
+    async fn transcription_is_never_a_cloud_migration_candidate() {
+        // Legacy transcription config + non-legacy summary: nothing to migrate, no
+        // prompt — transcription stays on local models by policy.
         let pool = pool().await;
         enable_managed_providers(&pool).await;
         sqlx::query("INSERT INTO transcript_settings VALUES('1','gigaam','gigaam-v3-e2e-ctc')")
@@ -559,20 +554,33 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(migrate(&pool).await.unwrap().pending_confirmation);
+        let report = migrate(&pool).await.unwrap();
+        assert!(!report.pending_confirmation);
         let marker: String = sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
             .bind(MARKER)
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(marker, PENDING_TRANSCRIPTION);
+        assert_eq!(marker, "applied");
+        assert_eq!(
+            values(&pool, "transcript_settings").await,
+            ("gigaam".into(), "gigaam-v3-e2e-ctc".into())
+        );
 
+        // A stale pending-transcription marker from an older build resolves cleanly
+        // without touching the transcription config.
+        sqlx::query("UPDATE app_settings_kv SET value=? WHERE key=?")
+            .bind(PENDING_TRANSCRIPTION)
+            .bind(MARKER)
+            .execute(&pool)
+            .await
+            .unwrap();
         let report = resolve(&pool, true).await.unwrap();
-        assert!(report.transcription_changed);
+        assert!(!report.transcription_changed);
         assert!(!report.summary_changed);
         assert_eq!(
-            values(&pool, "settings").await,
-            ("openrouter".into(), "custom-model".into())
+            values(&pool, "transcript_settings").await,
+            ("gigaam".into(), "gigaam-v3-e2e-ctc".into())
         );
     }
 

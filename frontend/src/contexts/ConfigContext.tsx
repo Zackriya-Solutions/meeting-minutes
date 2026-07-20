@@ -107,10 +107,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     ollamaEndpoint: null
   });
 
-  // Transcript model configuration state
+  // Transcript model configuration state. Local GigaAM is the default and the only
+  // engine offered in Settings (cloud ASR measured far worse on real meetings).
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'salutespeech',
-    model: 'salutespeech-stream-v2',
+    provider: 'gigaam',
+    model: 'gigaam-v3-e2e-rnnt-fp32',
     apiKey: null
   });
 
