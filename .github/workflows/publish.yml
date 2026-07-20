@@ -135,7 +135,7 @@ jobs:
       next_version: ${{ steps.p.outputs.next_version }}
     env:
       VALUEOS_API: ${{ vars.VALUEOS_API }}
-      API_KEY: ${{ secrets.API_KEY }}
+      API_KEY: ${{ secrets.AGENT_API_KEY }}
     steps:
       - name: GET next-version
         id: p
@@ -148,7 +148,7 @@ jobs:
             exit 1
           fi
           if [ -z "${API_KEY:-}" ]; then
-            echo "::error title=Missing config::Repository secret API_KEY is not set (Settings → Secrets and variables → Actions → Secrets). See valueos/CI.md."
+            echo "::error title=Missing config::Repository secret AGENT_API_KEY is not set (Settings → Secrets and variables → Actions → Secrets). See valueos/CI.md."
             exit 1
           fi
           base="${VALUEOS_API%/}" # tolerate a trailing slash on the variable
@@ -175,7 +175,7 @@ jobs:
     environment: agent-release
     env:
       VALUEOS_API: ${{ vars.VALUEOS_API }}
-      API_KEY: ${{ secrets.API_KEY }}
+      API_KEY: ${{ secrets.AGENT_API_KEY }}
       AGENT_RELEASES_BUCKET: ${{ vars.AGENT_RELEASES_BUCKET }}
       NOTES: ${{ github.event.inputs.notes }}
     steps:
@@ -185,7 +185,7 @@ jobs:
           set -euo pipefail
           miss=()
           [ -n "${VALUEOS_API:-}" ] || miss+=("variable VALUEOS_API")
-          [ -n "${API_KEY:-}" ] || miss+=("secret API_KEY")
+          [ -n "${API_KEY:-}" ] || miss+=("secret AGENT_API_KEY")
           [ -n "${AGENT_RELEASES_BUCKET:-}" ] || miss+=("variable AGENT_RELEASES_BUCKET")
           [ -n "${AWS_ACCESS_KEY_ID:-}" ] || miss+=("secret AWS_ACCESS_KEY_ID")
           [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] || miss+=("secret AWS_SECRET_ACCESS_KEY")
