@@ -116,7 +116,30 @@ pub async fn get_device_and_config(
         return super::platform::get_windows_device(audio_device);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "android")]
+    {
+        use cpal::traits::{DeviceTrait, HostTrait};
+
+        // Deliberately bypasses `host.input_devices()` name-matching, unlike
+        // every other platform below: cpal's oboe backend implements device
+        // enumeration via a JNI call into AudioManager that has been observed
+        // to hang indefinitely on-device. There is exactly one microphone as
+        // far as this app is concerned, so go straight to the (JNI-call-free)
+        // default device regardless of the name that was resolved earlier.
+        if audio_device.device_type == DeviceType::Input {
+            let host = cpal::default_host();
+            let device = host
+                .default_input_device()
+                .ok_or_else(|| anyhow!("No default input device available"))?;
+            let default_config = device
+                .default_input_config()
+                .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+            return Ok((device, default_config));
+        }
+        return Err(anyhow!("Device not found: {}", audio_device.name));
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "android")))]
     {
         use cpal::traits::{DeviceTrait, HostTrait};
 
