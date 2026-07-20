@@ -344,6 +344,10 @@ input, textarea { color: var(--fg1); }
 input:not([type='checkbox']):not([type='radio']):not([type='range']):not([data-slot='input-group-control']), textarea:not([data-slot='input-group-control']), select { background-color: var(--surface-input); }
 input::placeholder, textarea::placeholder { color: var(--fg3); }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+/* The meeting composer shows focus on the whole dock (.mm-composer:focus-within),
+   so the inner textarea must not draw its own sharp gold outline. Unlayered + more
+   specific than the global rule above, so it wins without !important. */
+.mm-composer textarea:focus, .mm-composer textarea:focus-visible { outline: none; }
 .font-mono, time { font-family: 'Space Grotesk', 'Onest', sans-serif; font-variant-numeric: tabular-nums; }
 
 /* Markdown + LaTeX rendering for chat answers and the summary body

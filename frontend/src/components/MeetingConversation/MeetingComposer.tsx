@@ -38,7 +38,7 @@ export function MeetingComposer({
   return (
     <div className="px-[26px] pb-[18px] pt-3">
       <div className="mx-auto max-w-[720px]">
-        <div className="flex items-end gap-2.5 rounded-[999px] border border-[var(--border-strong)] bg-[var(--bg-sheet)] py-1.5 pl-[18px] pr-2">
+        <div className="mm-composer flex items-end gap-2.5 rounded-[999px] border border-[var(--border-strong)] bg-[var(--bg-sheet)] py-1.5 pl-[18px] pr-2 transition-colors focus-within:border-[var(--gold-border)]">
           <textarea
             ref={inputRef}
             value={input}
