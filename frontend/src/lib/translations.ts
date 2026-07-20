@@ -8,6 +8,19 @@
  * Generated/maintained alongside the Settings i18n conversion.
  */
 export const RU: Record<string, string> = {
+  // Meeting conversation (variant 2a)
+  "Meeting summary": "Саммари встречи",
+  "Transcript": "Транскрипт",
+  "replies": "реплик",
+  "min": "мин",
+  "participants": "участников",
+  "Ask about this meeting…": "Спросите об этой встрече…",
+  "Ask a question below to discuss this meeting.": "Задайте вопрос ниже, чтобы обсудить эту встречу.",
+  "More actions": "Ещё действия",
+  "Save changes": "Сохранить изменения",
+  "What tasks are due this week?": "Какие задачи на этой неделе?",
+  "What are the risks to the deadlines?": "Какие риски по срокам?",
+  "Make a list of action items.": "Сделай список действий.",
   "Settings": "Настройки",
   "General": "Основное",
   "Recordings": "Запись",
