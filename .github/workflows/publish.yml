@@ -142,7 +142,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          code="$(curl -sS -o nv.json -w '%{http_code}' -H "x-api-key: $API_KEY" "$VALUEOS_API/api/agent/releases/next-version")"
+          # Config preflight — fail with guidance instead of a cryptic "curl: (3) No host part in the URL".
+          if [ -z "${VALUEOS_API:-}" ]; then
+            echo "::error title=Missing config::Repository variable VALUEOS_API is not set. Set it under Settings → Secrets and variables → Actions → Variables to the app base URL (host only, no trailing slash, no path), e.g. https://<app-host>. See valueos/CI.md."
+            exit 1
+          fi
+          if [ -z "${API_KEY:-}" ]; then
+            echo "::error title=Missing config::Repository secret API_KEY is not set (Settings → Secrets and variables → Actions → Secrets). See valueos/CI.md."
+            exit 1
+          fi
+          base="${VALUEOS_API%/}" # tolerate a trailing slash on the variable
+          code="$(curl -sS -o nv.json -w '%{http_code}' -H "x-api-key: $API_KEY" "$base/api/agent/releases/next-version")"
           echo "Response:"; cat nv.json; echo
           [ "$code" = 200 ] || { echo "::error::next-version preview failed (HTTP $code)"; exit 1; }
           nv="$(jq -r '.result.next_version' nv.json)"
@@ -169,6 +179,23 @@ jobs:
       AGENT_RELEASES_BUCKET: ${{ vars.AGENT_RELEASES_BUCKET }}
       NOTES: ${{ github.event.inputs.notes }}
     steps:
+      - name: Config preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          miss=()
+          [ -n "${VALUEOS_API:-}" ] || miss+=("variable VALUEOS_API")
+          [ -n "${API_KEY:-}" ] || miss+=("secret API_KEY")
+          [ -n "${AGENT_RELEASES_BUCKET:-}" ] || miss+=("variable AGENT_RELEASES_BUCKET")
+          [ -n "${AWS_ACCESS_KEY_ID:-}" ] || miss+=("secret AWS_ACCESS_KEY_ID")
+          [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] || miss+=("secret AWS_SECRET_ACCESS_KEY")
+          if [ "${#miss[@]}" -ne 0 ]; then
+            printf '::error title=Missing config::Not configured (Settings → Secrets and variables → Actions): %s. See valueos/CI.md.\n' "$(IFS=', '; echo "${miss[*]}")"
+            exit 1
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -207,7 +234,8 @@ jobs:
           add linux   "$(find dist -type f -name '*.AppImage' 2>/dev/null | head -1)"
           [ "$arts" != '[]' ] || { echo "no binaries found in dist/" >&2; exit 1; }
           body="$(jq -n --arg r "$GITHUB_SHA" --arg n "${NOTES:-}" --argjson a "$arts" '{git_ref:$r,notes:$n,artifacts:$a}')"
-          code="$(curl -sS -o resp.json -w '%{http_code}' -X POST "$VALUEOS_API/api/agent/releases" \
+          base="${VALUEOS_API%/}" # tolerate a trailing slash on the variable
+          code="$(curl -sS -o resp.json -w '%{http_code}' -X POST "$base/api/agent/releases" \
             -H "x-api-key: $API_KEY" -H 'content-type: application/json' --data "$body")"
           echo "Response:"; cat resp.json; echo
           [ "$code" = 201 ] || { echo "publish failed ($code)" >&2; exit 1; }
