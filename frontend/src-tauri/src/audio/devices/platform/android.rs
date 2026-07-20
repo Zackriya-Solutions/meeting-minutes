@@ -21,7 +21,15 @@ pub fn configure_android_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
     let mut devices = Vec::new();
 
     if host.default_input_device().is_some() {
-        devices.push(AudioDevice::new("default".to_string(), DeviceType::Input));
+        // The name must carry the "(input)"/"(output)" suffix that
+        // AudioDevice::from_name() requires to round-trip: the frontend reads
+        // this struct's `name` field back from get_audio_devices() and later
+        // sends that exact string back as mic_device_name when starting a
+        // recording, which parse_audio_device() re-parses via from_name().
+        // A bare "default" fails that parse ("Device type (input/output) not
+        // specified in the name"); get_device_and_config's Android branch
+        // ignores the name's content either way and just needs device_type.
+        devices.push(AudioDevice::new("default (input)".to_string(), DeviceType::Input));
     }
 
     Ok(devices)
