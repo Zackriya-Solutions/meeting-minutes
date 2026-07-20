@@ -88,21 +88,56 @@ async function resolveMicDeviceName(): Promise<string | null> {
   }
 }
 
+/**
+ * Race `promise` against a timeout that *rejects* (unlike `withTimeout`
+ * below, which resolves with a fallback). Used for steps where hanging
+ * silently would just relocate the "Starting…" freeze earlier in the
+ * pipeline instead of fixing it — every IPC call `startRecording` makes
+ * before the final `start_recording` invoke must be bounded, or a stuck
+ * command anywhere in the chain (not just the one we'd expect) reproduces
+ * the exact same indefinite hang with no error.
+ */
+function raceTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]);
+}
+
 export async function startRecording(): Promise<void> {
   // Guarantee a localWhisper transcript config exists before the backend
   // ever sees the start command. The Rust recording pipeline defaults to
   // the (Android-unsupported) Parakeet engine when no config row exists —
   // a background self-heal alone races with the user tapping Record right
   // after a download finishes, so check synchronously here too.
-  if (!(await hasTranscriptConfig())) {
-    const models = await fetchModels();
+  const hasConfig = await raceTimeout(
+    hasTranscriptConfig(),
+    10000,
+    'Timed out checking the speech model configuration.'
+  );
+  if (!hasConfig) {
+    const models = await raceTimeout(
+      fetchModels(),
+      10000,
+      'Timed out listing downloaded speech models.'
+    );
     const downloaded = models.find((m) => m.status === 'downloaded');
     if (downloaded) {
-      await selectWhisperModel(downloaded.name);
+      await raceTimeout(
+        selectWhisperModel(downloaded.name),
+        10000,
+        'Timed out saving the speech model selection.'
+      );
     }
   }
 
-  const micDeviceName = await resolveMicDeviceName();
+  const micDeviceName = await raceTimeout(
+    resolveMicDeviceName(),
+    10000,
+    'Timed out listing microphone devices.'
+  );
   if (!micDeviceName) {
     throw new Error(
       'No microphone device found. Check that microphone permission is granted.'
