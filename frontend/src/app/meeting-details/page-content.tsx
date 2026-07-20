@@ -185,25 +185,9 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
-  // Auto-generate summary when flag is set
-  useEffect(() => {
-    let cancelled = false;
-
-    const autoGenerate = async () => {
-      if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
-        await summaryGeneration.handleGenerateSummary('');
-        if (onAutoGenerateComplete && !cancelled) {
-          onAutoGenerateComplete();
-        }
-      }
-    };
-
-    autoGenerate();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
+  // Variant 2a: summarization is user-initiated (pick a template in the summary
+  // message), so there is no auto-generation on entry — the `shouldAutoGenerate`
+  // flag from the recording flow is intentionally ignored here.
 
   const summaryResponse: SummaryResponse | null = null;
   const isSummaryDirty = meetingData.isTitleDirty || (meetingData.blockNoteSummaryRef.current?.isDirty || false);
@@ -257,18 +241,20 @@ export default function PageContent({
 
   return (
     <>
-      <LearningReviewPanel
-        meetingId={meeting.id}
-        onPlayIdentitySample={handlePlayIdentitySample}
-        onChanged={async () => {
-          await onRefetchTranscripts?.();
-          await onSpeakersDetected?.();
-          await onMeetingUpdated?.();
-        }}
-      />
       <MeetingConversation
         meetingId={meeting.id}
         meeting={meeting}
+        reviewSlot={
+          <LearningReviewPanel
+            meetingId={meeting.id}
+            onPlayIdentitySample={handlePlayIdentitySample}
+            onChanged={async () => {
+              await onRefetchTranscripts?.();
+              await onSpeakersDetected?.();
+              await onMeetingUpdated?.();
+            }}
+          />
+        }
         meetingTitle={meetingData.meetingTitle}
         onTitleChange={meetingData.handleTitleChange}
         isEditingTitle={meetingData.isEditingTitle}

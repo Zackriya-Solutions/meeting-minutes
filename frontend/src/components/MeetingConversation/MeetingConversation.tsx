@@ -52,6 +52,10 @@ interface MeetingConversationProps {
   meetingId: string;
   meeting: { id: string; title: string; created_at: string };
 
+  /** Optional element pinned under the top bar (e.g. the speaker-identity review
+   *  panel). Rendered as a non-scrolling row so it never pushes the composer off. */
+  reviewSlot?: React.ReactNode;
+
   // Top-bar title editing (reuses inline rename → api_save_meeting_title upstream).
   meetingTitle: string;
   onTitleChange: (title: string) => void;
@@ -98,6 +102,7 @@ interface MeetingConversationProps {
 export function MeetingConversation({
   meetingId,
   meeting,
+  reviewSlot,
   meetingTitle,
   onTitleChange,
   isEditingTitle,
@@ -214,8 +219,6 @@ export function MeetingConversation({
     return parts.join(' · ');
   }, [meeting.created_at, segments, transcripts, speakerCount, t]);
 
-  const hasTranscript = (totalCount ?? segments?.length ?? transcripts.length) > 0;
-
   return (
     <div className="flex h-screen flex-col bg-[var(--bg-canvas)]">
       {/* Top bar */}
@@ -245,8 +248,10 @@ export function MeetingConversation({
         />
       </div>
 
+      {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
+
       {/* Thread */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-6">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-5">
           {/* Pin #1 — transcript */}
           <TranscriptCard
@@ -312,7 +317,7 @@ export function MeetingConversation({
           onKeyDown={onKeyDown}
           onSend={send}
           sending={sending}
-          disabled={loadingHistory || !hasTranscript}
+          disabled={loadingHistory}
           inputRef={inputRef}
           suggestions={MEETING_SUGGESTIONS}
           showSuggestions={messages.length === 0}

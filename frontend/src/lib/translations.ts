@@ -10,6 +10,9 @@
 export const RU: Record<string, string> = {
   // Meeting conversation (variant 2a)
   "Meeting summary": "Саммари встречи",
+  "Summary type": "Тип саммари",
+  "Regenerate": "Пересобрать",
+  "No summary yet. Choose a type to generate it.": "Саммари ещё нет. Выберите тип, чтобы сгенерировать.",
   "Transcript": "Транскрипт",
   "replies": "реплик",
   "min": "мин",
