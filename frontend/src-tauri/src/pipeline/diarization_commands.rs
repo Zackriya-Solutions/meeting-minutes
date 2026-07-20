@@ -1,13 +1,13 @@
 //! Diarization model management (PLAN.md Phase 2): download / status of the pyannote-style
 //! cascade. Files live in `app_data_dir/models/diarization/`, a sibling of the gigaam /
 //! embedding model dirs. Two ONNX files are needed:
-//!   * `segmentation.onnx` — pyannote segmentation-3.0 (~5.9 MB, MIT)
-//!   * `embedding.onnx`     — WeSpeaker CAM++ VoxCeleb speaker embeddings (~29 MB)
+//!   * `segmentation.onnx`  — pyannote segmentation-3.0 (~5.9 MB, MIT)
+//!   * `embedding.v2.onnx`  — 3D-Speaker CAM++ zh-en advanced speaker embeddings (~28 MB,
+//!     Apache-2.0, sherpa-onnx export; replaced the WeSpeaker VoxCeleb v1 model 2026-07-20)
 //!
-//! Both are hosted as direct `.onnx` release assets by `thewh1teagle/pyannote-rs` (the
-//! reference implementation this cascade is cribbed from). Everything degrades gracefully:
-//! until both files are present, `diarization_status.available` is false and the diarize
-//! job leaves segments unattributed.
+//! Everything degrades gracefully: until both files are present,
+//! `diarization_status.available` is false and the diarize job leaves segments
+//! unattributed (existing v1 installs re-enter the download-consent flow once).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,12 +26,18 @@ use crate::pipeline::diarization::{
 };
 use crate::state::AppState;
 
-/// Verified 200-OK direct-download URLs (checked 2026-07: 5,983,836 B / 29,292,684 B).
-/// `CAM%2B%2B` is the URL-encoded `CAM++`.
+/// Verified 200-OK direct-download URLs (checked 2026-07-20: 5,983,836 B / 28,281,164 B).
+/// The embedding is the 3D-Speaker CAM++ zh-en "advanced" export from sherpa-onnx —
+/// see [`super::diarization::EMBEDDING_FILE`] for why v1 (WeSpeaker VoxCeleb) was
+/// retired. Note "recongition" is a genuine typo in the upstream release tag.
 const SEGMENTATION_URL: &str =
     "https://github.com/thewh1teagle/pyannote-rs/releases/download/v0.1.0/segmentation-3.0.onnx";
 const EMBEDDING_URL: &str =
-    "https://github.com/thewh1teagle/pyannote-rs/releases/download/v0.1.0/wespeaker_en_voxceleb_CAM%2B%2B.onnx";
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx";
+
+/// v1 embedding file retired 2026-07-20 (non-separable on real meeting audio); removed
+/// on the next model download so stale installs don't keep 28 MB of dead weight.
+const LEGACY_EMBEDDING_FILE: &str = "embedding.onnx";
 
 pub fn diarization_model_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
@@ -143,6 +149,16 @@ pub async fn download_diarization_models<R: Runtime>(app: AppHandle<R>) -> Resul
         EMBEDDING_FILE,
     )
     .await?;
+
+    // Retire the v1 embedding if this install still carries it.
+    let legacy = dir.join(LEGACY_EMBEDDING_FILE);
+    if legacy.exists() {
+        if let Err(e) = std::fs::remove_file(&legacy) {
+            log::warn!("could not remove legacy embedding model {}: {e}", legacy.display());
+        } else {
+            log::info!("removed legacy v1 embedding model {}", legacy.display());
+        }
+    }
 
     let _ = app.emit("diarization-ready", ());
     log::info!("diarization models downloaded to {}", dir.display());
@@ -272,7 +288,10 @@ async fn resolve_diarization_provider(pool: &SqlitePool) -> String {
     .flatten()
     .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty())
-    .unwrap_or_else(|| "salutespeech".to_string())
+    // Local is the default and the only UI-selectable engine (2026-07-20: cloud found
+    // 4/7 speakers at 68.8% agreement vs local 7/7 at 92.5% on the reference meeting).
+    // The cloud path stays reachable via env/kv for research.
+    .unwrap_or_else(|| "local".to_string())
 }
 
 /// Create a fresh unconfirmed `Speaker N` profile per distinct cloud speaker id, returning
@@ -467,6 +486,17 @@ async fn run_local_diarization<R: Runtime>(
     Ok((result.turns, cluster_to_speaker, cluster_to_learning))
 }
 
+/// Everything the diarization engine learned about a meeting's voices, before any
+/// transcript rows are touched: raw speaker turns plus the resolved cluster→speaker
+/// maps. Produced by [`compute_speaker_turns`]; consumed by [`attribute_transcripts`]
+/// (row attribution) and by the refinement pass (turn-aligned re-transcription — the
+/// turns become the ASR segment boundaries so replies split per speaker).
+pub struct SpeakerTurnsPlan {
+    pub turns: Vec<SpeakerTurn>,
+    pub cluster_to_speaker: HashMap<i64, i64>,
+    pub cluster_to_learning: HashMap<i64, i64>,
+}
+
 /// Shared diarization core, called by both the `diarize_meeting` command and the `diarize`
 /// job handler. Runs the engine on the meeting's recording, attributes transcript segments
 /// to resolved speakers, persists cross-meeting speaker identities, and emits
@@ -476,6 +506,18 @@ pub async fn run_diarization_core<R: Runtime>(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<DiarizeOutcome, DiarizeError> {
+    let plan = compute_speaker_turns(app, pool, meeting_id).await?;
+    attribute_transcripts(app, pool, meeting_id, &plan).await
+}
+
+/// Phase 1 of diarization: run the configured engine (cloud with local fallback, or
+/// local) on the meeting's recording and resolve speaker identities. Persists identity
+/// bookkeeping (speaker clusters, inference runs) but does not touch transcript rows.
+pub async fn compute_speaker_turns<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<SpeakerTurnsPlan, DiarizeError> {
     // 1) Locate the meeting's saved recording (both engines need it).
     let meeting = MeetingsRepository::get_meeting_metadata(pool, meeting_id)
         .await
@@ -576,13 +618,34 @@ pub async fn run_diarization_core<R: Runtime>(
         run_local_diarization(app, pool, meeting_id, &audio_path, expected_speakers).await?
     };
 
+    Ok(SpeakerTurnsPlan {
+        turns,
+        cluster_to_speaker,
+        cluster_to_learning,
+    })
+}
+
+/// Phase 2 of diarization: attribute the meeting's transcript rows to the plan's
+/// speakers and finish the run (learning provenance, orphan GC, `diarization-complete`).
+pub async fn attribute_transcripts<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &SqlitePool,
+    meeting_id: &str,
+    plan: &SpeakerTurnsPlan,
+) -> Result<DiarizeOutcome, DiarizeError> {
+    let SpeakerTurnsPlan {
+        turns,
+        cluster_to_speaker,
+        cluster_to_learning,
+    } = plan;
+
     // 5) Attribute transcript segments. Reset first so re-runs are idempotent (only
     //    speaker_id is touched — the 'mic'/'system' channel tag is preserved).
     let segments = SpeakersRepository::list_meeting_segments(pool, meeting_id)
         .await
         .map_err(|e| DiarizeError::Other(e.into()))?;
     let total_segments = segments.len() as i64;
-    let assignments = assign_segments_to_speakers(&segments, &turns, &cluster_to_speaker);
+    let assignments = assign_segments_to_speakers(&segments, turns, cluster_to_speaker);
     let had_existing_assignments = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM transcripts WHERE meeting_id = ? AND speaker_id IS NOT NULL)",
     )
@@ -624,7 +687,7 @@ pub async fn run_diarization_core<R: Runtime>(
         let Some(local_cluster) = assign_segment(
             secs_to_ms(*start_s),
             secs_to_ms(*end_s),
-            &turns,
+            turns,
             MIN_OVERLAP_RATIO,
         ) else {
             continue;
@@ -640,7 +703,7 @@ pub async fn run_diarization_core<R: Runtime>(
                 secs_to_ms(*start_s),
                 secs_to_ms(*end_s),
                 local_cluster,
-                &turns,
+                turns,
             ),
         )
         .await
@@ -859,5 +922,78 @@ mod tests {
         assert!(should_preserve_existing_assignments(true, 3, 0));
         assert!(!should_preserve_existing_assignments(true, 3, 1));
         assert!(!should_preserve_existing_assignments(true, 0, 0));
+    }
+
+    // Research harness: run SaluteSpeech CLOUD diarization on a real meeting WAV using
+    // the config resolved from a real app database (managed gateway or stored key), and
+    // write the returned turns as CSV for offline scoring against a ground-truth
+    // timeline — comparable 1:1 with `research_diarize_wav` (the local engine). Env:
+    //   MEETILY_DB_PATH=<meeting_minutes.sqlite>  MEETILY_DIARIZATION_TEST_WAV=<wav>
+    //   RESEARCH_OUT=<turns.csv>  RESEARCH_NUM_SPEAKERS=<optional hint>
+    //   cargo test -p meetily --lib pipeline::diarization_commands::tests::research_salutespeech_diarize -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn research_salutespeech_diarize() {
+        let db = match std::env::var("MEETILY_DB_PATH") {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skip: MEETILY_DB_PATH not set");
+                return;
+            }
+        };
+        let wav = match std::env::var("MEETILY_DIARIZATION_TEST_WAV") {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_TEST_WAV not set");
+                return;
+            }
+        };
+        let out = std::env::var("RESEARCH_OUT").unwrap_or_else(|_| "salute_turns.csv".into());
+        let hint = std::env::var("RESEARCH_NUM_SPEAKERS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok());
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{db}?mode=ro"))
+            .await
+            .expect("open app db read-only");
+        let Some(cfg) = crate::salutespeech::resolve_config(&pool).await else {
+            eprintln!("skip: SaluteSpeech config not resolvable (privacy/local_only or no key)");
+            return;
+        };
+
+        let wav_path = std::path::PathBuf::from(&wav);
+        let pcm16 = tokio::task::spawn_blocking(move || decode_to_pcm16_16k(&wav_path))
+            .await
+            .unwrap()
+            .expect("decode to pcm16");
+        eprintln!(
+            "uploading {:.1} MB pcm16 ({:.1}s audio), hint={hint:?}",
+            pcm16.len() as f64 / 1e6,
+            pcm16.len() as f64 / 32_000.0
+        );
+
+        let started = std::time::Instant::now();
+        let turns = crate::salutespeech::diarize::diarize_pcm16(&cfg, pcm16, hint)
+            .await
+            .expect("cloud diarization");
+        eprintln!(
+            "cloud diarize: {} turns, {} distinct speakers, {:.0}s wall",
+            turns.len(),
+            turns
+                .iter()
+                .map(|t| t.speaker_id)
+                .collect::<HashSet<_>>()
+                .len(),
+            started.elapsed().as_secs_f64()
+        );
+
+        let mut csv = String::from("start_ms,end_ms,cluster_id\n");
+        for t in &turns {
+            csv.push_str(&format!("{},{},{}\n", t.start_ms, t.end_ms, t.speaker_id));
+        }
+        std::fs::write(&out, csv).unwrap();
+        eprintln!("wrote {out}");
     }
 }

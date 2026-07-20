@@ -15,14 +15,19 @@ export interface ModelOption {
   size_mb: number;
 }
 
-// Must match SALUTE_MODEL in TranscriptSettings.tsx (the model string persisted for the
-// SaluteSpeech provider). The actual recognition model is chosen in Settings.
-const SALUTE_MODEL_NAME = 'salutespeech-stream-v2';
+interface GigaamVariantInfo {
+  id: string;
+  label: string;
+  size_mb: number;
+  present: boolean;
+}
 
 interface GigaamStatus {
-  model: string;
+  selected: string;
   model_present: boolean;
   loaded: boolean;
+  loaded_variant: string | null;
+  variants: GigaamVariantInfo[];
 }
 
 interface TranscriptModelConfig {
@@ -58,37 +63,25 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const allModels: ModelOption[] = [];
 
     // Fetch GigaAM (the primary/default local engine) first so it's the default choice.
+    // The variant (CTC/RNN-T × int8/fp32) is chosen in Settings → Transcription; the
+    // dialog offers the selected variant and shows which one will actually run.
     try {
       const gigaam = await invoke<GigaamStatus>('gigaam_status');
       if (gigaam?.model_present) {
+        const selected = gigaam.variants?.find((v) => v.id === gigaam.selected);
         allModels.push({
           provider: 'gigaam' as const,
-          name: gigaam.model || 'gigaam-v3-e2e-ctc',
-          displayName: t('GigaAM v3 (Russian)'),
-          size_mb: 224,
+          name: `gigaam-v3-${gigaam.selected}`,
+          displayName: `${t('GigaAM v3 (Russian)')}${selected ? ` · ${selected.label}` : ''}`,
+          size_mb: selected?.size_mb ?? 0,
         });
       }
     } catch (err) {
       console.error('Failed to fetch GigaAM status:', err);
     }
 
-    // SaluteSpeech (cloud) — offered when either a user Authorization Key exists or
-    // this binary supports the managed Memento gateway. This is intentionally a local
-    // capability check: a temporary gateway outage must not remove the option from the
-    // dialog; the operation itself performs the live readiness check.
-    try {
-      const saluteSpeechSelectable = await invoke<boolean>('salutespeech_can_be_selected');
-      if (saluteSpeechSelectable) {
-        allModels.push({
-          provider: 'salutespeech' as const,
-          name: SALUTE_MODEL_NAME,
-          displayName: t('SaluteSpeech (Sber cloud)'),
-          size_mb: 0,
-        });
-      }
-    } catch (err) {
-      console.error('Failed to check SaluteSpeech readiness:', err);
-    }
+    // SaluteSpeech is no longer offered (2026-07-20): the cloud matched 80.4% of
+    // reference words vs GigaAM's 92.4% and its diarization found 4/7 speakers.
 
     // Fetch Whisper models
     try {

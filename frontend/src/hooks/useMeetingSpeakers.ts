@@ -90,7 +90,7 @@ export function useMeetingSpeakers({
     useEffect(() => {
         if (!meetingId) return;
 
-        let unlisten: (() => void) | undefined;
+        const unlisteners: (() => void)[] = [];
         let cancelled = false;
 
         listen<DiarizationCompletePayload>("diarization-complete", async (event) => {
@@ -99,12 +99,23 @@ export function useMeetingSpeakers({
             await onDiarizedRef.current?.();
         }).then((un) => {
             if (cancelled) un();
-            else unlisten = un;
+            else unlisteners.push(un);
+        });
+
+        // The post-meeting refinement pass replaces transcript rows even when
+        // diarization is skipped (models absent), so refresh on its completion too.
+        listen<{ meeting_id: string }>("refinement-complete", async (event) => {
+            if (event.payload.meeting_id !== meetingId) return;
+            await refetchSpeakers();
+            await onDiarizedRef.current?.();
+        }).then((un) => {
+            if (cancelled) un();
+            else unlisteners.push(un);
         });
 
         return () => {
             cancelled = true;
-            if (unlisten) unlisten();
+            unlisteners.forEach((un) => un());
         };
     }, [meetingId, refetchSpeakers]);
 

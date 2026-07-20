@@ -12,6 +12,12 @@ use super::variant::GigaamVariant;
 
 const HF_BASE: &str = "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/main";
 
+/// The variants offered in the UI. Narrowed to RNN-T fp32 only (2026-07-20): it is the
+/// measured-best variant, and offering int8/CTC alternatives only produced confusing
+/// quality differences between installs. The other variants in [`GigaamVariant::ALL`]
+/// remain loadable for A/B research (`load_global` accepts any of them).
+const OFFERED_VARIANTS: [GigaamVariant; 1] = [GigaamVariant::E2eRnntFp32];
+
 fn gigaam_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -27,26 +33,18 @@ fn variant_marker(dir: &Path) -> PathBuf {
     dir.join("selected_variant.txt")
 }
 
-/// The persisted variant selection. With no marker file (fresh or pre-variant install),
-/// default to `GigaamVariant::default()` (e2e-RNN-T fp32) — but keep an already-downloaded
-/// variant if one is present, so existing installs aren't forced to re-download.
+/// The persisted variant selection, clamped to the offered set: a marker pointing at a
+/// retired variant (e.g. a legacy e2e-ctc-int8 selection) resolves to the default
+/// RNN-T fp32 — such installs see "Not downloaded" once and fetch the supported model.
 fn read_selected(dir: &Path) -> GigaamVariant {
     if let Some(v) = std::fs::read_to_string(variant_marker(dir))
         .ok()
         .and_then(|s| GigaamVariant::from_id(s.trim()))
+        .filter(|v| OFFERED_VARIANTS.contains(v))
     {
         return v;
     }
-    let default = GigaamVariant::default();
-    if variant_present(dir, default) {
-        return default;
-    }
-    // Prefer any already-present variant (e.g. a legacy e2e-ctc-int8 download) over
-    // forcing the new default's download; otherwise fall back to the default.
-    GigaamVariant::ALL
-        .into_iter()
-        .find(|v| variant_present(dir, *v))
-        .unwrap_or(default)
+    GigaamVariant::default()
 }
 
 fn write_selected(dir: &Path, v: GigaamVariant) -> Result<(), String> {
@@ -121,7 +119,7 @@ pub async fn gigaam_transcribe_audio(audio_data: Vec<f32>) -> Result<String, Str
 pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
     let dir = gigaam_dir(&app)?;
     let selected = read_selected(&dir);
-    let variants: Vec<serde_json::Value> = GigaamVariant::ALL
+    let variants: Vec<serde_json::Value> = OFFERED_VARIANTS
         .iter()
         .map(|v| {
             serde_json::json!({
@@ -147,6 +145,9 @@ pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::
 #[tauri::command]
 pub async fn gigaam_select_variant<R: Runtime>(app: AppHandle<R>, variant: String) -> Result<(), String> {
     let v = GigaamVariant::from_id(&variant).ok_or_else(|| format!("unknown GigaAM variant: {variant}"))?;
+    if !OFFERED_VARIANTS.contains(&v) {
+        return Err(format!("GigaAM variant {variant} is not offered in this build"));
+    }
     let dir = gigaam_dir(&app)?;
     write_selected(&dir, v)?;
     if variant_present(&dir, v) {

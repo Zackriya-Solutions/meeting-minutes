@@ -74,6 +74,14 @@ export function GigaamModelManager() {
       setSwitching(true);
       try {
         await invoke('gigaam_select_variant', { variant });
+        // Keep the persisted transcript config's model label in sync with the variant
+        // that will actually transcribe (this component only renders when the GigaAM
+        // provider is active).
+        invoke('api_save_transcript_config', {
+          provider: 'gigaam',
+          model: `gigaam-v3-${variant}`,
+          apiKey: null,
+        }).catch((e) => console.error('Failed to sync transcript config:', e));
         refresh();
       } catch (e) {
         setError(typeof e === 'string' ? e : t('Failed to switch variant.'));

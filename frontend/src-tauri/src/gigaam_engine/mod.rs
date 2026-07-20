@@ -73,6 +73,17 @@ pub fn loaded_variant() -> Option<GigaamVariant> {
     *LOADED_VARIANT.lock().unwrap()
 }
 
+/// Provenance/display label for the model that actually transcribes: derived from the
+/// loaded variant (e.g. "gigaam-v3-e2e-rnnt-fp32"). Historically this was hardcoded to
+/// "gigaam-v3-e2e-ctc" everywhere, so logs and metadata claimed the CTC variant no
+/// matter what was running.
+pub fn model_label() -> String {
+    match loaded_variant() {
+        Some(v) => format!("gigaam-v3-{}", v.id()),
+        None => "gigaam-v3".to_string(),
+    }
+}
+
 pub fn unload() {
     if let Ok(mut g) = ENGINE.lock() {
         *g = None;

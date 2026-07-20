@@ -1145,7 +1145,7 @@ pub async fn api_save_meeting_title<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
@@ -1193,6 +1193,7 @@ pub async fn api_save_transcript<R: Runtime>(
     let pool = state.db_manager.pool();
 
     let provenance_folder = folder_path.clone();
+    let refinement_folder = folder_path.clone();
     // Now, call the repository with the correctly typed data.
     match TranscriptsRepository::save_transcript(
         pool,
@@ -1236,6 +1237,18 @@ pub async fn api_save_transcript<R: Runtime>(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id
             );
+
+            // Kick off the automatic post-meeting refinement pass (batch re-transcription
+            // + diarization + labeled export). Fire-and-forget: the live transcript the
+            // user just saved is the fallback if any stage fails.
+            if let Some(folder) = refinement_folder.filter(|value| !value.trim().is_empty()) {
+                crate::audio::refinement::spawn_post_meeting_refinement(
+                    app.clone(),
+                    meeting_id.clone(),
+                    folder,
+                );
+            }
+
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Transcript saved successfully",

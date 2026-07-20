@@ -35,7 +35,7 @@ impl TranscriptionProvider for GigaamProvider {
     }
 
     async fn get_current_model(&self) -> Option<String> {
-        crate::gigaam_engine::is_loaded().then(|| "gigaam-v3-e2e-ctc".to_string())
+        crate::gigaam_engine::is_loaded().then(crate::gigaam_engine::model_label)
     }
 
     fn provider_name(&self) -> &'static str {

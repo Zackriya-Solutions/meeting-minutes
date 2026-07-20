@@ -11,7 +11,7 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolat
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
-use super::vad::{ContinuousVadProcessor};
+use super::vad::{ContinuousVadProcessor, SpeechSegment};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -799,6 +799,10 @@ pub struct AudioPipeline {
     vad_processor: ContinuousVadProcessor,
     sample_rate: u32,
     chunk_id_counter: u64,
+    // End (VAD-clock ms) of the last segment sent to transcription. Consecutive VAD
+    // segments overlap by up to pre+post speech padding (~700ms); the overlapping head
+    // of the next segment is trimmed so no audio is transcribed twice.
+    last_sent_end_ms: f64,
     // Performance optimization: reduce logging frequency
     last_summary_time: std::time::Instant,
     processed_chunks: u64,
@@ -837,11 +841,12 @@ impl AudioPipeline {
         let _ = (mic_device_name, mic_device_kind, system_device_name, system_device_kind);
 
         // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
+        // The VAD processor now handles 48kHz->16kHz resampling internally.
+        // 800ms bridges natural intra-sentence pauses: at the previous 400ms a reference
+        // 31-min meeting fragmented into 293 segments (vs 110 natural turns) with words
+        // and numbers cut mid-utterance at the boundaries. Batch processing uses 2000ms
+        // (import.rs); live stays lower to keep transcripts appearing promptly.
+        let redemption_time = 800;
 
         let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
             Ok(processor) => {
@@ -873,6 +878,7 @@ impl AudioPipeline {
             vad_processor,
             sample_rate,
             chunk_id_counter: 0,
+            last_sent_end_ms: 0.0,
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
@@ -963,35 +969,7 @@ impl AudioPipeline {
                             match self.vad_processor.process_audio(&mixed_with_gain) {
                                 Ok(speech_segments) => {
                                     for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            // Attribute this segment to its dominant audio channel
-                                            // by integrating mic vs system energy over its timespan.
-                                            let speaker = self.channel_energy
-                                                .classify(segment.start_timestamp_ms, segment.end_timestamp_ms);
-
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples, speaker={:?}",
-                                                  duration_ms, segment.samples.len(), speaker);
-
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000,
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
-                                                speaker,
-                                            };
-
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                                warn!("Failed to send VAD segment: {}", e);
-                                            } else {
-                                                self.chunk_id_counter += 1;
-                                            }
-                                        } else {
-                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
-                                                   duration_ms, segment.samples.len());
-                                        }
+                                        self.send_speech_segment(segment, false);
                                     }
                                 }
                                 Err(e) => {
@@ -1039,34 +1017,7 @@ impl AudioPipeline {
         match self.vad_processor.flush() {
             Ok(final_segments) => {
                 for segment in final_segments {
-                    let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                    // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
-                    if segment.samples.len() >= 800 {
-                        let speaker = self.channel_energy
-                            .classify(segment.start_timestamp_ms, segment.end_timestamp_ms);
-
-                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples, speaker={:?}",
-                              duration_ms, segment.samples.len(), speaker);
-
-                        let transcription_chunk = AudioChunk {
-                            data: segment.samples,
-                            sample_rate: 16000,
-                            timestamp: segment.start_timestamp_ms / 1000.0,
-                            chunk_id: self.chunk_id_counter,
-                            device_type: DeviceType::Microphone,
-                            speaker,
-                        };
-
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                            warn!("Failed to send final VAD segment: {}", e);
-                        } else {
-                            self.chunk_id_counter += 1;
-                        }
-                    } else {
-                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
-                              duration_ms, segment.samples.len());
-                    }
+                    self.send_speech_segment(segment, true);
                 }
             }
             Err(e) => {
@@ -1077,6 +1028,82 @@ impl AudioPipeline {
         Ok(())
     }
 
+    /// Trim, split, and send one VAD segment to the transcription worker.
+    ///
+    /// Two guards, both measured on a reference 31-min meeting:
+    /// - The VAD session pads every segment with pre/post-speech context, so consecutive
+    ///   segments overlap in audio time (95 of 292 on the reference recording); the same
+    ///   audio transcribed twice produced duplicated words at the boundaries. The
+    ///   already-sent head is trimmed off.
+    /// - The GigaAM RNN-T encoder fails outright on inputs longer than ~160 s and the
+    ///   worker drops the text of a failed segment, so an unbroken monologue (most
+    ///   likely at stop-recording flush) would silently vanish. Oversized segments split
+    ///   at their quietest points, same as the batch import path.
+    fn send_speech_segment(&mut self, segment: SpeechSegment, is_final: bool) {
+        // 25 s: comfortably under the engine failure length while preserving enough
+        // context for punctuation and number normalization (matches import.rs).
+        const MAX_ASR_SEGMENT_SAMPLES: usize = 25 * 16000;
+        // Minimum 50ms at 16kHz - matches Parakeet capability
+        const MIN_ASR_SEGMENT_SAMPLES: usize = 800;
+
+        let Some(segment) = trim_leading_overlap(segment, self.last_sent_end_ms) else {
+            debug!("⏭️ Dropping VAD segment fully contained in already-sent audio");
+            return;
+        };
+
+        for piece in crate::audio::common::split_segment_at_silence(&segment, MAX_ASR_SEGMENT_SAMPLES) {
+            let duration_ms = piece.end_timestamp_ms - piece.start_timestamp_ms;
+            if piece.samples.len() < MIN_ASR_SEGMENT_SAMPLES {
+                debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < {})",
+                       duration_ms, piece.samples.len(), MIN_ASR_SEGMENT_SAMPLES);
+                continue;
+            }
+
+            // Attribute this segment to its dominant audio channel by integrating
+            // mic vs system energy over its timespan.
+            let speaker = self.channel_energy
+                .classify(piece.start_timestamp_ms, piece.end_timestamp_ms);
+
+            info!("📤 Sending {}VAD segment: {:.1}ms, {} samples, speaker={:?}",
+                  if is_final { "final " } else { "" }, duration_ms, piece.samples.len(), speaker);
+
+            self.last_sent_end_ms = self.last_sent_end_ms.max(piece.end_timestamp_ms);
+            let transcription_chunk = AudioChunk {
+                data: piece.samples,
+                sample_rate: 16000,
+                timestamp: piece.start_timestamp_ms / 1000.0,
+                chunk_id: self.chunk_id_counter,
+                device_type: DeviceType::Microphone, // Mixed audio
+                speaker,
+            };
+
+            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                warn!("Failed to send VAD segment: {}", e);
+            } else {
+                self.chunk_id_counter += 1;
+            }
+        }
+    }
+}
+
+/// Drop the head of `segment` that precedes `last_sent_end_ms` (audio already sent to
+/// transcription as the previous segment's post-speech padding). Returns `None` when the
+/// whole segment lies inside already-sent audio. Samples are 16 kHz (VAD output).
+pub(crate) fn trim_leading_overlap(
+    mut segment: SpeechSegment,
+    last_sent_end_ms: f64,
+) -> Option<SpeechSegment> {
+    let overlap_ms = last_sent_end_ms - segment.start_timestamp_ms;
+    if overlap_ms <= 0.0 {
+        return Some(segment);
+    }
+    let drop_samples = ((overlap_ms / 1000.0) * 16000.0).round() as usize;
+    if drop_samples >= segment.samples.len() {
+        return None;
+    }
+    segment.samples.drain(..drop_samples);
+    segment.start_timestamp_ms = last_sent_end_ms;
+    Some(segment)
 }
 
 /// Simple audio pipeline manager
@@ -1283,5 +1310,40 @@ mod tests {
         }
         // Memory stays bounded near the retention window, not the full history.
         assert!(tracker.windows.len() <= (ChannelEnergyTracker::MAX_RETAIN_MS / 500.0) as usize + 1);
+    }
+
+    fn seg(start_ms: f64, end_ms: f64) -> SpeechSegment {
+        let n = (((end_ms - start_ms) / 1000.0) * 16000.0).round() as usize;
+        SpeechSegment {
+            samples: vec![0.1; n],
+            start_timestamp_ms: start_ms,
+            end_timestamp_ms: end_ms,
+            confidence: 0.9,
+        }
+    }
+
+    #[test]
+    fn trim_leading_overlap_passes_non_overlapping_segment_through() {
+        let s = seg(1000.0, 2000.0);
+        let out = trim_leading_overlap(s, 1000.0).expect("kept");
+        assert_eq!(out.start_timestamp_ms, 1000.0);
+        assert_eq!(out.samples.len(), 16000);
+    }
+
+    #[test]
+    fn trim_leading_overlap_drops_already_sent_head() {
+        // Previous segment's post-speech padding ran to 1500ms; this one starts at
+        // 1200ms → the first 300ms were already transcribed.
+        let s = seg(1200.0, 2200.0);
+        let out = trim_leading_overlap(s, 1500.0).expect("kept");
+        assert_eq!(out.start_timestamp_ms, 1500.0);
+        // 1000ms - 300ms = 700ms of audio remain.
+        assert_eq!(out.samples.len(), (0.7f64 * 16000.0) as usize);
+    }
+
+    #[test]
+    fn trim_leading_overlap_drops_fully_contained_segment() {
+        let s = seg(1000.0, 1400.0);
+        assert!(trim_leading_overlap(s, 1400.0).is_none());
     }
 }

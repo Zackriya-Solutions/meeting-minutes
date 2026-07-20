@@ -74,38 +74,8 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected }
         if (!meetingId || busy) return;
         setPhase("checking");
         try {
-            // Cloud diarization (SaluteSpeech) skips the local-model download gate — it
-            // works through the managed Memento gateway (or a user Authorization Key).
-            // Default to SaluteSpeech when nothing is persisted (managed build default).
-            let provider = "salutespeech";
-            let saluteReady = false;
-            try {
-                const s = await invoke<Record<string, string>>("get_app_settings");
-                provider = (s?.["diarization.provider"] || "salutespeech").trim() || "salutespeech";
-            } catch {
-                /* settings unreadable → fall back to the salutespeech default */
-            }
-            try {
-                saluteReady = await invoke<boolean>("salutespeech_is_configured");
-            } catch {
-                saluteReady = false;
-            }
-
-            if (provider === "salutespeech") {
-                const localStatus = await invoke<DiarizationStatus>("diarization_status");
-                if (!localStatus.available) {
-                    setPhase("idle");
-                    setDownloadPurpose(saluteReady ? 'identity' : 'fallback');
-                    setShowDownload(true);
-                    if (!saluteReady) {
-                        toast.warning(t("SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud."));
-                    }
-                    return;
-                }
-                await runDiarize();
-                return;
-            }
-
+            // Diarization is local-only in the UI (cloud measured far worse); the only
+            // gate is the one-time speaker-model download.
             const status = await invoke<DiarizationStatus>("diarization_status");
             if (!status.available) {
                 setPhase("idle");
