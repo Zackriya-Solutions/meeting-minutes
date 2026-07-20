@@ -1,67 +1,17 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import {
-  Loader2,
-} from '@/components/memento/LucideCompat';
+import { Loader2 } from '@/components/memento/LucideCompat';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/memento/Button';
 import { getCollectionDisplayText } from '@/lib/collectionDisplay';
 import { useT } from '@/lib/i18n';
 import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
-
-// Mirrors the Rust `Citation` (search::rag).
-interface Citation {
-  index: number;
-  chunk_id: number;
-  meeting_id: string;
-  start_ms: number;
-}
-
-// Mirrors the Rust `RagAskResponse` (search::commands).
-interface RagAskResponse {
-  session_id: number;
-  answer: string;
-  citations: Citation[];
-  found: boolean;
-  warning: string | null;
-  diagnostics: RetrievalDiagnostics;
-}
-
-interface RetrievalDiagnostics {
-  reason: 'ok' | 'no_index' | 'index_incomplete' | 'no_relevant_evidence' | 'answer_not_found' | 'answer_ungrounded' | string;
-  indexable_meetings: number;
-  indexed_meetings: number;
-  best_score: number;
-  query_rewritten: boolean;
-  semantic_available: boolean;
-  lexical_hits: number;
-  fuzzy_hits: number;
-  semantic_hits: number;
-  transcript_fallback_hits: number;
-  candidates_considered: number;
-}
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  citations?: Citation[];
-  found?: boolean;
-  warning?: string | null;
-  diagnostics?: RetrievalDiagnostics;
-  error?: boolean;
-}
-
-interface RagSessionResponse {
-  session_id: number;
-  messages: ChatMessage[];
-}
-
-type ScopeKind = 'archive' | 'collection' | 'meeting';
+import { useMeetingChat, type Citation, type ScopeKind } from '@/hooks/useMeetingChat';
+import { MessageBubble, TypingIndicator } from '@/components/chat/MessageBubble';
 
 interface MeetingRef {
   id: string;
@@ -84,14 +34,7 @@ export default function ChatPage() {
   const router = useRouter();
   const t = useT();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [sessionId, setSessionId] = useState<number | null>(null);
   const [scopeInitialized, setScopeInitialized] = useState(false);
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-
   const [scopeKind, setScopeKind] = useState<ScopeKind>('archive');
   const [collectionId, setCollectionId] = useState<number | null>(null);
   const [meetingId, setMeetingId] = useState<string | null>(null);
@@ -100,11 +43,16 @@ export default function ChatPage() {
   const [meetings, setMeetings] = useState<MeetingRef[]>([]);
   const [collections, setCollections] = useState<CollectionRef[]>([]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const draftBeforeHistory = useRef('');
   const pendingQuestion = useRef<string | null>(null);
   const submittedPendingQuestion = useRef(false);
+
+  const chat = useMeetingChat({
+    scope: scopeKind,
+    collectionId,
+    meetingId,
+    enabled: scopeInitialized,
+  });
+  const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, startNewChat, scrollRef, inputRef } = chat;
 
   // Load scope options.
   useEffect(() => {
@@ -154,209 +102,36 @@ export default function ChatPage() {
       setScopeKind('archive');
       setReturnCollectionId(null);
     }
-    setSessionId(null);
-    setMessages([]);
     setScopeInitialized(true);
   }, []);
 
-  // Conversations are persisted by the Rust core. Restore the latest session for the
-  // selected archive/collection/meeting whenever this screen is mounted or scope changes.
-  useEffect(() => {
-    if (!scopeInitialized) return;
-    if (scopeKind === 'collection' && collectionId == null) {
-      setLoadingHistory(false);
-      return;
-    }
-    if (scopeKind === 'meeting' && !meetingId) {
-      setLoadingHistory(false);
-      return;
-    }
-
-    let active = true;
-    setLoadingHistory(true);
-    setMessages([]);
-    setSessionId(null);
-    setHistoryIndex(null);
-    invoke<RagSessionResponse | null>('rag_get_latest_session', {
-      input: {
-        scope: scopeKind,
-        collection_id: scopeKind === 'collection' ? collectionId : null,
-        meeting_id: scopeKind === 'meeting' ? meetingId : null,
-      },
-    })
-      .then((session) => {
-        if (!active || !session) return;
-        setSessionId(session.session_id);
-        setMessages(Array.isArray(session.messages) ? session.messages : []);
-      })
-      .catch((error) => {
-        console.error('Failed to restore chat session:', error);
-      })
-      .finally(() => {
-        if (active) setLoadingHistory(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [scopeInitialized, scopeKind, collectionId, meetingId]);
-
-  // Auto-scroll to the latest message.
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, sending]);
-
-  const startNewChat = useCallback(() => {
-    setMessages([]);
-    setSessionId(null);
-    setInput('');
-    setHistoryIndex(null);
-    draftBeforeHistory.current = '';
-    inputRef.current?.focus();
-  }, []);
-
-  // Changing scope restores the latest session for that scope.
+  // Changing scope restores the latest session for that scope (handled by the hook).
   const changeScope = (kind: ScopeKind) => {
     setScopeKind(kind);
     if (kind !== 'collection') setCollectionId(null);
     if (kind !== 'meeting') setMeetingId(null);
-    setSessionId(null);
-    setMessages([]);
-    setHistoryIndex(null);
   };
 
-  const openCitation = (c: Citation) => {
-    const seconds = Math.floor(c.start_ms / 1000);
-    router.push(`/meeting-details?id=${encodeURIComponent(c.meeting_id)}&t=${seconds}`);
-  };
-
-  const send = useCallback(
-    async (text: string) => {
-      const query = text.trim();
-      if (!query || sending || loadingHistory) return;
-
-      if (scopeKind === 'collection' && collectionId == null) {
-        setMessages((m) => [...m, { role: 'assistant', content: t('Select a collection to search.'), error: true }]);
-        return;
-      }
-      if (scopeKind === 'meeting' && !meetingId) {
-        setMessages((m) => [...m, { role: 'assistant', content: t('Select a meeting to search.'), error: true }]);
-        return;
-      }
-
-      setInput('');
-      setHistoryIndex(null);
-      draftBeforeHistory.current = '';
-      setMessages((m) => [...m, { role: 'user', content: query }]);
-      setSending(true);
-
-      try {
-        const res = await invoke<RagAskResponse>('rag_ask', {
-          input: {
-            query,
-            scope: scopeKind,
-            collection_id: scopeKind === 'collection' ? collectionId : null,
-            meeting_id: scopeKind === 'meeting' ? meetingId : null,
-            session_id: sessionId,
-          },
-        });
-        setSessionId(res.session_id);
-        setMessages((m) => [
-          ...m,
-          {
-            role: 'assistant',
-            content: res.answer,
-            citations: res.citations ?? [],
-            found: res.found,
-            warning: res.warning,
-            diagnostics: res.diagnostics,
-          },
-        ]);
-      } catch (e) {
-        setMessages((m) => [
-          ...m,
-          {
-            role: 'assistant',
-            content:
-              typeof e === 'string'
-                ? e
-                : t('Failed to get an answer. Make sure an LLM provider (GigaChat or DeepSeek) is configured in settings.'),
-            error: true,
-          },
-        ]);
-      } finally {
-        setSending(false);
-      }
+  const openCitation = useCallback(
+    (c: Citation) => {
+      const seconds = Math.floor(c.start_ms / 1000);
+      router.push(`/meeting-details?id=${encodeURIComponent(c.meeting_id)}&t=${seconds}`);
     },
-    [sending, loadingHistory, scopeKind, collectionId, meetingId, sessionId, t],
+    [router],
   );
 
   useEffect(() => {
     const question = pendingQuestion.current;
-    if (
-      !scopeInitialized
-      || loadingHistory
-      || sending
-      || submittedPendingQuestion.current
-      || !question
-    ) return;
+    if (!scopeInitialized || loadingHistory || sending || submittedPendingQuestion.current || !question) return;
 
     submittedPendingQuestion.current = true;
     pendingQuestion.current = null;
     void send(question);
   }, [loadingHistory, scopeInitialized, send, sending]);
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send(input);
-      return;
-    }
-
-    const queryHistory = messages
-      .filter((message) => message.role === 'user')
-      .map((message) => message.content);
-    if (
-      e.key === 'ArrowUp'
-      && !e.altKey
-      && !e.ctrlKey
-      && !e.metaKey
-      && queryHistory.length > 0
-      && (historyIndex != null || input.length === 0 || e.currentTarget.selectionStart === 0)
-    ) {
-      e.preventDefault();
-      const nextIndex = historyIndex == null
-        ? queryHistory.length - 1
-        : Math.max(0, historyIndex - 1);
-      if (historyIndex == null) draftBeforeHistory.current = input;
-      setHistoryIndex(nextIndex);
-      setInput(queryHistory[nextIndex]);
-      return;
-    }
-    if (
-      e.key === 'ArrowDown'
-      && !e.altKey
-      && !e.ctrlKey
-      && !e.metaKey
-      && historyIndex != null
-    ) {
-      e.preventDefault();
-      if (historyIndex < queryHistory.length - 1) {
-        const nextIndex = historyIndex + 1;
-        setHistoryIndex(nextIndex);
-        setInput(queryHistory[nextIndex]);
-      } else {
-        setHistoryIndex(null);
-        setInput(draftBeforeHistory.current);
-      }
-    }
-  };
-
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
   const selectedCollection = collections.find((collection) => collection.id === collectionId);
-  const selectedCollectionName = selectedCollection
-    ? getCollectionDisplayText(selectedCollection, t).name
-    : null;
+  const selectedCollectionName = selectedCollection ? getCollectionDisplayText(selectedCollection, t).name : null;
   const backToContext = () => {
     if (returnCollectionId != null) {
       router.push(`/collections?collectionId=${returnCollectionId}`);
@@ -467,11 +242,7 @@ export default function ChatPage() {
             ref={inputRef}
             value={input}
             disabled={loadingHistory}
-            onChange={(e) => {
-              setInput(e.target.value);
-              setHistoryIndex(null);
-              draftBeforeHistory.current = e.target.value;
-            }}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
             placeholder={t('Ask about your meetings…')}
@@ -492,124 +263,6 @@ export default function ChatPage() {
         <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--fg3)]">
           {t('Answers are drawn only from your recordings, with links to the sources.')}
         </p>
-      </div>
-    </div>
-  );
-}
-
-function MessageBubble({
-  msg,
-  meetingTitle,
-  onCite,
-}: {
-  msg: ChatMessage;
-  meetingTitle: (id: string) => string;
-  onCite: (c: Citation) => void;
-}) {
-  const t = useT();
-  const isUser = msg.role === 'user';
-  const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18 }}
-      className={cn('flex', isUser ? 'justify-end' : 'justify-start')}
-    >
-      <div
-        className={cn(
-          'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
-          isUser
-            ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
-            : msg.error
-              ? 'border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
-              : notFound
-                ? 'border border-[var(--border-subtle)] bg-[var(--bg-sheet)] text-[var(--fg2)]'
-                : 'bg-[var(--bg-elevated)] text-[var(--fg1)]',
-        )}
-      >
-        {notFound && (
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
-            <Icon name="search" size={14} />
-            {t('Not found in your meetings')}
-          </div>
-        )}
-        <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-
-        {notFound && msg.diagnostics && (
-          <RetrievalExplanation diagnostics={msg.diagnostics} />
-        )}
-
-        {msg.warning && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
-            <Icon name="alert" size={14} />
-            {msg.warning}
-          </div>
-        )}
-
-        {!!msg.citations?.length && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {msg.citations.map((c) => (
-              <button
-                key={c.index}
-                onClick={() => onCite(c)}
-                title={t('Open the meeting at this moment')}
-                className="flex items-center gap-1 rounded-full bg-[var(--bg-canvas)]/70 px-2 py-0.5 text-xs text-[var(--gold)] ring-1 ring-[var(--gold-ring)] transition-colors hover:bg-[var(--gold-soft)]"
-              >
-                <Icon name="transcript" size={12} />
-                <span className="font-medium">[{c.index}]</span>
-                <span className="max-w-[160px] truncate">{meetingTitle(c.meeting_id)}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
-function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDiagnostics }) {
-  const t = useT();
-  let explanation: string;
-  if (diagnostics.reason === 'no_index') {
-    explanation = t('There are no searchable transcripts in this scope yet.');
-  } else if (diagnostics.reason === 'index_incomplete') {
-    explanation = t('The archive index is incomplete: {indexed} of {total} meetings are ready.')
-      .replace('{indexed}', String(diagnostics.indexed_meetings))
-      .replace('{total}', String(diagnostics.indexable_meetings));
-  } else if (diagnostics.reason === 'answer_ungrounded') {
-    explanation = t('Relevant fragments were found, but the generated answer could not be verified against source links.');
-  } else if (diagnostics.reason === 'answer_not_found') {
-    explanation = t('Relevant fragments were checked, but they do not contain an answer to this question.');
-  } else {
-    explanation = t('Memento checked close spellings and related fragments, but did not find enough evidence for a grounded answer.');
-  }
-
-  return (
-    <div className="mt-2 rounded-lg bg-[var(--bg-canvas)]/60 px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
-      <p>{explanation}</p>
-      {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
-        <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
-      )}
-      {diagnostics.query_rewritten && (
-        <p className="mt-1">{t('Common ASR spellings and transliterated product names were included automatically.')}</p>
-      )}
-    </div>
-  );
-}
-
-function TypingIndicator() {
-  return (
-    <div className="flex justify-start">
-      <div className="flex items-center gap-1 rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-[var(--fg3)]"
-            style={{ animationDelay: `${i * 0.15}s` }}
-          />
-        ))}
       </div>
     </div>
   );

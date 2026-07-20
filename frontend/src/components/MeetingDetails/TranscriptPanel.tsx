@@ -63,6 +63,16 @@ interface TranscriptPanelProps {
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   /** Refresh speakers + transcripts after a successful detect. */
   onSpeakersDetected?: () => Promise<void> | void;
+
+  /**
+   * Presentation flags for the meeting-conversation transcript pin (variant 2a).
+   * The pin moves the transcript actions into the screen's "⋯" menu and drops the
+   * summary context field, so it renders the panel without its own toolbar/field
+   * and with a compact audio player. All default to the original two-panel look.
+   */
+  showToolbar?: boolean;
+  showContextField?: boolean;
+  compactPlayer?: boolean;
 }
 
 export function TranscriptPanel({
@@ -91,6 +101,9 @@ export function TranscriptPanel({
   speakerCount = 0,
   onRenameSpeaker,
   onSpeakersDetected,
+  showToolbar = true,
+  showContextField = true,
+  compactPlayer = false,
 }: TranscriptPanelProps) {
   const t = useT();
   const [audioSources, setAudioSources] = useState<string[]>([]);
@@ -211,27 +224,30 @@ export function TranscriptPanel({
     // meeting-details/page-content.tsx; this root just fills its pane.
     <div className="relative flex h-full w-full min-w-0 flex-col bg-[var(--bg-sheet)]">
       {/* Title area */}
-      <div className="border-b border-[var(--border-subtle)] p-4">
-        <TranscriptButtonGroup
-          transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
-          onCopyTranscript={onCopyTranscript}
-          onToggleRecordingAudio={() => {
-            if (audio.isPlaying) audio.pause();
-            else void audio.play();
-          }}
-          recordingAudioAvailable={audioSources.length > 0 && !audioUnavailable}
-          isRecordingAudioPlaying={audio.isPlaying}
-          isRecordingAudioLoading={audio.isLoading}
-          meetingId={meetingId}
-          meetingFolderPath={meetingFolderPath}
-          onRefetchTranscripts={onRefetchTranscripts}
-          onSpeakersDetected={onSpeakersDetected}
-          speakerCount={speakerCount}
-        />
-      </div>
+      {showToolbar && (
+        <div className="border-b border-[var(--border-subtle)] p-4">
+          <TranscriptButtonGroup
+            transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
+            onCopyTranscript={onCopyTranscript}
+            onToggleRecordingAudio={() => {
+              if (audio.isPlaying) audio.pause();
+              else void audio.play();
+            }}
+            recordingAudioAvailable={audioSources.length > 0 && !audioUnavailable}
+            isRecordingAudioPlaying={audio.isPlaying}
+            isRecordingAudioLoading={audio.isLoading}
+            meetingId={meetingId}
+            meetingFolderPath={meetingFolderPath}
+            onRefetchTranscripts={onRefetchTranscripts}
+            onSpeakersDetected={onSpeakersDetected}
+            speakerCount={speakerCount}
+          />
+        </div>
+      )}
 
       {meetingId && meetingFolderPath && (
         <MeetingAudioPlayer
+          compact={compactPlayer}
           available={audioSources.length > 0 && !audioUnavailable}
           isPlaying={audio.isPlaying}
           isLoading={audio.isLoading}
@@ -292,7 +308,7 @@ export function TranscriptPanel({
       </div>
 
       {/* Custom prompt input at bottom of transcript section */}
-      {!isRecording && convertedSegments.length > 0 && (
+      {showContextField && !isRecording && convertedSegments.length > 0 && (
         <div className="border-t border-[var(--border-subtle)] p-3">
           <textarea
             placeholder={t('Add context for AI summary. For example people involved, meeting overview, objective etc...')}
