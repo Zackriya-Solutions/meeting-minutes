@@ -222,7 +222,7 @@ export function MeetingConversation({
   return (
     <div className="flex h-screen flex-col bg-[var(--bg-canvas)]">
       {/* Top bar */}
-      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-5 py-3">
+      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-[22px] py-4">
         <div className="min-w-0 flex-1">
           <EditableTitle
             title={meetingTitle}
@@ -235,24 +235,20 @@ export function MeetingConversation({
         </div>
         <MeetingOverflowMenu
           meetingId={meetingId}
-          meetingFolderPath={meetingFolderPath}
           hasSummary={hasSummary}
-          isSaving={isSaving}
-          isDirty={isSummaryDirty}
           onCopySummary={onCopySummary}
           onSaveSummary={onSaveSummary}
-          onOpenModelSettings={onOpenModelSettings}
-          speakerCount={speakerCount}
-          onSpeakersDetected={onSpeakersDetected}
-          onRefetchTranscripts={onRefetchTranscripts}
+          modelConfig={summaryPanelProps.modelConfig}
+          setModelConfig={summaryPanelProps.setModelConfig}
+          onSaveModelConfig={summaryPanelProps.onSaveModelConfig}
         />
       </div>
 
       {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
 
       {/* Thread */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
-        <div className="mx-auto flex max-w-3xl flex-col gap-5">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-2 pt-[26px]">
+        <div className="mx-auto flex max-w-[760px] flex-col gap-[18px]">
           {/* Pin #1 — transcript */}
           <TranscriptCard
             meetingId={meetingId}
@@ -310,19 +306,15 @@ export function MeetingConversation({
       </div>
 
       {/* Composer */}
-      <div className="px-5">
-        <MeetingComposer
-          input={input}
-          onInputChange={setInput}
-          onKeyDown={onKeyDown}
-          onSend={send}
-          sending={sending}
-          disabled={loadingHistory}
-          inputRef={inputRef}
-          suggestions={MEETING_SUGGESTIONS}
-          showSuggestions={messages.length === 0}
-        />
-      </div>
+      <MeetingComposer
+        input={input}
+        onInputChange={setInput}
+        onKeyDown={onKeyDown}
+        onSend={send}
+        sending={sending}
+        disabled={loadingHistory}
+        inputRef={inputRef}
+      />
     </div>
   );
 }

@@ -11,6 +11,11 @@ export const RU: Record<string, string> = {
   // Meeting conversation (variant 2a)
   "Meeting summary": "Саммари встречи",
   "Summary type": "Тип саммари",
+  "Summary type · rebuilds the message": "Тип саммари · пересоберёт сообщение",
+  "Copy summary": "Копировать саммари",
+  "Save to note": "Сохранить в заметку",
+  "Delete this meeting? This cannot be undone.": "Удалить эту встречу? Действие необратимо.",
+  "Meeting deleted": "Встреча удалена",
   "Regenerate": "Пересобрать",
   "No summary yet. Choose a type to generate it.": "Саммари ещё нет. Выберите тип, чтобы сгенерировать.",
   "Transcript": "Транскрипт",
