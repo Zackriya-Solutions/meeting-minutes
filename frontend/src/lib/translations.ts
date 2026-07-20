@@ -8,7 +8,10 @@
  * Generated/maintained alongside the Settings i18n conversion.
  */
 export const RU: Record<string, string> = {
-  // Meeting conversation (variant 2a)
+  // Meeting conversation (variant 2a/3a)
+  "Today": "Сегодня",
+  "Yesterday": "Вчера",
+  "Earlier": "Ранее",
   "Meeting summary": "Саммари встречи",
   "Summary type": "Тип саммари",
   "Summary type · rebuilds the message": "Тип саммари · пересоберёт сообщение",

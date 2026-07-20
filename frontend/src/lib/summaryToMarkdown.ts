@@ -1,11 +1,12 @@
 /**
- * Best-effort conversion of a persisted meeting summary (BlockNote JSON, legacy
- * section map, or a plain markdown blob) into Markdown, plus a TL;DR/details split
- * for the 3a summary layout (a prominent lead + a collapsible "Подробнее" section).
+ * Best-effort conversion of a persisted meeting summary (a markdown blob, BlockNote
+ * JSON, or a legacy section map) into Markdown, plus a TL;DR/details split for the
+ * 3a summary layout (a prominent lead + a collapsible "Подробнее" section).
  *
- * The real summary is free-form generated content, so this is intentionally
- * defensive: anything it cannot understand degrades to an empty string rather than
- * throwing, and callers fall back to showing nothing / the generate state.
+ * Real summaries are markdown where section titles are bold lines (**Краткое
+ * содержание**, **Ключевые решения**, **Задачи** …). We normalize those to real
+ * Markdown headings so they render as sections and the split can use them as
+ * boundaries. Anything unknown degrades to an empty string rather than throwing.
  */
 
 function inlineText(content: any): string {
@@ -63,32 +64,61 @@ function sectionsToMarkdown(summary: Record<string, any>): string {
   return parts.join('\n\n').trim();
 }
 
+/** Turn bold-only lines (**Section**) into real Markdown headings. */
+function normalizeHeadings(md: string): string {
+  return md
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      const m = trimmed.match(/^\*\*(.+?)\*\*:?$/);
+      return m ? `## ${m[1].trim()}` : line;
+    })
+    .join('\n');
+}
+
 /** Convert any persisted summary shape to Markdown (empty string if unknown). */
 export function summaryToMarkdown(summary: any): string {
   try {
     if (!summary) return '';
-    if (typeof summary === 'string') return summary.trim();
-    if (typeof summary.markdown === 'string' && summary.markdown.trim()) return summary.markdown.trim();
-    if (Array.isArray(summary.summary_json)) return blocksToMarkdown(summary.summary_json);
-    if (typeof summary === 'object') return sectionsToMarkdown(summary);
-    return '';
+    let md = '';
+    if (typeof summary === 'string') md = summary;
+    else if (typeof summary.markdown === 'string' && summary.markdown.trim()) md = summary.markdown;
+    else if (Array.isArray(summary.summary_json)) md = blocksToMarkdown(summary.summary_json);
+    else if (typeof summary === 'object') md = sectionsToMarkdown(summary);
+    return normalizeHeadings(md.trim()).trim();
   } catch {
     return '';
   }
 }
 
 /**
- * Split summary markdown into a TL;DR lead (the first prose paragraph) and the
- * remaining details (key decisions / tasks). Either may be empty.
+ * Split summary markdown into a TL;DR lead (the body of the first section) and the
+ * remaining details (subsequent sections: key decisions / tasks). Either may be
+ * empty. Assumes headings have been normalized by summaryToMarkdown.
  */
 export function splitSummaryLead(markdown: string): { lead: string; details: string } {
   const md = (markdown || '').trim();
   if (!md) return { lead: '', details: '' };
-  const paragraphs = md.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-  const isProse = (p: string) => !/^(#{1,6}\s|[-*]\s|\d+\.\s|- \[)/.test(p);
-  const leadIdx = paragraphs.findIndex(isProse);
-  if (leadIdx === -1) return { lead: '', details: md };
-  const lead = paragraphs[leadIdx];
-  const details = paragraphs.filter((_, i) => i !== leadIdx).join('\n\n');
+
+  const blocks = md.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+  const isHeading = (b: string) => /^#{1,6}\s/.test(b);
+  const isListOrTable = (b: string) => /^([-*]\s|\d+\.\s|\||- \[)/.test(b);
+  const headingIdxs = blocks.map((b, i) => (isHeading(b) ? i : -1)).filter((i) => i >= 0);
+
+  if (headingIdxs.length === 0) {
+    const leadIdx = blocks.findIndex((b) => !isListOrTable(b));
+    if (leadIdx === -1) return { lead: '', details: md };
+    return { lead: blocks[leadIdx], details: blocks.filter((_, i) => i !== leadIdx).join('\n\n') };
+  }
+
+  const first = headingIdxs[0];
+  const second = headingIdxs[1] ?? blocks.length;
+  const overview = blocks
+    .slice(first + 1, second)
+    .filter((b) => !isHeading(b) && !isListOrTable(b));
+  const lead = overview.join('\n\n').trim();
+  const details = blocks.slice(second).join('\n\n').trim();
+
+  if (!lead) return { lead: '', details: blocks.slice(first).join('\n\n').trim() };
   return { lead, details };
 }

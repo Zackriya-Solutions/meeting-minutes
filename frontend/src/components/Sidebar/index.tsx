@@ -716,8 +716,8 @@ const Sidebar: React.FC = () => {
         <div
           className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
             ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-[var(--gold-soft)] text-[var(--gold)] font-medium' :
-              hasTranscriptMatch ? 'bg-[var(--gold-soft)]' : 'hover:bg-[var(--bg-sheet)]'
+            : `px-3 py-2 my-0.5 rounded-md text-sm border-l-2 ${isActive ? 'border-[var(--gold)] bg-[var(--bg-elevated)] text-[var(--fg1)] font-medium' :
+              hasTranscriptMatch ? 'border-transparent bg-[var(--gold-soft)]' : 'border-transparent hover:bg-[var(--bg-sheet)]'
             } cursor-pointer`
             }`}
           style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
@@ -823,6 +823,51 @@ const Sidebar: React.FC = () => {
           </div>
         )}
       </div>
+    );
+  };
+
+  // Date bucket (3a): 0 = Today, 1 = Yesterday, 2 = Earlier (also undated).
+  const meetingBucket = (item: SidebarItem): number => {
+    const raw = item.occurredAt ?? item.createdAt;
+    if (!raw) return 2;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return 2;
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday);
+    startOfYesterday.setDate(startOfToday.getDate() - 1);
+    if (d >= startOfToday) return 0;
+    if (d >= startOfYesterday) return 1;
+    return 2;
+  };
+
+  // 3a sidebar: meetings grouped by date (Today / Yesterday / Earlier), past groups
+  // dimmed. Non-meeting rows (e.g. "+ New Call") render first, ungrouped.
+  const renderGroupedMeetings = (children: SidebarItem[]) => {
+    const isMeeting = (c: SidebarItem) => c.id.includes('-') && !c.id.startsWith('intro-call');
+    const nonMeetings = children.filter((c) => !isMeeting(c));
+    const groups: { key: string; label: string; items: SidebarItem[] }[] = [
+      { key: 'today', label: t('Today'), items: [] },
+      { key: 'yesterday', label: t('Yesterday'), items: [] },
+      { key: 'earlier', label: t('Earlier'), items: [] },
+    ];
+    for (const c of children) {
+      if (isMeeting(c)) groups[meetingBucket(c)].items.push(c);
+    }
+    return (
+      <>
+        {nonMeetings.map((c) => renderItem(c, 1))}
+        {groups
+          .filter((g) => g.items.length > 0)
+          .map((g) => (
+            <div key={g.key} className={g.key === 'earlier' ? 'opacity-70' : ''}>
+              <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--fg3)]">
+                {g.label}
+              </div>
+              {g.items.map((c) => renderItem(c, 1))}
+            </div>
+          ))}
+      </>
     );
   };
 
@@ -946,7 +991,9 @@ const Sidebar: React.FC = () => {
                   .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
                   .map(item => (
                     <div key={`${item.id}-children`} className="mx-3">
-                      {item.children!.map(child => renderItem(child, 1))}
+                      {item.id === 'meetings'
+                        ? renderGroupedMeetings(item.children!)
+                        : item.children!.map(child => renderItem(child, 1))}
                     </div>
                   ))}
               </div>
@@ -961,16 +1008,16 @@ const Sidebar: React.FC = () => {
             <button
               onClick={handleRecordingToggle}
               disabled={isRecording}
-              className={`memento-primary-action w-full flex items-center justify-center px-3 py-2 text-sm font-medium ${isRecording ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--fg1)] transition-colors ${isRecording ? 'opacity-60 cursor-not-allowed' : 'hover:bg-[var(--state-hover-bg)]'}`}
             >
               {isRecording ? (
                 <>
-                  <MementoIcon name="stop" size={17} />
+                  <MementoIcon name="stop" size={16} />
                   <span>{t('Recording in progress...')}</span>
                 </>
               ) : (
                 <>
-                  <MementoIcon name="mic" size={17} />
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--danger)]" />
                   <span>{t('Start Recording')}</span>
                 </>
               )}
