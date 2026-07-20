@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { List, Settings as SettingsIcon, LayoutGrid } from 'lucide-react';
+import { List, Settings as SettingsIcon, LayoutGrid, FileAudio } from 'lucide-react';
 import './mobile.css';
 import type { VmAccent, VmMeeting, VmModel, VmScreen, VmTheme } from './types';
 import {
@@ -27,6 +27,7 @@ import { MeetingDetailScreen } from './MeetingDetailScreen';
 import { ModelsScreen } from './ModelsScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { ImportAudioScreen } from './ImportAudioScreen';
+import { RecordingsScreen } from './RecordingsScreen';
 
 const LS_THEME = 'vm-theme';
 const LS_ACCENT = 'vm-accent';
@@ -175,7 +176,7 @@ export default function MobileApp() {
     return <div className="vm-app" data-theme={theme} data-accent={accent} />;
   }
 
-  const showTabBar = ['home', 'models', 'settings'].includes(screen);
+  const showTabBar = ['home', 'recordings', 'models', 'settings'].includes(screen);
 
   return (
     <div className="vm-app" data-theme={theme} data-accent={accent}>
@@ -209,6 +210,7 @@ export default function MobileApp() {
               }}
             />
           )}
+          {screen === 'recordings' && <RecordingsScreen />}
           {screen === 'detail' && activeMeetingId && (
             <MeetingDetailScreen
               meetingId={activeMeetingId}
@@ -245,6 +247,13 @@ export default function MobileApp() {
               >
                 <List size={22} strokeWidth={2} />
                 <span>Meetings</span>
+              </button>
+              <button
+                className={`tabitem ${screen === 'recordings' ? 'on' : ''}`}
+                onClick={() => setScreen('recordings')}
+              >
+                <FileAudio size={22} strokeWidth={2} />
+                <span>Recordings</span>
               </button>
               <button
                 className={`tabitem ${screen === 'models' ? 'on' : ''}`}

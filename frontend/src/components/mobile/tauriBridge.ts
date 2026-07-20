@@ -62,6 +62,65 @@ export async function fetchMeetingDetail(meetingId: string): Promise<MeetingDeta
   }
 }
 
+// ── Local recordings (on-disk, independent of the meetings DB) ────────────
+
+export interface VmLocalRecording {
+  folderName: string;
+  title: string;
+  createdAt?: string;
+  status?: string;
+  durationSeconds?: number;
+  hasAudio: boolean;
+  audioPath?: string;
+  hasTranscript: boolean;
+}
+
+export async function fetchLocalRecordings(): Promise<VmLocalRecording[]> {
+  try {
+    const rows = await invoke<
+      {
+        folder_name: string;
+        meeting_name?: string | null;
+        created_at?: string | null;
+        status?: string | null;
+        duration_seconds?: number | null;
+        has_audio: boolean;
+        audio_path?: string | null;
+        has_transcript: boolean;
+      }[]
+    >('list_local_recordings');
+    return (rows || []).map((r) => ({
+      folderName: r.folder_name,
+      title: r.meeting_name || r.folder_name,
+      createdAt: r.created_at ?? undefined,
+      status: r.status ?? undefined,
+      durationSeconds: r.duration_seconds ?? undefined,
+      hasAudio: r.has_audio,
+      audioPath: r.audio_path ?? undefined,
+      hasTranscript: r.has_transcript,
+    }));
+  } catch (e) {
+    console.warn('[vm] list_local_recordings failed', e);
+    return [];
+  }
+}
+
+export async function fetchLocalRecordingTranscript(folderName: string): Promise<VmSegment[]> {
+  try {
+    const segments = await invoke<
+      { id: string; text: string; audio_start_time: number }[]
+    >('read_local_recording_transcript', { folderName });
+    return (segments || []).map((s) => ({
+      id: s.id,
+      text: s.text,
+      timestamp: s.audio_start_time,
+    }));
+  } catch (e) {
+    console.warn('[vm] read_local_recording_transcript failed', e);
+    return [];
+  }
+}
+
 // ── Recording ────────────────────────────────────────────────────────────
 
 /**

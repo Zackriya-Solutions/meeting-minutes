@@ -1,7 +1,8 @@
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Runtime};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use anyhow::Result;
@@ -10,6 +11,32 @@ use log::error;
 
 #[cfg(target_os = "macos")]
 use crate::audio::capture::AudioCaptureBackend;
+
+/// Android has no XDG-style "Documents"/"Music" directory the `dirs` crate can
+/// resolve (its `*_dir()` functions all return None there), so
+/// get_default_recordings_folder()'s desktop logic silently fell back to
+/// `PathBuf::from(".")` — not a writable, app-scoped location in the Android
+/// sandbox. Cache a real one (the same app data dir Tauri's path API and the
+/// mobile frontend's stop_recording save_path both already use) at startup,
+/// mirroring whisper_engine::commands::set_models_directory's pattern for the
+/// same underlying problem.
+#[cfg(target_os = "android")]
+static ANDROID_RECORDINGS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+#[cfg(target_os = "android")]
+pub fn set_android_recordings_dir<R: Runtime>(app: &AppHandle<R>) {
+    match app.path().app_data_dir() {
+        Ok(dir) => {
+            let recordings_dir = dir.join("meetily-recordings");
+            if let Err(e) = std::fs::create_dir_all(&recordings_dir) {
+                log::error!("Failed to create Android recordings directory: {}", e);
+                return;
+            }
+            *ANDROID_RECORDINGS_DIR.lock().unwrap() = Some(recordings_dir);
+        }
+        Err(e) => log::error!("Failed to get app data dir for recordings: {}", e),
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingPreferences {
@@ -67,7 +94,20 @@ pub fn get_default_recordings_folder() -> PathBuf {
         }
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "android")]
+    {
+        // Android: app data dir/meetily-recordings, cached by
+        // set_android_recordings_dir() at startup — dirs::document_dir() and
+        // friends all return None in the Android sandbox, so falling through
+        // to the Linux branch below would silently resolve to the relative,
+        // non-writable "." path.
+        ANDROID_RECORDINGS_DIR.lock().unwrap().clone().unwrap_or_else(|| {
+            warn!("Android recordings dir not initialized yet, falling back to \".\"");
+            PathBuf::from(".")
+        })
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
     {
         // Linux/Others: ~/Documents/meetily-recordings
         dirs::document_dir()

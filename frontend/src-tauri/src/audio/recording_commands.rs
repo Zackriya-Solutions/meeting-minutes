@@ -1031,6 +1031,110 @@ pub async fn get_meeting_folder_path() -> Result<Option<String>, String> {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalRecordingInfo {
+    pub folder_name: String,
+    pub meeting_name: Option<String>,
+    pub created_at: Option<String>,
+    pub status: Option<String>,
+    pub duration_seconds: Option<f64>,
+    pub has_audio: bool,
+    pub audio_path: Option<String>,
+    pub has_transcript: bool,
+}
+
+/// List recordings saved on disk (one folder per recording, under the
+/// platform's recordings directory), independent of the SQLite meetings
+/// table. Reads each folder's metadata.json/transcripts.json directly, so it
+/// still surfaces a recording even if something downstream (e.g. DB sync)
+/// failed to pick it up — useful both as a real feature (browse/see what's
+/// been recorded) and as a way to confirm recordings are actually landing on
+/// disk when diagnosing save-path issues.
+#[tauri::command]
+pub async fn list_local_recordings() -> Result<Vec<LocalRecordingInfo>, String> {
+    let base = super::recording_preferences::get_default_recordings_folder();
+
+    let entries = match std::fs::read_dir(&base) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(Vec::new()), // Folder doesn't exist yet - no recordings
+    };
+
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let folder_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let metadata: Option<crate::audio::recording_saver::MeetingMetadata> =
+            std::fs::read_to_string(path.join("metadata.json"))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok());
+
+        let has_transcript = path.join("transcripts.json").exists();
+
+        // Find an audio file directly inside the folder (skip .checkpoints/,
+        // which holds in-progress chunks, not a finished recording).
+        let mut audio_path: Option<String> = None;
+        if let Ok(sub_entries) = std::fs::read_dir(&path) {
+            for sub in sub_entries.flatten() {
+                let sub_path = sub.path();
+                if sub_path.is_file() {
+                    if let Some(ext) = sub_path.extension().and_then(|e| e.to_str()) {
+                        if matches!(ext.to_lowercase().as_str(), "mp4" | "wav" | "m4a") {
+                            audio_path = Some(sub_path.to_string_lossy().to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        out.push(LocalRecordingInfo {
+            meeting_name: metadata.as_ref().and_then(|m| m.meeting_name.clone()),
+            created_at: metadata.as_ref().map(|m| m.created_at.clone()),
+            status: metadata.as_ref().map(|m| m.status.clone()),
+            duration_seconds: metadata.as_ref().and_then(|m| m.duration_seconds),
+            has_audio: audio_path.is_some(),
+            audio_path,
+            has_transcript,
+            folder_name,
+        });
+    }
+
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(out)
+}
+
+/// Read a local recording's transcripts.json (written incrementally during
+/// recording and finalized on stop). folder_name must be a direct child of
+/// the recordings directory, as returned by list_local_recordings.
+#[tauri::command]
+pub async fn read_local_recording_transcript(
+    folder_name: String,
+) -> Result<Vec<crate::audio::recording_saver::TranscriptSegment>, String> {
+    let base = super::recording_preferences::get_default_recordings_folder();
+    // Reject path traversal - folder_name must be a plain single path segment.
+    if folder_name.contains('/') || folder_name.contains('\\') || folder_name.contains("..") {
+        return Err("Invalid folder name".to_string());
+    }
+    let transcript_path = base.join(&folder_name).join("transcripts.json");
+
+    let content = std::fs::read_to_string(&transcript_path)
+        .map_err(|e| format!("Failed to read transcript: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse transcript: {}", e))?;
+    let segments = json
+        .get("segments")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![]));
+    serde_json::from_value(segments).map_err(|e| format!("Failed to parse segments: {}", e))
+}
+
 /// Get accumulated transcript segments from current recording session
 /// Used for syncing frontend state after page reload during active recording
 #[tauri::command]

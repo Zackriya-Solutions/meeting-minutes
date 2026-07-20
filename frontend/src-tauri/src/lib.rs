@@ -487,6 +487,11 @@ pub fn run() {
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
 
+            // Android has no dirs::document_dir()/audio_dir(); recordings must
+            // use the app data dir instead (see recording_preferences.rs).
+            #[cfg(target_os = "android")]
+            audio::recording_preferences::set_android_recordings_dir(&_app.handle());
+
             // Initialize Whisper engine on startup
             tauri::async_runtime::spawn(async {
                 if let Err(e) = whisper_engine::commands::whisper_init().await {
@@ -646,6 +651,8 @@ pub fn run() {
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
+            audio::recording_commands::list_local_recordings,
+            audio::recording_commands::read_local_recording_transcript,
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
