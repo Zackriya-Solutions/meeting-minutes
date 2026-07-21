@@ -3,158 +3,195 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Memento stats</title>
+<title>Memento product statistics</title>
 <style>
-  /* Memento module dashboard. Relative URLs only (served behind /p/memento/).
-     Tokens mirror the hub's; ?theme=light|dark overrides the OS scheme. */
-  :root { color-scheme: light;
-    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e;
-    --muted:#898781; --border:rgba(11,11,11,0.10); --accent:#2a78d6;
-    --accent-2:#7c5cd6; }
-  :root[data-theme="dark"], :root.auto-dark { color-scheme: dark;
-    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7;
-    --muted:#898781; --border:rgba(255,255,255,0.10); --accent:#3987e5;
-    --accent-2:#8f6fe8; }
-  body { margin:0; padding:22px 26px; background:var(--page); color:var(--ink);
-    font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
-  h1 { font-size:17px; margin:0 0 2px; }
-  .sub { color:var(--muted); font-size:12px; }
+  :root { color-scheme:light; --page:#f9f9f7; --surface:#fff; --ink:#11110f;
+    --ink2:#54534e; --muted:#8b8982; --border:rgba(17,17,15,.11);
+    --blue:#2a78d6; --blue-soft:#dceafb; --gold:#a66a12; --gold-soft:#f7e8ca;
+    --bad:#b8443d; --good:#267a4b; }
+  :root[data-theme="dark"], :root.auto-dark { color-scheme:dark; --page:#0d0d0d;
+    --surface:#191918; --ink:#f6f5f1; --ink2:#c6c4bc; --muted:#918f88;
+    --border:rgba(255,255,255,.11); --blue:#5da2ee; --blue-soft:#172f4c;
+    --gold:#e0a84d; --gold-soft:#443118; --bad:#e47b73; --good:#62bd86; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:24px 28px 40px; background:var(--page); color:var(--ink);
+    font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { display:flex; align-items:flex-start; gap:16px; max-width:1200px; }
+  h1 { font-size:19px; line-height:1.2; margin:0 0 4px; letter-spacing:-.01em; }
+  .sub,.note { color:var(--muted); font-size:12px; }
   .periods { margin-left:auto; display:flex; gap:4px; }
-  .periods button { background:var(--surface); border:1px solid var(--border);
-    color:var(--ink-2); border-radius:8px; padding:4px 10px; font-size:12px;
-    cursor:pointer; }
-  .periods button.on { color:var(--ink); border-color:var(--accent);
-    box-shadow:0 0 0 1px var(--accent) inset; }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-    gap:12px; max-width:980px; margin-top:16px; }
-  .tile { background:var(--surface); border:1px solid var(--border);
-    border-radius:12px; padding:12px 14px; }
-  .tile .v { font-size:22px; font-weight:600; }
-  .tile .v.good { color:#2e9e5b; }
-  .tile .l { font-size:10.5px; color:var(--muted); margin-top:1px; }
-  .card { background:var(--surface); border:1px solid var(--border);
-    border-radius:12px; padding:14px 16px; max-width:980px; margin-top:14px; }
-  .card h2 { font-size:12px; font-weight:600; color:var(--ink-2); margin:0 0 10px;
-    text-transform:uppercase; letter-spacing:.04em; }
-  .chart-wrap { overflow-x:auto; }
-  svg text { font:10px system-ui, sans-serif; fill:var(--muted); }
-  .legend { display:flex; gap:14px; font-size:11px; color:var(--muted); margin-top:8px; }
-  .legend i { display:inline-block; width:9px; height:9px; border-radius:2px;
-    margin-right:5px; vertical-align:-1px; }
-  .empty { color:var(--muted); font-size:12px; padding:18px 0; }
+  button { background:var(--surface); border:1px solid var(--border); color:var(--ink2);
+    border-radius:8px; padding:5px 11px; font:12px inherit; cursor:pointer; }
+  button.on { color:var(--ink); border-color:var(--blue); box-shadow:0 0 0 1px var(--blue) inset; }
+  .kpis { display:grid; grid-template-columns:repeat(6,minmax(125px,1fr)); gap:10px;
+    max-width:1200px; margin-top:18px; }
+  .kpi,.panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+  .kpi { padding:13px 14px; min-height:82px; }
+  .kpi .value { font-size:23px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .kpi .label { color:var(--ink2); font-size:11px; margin-top:2px; }
+  .kpi .detail { color:var(--muted); font-size:10px; margin-top:2px; }
+  .grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(270px,1fr); gap:12px;
+    max-width:1200px; margin-top:12px; align-items:start; }
+  .panel { padding:15px 16px; min-width:0; }
+  .panel h2 { font-size:13px; margin:0 0 2px; font-weight:650; }
+  .panel .caption { color:var(--muted); font-size:11px; margin-bottom:12px; }
+  .wide { grid-column:1 / -1; }
+  .chart { overflow-x:auto; min-height:230px; }
+  .chart svg { display:block; min-width:660px; width:100%; height:230px; }
+  svg text { fill:var(--muted); font:10px ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .legend { display:flex; gap:16px; color:var(--muted); font-size:11px; margin-top:8px; }
+  .legend i { display:inline-block; width:12px; height:3px; margin-right:6px; vertical-align:3px; }
+  .stage { display:grid; grid-template-columns:125px minmax(90px,1fr) 52px; align-items:center;
+    gap:9px; margin:9px 0; font-size:11px; }
+  .stage .track { height:9px; background:var(--blue-soft); border-radius:99px; overflow:hidden; }
+  .stage .fill { height:100%; background:var(--blue); border-radius:99px; min-width:2px; }
+  .stage .n { text-align:right; font-variant-numeric:tabular-nums; color:var(--ink2); }
+  .retention { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .ret { background:var(--page); border:1px solid var(--border); border-radius:9px; padding:10px; }
+  .ret .v { font-size:20px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .ret .l { color:var(--muted); font-size:10px; }
+  .quality { display:grid; grid-template-columns:1fr auto; gap:8px 14px; font-size:12px; }
+  .quality div:nth-child(even) { font-variant-numeric:tabular-nums; color:var(--ink2); text-align:right; }
+  .quality .bad { color:var(--bad) !important; }
+  .quality .good { color:var(--good) !important; }
+  .versions { display:flex; flex-direction:column; gap:8px; }
+  .version { display:grid; grid-template-columns:105px 1fr 38px; gap:8px; align-items:center; font-size:11px; }
+  .version .bar { height:7px; border-radius:99px; background:var(--gold-soft); overflow:hidden; }
+  .version .bar i { display:block; height:100%; background:var(--gold); border-radius:99px; }
+  .data-notes { margin:0; padding-left:18px; color:var(--ink2); font-size:11px; }
+  .data-notes li { margin:4px 0; }
+  .empty { color:var(--muted); padding:25px 0; font-size:12px; }
+  @media(max-width:900px) { .kpis{grid-template-columns:repeat(3,1fr)} .grid{grid-template-columns:1fr}
+    .wide{grid-column:auto} }
+  @media(max-width:560px) { body{padding:18px 14px 32px} header{flex-wrap:wrap}
+    .periods{margin-left:0} .kpis{grid-template-columns:repeat(2,1fr)} .stage{grid-template-columns:105px 1fr 42px} }
 </style>
 </head>
 <body>
   <header>
     <div>
-      <h1>Memento</h1>
-      <div class="sub" id="sub">loading…</div>
+      <h1>Memento product statistics</h1>
+      <div class="sub" id="sub">Loading opted-in product activity…</div>
     </div>
-    <nav class="periods" id="periods">
-      <button data-days="7">7d</button>
-      <button data-days="30" class="on">30d</button>
-      <button data-days="90">90d</button>
+    <nav class="periods" id="periods" aria-label="Reporting window">
+      <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button>
     </nav>
   </header>
-
-  <div class="tiles" id="tiles"></div>
-
-  <div class="card">
-    <h2>Meetings &amp; recorded hours per day</h2>
-    <div class="chart-wrap" id="chart"><div class="empty">loading…</div></div>
-    <div class="legend">
-      <span><i style="background:var(--accent)"></i>meetings</span>
-      <span><i style="background:var(--accent-2)"></i>recorded hours</span>
+  <main>
+    <section class="kpis" id="kpis"></section>
+    <div class="grid">
+      <section class="panel wide">
+        <h2>Daily value devices and captured memories</h2>
+        <div class="caption" id="trend-caption">UTC day · opted-in anonymous devices</div>
+        <div class="chart" id="trend"><div class="empty">Loading…</div></div>
+        <div class="legend"><span><i style="background:var(--blue)"></i>value devices</span><span><i style="background:var(--gold)"></i>captured memories</span></div>
+      </section>
+      <section class="panel">
+        <h2>Activation reach</h2>
+        <div class="caption">Distinct devices in the window · stages are not asserted as an ordered sequence</div>
+        <div id="funnel"></div>
+      </section>
+      <section class="panel">
+        <h2>Value retention</h2>
+        <div class="caption">Returned within N days after first value · mature cohorts only</div>
+        <div class="retention" id="retention"></div>
+      </section>
+      <section class="panel">
+        <h2>Reliability guardrails</h2>
+        <div class="caption">Counts and rates in the selected window</div>
+        <div class="quality" id="quality"></div>
+      </section>
+      <section class="panel">
+        <h2>App versions</h2>
+        <div class="caption">Distinct observed devices; unknown includes legacy events</div>
+        <div class="versions" id="versions"></div>
+      </section>
+      <section class="panel wide">
+        <h2>Data contract and coverage</h2>
+        <div class="caption" id="coverage"></div>
+        <ul class="data-notes" id="notes"></ul>
+      </section>
     </div>
-  </div>
-
+  </main>
 <script>
-  const qs = new URLSearchParams(location.search);
-  if (qs.get('theme')) {
-    document.documentElement.dataset.theme = qs.get('theme');
-  } else if (matchMedia('(prefers-color-scheme: dark)').matches) {
-    document.documentElement.classList.add('auto-dark');
-  }
-
+  const params = new URLSearchParams(location.search);
+  if (params.get('theme')) document.documentElement.dataset.theme = params.get('theme');
+  else if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('auto-dark');
   let days = 30;
+  const esc = value => String(value ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const number = value => value == null ? '—' : Number(value).toLocaleString('en-US', {maximumFractionDigits:1});
+  const pct = value => value == null ? '—' : `${(Number(value) * 100).toFixed(0)}%`;
+  const hours = seconds => `${(Number(seconds || 0) / 3600).toFixed(1)}h`;
 
-  function esc(s) {
-    return String(s).replace(/[&<>"]/g, c =>
-      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function renderKpis(data) {
+    const cards = [
+      [number(data.growth.weekly_value_devices), 'Weekly value devices', 'rolling 7d outcome'],
+      [pct(data.retention.rates.d7), 'Value retention D7', `n=${data.retention.cohorts.d7}`],
+      [number(data.usage.captured_memories), `Captured memories · ${data.window_label}`, `${number(data.usage.recordings)} recorded · ${number(data.usage.imports)} imported`],
+      [hours(data.usage.captured_seconds), `Captured time · ${data.window_label}`, `${number(data.usage.memories_per_value_device)} memories / value device`],
+      [pct(data.quality.summary_success_rate), 'Summary success', `${number(data.usage.successful_summaries)} successful`],
+      [pct(data.quality.fatal_recording_rate), 'Fatal recording rate', `${number(data.quality.fatal_recordings)} fatal`],
+    ];
+    document.getElementById('kpis').innerHTML = cards.map(card => `<div class="kpi"><div class="value">${esc(card[0])}</div><div class="label">${esc(card[1])}</div><div class="detail">${esc(card[2])}</div></div>`).join('');
   }
 
-  async function loadSummary() {
-    const s = await fetch(`summary?days=${days}`, { cache: 'no-store' })
-      .then(r => r.json());
-    document.getElementById('sub').textContent = 'updated ' + s.updated_at;
-    document.getElementById('tiles').innerHTML = (s.metrics || []).map(m =>
-      `<div class="tile"><div class="v${m.good ? ' good' : ''}">${esc(m.value)}</div>` +
-      `<div class="l">${esc(m.label)}</div></div>`).join('');
-  }
-
-  function fillDays(rows) {
-    // Continuous day axis: gaps in the data are real zeros, show them.
-    const byDate = Object.fromEntries(rows.map(r => [r.date, r]));
-    const out = [];
-    const d = new Date(Date.now() - (days - 1) * 86400e3);
-    for (let i = 0; i < days; i++) {
-      const key = d.toISOString().slice(0, 10);
-      out.push(byDate[key] || { date: key, meetings: 0, recorded_seconds: 0 });
-      d.setUTCDate(d.getUTCDate() + 1);
+  function renderTrend(rows) {
+    const el = document.getElementById('trend');
+    if (!rows.some(row => row.value_devices || row.recordings || row.imports)) {
+      el.innerHTML = '<div class="empty">No value events in this window yet.</div>'; return;
     }
-    return out;
+    const W=1000,H=230,L=34,R=10,T=10,B=30, plotW=W-L-R, plotH=H-T-B;
+    const values = rows.flatMap(row => [row.value_devices, row.recordings + row.imports]);
+    const max = Math.max(...values, 1);
+    const x = index => L + (rows.length === 1 ? plotW/2 : index*plotW/(rows.length-1));
+    const y = value => T + plotH - Number(value||0)*plotH/max;
+    const points = key => rows.map((row,index) => `${x(index)},${y(key(row))}`).join(' ');
+    const ticks = [0,.25,.5,.75,1].map(part => { const yy=T+plotH-plotH*part; return `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="var(--border)"/><text x="${L-7}" y="${yy+3}" text-anchor="end">${Math.round(max*part)}</text>`; }).join('');
+    const labels = rows.map((row,index) => (rows.length <= 14 || index % Math.ceil(rows.length/8) === 0 || index === rows.length-1) ? `<text x="${x(index)}" y="${H-7}" text-anchor="middle">${esc(row.date.slice(5))}</text>` : '').join('');
+    const dots = rows.map((row,index) => { const captured=row.recordings+row.imports; return `<g><title>${esc(row.date)}: ${row.value_devices} value devices; ${captured} captured memories</title><circle cx="${x(index)}" cy="${y(row.value_devices)}" r="2.3" fill="var(--blue)"/><circle cx="${x(index)}" cy="${y(captured)}" r="2.3" fill="var(--surface)" stroke="var(--gold)" stroke-width="1.5"/></g>`; }).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily value devices and captured memories">${ticks}<polyline points="${points(row=>row.value_devices)}" fill="none" stroke="var(--blue)" stroke-width="2"/><polyline points="${points(row=>row.recordings+row.imports)}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-dasharray="5 3"/>${dots}${labels}</svg>`;
   }
 
-  async function loadChart() {
-    const data = await fetch(`dashboard-data?days=${days}`, { cache: 'no-store' })
-      .then(r => r.json());
-    const rows = fillDays(data.days || []);
-    const el = document.getElementById('chart');
-    if (!rows.some(r => r.meetings || r.recorded_seconds)) {
-      el.innerHTML = '<div class="empty">No meetings in this window yet.</div>';
-      return;
+  function renderFunnel(rows) {
+    const base = Math.max(rows[0]?.devices || 0, 1);
+    document.getElementById('funnel').innerHTML = rows.map(row => `<div class="stage"><span>${esc(row.step)}</span><div class="track"><div class="fill" style="width:${Math.max(0,Math.min(100,row.devices/base*100))}%"></div></div><span class="n">${number(row.devices)}</span></div>`).join('');
+  }
+
+  function renderRetention(data) {
+    document.getElementById('retention').innerHTML = ['d1','d7','d30'].map(key => `<div class="ret"><div class="v">${pct(data.rates[key])}</div><div class="l">${key.toUpperCase()} · n=${number(data.cohorts[key])}</div></div>`).join('');
+  }
+
+  function renderQuality(data) {
+    const rows = [
+      ['Fatal recordings', number(data.fatal_recordings), data.fatal_recording_rate === 0 ? 'good' : data.fatal_recording_rate ? 'bad' : ''],
+      ['Fatal recording rate', pct(data.fatal_recording_rate), data.fatal_recording_rate === 0 ? 'good' : data.fatal_recording_rate ? 'bad' : ''],
+      ['Summary success', pct(data.summary_success_rate), data.summary_success_rate === 1 ? 'good' : ''],
+      ['Import success', pct(data.import_success_rate), data.import_success_rate === 1 ? 'good' : ''],
+      ['Transcription errors', number(data.transcription_errors), data.transcription_errors ? 'bad' : 'good'],
+      ['All tracked errors', number(data.errors), data.errors ? 'bad' : 'good'],
+    ];
+    document.getElementById('quality').innerHTML = rows.map(row => `<div>${esc(row[0])}</div><div class="${row[2]}">${esc(row[1])}</div>`).join('');
+  }
+
+  function renderVersions(rows) {
+    const max = Math.max(...rows.map(row=>row.devices),1);
+    document.getElementById('versions').innerHTML = rows.length ? rows.map(row => `<div class="version"><span title="${esc(row.version)}">${esc(row.version)}</span><span class="bar"><i style="width:${row.devices/max*100}%"></i></span><span>${number(row.devices)}</span></div>`).join('') : '<div class="empty">No version property yet.</div>';
+  }
+
+  async function refresh() {
+    try {
+      const data = await fetch(`product?days=${days}`, {cache:'no-store'}).then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); });
+      document.getElementById('sub').textContent = `Updated ${data.updated_at} · ${number(data.identity.observed_devices)} opted-in devices in ${data.window_label}`;
+      document.getElementById('trend-caption').textContent = `UTC day · ${data.window_label} window · same count scale for both series`;
+      renderKpis(data); renderTrend(data.daily); renderFunnel(data.funnel); renderRetention(data.retention); renderQuality(data.quality); renderVersions(data.versions);
+      const source = Object.entries(data.data_quality.sources).map(([key,value])=>`${key} ${number(value)}`).join(' · ') || 'no window events';
+      document.getElementById('coverage').textContent = `Coverage ${data.data_quality.first_event_at || '—'} → ${data.data_quality.last_event_at || '—'} · sources: ${source} · invalid durations: ${number(data.data_quality.invalid_duration_events)}`;
+      document.getElementById('notes').innerHTML = data.data_quality.notes.map(note => `<li>${esc(note)}</li>`).join('');
+    } catch (error) {
+      document.getElementById('sub').textContent = `Dashboard failed: ${error}`;
     }
-    const W = Math.max(640, rows.length * 22), H = 180, PB = 18, PT = 6;
-    const maxM = Math.max(...rows.map(r => r.meetings), 1);
-    const maxH = Math.max(...rows.map(r => r.recorded_seconds / 3600), 0.1);
-    const bw = (W / rows.length);
-    const bars = rows.map((r, i) => {
-      const x = i * bw;
-      const mh = (r.meetings / maxM) * (H - PB - PT);
-      const hh = ((r.recorded_seconds / 3600) / maxH) * (H - PB - PT);
-      const label = (rows.length <= 31 || i % 7 === 0)
-        ? `<text x="${x + bw / 2}" y="${H - 5}" text-anchor="middle">${r.date.slice(5)}</text>` : '';
-      const title = `${r.date}: ${r.meetings} meetings, ` +
-        `${(r.recorded_seconds / 3600).toFixed(1)}h recorded`;
-      return `<g><title>${esc(title)}</title>` +
-        `<rect x="${x + 2}" y="${H - PB - mh}" width="${bw / 2 - 3}" height="${mh}"` +
-        ` rx="2" fill="var(--accent)"/>` +
-        `<rect x="${x + bw / 2 + 1}" y="${H - PB - hh}" width="${bw / 2 - 3}" height="${hh}"` +
-        ` rx="2" fill="var(--accent-2)"/>${label}</g>`;
-    }).join('');
-    el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
-      `<line x1="0" y1="${H - PB}" x2="${W}" y2="${H - PB}"` +
-      ` stroke="var(--border)"/>${bars}</svg>`;
   }
-
-  function refresh() {
-    loadSummary().catch(e =>
-      document.getElementById('sub').textContent = 'summary failed: ' + e);
-    loadChart().catch(e =>
-      document.getElementById('chart').innerHTML =
-        `<div class="empty">chart failed: ${esc(e)}</div>`);
-  }
-
-  document.getElementById('periods').addEventListener('click', e => {
-    const b = e.target.closest('button');
-    if (!b) return;
-    days = Number(b.dataset.days);
-    document.querySelectorAll('.periods button').forEach(x =>
-      x.classList.toggle('on', x === b));
-    refresh();
-  });
-
+  document.getElementById('periods').addEventListener('click', event => { const button=event.target.closest('button'); if(!button)return; days=Number(button.dataset.days); document.querySelectorAll('#periods button').forEach(item=>item.classList.toggle('on',item===button)); refresh(); });
   refresh();
 </script>
 </body>

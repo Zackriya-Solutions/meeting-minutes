@@ -14,17 +14,35 @@ use tokio::sync::{Mutex, Notify};
 
 const PROD_INGEST_URL: &str = "https://stats.multitool.works/p/memento/events";
 const DEV_INGEST_URL: &str = "http://127.0.0.1:9901/events";
-// Static per-project token: spam protection at the ingest edge, not a secret
-// capable of reading anything back (the dashboard sits behind Basic Auth).
-// Release pipelines can rotate it without touching source by exporting
-// MEMENTO_STATS_INGEST_TOKEN at build time (see `new()`); the committed
-// default keeps local release builds working.
-const PROD_INGEST_TOKEN: &str = "beb4c8ebb4c216000a536e33584571680bbad34b4987a07b";
 
 const FLUSH_INTERVAL_SECS: u64 = 30;
 const FLUSH_AT: usize = 25;
 // Ingest rejects batches >500; beyond this we drop oldest (offline cap).
 const MAX_QUEUE: usize = 500;
+
+const SAFE_PROPERTY_KEYS: &[&str] = &[
+    "accepted", "active_duration_seconds", "app_version", "architecture", "build_profile",
+    "button", "category", "chunks_processed", "code", "copy_count_today", "copy_type",
+    "date", "days_since_install", "device_category", "duration", "duration_seconds",
+    "enabled", "error_category", "error_code", "error_type", "event_id", "feature",
+    "feature_name", "file_size_bytes", "first_meeting_duration_seconds", "folder_type",
+    "had_fatal_error", "has_microphone", "has_preferred_microphone",
+    "has_preferred_system_audio", "has_system_audio", "import_kind", "is_auto_detect",
+    "is_bluetooth", "language", "language_code", "latency_bucket", "location",
+    "meeting_id_hash", "meetings_count", "memory_type", "microphone_device_type",
+    "model_name", "model_provider", "new_model", "new_provider", "notifications_enabled",
+    "old_model", "old_provider", "page", "pause_duration_seconds", "platform",
+    "prompt_length", "provider", "release_channel", "result_count_bucket", "retryable",
+    "scope", "segments_count", "session_duration", "session_id", "status", "success",
+    "summary_model", "summary_provider", "system_audio_device_type",
+    "time_since_recording_minutes", "total_duration_seconds", "transcript_length",
+    "transcript_segments_count", "transcription_model", "transcription_provider", "workflow",
+];
+
+fn sanitize_properties(mut properties: HashMap<String, String>) -> HashMap<String, String> {
+    properties.retain(|key, _| SAFE_PROPERTY_KEYS.contains(&key.as_str()));
+    properties
+}
 
 #[derive(Serialize, Clone)]
 struct TractionEvent {
@@ -43,22 +61,26 @@ pub struct TractionSink {
 }
 
 impl TractionSink {
-    pub fn new() -> Arc<Self> {
+    pub fn new() -> Option<Arc<Self>> {
         let endpoint = std::env::var("MEMENTO_STATS_URL").unwrap_or_else(|_| {
             if cfg!(debug_assertions) { DEV_INGEST_URL } else { PROD_INGEST_URL }.to_string()
         });
-        // Токен: рантайм-env (отладка) → компайл-тайм env (CI/релизный
-        // пайплайн) → зашитый дефолт. Dev-сборки ходят в локальный модуль
-        // без токена.
+        // Release builds require build-time injection. A client credential is
+        // only ingest spam protection, but committing the live value prevents
+        // rotation and makes abuse needlessly easy.
         let token = std::env::var("MEMENTO_STATS_INGEST_TOKEN").unwrap_or_else(|_| {
             if cfg!(debug_assertions) {
                 String::new()
             } else {
                 option_env!("MEMENTO_STATS_INGEST_TOKEN")
-                    .unwrap_or(PROD_INGEST_TOKEN)
+                    .unwrap_or("")
                     .to_string()
             }
         });
+        if !cfg!(debug_assertions) && token.is_empty() {
+            log::warn!("Traction analytics disabled: release ingest token was not injected");
+            return None;
+        }
 
         let sink = Arc::new(Self {
             endpoint,
@@ -90,7 +112,7 @@ impl TractionSink {
             }
         });
 
-        sink
+        Some(sink)
     }
 
     pub async fn track(&self, device_id: &str, name: &str, properties: HashMap<String, String>) {
@@ -99,7 +121,7 @@ impl TractionSink {
             ts: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
             device_id: device_id.to_string(),
             name: name.to_string(),
-            properties,
+            properties: sanitize_properties(properties),
         });
         if queue.len() > MAX_QUEUE {
             let drop = queue.len() - MAX_QUEUE;
@@ -154,6 +176,23 @@ impl TractionSink {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn sink_keeps_metric_fields_and_drops_unapproved_content() {
+        let sink = TractionSink::new().expect("debug sink");
+        let mut props = HashMap::new();
+        props.insert("event_id".to_string(), "event-123".to_string());
+        props.insert("duration_seconds".to_string(), "42".to_string());
+        props.insert("meeting_title".to_string(), "Private roadmap".to_string());
+        props.insert("error_message".to_string(), "secret transcript".to_string());
+
+        sink.track("device", "meeting_ended", props).await;
+        let queue = sink.queue.lock().await;
+        assert_eq!(queue[0].properties.get("event_id"), Some(&"event-123".to_string()));
+        assert_eq!(queue[0].properties.get("duration_seconds"), Some(&"42".to_string()));
+        assert!(!queue[0].properties.contains_key("meeting_title"));
+        assert!(!queue[0].properties.contains_key("error_message"));
+    }
+
     /// e2e против локально запущенного модуля (stats/server.py, порт 9901,
     /// STATS_INGEST_TOKEN=devtoken). В обычном прогоне не бегает:
     ///   cargo test -p meetily traction -- --ignored
@@ -162,7 +201,7 @@ mod tests {
     async fn sink_delivers_batch_to_local_module() {
         std::env::set_var("MEMENTO_STATS_URL", "http://127.0.0.1:9901/events");
         std::env::set_var("MEMENTO_STATS_INGEST_TOKEN", "devtoken");
-        let sink = TractionSink::new();
+        let sink = TractionSink::new().expect("debug sink");
         let mut props = HashMap::new();
         props.insert("total_duration_seconds".to_string(), "42".to_string());
         sink.track("user_e2e_test", "meeting_ended", props).await;

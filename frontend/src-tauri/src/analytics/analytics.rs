@@ -20,6 +20,11 @@ const SENSITIVE_ANALYTICS_KEYS: &[&str] = &[
     "meeting_folder_path",
     "device_name",
     "user_agent",
+    // Raw failures can contain paths, titles, transcript fragments, or provider payloads.
+    "error",
+    "error_message",
+    // The anonymous distinct id already identifies the event envelope.
+    "user_id",
 ];
 
 fn sanitize_analytics_properties(mut properties: HashMap<String, String>) -> HashMap<String, String> {
@@ -97,7 +102,7 @@ impl AnalyticsClient {
         // вместе; если будущий вызов их разведёт, Traction останется привязан
         // к согласию пользователя (enabled), а не к наличию PostHog-ключа.
         let traction = if config.enabled {
-            Some(crate::analytics::traction::TractionSink::new())
+            crate::analytics::traction::TractionSink::new()
         } else {
             None
         };
@@ -152,8 +157,15 @@ impl AnalyticsClient {
         let event_name = event_name.to_string();
         let mut properties = sanitize_analytics_properties(properties.unwrap_or_default());
 
+        // Shared across PostHog and Traction for retry idempotency and deduplication.
+        properties.insert("event_id".to_string(), Uuid::new_v4().to_string());
+
         // Add app version to all events
         properties.insert("app_version".to_string(), env!("CARGO_PKG_VERSION").to_string());
+        properties.insert(
+            "build_profile".to_string(),
+            if cfg!(debug_assertions) { "debug" } else { "release" }.to_string(),
+        );
 
         // Add session information to all events
         if let Some(session) = self.current_session.lock().await.as_ref() {
@@ -501,6 +513,9 @@ mod tests {
         properties.insert("meeting_folder_path".to_string(), "C:\\meetings\\private".to_string());
         properties.insert("device_name".to_string(), "Jane's AirPods".to_string());
         properties.insert("user_agent".to_string(), "Mozilla/5.0".to_string());
+        properties.insert("error".to_string(), "/Users/alice/private meeting".to_string());
+        properties.insert("error_message".to_string(), "transcript fragment".to_string());
+        properties.insert("user_id".to_string(), "duplicate-device-id".to_string());
         properties.insert("meeting_id".to_string(), "meeting-123".to_string());
         properties.insert("duration_seconds".to_string(), "125".to_string());
         properties.insert("segments_count".to_string(), "42".to_string());
@@ -523,6 +538,9 @@ mod tests {
             "meeting_folder_path",
             "device_name",
             "user_agent",
+            "error",
+            "error_message",
+            "user_id",
         ] {
             assert!(!sanitized.contains_key(key), "sensitive key remained: {}", key);
         }

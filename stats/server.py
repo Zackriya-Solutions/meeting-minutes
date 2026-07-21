@@ -1,47 +1,23 @@
 #!/usr/bin/env python3
-"""Memento stats module for the Traction analytics hub.
-
-Built from traction/stats-module-template (GigaTool repo); contract:
-specs/stats-hub.md §4. Lives behind `strip_prefix /p/memento` on the hub,
-so every URL the dashboard uses is relative.
-
-Routes:
-  GET  /            — dashboard (index.html)
-  GET  /health      — liveness + deploy version
-  GET  /summary     — standard core (?days=N) + Memento metrics[]
-  GET  /dashboard-data — daily series for the dashboard chart
-  GET  /series      — daily core series (hub history backfill)
-  POST /events      — ingest (X-Ingest-Token)
-
-Event schema (sent by the Memento desktop app, see
-frontend/src-tauri/src/analytics/traction.rs):
-  { "device_id": "...", "events": [ { "ts": 1712..., "name": "meeting_ended",
-    "properties": { "total_duration_seconds": "1830.5", ... } } ] }
-
-Metric sources:
-  Meetings      — count of `meeting_ended` events (emitted by the Rust core
-                  when a recording stops, includes durations)
-  Recorded hrs  — sum of total_duration_seconds (fallback active_duration_seconds)
-  Summaries     — `summary_generation_completed` with success=true
-  DAU           — distinct device_id over the window (core)
-  Errors        — `error` + `*_error` events (transcription_error, ...)
-
-Run:  STATS_PORT=9901 python3 server.py
-Env:  STATS_PORT (default 9901), STATS_DB (default ./data/events.db),
-      STATS_INGEST_TOKEN (empty = no token check, dev only!)
-"""
+"""Memento product statistics module for the Traction hub."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import sqlite3
 import time
+from collections import Counter, defaultdict
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+
+from posthog_sync import sync_once
+from storage import connect, excluded_device_ids, exclusion_clause, insert_events
 
 HERE = Path(__file__).resolve().parent
 PORT = int(os.environ.get("STATS_PORT", "9901"))
@@ -49,58 +25,103 @@ DB_PATH = Path(os.environ.get("STATS_DB", HERE / "data" / "events.db"))
 INGEST_TOKEN = os.environ.get("STATS_INGEST_TOKEN", "")
 VERSION_FILE = HERE / "VERSION"
 VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
+MAX_BODY_BYTES = 1_000_000
+DAY = 86_400.0
 
-app = FastAPI()
+CAPTURE_COMPLETED = {"meeting_ended", "import_audio_completed"}
+VALUE_EVENTS = {
+    *CAPTURE_COMPLETED,
+    "summary_copied",
+    "transcript_copied",
+    "knowledge_search_completed",
+    "meeting_chat_response_completed",
+    "collection_chat_response_completed",
+    "memory_record_accepted",
+}
+CAPTURE_STARTED = {"recording_started", "import_audio_started"}
+COPY_EVENTS = {"summary_copied", "transcript_copied"}
 
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-_db = sqlite3.connect(DB_PATH, check_same_thread=False)
-_db.execute("PRAGMA journal_mode=WAL")
-_db.execute(
-    "CREATE TABLE IF NOT EXISTS events ("
-    " ts REAL NOT NULL, device_id TEXT, name TEXT NOT NULL, properties TEXT)"
-)
-_db.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
-_db.commit()
-
-# Recorded seconds per meeting_ended row: prefer wall-clock total, fall back
-# to active (older events may miss total), 0 if neither parses.
-DURATION_SQL = (
-    "COALESCE(CAST(json_extract(properties,'$.total_duration_seconds') AS REAL),"
-    " CAST(json_extract(properties,'$.active_duration_seconds') AS REAL), 0)"
-)
-ERROR_NAMES_SQL = "(name = 'error' OR name LIKE '%error')"
+_db = connect(DB_PATH)
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"ok": True, "version": VERSION}
+async def _posthog_sync_loop() -> None:
+    interval = max(30, int(os.environ.get("POSTHOG_SYNC_INTERVAL_SECONDS", "300")))
+    while True:
+        try:
+            result = await asyncio.to_thread(sync_once, _db)
+            if result.get("enabled"):
+                print(f"[posthog-sync] {json.dumps(result, sort_keys=True)}", flush=True)
+        except Exception as error:  # the dashboard remains live when PostHog is down
+            print(f"[posthog-sync] failed: {error}", flush=True)
+        await asyncio.sleep(interval)
 
 
-@app.post("/events")
-async def ingest(request: Request) -> JSONResponse:
-    if INGEST_TOKEN and request.headers.get("x-ingest-token") != INGEST_TOKEN:
-        return JSONResponse({"error": "bad token"}, status_code=401)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = None
+    if os.environ.get("POSTHOG_PERSONAL_API_KEY") and os.environ.get("POSTHOG_PROJECT_ID"):
+        task = asyncio.create_task(_posthog_sync_loop())
+    yield
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+def _window(days: float) -> tuple[float, float, str]:
+    window_days = max(0.04, min(float(days), 365.0))
+    since = time.time() - window_days * DAY
+    label = "24h" if abs(window_days - 1.0) < 1e-9 else f"{window_days:g}d"
+    return window_days, since, label
+
+
+def _props(raw: str | None) -> dict[str, str]:
     try:
-        body = json.loads(await request.body())
-    except json.JSONDecodeError as e:
-        return JSONResponse({"error": f"bad json: {e}"}, status_code=400)
-    events = body.get("events", [body]) if isinstance(body, dict) else body
-    if not isinstance(events, list) or len(events) > 500:
-        return JSONResponse({"error": "expected ≤500 events"}, status_code=400)
-    device = body.get("device_id") if isinstance(body, dict) else None
-    rows = []
-    for ev in events:
-        if not isinstance(ev, dict) or not ev.get("name"):
+        value = json.loads(raw or "{}")
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _true(value: Any) -> bool:
+    return str(value).lower() == "true"
+
+
+def _successful(name: str, properties: dict[str, str]) -> bool:
+    return name not in {"import_audio_completed", "summary_generation_completed"} or _true(
+        properties.get("success", "true")
+    )
+
+
+def _is_value(name: str, properties: dict[str, str]) -> bool:
+    return name in VALUE_EVENTS and _successful(name, properties)
+
+
+def _is_error(name: str, properties: dict[str, str]) -> bool:
+    return (
+        name == "error"
+        or name.endswith("_error")
+        or name.endswith(".failed")
+        or (name == "meeting_ended" and _true(properties.get("had_fatal_error")))
+        or (name == "summary_generation_completed" and not _true(properties.get("success")))
+    )
+
+
+def _positive_number(properties: dict[str, str], *keys: str) -> tuple[float, bool]:
+    for key in keys:
+        if key not in properties:
             continue
-        rows.append((
-            float(ev.get("ts") or time.time()),
-            str(ev.get("device_id") or device or ""),
-            str(ev["name"])[:120],
-            json.dumps(ev.get("properties") or {})[:4000],
-        ))
-    _db.executemany("INSERT INTO events VALUES (?,?,?,?)", rows)
-    _db.commit()
-    return JSONResponse({"ok": True, "ingested": len(rows)})
+        try:
+            value = float(properties[key])
+        except (TypeError, ValueError):
+            return 0.0, False
+        if value < 0 or value != value or value == float("inf"):
+            return 0.0, False
+        return value, True
+    return 0.0, True
 
 
 def _fmt_hours(seconds: float) -> str:
@@ -109,108 +130,339 @@ def _fmt_hours(seconds: float) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
-def _window(days: float) -> tuple[float, float, str]:
-    window_days = max(0.04, min(float(days), 365.0))
-    since = time.time() - window_days * 86400.0
-    win = "24h" if abs(window_days - 1.0) < 1e-9 else f"{window_days:g}d"
-    return window_days, since, win
+def _fmt_rate(value: float | None) -> str:
+    return "—" if value is None else f"{value * 100:.0f}%"
+
+
+def _iso(ts: float | None) -> str | None:
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds") if ts else None
+
+
+@app.get("/health")
+async def health() -> dict[str, Any]:
+    state = _db.execute(
+        "SELECT cursor,updated_at FROM sync_state WHERE source='posthog'"
+    ).fetchone()
+    return {
+        "ok": True,
+        "version": VERSION,
+        "posthog_sync": bool(os.environ.get("POSTHOG_PERSONAL_API_KEY")),
+        "posthog_cursor": _iso(float(state[0])) if state else None,
+        "posthog_synced_at": _iso(float(state[1])) if state else None,
+    }
+
+
+@app.post("/events")
+async def ingest(request: Request) -> JSONResponse:
+    if INGEST_TOKEN and request.headers.get("x-ingest-token") != INGEST_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=401)
+    try:
+        content_length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        return JSONResponse({"error": "bad content-length"}, status_code=400)
+    if content_length > MAX_BODY_BYTES:
+        return JSONResponse({"error": "body too large"}, status_code=413)
+    body_raw = await request.body()
+    if len(body_raw) > MAX_BODY_BYTES:
+        return JSONResponse({"error": "body too large"}, status_code=413)
+    try:
+        body = json.loads(body_raw)
+    except json.JSONDecodeError as error:
+        return JSONResponse({"error": f"bad json: {error}"}, status_code=400)
+    events = body.get("events", [body]) if isinstance(body, dict) else body
+    if not isinstance(events, list) or len(events) > 500:
+        return JSONResponse({"error": "expected ≤500 events"}, status_code=400)
+    device = body.get("device_id") if isinstance(body, dict) else None
+    result = insert_events(_db, events, device, source="direct")
+    return JSONResponse({"ok": True, **result})
+
+
+def compute_product(days: float = 30.0) -> dict[str, Any]:
+    window_days, since, label = _window(days)
+    excluded = excluded_device_ids()
+    clause, params = exclusion_clause(excluded)
+    rows = _db.execute(
+        "SELECT ts,device_id,name,properties,source FROM events"
+        " WHERE device_id != ''" + clause + " ORDER BY ts",
+        params,
+    ).fetchall()
+
+    today = int(time.time() // DAY)
+    first_seen: dict[str, int] = {}
+    active_days: dict[str, set[int]] = defaultdict(set)
+    value_days: dict[str, set[int]] = defaultdict(set)
+    observed: set[str] = set()
+    value_devices: set[str] = set()
+    capture_started_devices: set[str] = set()
+    captured_devices: set[str] = set()
+    summary_devices: set[str] = set()
+    copy_devices: set[str] = set()
+    source_counts: Counter[str] = Counter()
+    version_devices: dict[str, set[str]] = defaultdict(set)
+    daily: dict[int, dict[str, Any]] = defaultdict(
+        lambda: {
+            "observed": set(), "value": set(), "recordings": 0, "imports": 0,
+            "captured_seconds": 0.0, "summaries": 0, "errors": 0, "events": 0,
+        }
+    )
+    counters: Counter[str] = Counter()
+    captured_seconds = 0.0
+    invalid_durations = 0
+    first_ts = rows[0][0] if rows else None
+    last_ts = rows[-1][0] if rows else None
+
+    for ts, device, name, raw_properties, source in rows:
+        properties = _props(raw_properties)
+        day = int(ts // DAY)
+        first_seen[device] = min(day, first_seen.get(device, day))
+        active_days[device].add(day)
+        if _is_value(name, properties):
+            value_days[device].add(day)
+        if ts <= since:
+            continue
+
+        observed.add(device)
+        source_counts[source or "unknown"] += 1
+        version_devices[properties.get("app_version", "unknown")].add(device)
+        item = daily[day]
+        item["events"] += 1
+        item["observed"].add(device)
+        if _is_value(name, properties):
+            value_devices.add(device)
+            item["value"].add(device)
+        if name in CAPTURE_STARTED:
+            capture_started_devices.add(device)
+        if name == "meeting_ended":
+            counters["recordings"] += 1
+            captured_devices.add(device)
+            item["recordings"] += 1
+            seconds, valid = _positive_number(
+                properties, "total_duration_seconds", "active_duration_seconds"
+            )
+            invalid_durations += int(not valid)
+            captured_seconds += seconds
+            item["captured_seconds"] += seconds
+            counters["fatal_recordings"] += int(_true(properties.get("had_fatal_error")))
+        elif name == "import_audio_started":
+            counters["import_starts"] += 1
+        elif name == "import_audio_completed" and _successful(name, properties):
+            counters["imports"] += 1
+            captured_devices.add(device)
+            item["imports"] += 1
+            seconds, valid = _positive_number(properties, "duration_seconds")
+            invalid_durations += int(not valid)
+            captured_seconds += seconds
+            item["captured_seconds"] += seconds
+        elif name == "summary_generation_completed":
+            counters["summary_attempts"] += 1
+            if _successful(name, properties):
+                counters["summaries"] += 1
+                summary_devices.add(device)
+                item["summaries"] += 1
+        if name in COPY_EVENTS:
+            counters["copies"] += 1
+            copy_devices.add(device)
+        if name == "transcription_error":
+            counters["transcription_errors"] += 1
+        if _is_error(name, properties):
+            counters["errors"] += 1
+            item["errors"] += 1
+
+    def rolling_active(source: dict[str, set[int]], span: int) -> int:
+        low = today - span + 1
+        return sum(any(low <= day <= today for day in days_set) for days_set in source.values())
+
+    horizons = (1, 7, 30)
+    retention: dict[str, float | None] = {}
+    cohort_sizes: dict[str, int] = {}
+    for horizon in horizons:
+        mature = [
+            (device, min(days_set), days_set)
+            for device, days_set in value_days.items()
+            if min(days_set) >= today - 90 and min(days_set) + horizon <= today
+        ]
+        returned = sum(
+            any(first_day < day <= first_day + horizon for day in days_set)
+            for _, first_day, days_set in mature
+        )
+        retention[f"d{horizon}"] = returned / len(mature) if mature else None
+        cohort_sizes[f"d{horizon}"] = len(mature)
+
+    summary_rate = (
+        counters["summaries"] / counters["summary_attempts"]
+        if counters["summary_attempts"] else None
+    )
+    fatal_rate = (
+        counters["fatal_recordings"] / counters["recordings"]
+        if counters["recordings"] else None
+    )
+    import_rate = (
+        counters["imports"] / counters["import_starts"]
+        if counters["import_starts"] else None
+    )
+    captured = counters["recordings"] + counters["imports"]
+    window_start_day = int(since // DAY)
+    new_value_devices = sum(
+        min(value_days[device]) >= window_start_day for device in value_devices
+    )
+    daily_out = []
+    for day in range(today - max(1, int(round(window_days))) + 1, today + 1):
+        item = daily[day]
+        daily_out.append(
+            {
+                "date": datetime.fromtimestamp(day * DAY, timezone.utc).date().isoformat(),
+                "dau": len(item["observed"]),
+                "value_devices": len(item["value"]),
+                "recordings": item["recordings"],
+                "imports": item["imports"],
+                "captured_seconds": round(item["captured_seconds"], 1),
+                "summaries": item["summaries"],
+                "errors": item["errors"],
+                "events": item["events"],
+            }
+        )
+
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "window_days": window_days,
+        "window_label": label,
+        "identity": {
+            "unit": "opted-in anonymous device",
+            "observed_devices": len(observed),
+            "total_seen_devices": len(active_days),
+            "excluded_internal_devices": len(excluded),
+        },
+        "growth": {
+            "dau_utc": rolling_active(active_days, 1),
+            "wau_rolling_7d": rolling_active(active_days, 7),
+            "mau_rolling_30d": rolling_active(active_days, 30),
+            "stickiness": (
+                rolling_active(active_days, 1) / rolling_active(active_days, 30)
+                if rolling_active(active_days, 30) else None
+            ),
+            "weekly_value_devices": rolling_active(value_days, 7),
+            "value_devices_in_window": len(value_devices),
+            "new_value_devices": new_value_devices,
+            "returning_value_devices": len(value_devices) - new_value_devices,
+        },
+        "usage": {
+            "captured_memories": captured,
+            "recordings": counters["recordings"],
+            "imports": counters["imports"],
+            "captured_seconds": round(captured_seconds, 1),
+            "average_capture_seconds": round(captured_seconds / captured, 1) if captured else None,
+            "successful_summaries": counters["summaries"],
+            "copies": counters["copies"],
+            "memories_per_value_device": round(captured / len(value_devices), 2)
+            if value_devices else None,
+        },
+        "funnel": [
+            {"step": "Observed", "devices": len(observed)},
+            {"step": "Capture started", "devices": len(capture_started_devices)},
+            {"step": "Memory completed", "devices": len(captured_devices)},
+            {"step": "Summary completed", "devices": len(summary_devices)},
+            {"step": "Content copied", "devices": len(copy_devices)},
+        ],
+        "retention": {"mode": "rolling value retention", "rates": retention, "cohorts": cohort_sizes},
+        "quality": {
+            "fatal_recordings": counters["fatal_recordings"],
+            "fatal_recording_rate": fatal_rate,
+            "summary_attempts": counters["summary_attempts"],
+            "summary_success_rate": summary_rate,
+            "import_success_rate": import_rate,
+            "transcription_errors": counters["transcription_errors"],
+            "errors": counters["errors"],
+        },
+        "data_quality": {
+            "first_event_at": _iso(first_ts),
+            "last_event_at": _iso(last_ts),
+            "invalid_duration_events": invalid_durations,
+            "sources": dict(source_counts),
+            "notes": [
+                "Opt-in devices only; devices are not people.",
+                "Summary adoption is an attempt-count proxy until summary events carry meeting_id_hash.",
+                "D1/D7/D30 use mature first-value cohorts from the latest 90 days.",
+            ],
+        },
+        "versions": [
+            {"version": version, "devices": len(devices)}
+            for version, devices in sorted(
+                version_devices.items(), key=lambda item: len(item[1]), reverse=True
+            )[:8]
+        ],
+        "daily": daily_out,
+    }
 
 
 @app.get("/summary")
 def summary(days: float = 1.0) -> JSONResponse:
-    """Core (installs/dau/events/errors) feeds the cross-project Summary
-    page; metrics[] is Memento's showcase on its Overview card."""
-    window_days, since, win = _window(days)
-
-    def q(sql: str, *args) -> float:
-        return _db.execute(sql, args).fetchone()[0]
-
-    installs = q("SELECT COUNT(DISTINCT device_id) FROM events WHERE device_id != ''")
-    dau = q(
-        "SELECT COUNT(DISTINCT device_id) FROM events WHERE ts > ? AND device_id != ''",
-        since,
-    )
-    events = q("SELECT COUNT(*) FROM events WHERE ts > ?", since)
-    errors = q(f"SELECT COUNT(*) FROM events WHERE ts > ? AND {ERROR_NAMES_SQL}", since)
-    meetings = q(
-        "SELECT COUNT(*) FROM events WHERE ts > ? AND name = 'meeting_ended'", since
-    )
-    recorded_s = q(
-        f"SELECT COALESCE(SUM({DURATION_SQL}), 0) FROM events"
-        " WHERE ts > ? AND name = 'meeting_ended'",
-        since,
-    )
-    summaries = q(
-        "SELECT COUNT(*) FROM events WHERE ts > ?"
-        " AND name = 'summary_generation_completed'"
-        " AND json_extract(properties,'$.success') = 'true'",
-        since,
-    )
-
-    metrics = [
-        {"label": f"Meetings {win}", "value": str(meetings)},
-        {"label": f"Recorded {win}", "value": _fmt_hours(recorded_s)},
-        {"label": f"Summaries {win}", "value": str(summaries)},
-        {"label": "DAU" if win == "24h" else f"Devices {win}", "value": str(dau)},
-        {
-            "label": "Avg meeting",
-            "value": _fmt_hours(recorded_s / meetings) if meetings else "—",
-        },
-        {"label": f"Errors {win}", "value": str(errors), "good": errors == 0},
-        {"label": "Installs", "value": str(installs)},
-    ]
-
+    product = compute_product(days)
+    excluded = excluded_device_ids()
+    clause, params = exclusion_clause(excluded)
+    _, since, label = _window(days)
+    installs = _db.execute(
+        "SELECT COUNT(DISTINCT device_id) FROM events WHERE device_id != ''" + clause,
+        params,
+    ).fetchone()[0]
+    window_params: list[Any] = [since, *params]
+    events = _db.execute(
+        "SELECT COUNT(*) FROM events WHERE ts > ?" + clause, window_params
+    ).fetchone()[0]
+    errors = product["quality"]["errors"]
+    observed = product["identity"]["observed_devices"]
+    usage = product["usage"]
+    retention = product["retention"]["rates"]
+    quality = product["quality"]
     payload = {
-        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "window_days": window_days,
+        "updated_at": product["updated_at"],
+        "window_days": product["window_days"],
         "installs": installs,
-        "dau": dau,
+        "dau": observed,
         "events": events,
         "errors": errors,
-        "metrics": metrics,
+        "metrics": [
+            {"label": "Weekly value devices", "value": str(product["growth"]["weekly_value_devices"])},
+            {"label": f"Captured memories {label}", "value": str(usage["captured_memories"])},
+            {"label": f"Captured {label}", "value": _fmt_hours(usage["captured_seconds"])},
+            {"label": f"Summaries {label}", "value": str(usage["successful_summaries"])},
+            {"label": "Value retention D7", "value": _fmt_rate(retention["d7"])},
+            {
+                "label": "Fatal recording rate",
+                "value": _fmt_rate(quality["fatal_recording_rate"]),
+                "good": quality["fatal_recording_rate"] in (None, 0),
+            },
+            {"label": "Observed installs", "value": str(installs)},
+        ],
     }
-    # no-store обязателен: закэшированный 200 маскирует мёртвый модуль.
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 
-def _daily_rows(since: float) -> list[dict]:
-    rows = _db.execute(
-        "SELECT date(ts, 'unixepoch') AS day,"
-        " SUM(name = 'meeting_ended'),"
-        f" SUM(CASE WHEN name = 'meeting_ended' THEN {DURATION_SQL} ELSE 0 END),"
-        " SUM(name = 'summary_generation_completed'"
-        "     AND json_extract(properties,'$.success') = 'true'),"
-        " COUNT(DISTINCT CASE WHEN device_id != '' THEN device_id END),"
-        " COUNT(*),"
-        f" SUM({ERROR_NAMES_SQL})"
-        " FROM events WHERE ts > ? GROUP BY day ORDER BY day",
-        (since,),
-    ).fetchall()
-    return [
-        {
-            "date": r[0], "meetings": r[1] or 0,
-            "recorded_seconds": round(r[2] or 0.0, 1),
-            "summaries": r[3] or 0, "dau": r[4], "events": r[5], "errors": r[6] or 0,
-        }
-        for r in rows
-    ]
+@app.get("/product")
+def product(days: float = 30.0) -> JSONResponse:
+    return JSONResponse(compute_product(days), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/dashboard-data")
 def dashboard_data(days: float = 30.0) -> JSONResponse:
-    _, since, _ = _window(days)
+    data = compute_product(days)
+    return JSONResponse({"days": data["daily"]}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/retention")
+def retention(days: float = 30.0) -> JSONResponse:
+    data = compute_product(days)
     return JSONResponse(
-        {"days": _daily_rows(since)}, headers={"Cache-Control": "no-store"}
+        {"growth": data["growth"], "retention": data["retention"]},
+        headers={"Cache-Control": "no-store"},
     )
 
 
 @app.get("/series")
 def series(days: float = 90.0) -> JSONResponse:
-    """Daily core series — only for hub Summary history backfill (spec §2.3)."""
-    _, since, _ = _window(days)
+    data = compute_product(days)
     days_out = [
-        {"date": d["date"], "dau": d["dau"], "events": d["events"], "errors": d["errors"]}
-        for d in _daily_rows(since)
+        {"date": day["date"], "dau": day["dau"], "events": day["events"], "errors": day["errors"]}
+        for day in data["daily"]
     ]
     return JSONResponse({"days": days_out}, headers={"Cache-Control": "no-store"})
 
@@ -221,5 +473,4 @@ def dashboard() -> FileResponse:
 
 
 if __name__ == "__main__":
-    # Loopback only: the outside world reaches modules through Caddy (spec §4).
     uvicorn.run(app, host="127.0.0.1", port=PORT)
