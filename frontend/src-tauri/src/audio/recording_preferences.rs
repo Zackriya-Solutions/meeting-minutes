@@ -24,6 +24,15 @@ where
     transaction().await
 }
 
+async fn serialize_preferences_read<T, F, Fut>(read: F) -> Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let _guard = RECORDING_PREFERENCES_SAVE_LOCK.lock().await;
+    read().await
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingPreferences {
     pub save_folder: PathBuf,
@@ -143,42 +152,45 @@ pub fn generate_recording_filename(format: &str) -> String {
 pub async fn load_recording_preferences<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<RecordingPreferences> {
-    // Try to load from Tauri store
-    let store = match app.store("recording_preferences.json") {
-        Ok(store) => store,
-        Err(e) => {
-            warn!("Failed to access store: {}, using defaults", e);
-            return Ok(RecordingPreferences::default());
-        }
-    };
-
-    // Try to get the preferences from store
-    let prefs = if let Some(value) = store.get("preferences") {
-        match serde_json::from_value::<RecordingPreferences>(value.clone()) {
-            Ok(mut p) => {
-                info!("Loaded recording preferences from store");
-                // Update macOS backend to current value if needed
-                #[cfg(target_os = "macos")]
-                {
-                    let backend = crate::audio::capture::get_current_backend();
-                    p.system_audio_backend = Some(backend.to_string());
-                }
-                p
-            }
+    serialize_preferences_read(|| async {
+        // Try to load from Tauri store
+        let store = match app.store("recording_preferences.json") {
+            Ok(store) => store,
             Err(e) => {
-                warn!("Failed to deserialize preferences: {}, using defaults", e);
-                RecordingPreferences::default()
+                warn!("Failed to access store: {}, using defaults", e);
+                return Ok(RecordingPreferences::default());
             }
-        }
-    } else {
-        info!("No stored preferences found, using defaults");
-        RecordingPreferences::default()
-    };
+        };
 
-    info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}",
-          prefs.save_folder, prefs.auto_save, prefs.file_format,
-          prefs.preferred_mic_device, prefs.preferred_system_device);
-    Ok(prefs)
+        // Try to get the preferences from store
+        let prefs = if let Some(value) = store.get("preferences") {
+            match serde_json::from_value::<RecordingPreferences>(value.clone()) {
+                Ok(mut p) => {
+                    info!("Loaded recording preferences from store");
+                    // Update macOS backend to current value if needed
+                    #[cfg(target_os = "macos")]
+                    {
+                        let backend = crate::audio::capture::get_current_backend();
+                        p.system_audio_backend = Some(backend.to_string());
+                    }
+                    p
+                }
+                Err(e) => {
+                    warn!("Failed to deserialize preferences: {}, using defaults", e);
+                    RecordingPreferences::default()
+                }
+            }
+        } else {
+            info!("No stored preferences found, using defaults");
+            RecordingPreferences::default()
+        };
+
+        info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}",
+              prefs.save_folder, prefs.auto_save, prefs.file_format,
+              prefs.preferred_mic_device, prefs.preferred_system_device);
+        Ok(prefs)
+    })
+    .await
 }
 
 /// Save recording preferences to store
@@ -516,8 +528,8 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
 #[cfg(test)]
 mod persistence_tests {
     use super::{
-        merge_recording_save_folder, persist_preferences_value, serialize_save_transaction,
-        RecordingPreferences,
+        merge_recording_save_folder, persist_preferences_value, serialize_preferences_read,
+        serialize_save_transaction, RecordingPreferences,
     };
     use serde_json::{json, Value};
     use std::cell::{Cell, RefCell};
@@ -526,6 +538,50 @@ mod persistence_tests {
         Arc,
     };
     use tokio::sync::{Mutex, Notify};
+
+    #[tokio::test]
+    async fn preference_read_waits_for_failed_save_rollback() {
+        let cached_folder = Arc::new(Mutex::new("previous"));
+        let save_entered = Arc::new(Notify::new());
+        let release_save = Arc::new(Notify::new());
+        let read_entered = Arc::new(AtomicBool::new(false));
+
+        let failed_save = {
+            let cached_folder = cached_folder.clone();
+            let save_entered = save_entered.clone();
+            let release_save = release_save.clone();
+            tokio::spawn(async move {
+                serialize_save_transaction(|| async move {
+                    *cached_folder.lock().await = "staged";
+                    save_entered.notify_one();
+                    release_save.notified().await;
+                    *cached_folder.lock().await = "previous";
+                    Err::<(), _>(anyhow::anyhow!("simulated save failure"))
+                })
+                .await
+            })
+        };
+
+        save_entered.notified().await;
+        let read = {
+            let cached_folder = cached_folder.clone();
+            let read_entered = read_entered.clone();
+            tokio::spawn(async move {
+                serialize_preferences_read(|| async move {
+                    read_entered.store(true, Ordering::SeqCst);
+                    Ok::<_, anyhow::Error>(*cached_folder.lock().await)
+                })
+                .await
+            })
+        };
+
+        tokio::task::yield_now().await;
+        assert!(!read_entered.load(Ordering::SeqCst));
+        release_save.notify_one();
+
+        assert!(failed_save.await.expect("save task").is_err());
+        assert_eq!(read.await.expect("read task").unwrap(), "previous");
+    }
 
     #[test]
     fn folder_only_update_preserves_latest_preferences() {
