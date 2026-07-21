@@ -4,14 +4,16 @@ import { motion } from 'framer-motion';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 
 /**
- * Presentational chat primitives shared by the standalone archive/collection chat
- * page and the embedded meeting conversation (variant 2a). The citation click
- * handler is injected so each surface can decide what a citation does — the
- * archive page routes to `/meeting-details`, while the meeting screen expands the
- * transcript pin and scrolls to the cited segment in place.
+ * Chat primitives shared by the archive/collection chat page and the embedded
+ * meeting conversation. Variant 3a: the user keeps a gold bubble; the assistant
+ * answer flows as plain content (no card, no border) rendered as Markdown + LaTeX,
+ * with muted (neutral, not gold) citation chips. The citation click handler is
+ * injected — the archive page routes to `/meeting-details`, the meeting screen
+ * expands the transcript pin and scrolls to the cited segment in place.
  */
 
 export function MessageBubble({
@@ -23,68 +25,65 @@ export function MessageBubble({
   msg: ChatMessage;
   meetingTitle: (id: string) => string;
   onCite: (c: Citation) => void;
-  /** Hide the per-citation meeting label when the whole thread is one meeting. */
   showMeetingLabel?: boolean;
 }) {
   const t = useT();
   const isUser = msg.role === 'user';
   const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
 
+  if (isUser) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18 }}
+        className="max-w-[78%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-[var(--gold)] px-[15px] py-[11px] text-[14px] leading-[1.5] text-[var(--fg-inverse)]"
+      >
+        {msg.content}
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className={cn('flex', isUser ? 'justify-end' : 'justify-start')}
+      className={cn('text-[14.5px] leading-[1.65]', msg.error ? 'text-[var(--danger)]' : 'text-[var(--fg1)]')}
     >
-      <div
-        className={cn(
-          'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
-          isUser
-            ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
-            : msg.error
-              ? 'border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
-              : notFound
-                ? 'border border-[var(--border-subtle)] bg-[var(--bg-sheet)] text-[var(--fg2)]'
-                : 'bg-[var(--bg-elevated)] text-[var(--fg1)]',
-        )}
-      >
-        {notFound && (
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
-            <Icon name="search" size={14} />
-            {t('Not found in your meetings')}
-          </div>
-        )}
-        <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+      {notFound && (
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
+          <Icon name="search" size={14} />
+          {t('Not found in your meetings')}
+        </div>
+      )}
 
-        {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
+      {msg.error ? <div className="whitespace-pre-wrap">{msg.content}</div> : <ChatMarkdown content={msg.content} />}
 
-        {msg.warning && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
-            <Icon name="alert" size={14} />
-            {msg.warning}
-          </div>
-        )}
+      {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
 
-        {!!msg.citations?.length && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {msg.citations.map((c) => (
-              <button
-                key={c.index}
-                onClick={() => onCite(c)}
-                title={t('Open the meeting at this moment')}
-                className="flex items-center gap-1 rounded-full bg-[var(--bg-canvas)]/70 px-2 py-0.5 text-xs text-[var(--gold)] ring-1 ring-[var(--gold-ring)] transition-colors hover:bg-[var(--gold-soft)]"
-              >
-                <Icon name="transcript" size={12} />
-                <span className="font-medium">[{c.index}]</span>
-                {showMeetingLabel && (
-                  <span className="max-w-[160px] truncate">{meetingTitle(c.meeting_id)}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {msg.warning && (
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
+          <Icon name="alert" size={14} />
+          {msg.warning}
+        </div>
+      )}
+
+      {!!msg.citations?.length && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {msg.citations.map((c) => (
+            <button
+              key={c.index}
+              onClick={() => onCite(c)}
+              title={t('Open the meeting at this moment')}
+              className="mm-numeric inline-flex items-center gap-1 rounded-md bg-[var(--bg-elevated)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
+            >
+              <span>[{c.index}]</span>
+              {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -107,7 +106,7 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
   }
 
   return (
-    <div className="mt-2 rounded-lg bg-[var(--bg-canvas)]/60 px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
+    <div className="mt-2 rounded-lg bg-[var(--bg-elevated)] px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
       <p>{explanation}</p>
       {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
         <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
@@ -121,8 +120,8 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
 
 export function TypingIndicator() {
   return (
-    <div className="flex justify-start">
-      <div className="flex items-center gap-1 rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
+    <div className="self-start">
+      <div className="flex items-center gap-1">
         {[0, 1, 2].map((i) => (
           <span
             key={i}

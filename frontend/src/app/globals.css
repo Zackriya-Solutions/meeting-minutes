@@ -344,4 +344,57 @@ input, textarea { color: var(--fg1); }
 input:not([type='checkbox']):not([type='radio']):not([type='range']):not([data-slot='input-group-control']), textarea:not([data-slot='input-group-control']), select { background-color: var(--surface-input); }
 input::placeholder, textarea::placeholder { color: var(--fg3); }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+/* The meeting composer shows focus on the whole dock (.mm-composer:focus-within),
+   so the inner textarea must not draw its own sharp gold outline. Unlayered + more
+   specific than the global rule above, so it wins without !important. */
+.mm-composer textarea:focus, .mm-composer textarea:focus-visible { outline: none; }
 .font-mono, time { font-family: 'Space Grotesk', 'Onest', sans-serif; font-variant-numeric: tabular-nums; }
+
+/* Markdown + LaTeX rendering for chat answers and the summary body
+   (react-markdown + remark-gfm + KaTeX). Audited/verified across tables, lists,
+   code, headings/inline, and math — see the markdown-hygiene audit.
+   Key fix: `word-break: normal; overflow-wrap: break-word` breaks at WORD
+   boundaries (min-content = whole word), so table headers like "Ответственный"
+   no longer shatter one character per line; wide tables scroll horizontally. */
+.mm-md { font-size: 14px; line-height: 1.6; color: var(--fg1); overflow-wrap: break-word; word-break: normal; min-width: 0; }
+.mm-md > :first-child { margin-top: 0; }
+.mm-md > :last-child { margin-bottom: 0; }
+.mm-md p { margin: 0 0 8px; }
+
+.mm-md h1, .mm-md h2, .mm-md h3, .mm-md h4, .mm-md h5, .mm-md h6 { margin: 14px 0 6px; font-weight: 700; line-height: 1.25; color: var(--fg1); }
+.mm-md h1 { font-size: 1.25em; }
+.mm-md h2 { font-size: 1.15em; }
+.mm-md h3 { font-size: 1.05em; }
+.mm-md h4 { font-size: 1em; }
+.mm-md h5 { font-size: 0.95em; color: var(--fg2); }
+.mm-md h6 { font-size: 0.9em; color: var(--fg2); }
+
+.mm-md ul, .mm-md ol { margin: 0 0 8px; padding-left: 20px; }
+.mm-md li { margin: 2px 0; }
+.mm-md li > ul, .mm-md li > ol { margin: 2px 0; }
+.mm-md li.task-list-item { list-style: none; }
+.mm-md li.task-list-item input[type="checkbox"] { margin: 0 0.45em 0 -18px; vertical-align: middle; accent-color: var(--gold); color-scheme: dark; }
+
+.mm-md a { color: var(--gold); text-decoration: underline; text-underline-offset: 2px; }
+.mm-md a:hover { color: var(--gold-active); }
+.mm-md a:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 3px; }
+.mm-md a strong, .mm-md a b, .mm-md a code { color: inherit; }
+.mm-md strong { font-weight: 700; color: var(--fg1); }
+.mm-md em { font-style: italic; }
+
+.mm-md code { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace; font-size: .9em; background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 5px; padding: 1px 5px; overflow-wrap: break-word; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.mm-md pre { margin: 0 0 8px; padding: 12px 14px; background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; overflow-x: auto; max-width: 100%; -moz-tab-size: 2; tab-size: 2; }
+.mm-md pre code { background: transparent; border: 0; padding: 0; font-size: .88em; white-space: pre; word-break: normal; overflow-wrap: normal; -webkit-box-decoration-break: slice; box-decoration-break: slice; }
+
+.mm-md blockquote { margin: 0 0 8px; padding: 2px 0 2px 12px; border-left: 3px solid var(--border-strong); color: var(--fg2); }
+.mm-md blockquote > :last-child { margin-bottom: 0; }
+
+.mm-md table { width: 100%; border-collapse: collapse; margin: 0 0 8px; display: block; overflow-x: auto; }
+.mm-md th, .mm-md td { border: 1px solid var(--border-subtle); padding: 6px 10px; text-align: left; vertical-align: top; overflow-wrap: break-word; word-break: normal; }
+.mm-md th { background: var(--bg-elevated); font-weight: 600; color: var(--fg1); white-space: normal; }
+
+.mm-md hr { border: 0; border-top: 1px solid var(--border-strong); margin: 12px 0; }
+
+.mm-md .katex { font-size: 1.02em; color: inherit; word-break: normal; overflow-wrap: normal; }
+.mm-md .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
+.mm-md .katex-display > .katex { text-align: left; }

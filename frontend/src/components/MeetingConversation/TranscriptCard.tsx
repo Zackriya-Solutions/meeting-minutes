@@ -4,16 +4,14 @@ import { useId, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
-import { Icon } from '@/components/memento/Icon';
 import { useT } from '@/lib/i18n';
 
 /**
- * Transcript pin for the meeting conversation (variant 2a). Collapsed by default:
- * a single header row (icon · "Transcript" · "N replies · MM min" · chevron) that
- * expands in place — not a slide-out panel — into a bounded, scrollable region
- * with a compact audio player. Reuses `TranscriptPanel` for the segment list,
- * seek-to-timestamp, and correction behavior; its own toolbar and summary context
- * field are hidden (those actions live in the screen's "⋯" menu).
+ * Transcript pin for the meeting conversation (variant 3a): a minimal rounded chip
+ * in the feed — icon · "Транскрипт" · "N реплик · MM мин" · chevron — that expands
+ * in place (no card / border) into a bounded, scrollable region with a compact
+ * audio player and the timecoded segment list. Reuses `TranscriptPanel` (real
+ * player / seek / pagination); its own toolbar and summary context field are hidden.
  */
 
 interface TranscriptCardProps {
@@ -28,7 +26,6 @@ interface TranscriptCardProps {
   onLoadMore?: () => void;
   onRefetchTranscripts?: () => Promise<void>;
   onOpenMeetingFolder: () => Promise<void>;
-  /** Jump-to-timestamp (seconds) — driven by ?t= deep links and citation clicks. */
   scrollToTimestamp?: number | null;
   playbackRequest?: {
     requestId: number;
@@ -44,11 +41,6 @@ interface TranscriptCardProps {
   onSpeakersDetected?: () => Promise<void> | void;
   expanded: boolean;
   onToggle: (expanded: boolean) => void;
-}
-
-function formatMinutes(seconds: number, t: (en: string) => string): string {
-  const mins = Math.max(1, Math.round(seconds / 60));
-  return `${mins} ${t('min')}`;
 }
 
 export function TranscriptCard({
@@ -87,32 +79,29 @@ export function TranscriptCard({
 
   const meta = [
     `${replyCount} ${t('replies')}`,
-    durationSeconds > 0 ? formatMinutes(durationSeconds, t) : null,
+    durationSeconds > 0 ? `${Math.max(1, Math.round(durationSeconds / 60))} ${t('min')}` : null,
   ]
     .filter(Boolean)
     .join(' · ');
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-16)] border border-[var(--border-subtle)] bg-[var(--bg-sheet)]">
+    <div>
+      {/* Minimal chip */}
       <button
         type="button"
         onClick={() => onToggle(!expanded)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="mm-hover flex w-full items-center gap-3 px-4 py-3 text-left"
+        className="inline-flex items-center gap-[9px] rounded-full bg-[var(--bg-elevated)] py-2 pl-3 pr-3.5 text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--gold-soft)] text-[var(--gold)]">
-          <Icon name="transcript" size={16} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-[var(--fg1)]">{t('Transcript')}</span>
-          {meta && <span className="mm-numeric block text-xs text-[var(--fg3)]">{meta}</span>}
-        </span>
-        <Icon
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={18}
-          className="shrink-0 text-[var(--fg3)]"
-        />
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 7h14M5 12h14M5 17h8" />
+        </svg>
+        <span className="text-[13px] font-semibold">{t('Transcript')}</span>
+        {meta && <span className="mm-numeric text-[11.5px] text-[var(--fg3)]">{meta}</span>}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--fg3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d={expanded ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'} />
+        </svg>
       </button>
 
       <AnimatePresence initial={false}>
@@ -123,10 +112,10 @@ export function TranscriptCard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="overflow-hidden border-t border-[var(--border-subtle)]"
+            className="overflow-hidden"
           >
             {/* Bounded height so the transcript never crowds out the summary and chat. */}
-            <div className="flex h-[min(52vh,520px)] flex-col">
+            <div className="mt-3 flex h-[min(46vh,440px)] flex-col">
               <TranscriptPanel
                 transcripts={transcripts}
                 customPrompt=""

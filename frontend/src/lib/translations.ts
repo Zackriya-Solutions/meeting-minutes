@@ -8,9 +8,19 @@
  * Generated/maintained alongside the Settings i18n conversion.
  */
 export const RU: Record<string, string> = {
-  // Meeting conversation (variant 2a)
+  // Meeting conversation (variant 2a/3a)
+  "Today": "Сегодня",
+  "Yesterday": "Вчера",
+  "Earlier": "Ранее",
   "Meeting summary": "Саммари встречи",
   "Summary type": "Тип саммари",
+  "Summary type · rebuilds the message": "Тип саммари · пересоберёт сообщение",
+  "More — decisions and tasks": "Подробнее — решения и задачи",
+  "Collapse details": "Свернуть подробности",
+  "Copy summary": "Копировать саммари",
+  "Save to note": "Сохранить в заметку",
+  "Delete this meeting? This cannot be undone.": "Удалить эту встречу? Действие необратимо.",
+  "Meeting deleted": "Встреча удалена",
   "Regenerate": "Пересобрать",
   "No summary yet. Choose a type to generate it.": "Саммари ещё нет. Выберите тип, чтобы сгенерировать.",
   "Transcript": "Транскрипт",

@@ -1,26 +1,21 @@
 "use client";
 
-import { type ComponentProps, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
-import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
-import { Icon } from '@/components/memento/Icon';
-import { Loader2, RefreshCw } from '@/components/memento/LucideCompat';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Copy, Loader2, RefreshCw, Save } from '@/components/memento/LucideCompat';
+import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
+import { summaryToMarkdown, splitSummaryLead } from '@/lib/summaryToMarkdown';
 import { useT } from '@/lib/i18n';
 
 /**
- * Summary as the first assistant message of the meeting conversation (variant 2a).
- *
- * Rendered inline like a chat message (avatar + bubble) — NOT as a bounded panel —
- * so the transcript pin, the summary, and the Q&A read as one continuous thread.
- * The summary body reuses `BlockNoteSummaryView` (which flows to its content
- * height); the compact type selector in the header starts/rebuilds the summary
- * (the user drives summarization by picking a template). Secondary actions
- * (copy / save / model / language) live in the screen's "⋯" menu.
- *
- * It receives the same prop bundle the old SummaryPanel took (transport only) and
- * uses the fields it needs — no separate plumbing in page-content.
+ * Summary for the meeting conversation (variant 3a): flows as content in the feed —
+ * NO card, no border, no background. A quiet eyebrow + neutral type selector, a
+ * prominent TL;DR lead, and "Ключевые решения / Задачи" behind a "Подробнее"
+ * disclosure (collapsed by default). Gold is muted here — the type selector and
+ * actions are neutral. The real summary content is converted to Markdown and
+ * rendered read-first; picking a template regenerates it.
  */
 
 type SummaryPanelProps = ComponentProps<typeof SummaryPanel>;
@@ -31,18 +26,25 @@ interface SummaryMessageProps {
 
 export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
   const t = useT();
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const isGenerating =
     p.summaryStatus === 'processing' || p.summaryStatus === 'summarizing' || p.summaryStatus === 'regenerating';
   const hasSummary = !!p.aiSummary;
   const hasModel = p.modelConfig.provider !== null && p.modelConfig.model !== null;
+  const selectedName =
+    p.availableTemplates.find((tp) => tp.id === p.selectedTemplate)?.name ?? t('Summary type');
 
-  // "Pick a template → generate with it". Generation reads selectedTemplate from a
-  // closure, so we can't select+generate synchronously — set the template, then
-  // generate once it has actually changed (via the effect below). Re-picking the
-  // current template regenerates immediately.
+  const { lead, details } = useMemo(() => {
+    if (!hasSummary) return { lead: '', details: '' };
+    return splitSummaryLead(summaryToMarkdown(p.aiSummary));
+  }, [hasSummary, p.aiSummary]);
+
+  // Pick a template → generate with it (set, then generate once it has changed).
   const pendingTemplateRef = useRef<string | null>(null);
   const pickTemplate = (id: string, name: string) => {
+    setTypeOpen(false);
     if (isGenerating) return;
     if (id === p.selectedTemplate) {
       void p.onGenerateSummary('');
@@ -58,91 +60,114 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
     }
   }, [p.selectedTemplate, p.onGenerateSummary]);
 
-  const typeSelector = (
-    <select
-      value={p.selectedTemplate}
-      disabled={isGenerating}
-      onChange={(e) => {
-        const tpl = p.availableTemplates.find((x) => x.id === e.target.value);
-        if (tpl) pickTemplate(tpl.id, tpl.name);
-      }}
-      className="mm-select max-w-[220px] text-xs"
-      title={t('Summary type')}
-      aria-label={t('Summary type')}
-    >
-      {p.availableTemplates.map((tpl) => (
-        <option key={tpl.id} value={tpl.id}>
-          {tpl.name}
-        </option>
-      ))}
-    </select>
-  );
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-      className="flex gap-3"
-    >
-      <span
-        aria-hidden
-        className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--gold-soft)] text-[var(--gold)]"
-      >
-        <Icon name="spark" size={16} />
-      </span>
-      <div className="min-w-0 flex-1 rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-sm font-semibold text-[var(--fg1)]">{t('Meeting summary')}</span>
-          <div className="ml-auto flex items-center gap-1.5">
-            {typeSelector}
-            {hasSummary && !isGenerating && (
+    <div>
+      {/* Eyebrow + neutral type selector */}
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--fg3)]">{t('Summary')}</span>
+        <div className="flex-1" />
+        <Popover open={typeOpen} onOpenChange={setTypeOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              disabled={isGenerating}
+              title={t('Summary type')}
+              className="inline-flex h-[30px] items-center gap-[7px] rounded-lg pl-2.5 pr-1.5 text-[12.5px] font-semibold text-[var(--fg2)] transition-colors hover:bg-[var(--state-hover-bg)] hover:text-[var(--fg1)] disabled:opacity-50"
+            >
+              <span className="max-w-[200px] truncate">{selectedName}</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-[300px] p-1.5">
+            <div className="px-2.5 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--fg3)]">
+              {t('Summary type · rebuilds the message')}
+            </div>
+            {p.availableTemplates.map((tp) => (
+              <button
+                key={tp.id}
+                type="button"
+                onClick={() => pickTemplate(tp.id, tp.name)}
+                className="flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--state-hover-bg)]"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold text-[var(--fg1)]">{tp.name}</span>
+                  <span className="block text-[11.5px] leading-snug text-[var(--fg3)]">{tp.description}</span>
+                </span>
+                {tp.id === p.selectedTemplate && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0">
+                    <path d="m6 12.5 4 4 8-8.5" />
+                  </svg>
+                )}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* Body */}
+      {isGenerating ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-[var(--fg2)]">
+          <Loader2 className="h-4 w-4 animate-spin text-[var(--gold)]" />
+          {p.getSummaryStatusMessage(p.summaryStatus)}
+        </div>
+      ) : hasSummary ? (
+        <>
+          {lead && <p className="m-0 text-[17px] font-medium leading-[1.6] text-[var(--fg1)]">{lead}</p>}
+
+          {details && (
+            <>
               <button
                 type="button"
-                onClick={() => void p.onRegenerateSummary()}
-                className="mm-icon-button mm-hover"
-                title={t('Regenerate')}
-                aria-label={t('Regenerate')}
+                onClick={() => setDetailsOpen((v) => !v)}
+                aria-expanded={detailsOpen}
+                className="mt-3.5 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--fg3)] transition-colors hover:text-[var(--fg1)]"
               >
-                <RefreshCw size={16} />
+                <span>{detailsOpen ? t('Collapse details') : t('More — decisions and tasks')}</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={detailsOpen ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'} />
+                </svg>
               </button>
-            )}
+              {detailsOpen && <ChatMarkdown className="mt-4" content={details} />}
+            </>
+          )}
+
+          {/* Quiet actions */}
+          <div className="mt-[18px] flex gap-4">
+            <QuietAction icon={<RefreshCw size={14} />} label={t('Regenerate')} onClick={() => void p.onRegenerateSummary()} />
+            <QuietAction icon={<Copy size={14} />} label={t('Copy')} onClick={() => void p.onCopySummary()} />
+            <QuietAction icon={<Save size={14} />} label={t('Save to note')} onClick={() => void p.onSaveAll()} />
           </div>
+        </>
+      ) : p.summaryLoadStatus === 'loading' ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-[var(--fg2)]">
+          <Loader2 className="h-4 w-4 animate-spin text-[var(--gold)]" />
+          {t('Loading saved summary...')}
         </div>
+      ) : (
+        <div className="py-1">
+          <p className="mb-3 text-sm text-[var(--fg2)]">{t('No summary yet. Choose a type to generate it.')}</p>
+          <EmptyStateSummary onGenerate={() => void p.onGenerateSummary('')} hasModel={hasModel} isGenerating={isGenerating} />
+        </div>
+      )}
 
-        {isGenerating ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-[var(--fg2)]">
-            <Loader2 className="h-4 w-4 animate-spin text-[var(--gold)]" />
-            {p.getSummaryStatusMessage(p.summaryStatus)}
-          </div>
-        ) : hasSummary ? (
-          <BlockNoteSummaryView
-            ref={p.summaryRef}
-            summaryData={p.aiSummary}
-            onSave={p.onSaveSummary}
-            onSummaryChange={p.onSummaryChange}
-            onDirtyChange={p.onDirtyChange}
-            status={p.summaryStatus}
-            error={p.summaryError}
-            onRegenerateSummary={() => void p.onRegenerateSummary()}
-            meeting={{ id: p.meeting.id, title: p.meetingTitle, created_at: p.meeting.created_at }}
-          />
-        ) : p.summaryLoadStatus === 'loading' ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-[var(--fg2)]">
-            <Loader2 className="h-4 w-4 animate-spin text-[var(--gold)]" />
-            {t('Loading saved summary...')}
-          </div>
-        ) : (
-          <div className="py-1">
-            <p className="mb-3 text-sm text-[var(--fg2)]">{t('No summary yet. Choose a type to generate it.')}</p>
-            <EmptyStateSummary onGenerate={() => void p.onGenerateSummary('')} hasModel={hasModel} isGenerating={isGenerating} />
-          </div>
-        )}
+      {p.summaryError && !isGenerating && hasSummary && (
+        <p className="mt-2 text-xs text-[var(--danger)]">{p.summaryError}</p>
+      )}
+    </div>
+  );
+}
 
-        {p.summaryError && !isGenerating && hasSummary && (
-          <p className="mt-2 text-xs text-[var(--danger)]">{p.summaryError}</p>
-        )}
-      </div>
-    </motion.div>
+function QuietAction({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--fg3)] transition-colors hover:text-[var(--fg1)]"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
