@@ -130,3 +130,24 @@ impl TractionSink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// e2e против локально запущенного модуля (stats/server.py, порт 9901,
+    /// STATS_INGEST_TOKEN=devtoken). В обычном прогоне не бегает:
+    ///   cargo test -p meetily traction -- --ignored
+    #[tokio::test]
+    #[ignore]
+    async fn sink_delivers_batch_to_local_module() {
+        std::env::set_var("MEMENTO_STATS_URL", "http://127.0.0.1:9901/events");
+        std::env::set_var("MEMENTO_STATS_INGEST_TOKEN", "devtoken");
+        let sink = TractionSink::new();
+        let mut props = HashMap::new();
+        props.insert("total_duration_seconds".to_string(), "42".to_string());
+        sink.track("user_e2e_test", "meeting_ended", props).await;
+        sink.flush().await;
+        assert!(sink.queue.lock().await.is_empty(), "flush must drain the queue on success");
+    }
+}
