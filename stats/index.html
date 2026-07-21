@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memento stats</title>
+<style>
+  /* Memento module dashboard. Relative URLs only (served behind /p/memento/).
+     Tokens mirror the hub's; ?theme=light|dark overrides the OS scheme. */
+  :root { color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e;
+    --muted:#898781; --border:rgba(11,11,11,0.10); --accent:#2a78d6;
+    --accent-2:#7c5cd6; }
+  :root[data-theme="dark"], :root.auto-dark { color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7;
+    --muted:#898781; --border:rgba(255,255,255,0.10); --accent:#3987e5;
+    --accent-2:#8f6fe8; }
+  body { margin:0; padding:22px 26px; background:var(--page); color:var(--ink);
+    font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:17px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:12px; }
+  .periods { margin-left:auto; display:flex; gap:4px; }
+  .periods button { background:var(--surface); border:1px solid var(--border);
+    color:var(--ink-2); border-radius:8px; padding:4px 10px; font-size:12px;
+    cursor:pointer; }
+  .periods button.on { color:var(--ink); border-color:var(--accent);
+    box-shadow:0 0 0 1px var(--accent) inset; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:12px; max-width:980px; margin-top:16px; }
+  .tile { background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:12px 14px; }
+  .tile .v { font-size:22px; font-weight:600; }
+  .tile .v.good { color:#2e9e5b; }
+  .tile .l { font-size:10.5px; color:var(--muted); margin-top:1px; }
+  .card { background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:14px 16px; max-width:980px; margin-top:14px; }
+  .card h2 { font-size:12px; font-weight:600; color:var(--ink-2); margin:0 0 10px;
+    text-transform:uppercase; letter-spacing:.04em; }
+  .chart-wrap { overflow-x:auto; }
+  svg text { font:10px system-ui, sans-serif; fill:var(--muted); }
+  .legend { display:flex; gap:14px; font-size:11px; color:var(--muted); margin-top:8px; }
+  .legend i { display:inline-block; width:9px; height:9px; border-radius:2px;
+    margin-right:5px; vertical-align:-1px; }
+  .empty { color:var(--muted); font-size:12px; padding:18px 0; }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Memento</h1>
+      <div class="sub" id="sub">loading…</div>
+    </div>
+    <nav class="periods" id="periods">
+      <button data-days="7">7d</button>
+      <button data-days="30" class="on">30d</button>
+      <button data-days="90">90d</button>
+    </nav>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>Meetings &amp; recorded hours per day</h2>
+    <div class="chart-wrap" id="chart"><div class="empty">loading…</div></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>meetings</span>
+      <span><i style="background:var(--accent-2)"></i>recorded hours</span>
+    </div>
+  </div>
+
+<script>
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('theme')) {
+    document.documentElement.dataset.theme = qs.get('theme');
+  } else if (matchMedia('(prefers-color-scheme: dark)').matches) {
+    document.documentElement.classList.add('auto-dark');
+  }
+
+  let days = 30;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  async function loadSummary() {
+    const s = await fetch(`summary?days=${days}`, { cache: 'no-store' })
+      .then(r => r.json());
+    document.getElementById('sub').textContent = 'updated ' + s.updated_at;
+    document.getElementById('tiles').innerHTML = (s.metrics || []).map(m =>
+      `<div class="tile"><div class="v${m.good ? ' good' : ''}">${esc(m.value)}</div>` +
+      `<div class="l">${esc(m.label)}</div></div>`).join('');
+  }
+
+  function fillDays(rows) {
+    // Continuous day axis: gaps in the data are real zeros, show them.
+    const byDate = Object.fromEntries(rows.map(r => [r.date, r]));
+    const out = [];
+    const d = new Date(Date.now() - (days - 1) * 86400e3);
+    for (let i = 0; i < days; i++) {
+      const key = d.toISOString().slice(0, 10);
+      out.push(byDate[key] || { date: key, meetings: 0, recorded_seconds: 0 });
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return out;
+  }
+
+  async function loadChart() {
+    const data = await fetch(`dashboard-data?days=${days}`, { cache: 'no-store' })
+      .then(r => r.json());
+    const rows = fillDays(data.days || []);
+    const el = document.getElementById('chart');
+    if (!rows.some(r => r.meetings || r.recorded_seconds)) {
+      el.innerHTML = '<div class="empty">No meetings in this window yet.</div>';
+      return;
+    }
+    const W = Math.max(640, rows.length * 22), H = 180, PB = 18, PT = 6;
+    const maxM = Math.max(...rows.map(r => r.meetings), 1);
+    const maxH = Math.max(...rows.map(r => r.recorded_seconds / 3600), 0.1);
+    const bw = (W / rows.length);
+    const bars = rows.map((r, i) => {
+      const x = i * bw;
+      const mh = (r.meetings / maxM) * (H - PB - PT);
+      const hh = ((r.recorded_seconds / 3600) / maxH) * (H - PB - PT);
+      const label = (rows.length <= 31 || i % 7 === 0)
+        ? `<text x="${x + bw / 2}" y="${H - 5}" text-anchor="middle">${r.date.slice(5)}</text>` : '';
+      const title = `${r.date}: ${r.meetings} meetings, ` +
+        `${(r.recorded_seconds / 3600).toFixed(1)}h recorded`;
+      return `<g><title>${esc(title)}</title>` +
+        `<rect x="${x + 2}" y="${H - PB - mh}" width="${bw / 2 - 3}" height="${mh}"` +
+        ` rx="2" fill="var(--accent)"/>` +
+        `<rect x="${x + bw / 2 + 1}" y="${H - PB - hh}" width="${bw / 2 - 3}" height="${hh}"` +
+        ` rx="2" fill="var(--accent-2)"/>${label}</g>`;
+    }).join('');
+    el.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+      `<line x1="0" y1="${H - PB}" x2="${W}" y2="${H - PB}"` +
+      ` stroke="var(--border)"/>${bars}</svg>`;
+  }
+
+  function refresh() {
+    loadSummary().catch(e =>
+      document.getElementById('sub').textContent = 'summary failed: ' + e);
+    loadChart().catch(e =>
+      document.getElementById('chart').innerHTML =
+        `<div class="empty">chart failed: ${esc(e)}</div>`);
+  }
+
+  document.getElementById('periods').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    days = Number(b.dataset.days);
+    document.querySelectorAll('.periods button').forEach(x =>
+      x.classList.toggle('on', x === b));
+    refresh();
+  });
+
+  refresh();
+</script>
+</body>
+</html>

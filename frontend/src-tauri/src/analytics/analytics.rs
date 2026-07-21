@@ -80,6 +80,7 @@ pub struct AnalyticsClient {
     config: AnalyticsConfig,
     user_id: Arc<Mutex<Option<String>>>,
     current_session: Arc<Mutex<Option<UserSession>>>,
+    traction: Option<Arc<crate::analytics::traction::TractionSink>>,
 }
 
 impl AnalyticsClient {
@@ -90,22 +91,32 @@ impl AnalyticsClient {
             None
         };
 
+        // Traction sink shares the client's lifecycle, so disabling analytics
+        // (dropping the client) stops Traction events too.
+        let traction = if config.enabled {
+            Some(crate::analytics::traction::TractionSink::new())
+        } else {
+            None
+        };
+
         Self {
             client,
             config,
             user_id: Arc::new(Mutex::new(None)),
             current_session: Arc::new(Mutex::new(None)),
+            traction,
         }
     }
 
     pub async fn identify(&self, user_id: String, properties: Option<HashMap<String, String>>) -> Result<(), String> {
+        // Store user ID for future events (Traction needs it even when the
+        // PostHog client is absent)
+        *self.user_id.lock().await = Some(user_id.clone());
+
         let client = match &self.client {
             Some(client) => Arc::clone(client),
             None => return Ok(()),
         };
-
-        // Store user ID for future events
-        *self.user_id.lock().await = Some(user_id.clone());
 
         let properties = sanitize_analytics_properties(properties.unwrap_or_default());
         
@@ -126,11 +137,6 @@ impl AnalyticsClient {
     }
 
     pub async fn track_event(&self, event_name: &str, properties: Option<HashMap<String, String>>) -> Result<(), String> {
-        let client = match &self.client {
-            Some(client) => Arc::clone(client),
-            None => return Ok(()),
-        };
-
         let user_id = match self.user_id.lock().await.clone() {
             Some(id) => id,
             None => {
@@ -151,7 +157,17 @@ impl AnalyticsClient {
             properties.insert("session_id".to_string(), session.session_id.clone());
             properties.insert("session_duration".to_string(), session.duration_seconds().to_string());
         }
-        
+
+        // Mirror every event to the Traction stats module (batched)
+        if let Some(traction) = &self.traction {
+            traction.track(&user_id, &event_name, properties.clone()).await;
+        }
+
+        let client = match &self.client {
+            Some(client) => Arc::clone(client),
+            None => return Ok(()),
+        };
+
         let mut event = Event::new(&event_name, &user_id);
         
         // Add event properties
@@ -195,7 +211,12 @@ impl AnalyticsClient {
             
             self.track_event("session_ended", Some(properties)).await?;
         }
-        
+
+        // The app is likely quitting — push whatever is queued for Traction.
+        if let Some(traction) = &self.traction {
+            traction.flush().await;
+        }
+
         Ok(())
     }
 
