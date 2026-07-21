@@ -49,6 +49,16 @@ export class StorageService {
   }
 
   /**
+   * Match a just-saved meeting against Google Calendar and write attendee/title/meet-link
+   * metadata onto it. No-op (resolves without error) if Calendar isn't connected or no
+   * event matches the meeting's time window.
+   * @param meetingId - ID of the meeting to enrich
+   */
+  async syncCalendarMetadata(meetingId: string): Promise<void> {
+    await invoke('api_save_meeting_calendar_metadata', { meetingId });
+  }
+
+  /**
    * Get meeting details by ID
    * @param meetingId - ID of the meeting to fetch
    * @returns Promise with meeting details

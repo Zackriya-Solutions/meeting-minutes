@@ -315,6 +315,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `summary_language` - Optional BCP-47 tag (e.g. "en-GB") to force summary output language
 /// * `detected_transcript_language` - Optional detected transcript language BCP-47 tag
 /// * `cached_english` - Optional previously-generated English summary to skip pass 1 when translating
+/// * `meeting_metadata_block` - Optional pre-formatted `<meeting_metadata>` block (calendar title/attendees)
 ///
 /// # Returns
 /// Tuple of (final_summary_markdown, english_summary_markdown, number_of_chunks_processed)
@@ -340,6 +341,7 @@ pub async fn generate_meeting_summary(
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
+    meeting_metadata_block: Option<&str>,
 ) -> Result<(String, String, i64), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -485,6 +487,12 @@ pub async fn generate_meeting_summary(
         let mut final_user_prompt = format!(
             "<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n"
         );
+
+        if let Some(metadata_block) = meeting_metadata_block {
+            final_user_prompt.push('\n');
+            final_user_prompt.push_str(metadata_block);
+            final_user_prompt.push('\n');
+        }
 
         if !custom_prompt.is_empty() {
             final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");

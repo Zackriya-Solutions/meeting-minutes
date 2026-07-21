@@ -1,6 +1,6 @@
 "use client";
 
-import { Summary, SummaryResponse, Transcript } from '@/types';
+import { Summary, SummaryResponse, Transcript, CalendarAttendee } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
@@ -10,7 +10,7 @@ import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown } from 'lucide-react';
+import { Languages, ChevronDown, Users, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -27,6 +27,8 @@ interface SummaryPanelProps {
     id: string;
     title: string;
     created_at: string;
+    calendar_attendees?: string;
+    calendar_meet_link?: string;
   };
   meetingTitle: string;
   onTitleChange: (title: string) => void;
@@ -115,6 +117,15 @@ export function SummaryPanel({
   } | null>(null);
   activeMeetingIdRef.current = meeting.id;
   const { addRecent } = useRecentLanguages();
+
+  const calendarAttendees: CalendarAttendee[] = (() => {
+    if (!meeting.calendar_attendees) return [];
+    try {
+      return JSON.parse(meeting.calendar_attendees) as CalendarAttendee[];
+    } catch {
+      return [];
+    }
+  })();
 
   const effectiveLangLabel = summaryLang ? labelForCode(summaryLang) : 'Auto';
   const isLocalFallbackLanguage = summaryLangStorage === 'local_fallback';
@@ -263,6 +274,28 @@ export function SummaryPanel({
           onFinishEditing={onFinishEditTitle}
           onChange={onTitleChange}
         /> */}
+
+        {(calendarAttendees.length > 0 || meeting.calendar_meet_link) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 mb-2">
+            {calendarAttendees.length > 0 && (
+              <span className="flex items-center gap-1" title={calendarAttendees.map(a => a.name || a.email).join(', ')}>
+                <Users size={12} />
+                {calendarAttendees.length} attendee{calendarAttendees.length === 1 ? '' : 's'}
+              </span>
+            )}
+            {meeting.calendar_meet_link && (
+              <a
+                href={meeting.calendar_meet_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 hover:text-blue-600"
+              >
+                <Video size={12} />
+                Meet link
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (

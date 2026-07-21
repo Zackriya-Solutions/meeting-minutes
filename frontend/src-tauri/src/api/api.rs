@@ -123,6 +123,14 @@ pub struct MeetingDetails {
     pub created_at: String,
     pub updated_at: String,
     pub transcripts: Vec<MeetingTranscript>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_attendees: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_meet_link: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_end_time: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -148,6 +156,14 @@ pub struct MeetingMetadata {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_attendees: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_meet_link: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_end_time: Option<String>,
 }
 
 /// Paginated transcripts response with total count
@@ -828,6 +844,10 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 folder_path: meeting.folder_path,
+                calendar_attendees: meeting.calendar_attendees,
+                calendar_meet_link: meeting.calendar_meet_link,
+                calendar_start_time: meeting.calendar_start_time,
+                calendar_end_time: meeting.calendar_end_time,
             })
         }
         Ok(None) => {

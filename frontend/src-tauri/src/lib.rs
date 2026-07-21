@@ -38,6 +38,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod calendar;
 pub mod config;
 pub mod console_utils;
 pub mod database;
@@ -530,6 +531,10 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
+            calendar::commands::calendar_start_oauth,
+            calendar::commands::calendar_disconnect,
+            calendar::commands::calendar_get_connection_status,
+            calendar::commands::api_save_meeting_calendar_metadata,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,

@@ -265,6 +265,12 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
+          try {
+            await storageService.syncCalendarMetadata(meetingId);
+          } catch (error) {
+            console.warn('Failed to sync Google Calendar metadata for meeting:', error);
+          }
+
           let shouldDetectSummaryLanguage = false;
           try {
             shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));

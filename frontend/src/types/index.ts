@@ -86,12 +86,21 @@ export interface SummaryDataResponse {
 }
 
 // Pagination types for optimized transcript loading
+export interface CalendarAttendee {
+  name?: string;
+  email: string;
+}
+
 export interface MeetingMetadata {
   id: string;
   title: string;
   created_at: string;
   updated_at: string;
   folder_path?: string;
+  calendar_attendees?: string; // JSON-encoded CalendarAttendee[]
+  calendar_meet_link?: string;
+  calendar_start_time?: string;
+  calendar_end_time?: string;
 }
 
 export interface PaginatedTranscriptsResponse {

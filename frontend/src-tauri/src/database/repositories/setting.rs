@@ -345,4 +345,66 @@ impl SettingsRepository {
 
         Ok(())
     }
+
+    // ===== GOOGLE CALENDAR CONFIG METHODS =====
+
+    pub async fn get_google_calendar_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<crate::calendar::GoogleCalendarConfig>, sqlx::Error> {
+        use sqlx::Row;
+
+        let row = sqlx::query("SELECT googleCalendarConfig FROM settings WHERE id = '1' LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+
+        match row {
+            Some(record) => {
+                let config_json: Option<String> = record.get("googleCalendarConfig");
+                if let Some(json) = config_json {
+                    let config: crate::calendar::GoogleCalendarConfig =
+                        serde_json::from_str(&json).map_err(|e| {
+                            sqlx::Error::Protocol(
+                                format!("Invalid JSON in googleCalendarConfig: {}", e).into(),
+                            )
+                        })?;
+                    Ok(Some(config))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn save_google_calendar_config(
+        pool: &SqlitePool,
+        config: &crate::calendar::GoogleCalendarConfig,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let config_json = serde_json::to_string(config).map_err(|e| {
+            sqlx::Error::Protocol(format!("Failed to serialize calendar config: {}", e).into())
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, googleCalendarConfig)
+            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                googleCalendarConfig = excluded.googleCalendarConfig
+            "#,
+        )
+        .bind(config_json)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn clear_google_calendar_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query("UPDATE settings SET googleCalendarConfig = NULL WHERE id = '1'")
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
 }

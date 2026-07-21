@@ -62,7 +62,7 @@ impl MeetingsRepository {
 
         // Get meeting details
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path, calendar_event_id, calendar_attendees, calendar_meet_link, calendar_start_time, calendar_end_time FROM meetings WHERE id = ?")
                 .bind(meeting_id)
                 .fetch_optional(&mut *transaction)
                 .await?;
@@ -101,6 +101,10 @@ impl MeetingsRepository {
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 transcripts: meeting_transcripts,
+                calendar_attendees: meeting.calendar_attendees,
+                calendar_meet_link: meeting.calendar_meet_link,
+                calendar_start_time: meeting.calendar_start_time,
+                calendar_end_time: meeting.calendar_end_time,
             }))
         } else {
             transaction.rollback().await?;
@@ -120,12 +124,56 @@ impl MeetingsRepository {
         }
 
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path, calendar_event_id, calendar_attendees, calendar_meet_link, calendar_start_time, calendar_end_time FROM meetings WHERE id = ?")
                 .bind(meeting_id)
                 .fetch_optional(pool)
                 .await?;
 
         Ok(meeting)
+    }
+
+    /// Write calendar-derived metadata onto an existing meeting, matched by time window
+    /// against a Google Calendar event. Follows the same shape as `update_meeting_title`.
+    pub async fn update_meeting_calendar_metadata(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        calendar_event_id: &str,
+        attendees_json: &str,
+        meet_link: Option<&str>,
+        start_time: &str,
+        end_time: &str,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        let now = Utc::now().naive_utc();
+
+        let rows_affected = sqlx::query(
+            r#"
+            UPDATE meetings SET
+                calendar_event_id = ?,
+                calendar_attendees = ?,
+                calendar_meet_link = ?,
+                calendar_start_time = ?,
+                calendar_end_time = ?,
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(calendar_event_id)
+        .bind(attendees_json)
+        .bind(meet_link)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(now)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+
+        Ok(rows_affected.rows_affected() > 0)
     }
 
     /// Get meeting transcripts with pagination support
