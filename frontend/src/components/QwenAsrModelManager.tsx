@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { CheckCircle2, Download, FolderOpen, Languages, Loader2, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Download, FolderOpen, Loader2, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   QwenAsrAPI,
@@ -164,7 +164,7 @@ export function QwenAsrModelManager({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Languages className="h-6 w-6 shrink-0 text-blue-600" />
+            <span aria-hidden="true" className="shrink-0 text-2xl leading-none">🌐</span>
             <h3 className="text-sm font-semibold text-gray-900">Qwen3-ASR 0.6B Int8</h3>
             {selected && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
           </div>
