@@ -249,21 +249,21 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border-red-200 xl:px-4"
+          className="bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border-red-200 @[40rem]:px-4"
           onClick={() => {
             Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
           }}
           title="Stop summary generation"
         >
-          <Square className="xl:mr-2" size={18} fill="currentColor" />
-          <span className="hidden lg:inline xl:inline">Stop</span>
+          <Square className="@[40rem]:mr-2" size={18} fill="currentColor" />
+          <span className="hidden @[40rem]:inline">Stop</span>
         </Button>
       ) : (
         <Button
           variant="outline"
           size="sm"
-          className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+          className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 @[40rem]:px-4"
           onClick={() => {
             Analytics.trackButtonClick('generate_summary', 'meeting_details');
             checkOllamaModelsAndGenerate();
@@ -279,13 +279,13 @@ export function SummaryGeneratorButtonGroup({
         >
           {isCheckingModels || isModelConfigLoading ? (
             <>
-              <Loader2 className="animate-spin xl:mr-2" size={18} />
-              <span className="hidden xl:inline">Processing...</span>
+              <Loader2 className="animate-spin @[40rem]:mr-2" size={18} />
+              <span className="hidden @[40rem]:inline">Processing...</span>
             </>
           ) : (
             <>
-              <Sparkles className="xl:mr-2" size={18} />
-              <span className="hidden lg:inline xl:inline">{hasSummary ? 'Regenerate Summary' : 'Generate Summary'}</span>
+              <Sparkles className="@[40rem]:mr-2" size={18} />
+              <span className="hidden @[40rem]:inline">{hasSummary ? 'Regenerate' : 'Generate'}</span>
             </>
           )}
         </Button>
@@ -302,7 +302,7 @@ export function SummaryGeneratorButtonGroup({
             title="Summary Settings"
           >
             <Settings />
-            <span className="hidden lg:inline">AI Model</span>
+            <span className="hidden @[40rem]:inline">AI Model</span>
           </Button>
         </DialogTrigger>
         <DialogContent
@@ -334,7 +334,7 @@ export function SummaryGeneratorButtonGroup({
               title="Select summary template"
             >
               <FileText />
-              <span className="hidden lg:inline">Template</span>
+              <span className="hidden @[40rem]:inline">Template</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

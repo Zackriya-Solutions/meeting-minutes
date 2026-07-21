@@ -5,6 +5,7 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo } from 'react';
+import { cn } from '@/lib/utils';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -23,6 +24,7 @@ interface TranscriptPanelProps {
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+  className?: string;
 
   // Retranscription props
   meetingId?: string;
@@ -45,6 +47,7 @@ export function TranscriptPanel({
   totalCount,
   loadedCount,
   onLoadMore,
+  className,
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
@@ -65,7 +68,7 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
+    <div className={cn("flex h-full min-w-0 w-full bg-white flex-col relative @container", className)}>
       {/* Title area */}
       <div className="p-4 border-b border-gray-200">
         <TranscriptButtonGroup
