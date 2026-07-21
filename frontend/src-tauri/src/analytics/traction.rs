@@ -59,15 +59,22 @@ impl TractionSink {
             kick: Arc::new(Notify::new()),
         });
 
-        let worker = Arc::clone(&sink);
+        // Воркер держит только Weak (плюс клон Notify на время ожидания):
+        // когда disable_analytics дропает AnalyticsClient и с ним синк,
+        // upgrade() после пробуждения проваливается — воркер выходит, НЕ
+        // отправляя накопленную очередь (согласие уже отозвано), и не
+        // копится при повторных init_analytics.
+        let worker = Arc::downgrade(&sink);
+        let kick = Arc::clone(&sink.kick);
         tauri::async_runtime::spawn(async move {
             loop {
                 let timer = tokio::time::sleep(std::time::Duration::from_secs(FLUSH_INTERVAL_SECS));
                 tokio::select! {
                     _ = timer => {}
-                    _ = worker.kick.notified() => {}
+                    _ = kick.notified() => {}
                 }
-                worker.flush().await;
+                let Some(sink) = worker.upgrade() else { break };
+                sink.flush().await;
             }
         });
 
