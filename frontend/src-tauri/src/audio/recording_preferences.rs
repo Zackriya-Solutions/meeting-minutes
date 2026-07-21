@@ -124,6 +124,14 @@ fn persist_preferences_value(
     Ok(())
 }
 
+fn merge_recording_save_folder(
+    mut preferences: RecordingPreferences,
+    save_folder: PathBuf,
+) -> RecordingPreferences {
+    preferences.save_folder = save_folder;
+    preferences
+}
+
 /// Generate a unique filename for a recording
 pub fn generate_recording_filename(format: &str) -> String {
     let now = chrono::Utc::now();
@@ -243,6 +251,50 @@ pub async fn set_recording_preferences<R: Runtime>(
     save_recording_preferences(&app, &preferences)
         .await
         .map_err(|e| format!("Failed to save recording preferences: {}", e))
+}
+
+#[tauri::command]
+pub async fn set_recording_save_folder<R: Runtime>(
+    app: AppHandle<R>,
+    save_folder: String,
+) -> Result<RecordingPreferences, String> {
+    serialize_save_transaction(|| async {
+        let store = app
+            .store("recording_preferences.json")
+            .map_err(|e| anyhow::anyhow!("Failed to access store: {}", e))?;
+        let previous_value = store.get("preferences");
+        let latest_preferences = match previous_value.as_ref() {
+            Some(value) => serde_json::from_value::<RecordingPreferences>(value.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize preferences: {}", e))?,
+            None => RecordingPreferences::default(),
+        };
+        let preferences =
+            merge_recording_save_folder(latest_preferences, PathBuf::from(save_folder));
+
+        persist_preferences_value(
+            &preferences,
+            previous_value,
+            |value| match value {
+                Some(value) => store.set("preferences", value),
+                None => {
+                    store.delete("preferences");
+                }
+            },
+            || {
+                store
+                    .save()
+                    .map_err(|error| anyhow::anyhow!("Failed to save store to disk: {}", error))
+            },
+        )?;
+
+        if let Err(error) = app.emit("recording-preferences-updated", &preferences) {
+            warn!("Failed to emit recording preferences update: {}", error);
+        }
+
+        Ok(preferences)
+    })
+    .await
+    .map_err(|e| format!("Failed to save recording folder: {}", e))
 }
 
 #[tauri::command]
@@ -463,7 +515,10 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
 
 #[cfg(test)]
 mod persistence_tests {
-    use super::{persist_preferences_value, serialize_save_transaction, RecordingPreferences};
+    use super::{
+        merge_recording_save_folder, persist_preferences_value, serialize_save_transaction,
+        RecordingPreferences,
+    };
     use serde_json::{json, Value};
     use std::cell::{Cell, RefCell};
     use std::sync::{
@@ -471,6 +526,30 @@ mod persistence_tests {
         Arc,
     };
     use tokio::sync::{Mutex, Notify};
+
+    #[test]
+    fn folder_only_update_preserves_latest_preferences() {
+        let mut latest = RecordingPreferences::default();
+        latest.auto_save = false;
+        latest.file_format = "wav".to_string();
+        latest.preferred_mic_device = Some("Latest microphone".to_string());
+        latest.preferred_system_device = Some("Latest system audio".to_string());
+        let selected_folder = std::env::temp_dir().join("selected-recordings");
+
+        let updated = merge_recording_save_folder(latest, selected_folder.clone());
+
+        assert_eq!(updated.save_folder, selected_folder);
+        assert!(!updated.auto_save);
+        assert_eq!(updated.file_format, "wav");
+        assert_eq!(
+            updated.preferred_mic_device.as_deref(),
+            Some("Latest microphone")
+        );
+        assert_eq!(
+            updated.preferred_system_device.as_deref(),
+            Some("Latest system audio")
+        );
+    }
 
     #[test]
     fn invalid_directory_is_rejected_before_store_mutation() {
