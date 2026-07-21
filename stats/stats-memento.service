@@ -1,0 +1,31 @@
+# Traction stats module: Memento (port 9901, registry: GigaTool
+# traction/projects.json). Install:
+#   sudo cp stats-memento.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stats-memento
+[Unit]
+Description=Traction stats module: memento
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gigatool
+Group=gigatool
+WorkingDirectory=/srv/stats/memento/app
+Environment=STATS_PORT=9901
+Environment=STATS_DB=/srv/stats/memento/data/events.db
+# Секреты — только через drop-in: /etc/systemd/system/stats-memento.service.d/env.conf
+# (там STATS_INGEST_TOKEN, read-only POSTHOG_PERSONAL_API_KEY и POSTHOG_PROJECT_ID).
+# PostHog sync выключен, если один из двух POSTHOG_* параметров отсутствует.
+# EnvironmentFile переопределяет Environment.
+ExecStart=/srv/stats/memento/app/.venv/bin/python /srv/stats/memento/app/server.py
+Restart=always
+RestartSec=3
+# Изоляция соседей: один сбойный модуль не съедает хост (spec §3).
+MemoryMax=1G
+CPUQuota=50%
+TasksMax=64
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -20,6 +20,11 @@ const SENSITIVE_ANALYTICS_KEYS: &[&str] = &[
     "meeting_folder_path",
     "device_name",
     "user_agent",
+    // Raw failures can contain paths, titles, transcript fragments, or provider payloads.
+    "error",
+    "error_message",
+    // The anonymous distinct id already identifies the event envelope.
+    "user_id",
 ];
 
 fn sanitize_analytics_properties(mut properties: HashMap<String, String>) -> HashMap<String, String> {
@@ -80,6 +85,7 @@ pub struct AnalyticsClient {
     config: AnalyticsConfig,
     user_id: Arc<Mutex<Option<String>>>,
     current_session: Arc<Mutex<Option<UserSession>>>,
+    traction: Option<Arc<crate::analytics::traction::TractionSink>>,
 }
 
 impl AnalyticsClient {
@@ -90,22 +96,35 @@ impl AnalyticsClient {
             None
         };
 
+        // Traction sink shares the client's lifecycle, so disabling analytics
+        // (dropping the client) stops Traction events too. Гейт — только
+        // config.enabled: init_analytics всегда задаёт enabled и api_key
+        // вместе; если будущий вызов их разведёт, Traction останется привязан
+        // к согласию пользователя (enabled), а не к наличию PostHog-ключа.
+        let traction = if config.enabled {
+            crate::analytics::traction::TractionSink::new()
+        } else {
+            None
+        };
+
         Self {
             client,
             config,
             user_id: Arc::new(Mutex::new(None)),
             current_session: Arc::new(Mutex::new(None)),
+            traction,
         }
     }
 
     pub async fn identify(&self, user_id: String, properties: Option<HashMap<String, String>>) -> Result<(), String> {
+        // Store user ID for future events (Traction needs it even when the
+        // PostHog client is absent)
+        *self.user_id.lock().await = Some(user_id.clone());
+
         let client = match &self.client {
             Some(client) => Arc::clone(client),
             None => return Ok(()),
         };
-
-        // Store user ID for future events
-        *self.user_id.lock().await = Some(user_id.clone());
 
         let properties = sanitize_analytics_properties(properties.unwrap_or_default());
         
@@ -126,11 +145,6 @@ impl AnalyticsClient {
     }
 
     pub async fn track_event(&self, event_name: &str, properties: Option<HashMap<String, String>>) -> Result<(), String> {
-        let client = match &self.client {
-            Some(client) => Arc::clone(client),
-            None => return Ok(()),
-        };
-
         let user_id = match self.user_id.lock().await.clone() {
             Some(id) => id,
             None => {
@@ -143,15 +157,32 @@ impl AnalyticsClient {
         let event_name = event_name.to_string();
         let mut properties = sanitize_analytics_properties(properties.unwrap_or_default());
 
+        // Shared across PostHog and Traction for retry idempotency and deduplication.
+        properties.insert("event_id".to_string(), Uuid::new_v4().to_string());
+
         // Add app version to all events
         properties.insert("app_version".to_string(), env!("CARGO_PKG_VERSION").to_string());
+        properties.insert(
+            "build_profile".to_string(),
+            if cfg!(debug_assertions) { "debug" } else { "release" }.to_string(),
+        );
 
         // Add session information to all events
         if let Some(session) = self.current_session.lock().await.as_ref() {
             properties.insert("session_id".to_string(), session.session_id.clone());
             properties.insert("session_duration".to_string(), session.duration_seconds().to_string());
         }
-        
+
+        // Mirror every event to the Traction stats module (batched)
+        if let Some(traction) = &self.traction {
+            traction.track(&user_id, &event_name, properties.clone()).await;
+        }
+
+        let client = match &self.client {
+            Some(client) => Arc::clone(client),
+            None => return Ok(()),
+        };
+
         let mut event = Event::new(&event_name, &user_id);
         
         // Add event properties
@@ -195,7 +226,12 @@ impl AnalyticsClient {
             
             self.track_event("session_ended", Some(properties)).await?;
         }
-        
+
+        // The app is likely quitting — push whatever is queued for Traction.
+        if let Some(traction) = &self.traction {
+            traction.flush().await;
+        }
+
         Ok(())
     }
 
@@ -477,6 +513,9 @@ mod tests {
         properties.insert("meeting_folder_path".to_string(), "C:\\meetings\\private".to_string());
         properties.insert("device_name".to_string(), "Jane's AirPods".to_string());
         properties.insert("user_agent".to_string(), "Mozilla/5.0".to_string());
+        properties.insert("error".to_string(), "/Users/alice/private meeting".to_string());
+        properties.insert("error_message".to_string(), "transcript fragment".to_string());
+        properties.insert("user_id".to_string(), "duplicate-device-id".to_string());
         properties.insert("meeting_id".to_string(), "meeting-123".to_string());
         properties.insert("duration_seconds".to_string(), "125".to_string());
         properties.insert("segments_count".to_string(), "42".to_string());
@@ -499,6 +538,9 @@ mod tests {
             "meeting_folder_path",
             "device_name",
             "user_agent",
+            "error",
+            "error_message",
+            "user_id",
         ] {
             assert!(!sanitized.contains_key(key), "sensitive key remained: {}", key);
         }
