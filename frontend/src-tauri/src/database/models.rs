@@ -106,6 +106,9 @@ pub struct Setting {
     #[sqlx(rename = "googleCalendarConfig")]
     #[serde(rename = "googleCalendarConfig")]
     pub google_calendar_config: Option<String>,
+    #[sqlx(rename = "autoDetectMeetEnabled")]
+    #[serde(rename = "autoDetectMeetEnabled")]
+    pub auto_detect_meet_enabled: Option<i64>,
 }
 
 impl Setting {

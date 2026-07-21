@@ -407,4 +407,32 @@ impl SettingsRepository {
             .await?;
         Ok(())
     }
+
+    pub async fn get_auto_detect_meet_enabled(
+        pool: &SqlitePool,
+    ) -> std::result::Result<bool, sqlx::Error> {
+        let value: Option<i64> =
+            sqlx::query_scalar("SELECT autoDetectMeetEnabled FROM settings WHERE id = '1' LIMIT 1")
+                .fetch_optional(pool)
+                .await?;
+        Ok(value.unwrap_or(0) != 0)
+    }
+
+    pub async fn set_auto_detect_meet_enabled(
+        pool: &SqlitePool,
+        enabled: bool,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, autoDetectMeetEnabled)
+            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                autoDetectMeetEnabled = excluded.autoDetectMeetEnabled
+            "#,
+        )
+        .bind(enabled as i64)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
 }

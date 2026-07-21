@@ -42,6 +42,7 @@ pub mod calendar;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod meet_detection;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -426,6 +427,11 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
+            // Start the Google Meet auto-detect poller (macOS only; no-op elsewhere).
+            // Gated behind the `auto_detect_meet_enabled` setting, checked on every poll,
+            // so toggling it in Settings takes effect without restarting the app.
+            meet_detection::spawn_meet_detection_task(_app.handle().clone());
+
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
             let app_for_notif = _app.handle().clone();
@@ -535,6 +541,8 @@ pub fn run() {
             calendar::commands::calendar_disconnect,
             calendar::commands::calendar_get_connection_status,
             calendar::commands::api_save_meeting_calendar_metadata,
+            meet_detection::commands::calendar_toggle_auto_detect,
+            meet_detection::commands::calendar_get_auto_detect_enabled,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,
@@ -723,6 +731,8 @@ pub fn run() {
             audio::permissions::check_screen_recording_permission_command,
             audio::permissions::request_screen_recording_permission_command,
             audio::permissions::trigger_system_audio_permission_command,
+            audio::permissions::check_window_title_read_permission_command,
+            audio::permissions::request_window_title_read_permission_command,
             // Database import commands
             database::commands::check_first_launch,
             database::commands::select_legacy_database_path,
