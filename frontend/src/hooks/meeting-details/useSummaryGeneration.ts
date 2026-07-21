@@ -274,12 +274,22 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            setAiSummary({
+              markdown: pollingResult.data.markdown,
+              ...(pollingResult.data.reasoning_stripped
+                ? {
+                    reasoning_stripped: true,
+                    reasoning: pollingResult.data.reasoning,
+                  }
+                : {}),
+            } as any);
             setSummaryStatus('completed');
 
             // Show success toast
             toast.success('Summary generated successfully!', {
-              description: 'Your meeting summary is ready',
+              description: pollingResult.data.reasoning_stripped
+                ? 'Your meeting summary is ready. Model reasoning was filtered out of the notes.'
+                : 'Your meeting summary is ready',
               duration: 4000,
             });
 

@@ -27,6 +27,44 @@ pub struct ChatRequest {
     pub top_p: Option<f32>,
 }
 
+/// Build OpenAI-compat JSON body.
+///
+/// Ollama thinking/reasoning stays enabled (no `reasoning_effort: none`) so
+/// capable models can reason; Meetily strips reasoning from the saved summary
+/// and surfaces it to the UI separately.
+pub fn build_openai_compat_chat_body(
+    provider: &LLMProvider,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+) -> serde_json::Value {
+    let (max_tokens_val, temperature_val, top_p_val) = if *provider == LLMProvider::CustomOpenAI {
+        (max_tokens, temperature, top_p)
+    } else {
+        (None, None, None)
+    };
+
+    serde_json::json!(ChatRequest {
+        model: model_name.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_prompt.to_string(),
+            }
+        ],
+        max_tokens: max_tokens_val,
+        temperature: temperature_val,
+        top_p: top_p_val,
+    })
+}
+
 // Generic structure for OpenAI-compatible API chat responses
 #[derive(Deserialize, Debug)]
 pub struct ChatResponse {
@@ -41,6 +79,9 @@ pub struct Choice {
 #[derive(Deserialize, Debug)]
 pub struct MessageContent {
     pub content: String,
+    /// Ollama thinking models may return reasoning separately from content.
+    #[serde(default)]
+    pub reasoning: Option<String>,
 }
 
 // Claude-specific request structure
@@ -218,29 +259,15 @@ pub async fn generate_summary(
 
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
-        // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
-
-        serde_json::json!(ChatRequest {
-            model: model_name.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                }
-            ],
-            max_tokens: max_tokens_val,
-            temperature: temperature_val,
-            top_p: top_p_val,
-        })
+        build_openai_compat_chat_body(
+            provider,
+            model_name,
+            system_prompt,
+            user_prompt,
+            max_tokens,
+            temperature,
+            top_p,
+        )
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
@@ -321,14 +348,57 @@ pub async fn generate_summary(
 
         info!("🐞 LLM Response received from {}", provider_name(provider));
 
-        let content = chat_response
+        let message = &chat_response
             .choices
             .get(0)
             .ok_or("No content in LLM response")?
-            .message
-            .content
-            .trim();
-        Ok(content.to_string())
+            .message;
+        let content = message.content.trim();
+        // Fold separate reasoning into <think> so existing cleaners can extract it
+        // and the UI can be notified that reasoning was present.
+        if let Some(reasoning) = message
+            .reasoning
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Ok(format!("<think>\n{reasoning}\n</think>\n{content}"))
+        } else {
+            Ok(content.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ollama_body_leaves_reasoning_enabled() {
+        let body = build_openai_compat_chat_body(
+            &LLMProvider::Ollama,
+            "qwen3.5:9b",
+            "sys",
+            "user",
+            None,
+            None,
+            None,
+        );
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn openai_body_omits_reasoning_effort() {
+        let body = build_openai_compat_chat_body(
+            &LLMProvider::OpenAI,
+            "gpt-4o",
+            "sys",
+            "user",
+            None,
+            None,
+            None,
+        );
+        assert!(body.get("reasoning_effort").is_none());
     }
 }
 

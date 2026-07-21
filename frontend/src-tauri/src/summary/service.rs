@@ -139,15 +139,29 @@ fn build_summary_result_json(
     english_markdown: &str,
     source: SummaryCacheSource,
     output_language: Option<&str>,
+    stripped_reasoning: Option<&str>,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let reasoning = stripped_reasoning
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let reasoning_stripped = reasoning.is_some();
+
+    let mut value = serde_json::json!({
         "markdown": strip_title_if_present(final_markdown),
         ENGLISH_CACHE_FIELD: EnglishSummaryCache {
             markdown: english_markdown.to_string(),
             source,
             output_language: normalise_summary_language_for_cache(output_language),
         },
-    })
+        "reasoning_stripped": reasoning_stripped,
+    });
+
+    if let Some(reasoning) = reasoning {
+        value["reasoning"] = serde_json::Value::String(reasoning);
+    }
+
+    value
 }
 
 /// Parses a `summary_processes.result` JSON blob and extracts a cached English
@@ -534,7 +548,7 @@ impl SummaryService {
         Self::cleanup_cancellation_token(&meeting_id);
 
         match result {
-            Ok((final_markdown, english_markdown, num_chunks)) => {
+            Ok((final_markdown, english_markdown, num_chunks, stripped_reasoning)) => {
                 info!(
                     "✓ Successfully processed {} chunks for meeting_id: {}. Duration: {:.2}s",
                     num_chunks, meeting_id, duration
@@ -559,6 +573,7 @@ impl SummaryService {
                     &english_markdown,
                     cache_source,
                     summary_language.as_deref(),
+                    stripped_reasoning.as_deref(),
                 );
 
                 // Update database with completed status
@@ -764,6 +779,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
+            None,
         )
         .to_string();
 
@@ -781,6 +797,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
+            None,
         )
         .to_string();
 
@@ -799,6 +816,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source,
             Some("fr"),
+            None,
         )
         .to_string();
 
@@ -919,6 +937,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
+            None,
         )
         .to_string();
 
@@ -941,6 +960,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
+            None,
         )
         .to_string();
 
@@ -962,6 +982,7 @@ mod tests {
             "# English Title\n## Decisions\nDone",
             sample_cache_source(),
             Some("fr"),
+            None,
         );
 
         assert_eq!(result["markdown"], "## Decisions\nDone");
