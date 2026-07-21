@@ -8,7 +8,8 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 const VAD_SAMPLE_RATE: usize = 16_000;
-pub(crate) const MIN_TRANSCRIPTION_SEGMENT_SAMPLES: usize = 800;
+// Qwen rejects inputs shorter than 100 ms; align VAD tails with that boundary.
+pub(crate) const MIN_TRANSCRIPTION_SEGMENT_SAMPLES: usize = 1_600;
 
 /// Represents a complete speech segment detected by VAD
 #[derive(Debug, Clone)]
