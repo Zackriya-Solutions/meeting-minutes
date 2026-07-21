@@ -1004,7 +1004,8 @@ pub async fn get_recording_state() -> serde_json::Value {
             "active_duration": manager.get_active_recording_duration(),
             "total_pause_duration": manager.get_total_pause_duration(),
             "current_pause_duration": manager.get_current_pause_duration(),
-            "chunks_processed": manager.get_stats().chunks_processed
+            "chunks_processed": manager.get_stats().chunks_processed,
+            "vad_segments_sent": manager.get_stats().vad_segments_sent
         })
     } else {
         serde_json::json!({

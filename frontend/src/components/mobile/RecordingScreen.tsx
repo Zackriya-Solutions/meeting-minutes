@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VmSegment } from './types';
 import {
-  getRecordingChunksProcessed,
+  getRecordingDiagnostics,
   onTranscriptUpdate,
   pauseRecording,
   resumeRecording,
@@ -43,11 +43,13 @@ export function RecordingScreen({
   const [segments, setSegments] = useState<VmSegment[]>([]);
   const [levels, setLevels] = useState<number[]>(Array(LEVEL_BARS).fill(0.12));
   const [autoScroll, setAutoScroll] = useState(true);
-  // TEMP DIAGNOSTIC: surfaces RecordingState.stats.chunks_processed so we can
-  // tell "mic isn't capturing anything" apart from "capture works but VAD /
-  // transcription / save isn't" without device log access. Remove once the
+  // TEMP DIAGNOSTIC: surfaces raw-capture vs VAD-segment counters so we can
+  // tell "mic isn't capturing anything" apart from "capture works but VAD
+  // never detects speech" apart from "VAD sends segments but Whisper
+  // produces nothing usable" without device log access. Remove once the
   // no-transcript / no-saved-meeting issue is confirmed fixed.
   const [chunksProcessed, setChunksProcessed] = useState<number | null>(null);
+  const [vadSegmentsSent, setVadSegmentsSent] = useState<number | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(false);
@@ -106,8 +108,11 @@ export function RecordingScreen({
       });
 
       chunksPoll = setInterval(async () => {
-        const n = await getRecordingChunksProcessed();
-        if (!cancelled) setChunksProcessed(n);
+        const diag = await getRecordingDiagnostics();
+        if (!cancelled) {
+          setChunksProcessed(diag.chunksProcessed);
+          setVadSegmentsSent(diag.vadSegmentsSent);
+        }
       }, 1500);
     })();
 
@@ -222,7 +227,10 @@ export function RecordingScreen({
               <p className="muted fs13" style={{ padding: '0 10px' }}>
                 Listening…
                 {chunksProcessed !== null && (
-                  <span className="mono"> (debug: {chunksProcessed} audio chunks captured)</span>
+                  <span className="mono">
+                    {' '}
+                    (debug: {chunksProcessed} audio chunks, {vadSegmentsSent ?? 0} VAD segments sent)
+                  </span>
                 )}
               </p>
             )}

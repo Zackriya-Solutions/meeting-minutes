@@ -250,19 +250,31 @@ export async function startRecording(): Promise<void> {
   }
 }
 
+export interface RecordingDiagnostics {
+  chunksProcessed: number;
+  vadSegmentsSent: number;
+}
+
 /**
- * Diagnostic: how many audio chunks the native pipeline has actually
- * processed so far (RecordingState.stats.chunks_processed). Used to tell
- * apart "the mic isn't capturing anything" from "capture works but nothing
- * downstream (VAD/transcription/save) is happening" while investigating a
- * recording that produces no transcript and no saved meeting.
+ * Diagnostic: how much raw audio the native pipeline has captured
+ * (chunks_processed) versus how many VAD-detected speech segments actually
+ * made it to the transcription worker (vad_segments_sent). Used to tell
+ * apart "the mic isn't capturing anything" (both stuck at 0), "capture works
+ * but VAD never detects speech" (chunks climb, segments stuck at 0), and
+ * "VAD sends segments but Whisper produces nothing usable" (both climb, no
+ * live transcript) while investigating a recording with no transcript.
  */
-export async function getRecordingChunksProcessed(): Promise<number> {
+export async function getRecordingDiagnostics(): Promise<RecordingDiagnostics> {
   try {
-    const state = await invoke<{ chunks_processed?: number }>('get_recording_state');
-    return state?.chunks_processed ?? 0;
+    const state = await invoke<{ chunks_processed?: number; vad_segments_sent?: number }>(
+      'get_recording_state'
+    );
+    return {
+      chunksProcessed: state?.chunks_processed ?? 0,
+      vadSegmentsSent: state?.vad_segments_sent ?? 0,
+    };
   } catch {
-    return 0;
+    return { chunksProcessed: 0, vadSegmentsSent: 0 };
   }
 }
 

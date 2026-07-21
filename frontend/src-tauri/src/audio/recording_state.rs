@@ -89,6 +89,13 @@ pub struct RecordingStats {
     pub chunks_processed: u64,
     pub total_duration: f64,
     pub last_activity: Option<Instant>,
+    /// How many VAD-detected speech segments have been handed to the
+    /// transcription worker so far. Diagnostic counter, alongside
+    /// chunks_processed: distinguishes "raw mic capture isn't flowing" from
+    /// "capture works but VAD never detects speech" from "VAD detects speech
+    /// but Whisper produces nothing usable" (chunks_processed climbing,
+    /// vad_segments_sent stuck at 0, no live transcript).
+    pub vad_segments_sent: u64,
 }
 
 /// Unified state management for audio recording
@@ -282,6 +289,12 @@ impl RecordingState {
         }
     }
 
+    pub fn record_vad_segment_sent(&self) {
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.vad_segments_sent += 1;
+        }
+    }
+
     // Error handling
     pub fn set_error_callback<F>(&self, callback: F)
     where
@@ -444,6 +457,7 @@ impl Clone for RecordingStats {
             chunks_processed: self.chunks_processed,
             total_duration: self.total_duration,
             last_activity: self.last_activity,
+            vad_segments_sent: self.vad_segments_sent,
         }
     }
 }
