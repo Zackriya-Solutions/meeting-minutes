@@ -51,6 +51,17 @@ jobs:
           echo "Application version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+          # tauri.conf.json's version is a static "0.4.0" that never changes
+          # between test builds, making artifacts/APKs from different commits
+          # indistinguishable by filename alone. Combine the CI run number
+          # (monotonic, human-readable) with the short commit SHA (unambiguous)
+          # into a build id used for the APK filename, the artifact name, and
+          # (via NEXT_PUBLIC_BUILD_ID below) the in-app version display.
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          BUILD_ID="${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          echo "Build id: $BUILD_ID"
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -135,6 +146,8 @@ jobs:
 
       - name: Build Android APK (release, arm64)
         working-directory: frontend
+        env:
+          NEXT_PUBLIC_BUILD_ID: ${{ steps.get-version.outputs.build_id }}
         run: pnpm tauri android build --apk --target aarch64
 
       - name: Sign APK
@@ -154,6 +167,7 @@ jobs:
           echo "Using build-tools: $BUILD_TOOLS"
 
           VERSION="${{ steps.get-version.outputs.version }}"
+          BUILD_ID="${{ steps.get-version.outputs.build_id }}"
           OUT_DIR="$PWD/android-artifacts"
           mkdir -p "$OUT_DIR"
 
@@ -177,7 +191,7 @@ jobs:
             SUFFIX="debug-signed"
           fi
 
-          APK_OUT="$OUT_DIR/meetily_${VERSION}_arm64_${SUFFIX}.apk"
+          APK_OUT="$OUT_DIR/meetily_${VERSION}-${BUILD_ID}_arm64_${SUFFIX}.apk"
           "$BUILD_TOOLS/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/aligned.apk
           "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-pass "pass:$KS_PASS" \
             --ks-key-alias "$KEY_ALIAS" --out "$APK_OUT" /tmp/aligned.apk
@@ -194,6 +208,6 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-android-arm64-${{ steps.get-version.outputs.version }}
+          name: meetily-android-arm64-${{ steps.get-version.outputs.version }}-${{ steps.get-version.outputs.build_id }}
           path: ${{ steps.sign-apk.outputs.apk-path }}
           retention-days: 14

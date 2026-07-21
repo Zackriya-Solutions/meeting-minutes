@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import type { VmAccent, VmModel, VmProvider, VmTheme } from './types';
 import { VM_ACCENTS, VM_PROVIDER_NAMES } from './types';
 import {
@@ -9,6 +10,11 @@ import {
   setLanguagePreference,
   VmModelConfig,
 } from './tauriBridge';
+
+// Baked in at CI build time (see .github/workflows/build-android.yml) so
+// test builds installed side-by-side can be told apart; empty for local dev
+// builds where this env var isn't set.
+const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID || '';
 
 const LANGUAGES = ['English (auto-detect)', 'English', 'Spanish', 'French'];
 const LS_LANGUAGE = 'vm-language';
@@ -61,6 +67,7 @@ export function SettingsScreen({
   const [apiKey, setApiKey] = useState('');
   const [notify, setNotify] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [appVersion, setAppVersion] = useState('');
 
   useEffect(() => {
     try {
@@ -70,6 +77,7 @@ export function SettingsScreen({
     } catch {
       /* ignore */
     }
+    getVersion().then(setAppVersion).catch(() => {});
     getModelConfig().then((c) => {
       if (!c) return;
       setConfig(c);
@@ -266,6 +274,10 @@ export function SettingsScreen({
         <div className="col ac" style={{ padding: '24px 0 10px' }}>
           <span className="muted fs12">Meetily mobile · open source</span>
           <span className="muted fs12">Your meetings never leave this device</span>
+          <span className="muted mono fs11" style={{ marginTop: 6 }}>
+            {appVersion && `v${appVersion}`}
+            {BUILD_ID && ` · build ${BUILD_ID}`}
+          </span>
         </div>
       </div>
     </div>
