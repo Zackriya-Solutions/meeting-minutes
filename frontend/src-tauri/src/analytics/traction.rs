@@ -16,6 +16,9 @@ const PROD_INGEST_URL: &str = "https://stats.multitool.works/p/memento/events";
 const DEV_INGEST_URL: &str = "http://127.0.0.1:9901/events";
 // Static per-project token: spam protection at the ingest edge, not a secret
 // capable of reading anything back (the dashboard sits behind Basic Auth).
+// Release pipelines can rotate it without touching source by exporting
+// MEMENTO_STATS_INGEST_TOKEN at build time (see `new()`); the committed
+// default keeps local release builds working.
 const PROD_INGEST_TOKEN: &str = "beb4c8ebb4c216000a536e33584571680bbad34b4987a07b";
 
 const FLUSH_INTERVAL_SECS: u64 = 30;
@@ -44,8 +47,17 @@ impl TractionSink {
         let endpoint = std::env::var("MEMENTO_STATS_URL").unwrap_or_else(|_| {
             if cfg!(debug_assertions) { DEV_INGEST_URL } else { PROD_INGEST_URL }.to_string()
         });
+        // Токен: рантайм-env (отладка) → компайл-тайм env (CI/релизный
+        // пайплайн) → зашитый дефолт. Dev-сборки ходят в локальный модуль
+        // без токена.
         let token = std::env::var("MEMENTO_STATS_INGEST_TOKEN").unwrap_or_else(|_| {
-            if cfg!(debug_assertions) { String::new() } else { PROD_INGEST_TOKEN.to_string() }
+            if cfg!(debug_assertions) {
+                String::new()
+            } else {
+                option_env!("MEMENTO_STATS_INGEST_TOKEN")
+                    .unwrap_or(PROD_INGEST_TOKEN)
+                    .to_string()
+            }
         });
 
         let sink = Arc::new(Self {

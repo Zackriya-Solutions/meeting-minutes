@@ -92,7 +92,10 @@ impl AnalyticsClient {
         };
 
         // Traction sink shares the client's lifecycle, so disabling analytics
-        // (dropping the client) stops Traction events too.
+        // (dropping the client) stops Traction events too. Гейт — только
+        // config.enabled: init_analytics всегда задаёт enabled и api_key
+        // вместе; если будущий вызов их разведёт, Traction останется привязан
+        // к согласию пользователя (enabled), а не к наличию PostHog-ключа.
         let traction = if config.enabled {
             Some(crate::analytics::traction::TractionSink::new())
         } else {
