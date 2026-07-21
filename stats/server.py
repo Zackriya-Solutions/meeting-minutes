@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 import time
@@ -106,7 +107,10 @@ def _is_error(name: str, properties: dict[str, str]) -> bool:
         or name.endswith("_error")
         or name.endswith(".failed")
         or (name == "meeting_ended" and _true(properties.get("had_fatal_error")))
-        or (name == "summary_generation_completed" and not _true(properties.get("success")))
+        or (
+            name in {"summary_generation_completed", "import_audio_completed"}
+            and not _successful(name, properties)
+        )
     )
 
 
@@ -154,7 +158,8 @@ async def health() -> dict[str, Any]:
 
 @app.post("/events")
 async def ingest(request: Request) -> JSONResponse:
-    if INGEST_TOKEN and request.headers.get("x-ingest-token") != INGEST_TOKEN:
+    supplied_token = request.headers.get("x-ingest-token", "")
+    if INGEST_TOKEN and not hmac.compare_digest(supplied_token, INGEST_TOKEN):
         return JSONResponse({"error": "bad token"}, status_code=401)
     try:
         content_length = int(request.headers.get("content-length") or 0)
@@ -181,14 +186,37 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
     window_days, since, label = _window(days)
     excluded = excluded_device_ids()
     clause, params = exclusion_clause(excluded)
+    today = int(time.time() // DAY)
+    # Retention needs at most the latest 90 UTC days; longer requested windows
+    # still receive their complete selected history.
+    history_since = min(since, (today - 90) * DAY)
     rows = _db.execute(
         "SELECT ts,device_id,name,properties,source FROM events"
-        " WHERE device_id != ''" + clause + " ORDER BY ts",
-        params,
+        " WHERE ts >= ? AND device_id != ''" + clause + " ORDER BY ts",
+        [history_since, *params],
     ).fetchall()
 
-    today = int(time.time() // DAY)
-    first_seen: dict[str, int] = {}
+    coverage = _db.execute(
+        "SELECT COUNT(DISTINCT device_id),MIN(ts),MAX(ts) FROM events"
+        " WHERE device_id != ''" + clause,
+        params,
+    ).fetchone()
+    value_names = sorted(VALUE_EVENTS)
+    value_placeholders = ",".join("?" for _ in value_names)
+    first_value_rows = _db.execute(
+        "SELECT device_id,MIN(ts) FROM events WHERE device_id != ''"
+        + clause
+        + f" AND name IN ({value_placeholders})"
+        + " AND (name != 'import_audio_completed'"
+        + " OR lower(COALESCE(json_extract(properties,'$.success'),'true')) = 'true')"
+        + " GROUP BY device_id",
+        [*params, *value_names],
+    ).fetchall()
+    first_value_days = {
+        device: int(first_value_ts // DAY)
+        for device, first_value_ts in first_value_rows
+    }
+
     active_days: dict[str, set[int]] = defaultdict(set)
     value_days: dict[str, set[int]] = defaultdict(set)
     observed: set[str] = set()
@@ -208,13 +236,12 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
     counters: Counter[str] = Counter()
     captured_seconds = 0.0
     invalid_durations = 0
-    first_ts = rows[0][0] if rows else None
-    last_ts = rows[-1][0] if rows else None
+    first_ts = coverage[1]
+    last_ts = coverage[2]
 
     for ts, device, name, raw_properties, source in rows:
         properties = _props(raw_properties)
         day = int(ts // DAY)
-        first_seen[device] = min(day, first_seen.get(device, day))
         active_days[device].add(day)
         if _is_value(name, properties):
             value_days[device].add(day)
@@ -277,9 +304,9 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
     cohort_sizes: dict[str, int] = {}
     for horizon in horizons:
         mature = [
-            (device, min(days_set), days_set)
-            for device, days_set in value_days.items()
-            if min(days_set) >= today - 90 and min(days_set) + horizon <= today
+            (device, first_day, value_days.get(device, set()))
+            for device, first_day in first_value_days.items()
+            if first_day >= today - 90 and first_day + horizon <= today
         ]
         returned = sum(
             any(first_day < day <= first_day + horizon for day in days_set)
@@ -303,7 +330,8 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
     captured = counters["recordings"] + counters["imports"]
     window_start_day = int(since // DAY)
     new_value_devices = sum(
-        min(value_days[device]) >= window_start_day for device in value_devices
+        first_value_days.get(device, today + 1) >= window_start_day
+        for device in value_devices
     )
     daily_out = []
     for day in range(today - max(1, int(round(window_days))) + 1, today + 1):
@@ -329,7 +357,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
         "identity": {
             "unit": "opted-in anonymous device",
             "observed_devices": len(observed),
-            "total_seen_devices": len(active_days),
+            "total_seen_devices": coverage[0],
             "excluded_internal_devices": len(excluded),
         },
         "growth": {

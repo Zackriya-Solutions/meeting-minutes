@@ -115,6 +115,23 @@ class StatsModuleTests(unittest.TestCase):
         self.assertIn("errors", payload)
         self.assertEqual(response.headers["cache-control"], "no-store")
 
+    def test_summary_without_success_is_not_also_an_error(self) -> None:
+        insert_events(
+            server._db,
+            [{
+                "ts": time.time() - server.DAY,
+                "device_id": "summary-device",
+                "name": "summary_generation_completed",
+                "properties": {"event_id": "summary-without-success"},
+            }],
+        )
+
+        product = server.compute_product(7)
+
+        self.assertEqual(product["usage"]["successful_summaries"], 1)
+        self.assertEqual(product["quality"]["summary_attempts"], 1)
+        self.assertEqual(product["quality"]["errors"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
