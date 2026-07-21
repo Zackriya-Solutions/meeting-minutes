@@ -52,11 +52,14 @@ cd stats
 python3 -m venv .venv
 .venv/bin/pip install fastapi uvicorn
 .venv/bin/python -m unittest -v test_server.py
-.venv/bin/python server.py                 # http://127.0.0.1:9901
+STATS_ALLOW_UNAUTHENTICATED_INGEST=1 .venv/bin/python server.py
+                                            # http://127.0.0.1:9901
 ```
 
 Debug desktop builds send directly to `http://127.0.0.1:9901/events` without a
-token. Release builds require `MEMENTO_STATS_INGEST_TOKEN` in the build
+token, so local server ingest must be enabled explicitly as shown above.
+Without `STATS_INGEST_TOKEN` or that development-only flag, `POST /events`
+fails closed with 503. Release builds require `MEMENTO_STATS_INGEST_TOKEN` in the build
 environment; there is intentionally no committed fallback. Rotate the
 currently exposed server token before enabling the next release. The ignored
 Rust e2e test can be run while the server is up:

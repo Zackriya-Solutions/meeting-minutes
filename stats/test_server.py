@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -116,6 +117,11 @@ class StatsModuleTests(unittest.TestCase):
         self.assertIn("events", payload)
         self.assertIn("errors", payload)
         self.assertEqual(response.headers["cache-control"], "no-store")
+
+    def test_ingest_fails_closed_without_server_configuration(self) -> None:
+        response = asyncio.run(server.ingest(None))
+
+        self.assertEqual(response.status_code, 503)
 
     def test_summary_without_success_is_not_also_an_error(self) -> None:
         insert_events(

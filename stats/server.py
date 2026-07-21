@@ -24,6 +24,9 @@ HERE = Path(__file__).resolve().parent
 PORT = int(os.environ.get("STATS_PORT", "9901"))
 DB_PATH = Path(os.environ.get("STATS_DB", HERE / "data" / "events.db"))
 INGEST_TOKEN = os.environ.get("STATS_INGEST_TOKEN", "")
+ALLOW_UNAUTHENTICATED_INGEST = (
+    os.environ.get("STATS_ALLOW_UNAUTHENTICATED_INGEST", "") == "1"
+)
 VERSION_FILE = HERE / "VERSION"
 VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
 MAX_BODY_BYTES = 1_000_000
@@ -41,6 +44,7 @@ VALUE_EVENTS = {
 }
 CAPTURE_STARTED = {"recording_started", "import_audio_started"}
 COPY_EVENTS = {"summary_copied", "transcript_copied"}
+SUCCESS_PROPERTY_EVENTS = {"import_audio_completed", "summary_generation_completed"}
 
 _db = connect(DB_PATH)
 
@@ -92,7 +96,7 @@ def _true(value: Any) -> bool:
 
 
 def _successful(name: str, properties: dict[str, str]) -> bool:
-    return name not in {"import_audio_completed", "summary_generation_completed"} or _true(
+    return name not in SUCCESS_PROPERTY_EVENTS or _true(
         properties.get("success", "true")
     )
 
@@ -156,6 +160,8 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "version": VERSION,
+        "ingest_enabled": bool(INGEST_TOKEN or ALLOW_UNAUTHENTICATED_INGEST),
+        "ingest_authenticated": bool(INGEST_TOKEN),
         "posthog_sync": bool(os.environ.get("POSTHOG_PERSONAL_API_KEY")),
         "posthog_backfill_complete": not bool(page_state),
         "posthog_cursor": _iso(float(state[0])) if state else None,
@@ -165,6 +171,8 @@ async def health() -> dict[str, Any]:
 
 @app.post("/events")
 async def ingest(request: Request) -> JSONResponse:
+    if not INGEST_TOKEN and not ALLOW_UNAUTHENTICATED_INGEST:
+        return JSONResponse({"error": "ingest disabled"}, status_code=503)
     supplied_token = request.headers.get("x-ingest-token", "")
     if INGEST_TOKEN and not hmac.compare_digest(supplied_token, INGEST_TOKEN):
         return JSONResponse({"error": "bad token"}, status_code=401)
@@ -209,15 +217,22 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
         params,
     ).fetchone()
     value_names = sorted(VALUE_EVENTS)
+    success_value_names = sorted(VALUE_EVENTS & SUCCESS_PROPERTY_EVENTS)
     value_placeholders = ",".join("?" for _ in value_names)
+    success_placeholders = ",".join("?" for _ in success_value_names)
+    success_predicate = (
+        f"(name NOT IN ({success_placeholders})"
+        " OR lower(COALESCE(json_extract(properties,'$.success'),'true')) = 'true')"
+        if success_value_names
+        else "1=1"
+    )
     first_value_rows = _db.execute(
         "SELECT device_id,MIN(ts) FROM events WHERE device_id != ''"
         + clause
         + f" AND name IN ({value_placeholders})"
-        + " AND (name != 'import_audio_completed'"
-        + " OR lower(COALESCE(json_extract(properties,'$.success'),'true')) = 'true')"
+        + f" AND {success_predicate}"
         + " GROUP BY device_id",
-        [*params, *value_names],
+        [*params, *value_names, *success_value_names],
     ).fetchall()
     first_value_days = {
         device: int(first_value_ts // DAY)
