@@ -20,28 +20,18 @@ const FLUSH_AT: usize = 25;
 // Ingest rejects batches >500; beyond this we drop oldest (offline cap).
 const MAX_QUEUE: usize = 500;
 
-const SAFE_PROPERTY_KEYS: &[&str] = &[
-    "accepted", "active_duration_seconds", "app_version", "architecture", "build_profile",
-    "button", "category", "chunks_processed", "code", "copy_count_today", "copy_type",
-    "date", "days_since_install", "device_category", "duration", "duration_seconds",
-    "enabled", "error_category", "error_code", "error_type", "event_id", "feature",
-    "feature_name", "file_size_bytes", "first_meeting_duration_seconds", "folder_type",
-    "had_fatal_error", "has_microphone", "has_preferred_microphone",
-    "has_preferred_system_audio", "has_system_audio", "import_kind", "is_auto_detect",
-    "is_bluetooth", "language", "language_code", "latency_bucket", "location",
-    "meeting_id_hash", "meetings_count", "memory_type", "microphone_device_type",
-    "model_name", "model_provider", "new_model", "new_provider", "notifications_enabled",
-    "old_model", "old_provider", "page", "pause_duration_seconds", "platform",
-    "prompt_length", "provider", "release_channel", "result_count_bucket", "retryable",
-    "scope", "segments_count", "session_duration", "session_id", "status", "success",
-    "summary_model", "summary_provider", "system_audio_device_type",
-    "time_since_recording_minutes", "total_duration_seconds", "transcript_length",
-    "transcript_segments_count", "transcription_model", "transcription_provider", "workflow",
-];
+const SAFE_PROPERTY_KEYS: &str = include_str!("../../../../stats/safe_properties.txt");
 
 fn sanitize_properties(mut properties: HashMap<String, String>) -> HashMap<String, String> {
-    properties.retain(|key, _| SAFE_PROPERTY_KEYS.contains(&key.as_str()));
+    properties.retain(|key, _| SAFE_PROPERTY_KEYS.lines().any(|allowed| allowed == key));
     properties
+}
+
+fn retryable_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status.as_u16() == 425
+        || status.is_server_error()
 }
 
 #[derive(Serialize, Clone)]
@@ -151,23 +141,31 @@ impl TractionSink {
             req = req.header("X-Ingest-Token", &self.token);
         }
 
-        match req.send().await {
-            Ok(resp) if resp.status().is_success() => {}
-            outcome => {
-                match outcome {
-                    Ok(resp) => log::warn!("Traction ingest rejected batch: {}", resp.status()),
-                    Err(e) => log::debug!("Traction ingest unreachable: {}", e),
-                }
-                // Return the batch to the queue so the next flush retries it.
-                let mut queue = self.queue.lock().await;
-                let mut restored = batch;
-                restored.extend(queue.drain(..));
-                if restored.len() > MAX_QUEUE {
-                    let drop = restored.len() - MAX_QUEUE;
-                    restored.drain(..drop);
-                }
-                *queue = restored;
+        let restore = match req.send().await {
+            Ok(resp) if resp.status().is_success() => false,
+            Ok(resp) if retryable_status(resp.status()) => {
+                log::warn!("Traction ingest temporarily rejected batch: {}", resp.status());
+                true
             }
+            Ok(resp) => {
+                log::warn!("Traction ingest permanently rejected batch: {}", resp.status());
+                false
+            }
+            Err(e) => {
+                log::debug!("Traction ingest unreachable: {}", e);
+                true
+            }
+        };
+        if restore {
+            // Return the batch to the queue so the next flush retries it.
+            let mut queue = self.queue.lock().await;
+            let mut restored = batch;
+            restored.extend(queue.drain(..));
+            if restored.len() > MAX_QUEUE {
+                let drop = restored.len() - MAX_QUEUE;
+                restored.drain(..drop);
+            }
+            *queue = restored;
         }
     }
 }
@@ -191,6 +189,15 @@ mod tests {
         assert_eq!(queue[0].properties.get("duration_seconds"), Some(&"42".to_string()));
         assert!(!queue[0].properties.contains_key("meeting_title"));
         assert!(!queue[0].properties.contains_key("error_message"));
+    }
+
+    #[test]
+    fn retries_only_transient_http_failures() {
+        assert!(retryable_status(reqwest::StatusCode::REQUEST_TIMEOUT));
+        assert!(retryable_status(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(retryable_status(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!retryable_status(reqwest::StatusCode::BAD_REQUEST));
+        assert!(!retryable_status(reqwest::StatusCode::PAYLOAD_TOO_LARGE));
     }
 
     /// e2e против локально запущенного модуля (stats/server.py, порт 9901,
