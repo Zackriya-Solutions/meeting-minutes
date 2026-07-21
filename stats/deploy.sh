@@ -23,7 +23,7 @@ VERSION="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo nogit)_$(da
 echo "$VERSION" > "$HERE/VERSION"
 echo "[deploy] version $VERSION"
 
-FLAGS=(-az --exclude=.venv --exclude=__pycache__ --exclude='*.pyc'
+FLAGS=(-az --exclude=.venv --exclude=.DS_Store --exclude=__pycache__ --exclude='*.pyc'
   --exclude=data --exclude=.gitignore --exclude=deploy.sh)
 [ "$DRY_RUN" = "1" ] && FLAGS+=(--dry-run -v)
 
