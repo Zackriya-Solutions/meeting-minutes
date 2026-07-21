@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _TEMP = tempfile.TemporaryDirectory()
 os.environ["STATS_DB"] = str(Path(_TEMP.name) / "events.db")
@@ -13,6 +14,7 @@ os.environ.pop("POSTHOG_PERSONAL_API_KEY", None)
 os.environ.pop("POSTHOG_PROJECT_ID", None)
 
 import server  # noqa: E402
+import posthog_sync  # noqa: E402
 from storage import insert_events, sanitize_properties  # noqa: E402
 
 
@@ -131,6 +133,52 @@ class StatsModuleTests(unittest.TestCase):
         self.assertEqual(product["usage"]["successful_summaries"], 1)
         self.assertEqual(product["quality"]["summary_attempts"], 1)
         self.assertEqual(product["quality"]["errors"], 0)
+
+    def test_posthog_page_cap_resumes_from_checkpoint(self) -> None:
+        now = time.time()
+        first_page = {
+            "results": [{
+                "event": "meeting_ended",
+                "timestamp": now - 20,
+                "distinct_id": "posthog-a",
+                "uuid": "posthog-event-a",
+                "properties": {"total_duration_seconds": 20},
+            }],
+            "next": "/api/projects/7/events/?page=2",
+        }
+        second_page = {
+            "results": [{
+                "event": "meeting_ended",
+                "timestamp": now - 40,
+                "distinct_id": "posthog-b",
+                "uuid": "posthog-event-b",
+                "properties": {"total_duration_seconds": 40},
+            }],
+            "next": None,
+        }
+        env = {
+            "POSTHOG_PERSONAL_API_KEY": "test-read-key",
+            "POSTHOG_PROJECT_ID": "7",
+            "POSTHOG_SYNC_MAX_PAGES": "1",
+        }
+        with patch.dict(os.environ, env), patch.object(
+            posthog_sync, "_request_json", side_effect=[first_page, second_page]
+        ) as request:
+            first = posthog_sync.sync_once(server._db)
+            second = posthog_sync.sync_once(server._db)
+
+        self.assertFalse(first["backfill_complete"])
+        self.assertTrue(second["backfill_complete"])
+        self.assertIn("page=2", request.call_args_list[1].args[0])
+        self.assertIsNone(
+            server._db.execute(
+                "SELECT cursor FROM sync_state WHERE source='posthog_page'"
+            ).fetchone()
+        )
+        self.assertEqual(
+            server._db.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+            2,
+        )
 
 
 if __name__ == "__main__":

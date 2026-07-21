@@ -115,17 +115,20 @@ def _is_error(name: str, properties: dict[str, str]) -> bool:
 
 
 def _positive_number(properties: dict[str, str], *keys: str) -> tuple[float, bool]:
+    saw_invalid = False
     for key in keys:
         if key not in properties:
             continue
         try:
             value = float(properties[key])
         except (TypeError, ValueError):
-            return 0.0, False
+            saw_invalid = True
+            continue
         if value < 0 or value != value or value == float("inf"):
-            return 0.0, False
+            saw_invalid = True
+            continue
         return value, True
-    return 0.0, True
+    return 0.0, not saw_invalid
 
 
 def _fmt_hours(seconds: float) -> str:
@@ -147,10 +150,14 @@ async def health() -> dict[str, Any]:
     state = _db.execute(
         "SELECT cursor,updated_at FROM sync_state WHERE source='posthog'"
     ).fetchone()
+    page_state = _db.execute(
+        "SELECT 1 FROM sync_state WHERE source='posthog_page'"
+    ).fetchone()
     return {
         "ok": True,
         "version": VERSION,
         "posthog_sync": bool(os.environ.get("POSTHOG_PERSONAL_API_KEY")),
+        "posthog_backfill_complete": not bool(page_state),
         "posthog_cursor": _iso(float(state[0])) if state else None,
         "posthog_synced_at": _iso(float(state[1])) if state else None,
     }

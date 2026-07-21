@@ -47,18 +47,26 @@ def sync_once(db) -> dict[str, Any]:
     state = db.execute(
         "SELECT cursor FROM sync_state WHERE source='posthog'"
     ).fetchone()
-    overlap = max(0, int(os.environ.get("POSTHOG_SYNC_OVERLAP_SECONDS", "300")))
-    if state:
-        after_ts = max(1_262_304_000.0, float(state[0]) - overlap)
+    page_state = db.execute(
+        "SELECT cursor FROM sync_state WHERE source='posthog_page'"
+    ).fetchone()
+    if page_state:
+        checkpoint = json.loads(page_state[0])
+        url = str(checkpoint["next_url"])
+        max_seen = float(checkpoint["max_seen"])
     else:
-        backfill_days = max(1, int(os.environ.get("POSTHOG_BACKFILL_DAYS", "365")))
-        after_ts = time.time() - backfill_days * 86_400
+        overlap = max(0, int(os.environ.get("POSTHOG_SYNC_OVERLAP_SECONDS", "300")))
+        if state:
+            after_ts = max(1_262_304_000.0, float(state[0]) - overlap)
+        else:
+            backfill_days = max(1, int(os.environ.get("POSTHOG_BACKFILL_DAYS", "365")))
+            after_ts = time.time() - backfill_days * 86_400
+        query = urllib.parse.urlencode({"after": _iso(after_ts), "limit": 100})
+        url = f"{host}/api/projects/{urllib.parse.quote(project, safe='')}/events/?{query}"
+        max_seen = float(state[0]) if state else after_ts
 
-    query = urllib.parse.urlencode({"after": _iso(after_ts), "limit": 100})
-    url = f"{host}/api/projects/{urllib.parse.quote(project, safe='')}/events/?{query}"
     max_pages = max(1, int(os.environ.get("POSTHOG_SYNC_MAX_PAGES", "2000")))
     totals = {"inserted": 0, "duplicates": 0, "rejected": 0}
-    max_seen = float(state[0]) if state else after_ts
     pages = 0
 
     while url and pages < max_pages:
@@ -92,15 +100,38 @@ def sync_once(db) -> dict[str, Any]:
         url = urllib.parse.urljoin(host + "/", next_url) if next_url else ""
 
     if url:
-        raise RuntimeError(f"PostHog sync exceeded {max_pages} pages; cursor not advanced")
+        # Preserve the opaque next-page URL rather than advancing the timestamp
+        # cursor: PostHog may paginate newest-first, so max_seen alone could
+        # skip older pages in a large backfill.
+        checkpoint = json.dumps({"next_url": url, "max_seen": max_seen})
+        db.execute(
+            "INSERT INTO sync_state(source,cursor,updated_at) VALUES('posthog_page',?,?)"
+            " ON CONFLICT(source) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
+            (checkpoint, time.time()),
+        )
+        db.commit()
+        return {
+            "enabled": True,
+            "pages": pages,
+            "cursor": _iso(max_seen),
+            "backfill_complete": False,
+            **totals,
+        }
 
     db.execute(
         "INSERT INTO sync_state(source,cursor,updated_at) VALUES('posthog',?,?)"
         " ON CONFLICT(source) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
         (str(max_seen), time.time()),
     )
+    db.execute("DELETE FROM sync_state WHERE source='posthog_page'")
     db.commit()
-    return {"enabled": True, "pages": pages, "cursor": _iso(max_seen), **totals}
+    return {
+        "enabled": True,
+        "pages": pages,
+        "cursor": _iso(max_seen),
+        "backfill_complete": True,
+        **totals,
+    }
 
 
 def main() -> None:
