@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FilePath as FsFilePath, FsExt};
 use uuid::Uuid;
 
 use super::audio_processing::create_meeting_folder;
@@ -913,6 +914,63 @@ fn write_import_metadata(
 // Tauri Commands
 // ============================================================================
 
+/// Resolve a picked file to a real, readable filesystem path.
+///
+/// On desktop the file dialog always returns a plain path. On Android it
+/// returns a SAF `content://` URI instead (e.g.
+/// `content://com.android.externalstorage.documents/document/primary%3ARecordings%2F...`)
+/// — not a filesystem path, so std::fs calls on it always fail with "File
+/// does not exist" even though the file is real and readable. Detect that
+/// case and copy the picked file's bytes into a real temp file via
+/// tauri-plugin-fs's Android support (Fs::open, which resolves the URI
+/// through ContentResolver under the hood), returning that temp file's path
+/// for validation and later import/transcription to use instead.
+fn resolve_picked_file<R: Runtime>(
+    app: &AppHandle<R>,
+    picked: FsFilePath,
+) -> Result<PathBuf, String> {
+    if let Some(p) = picked.as_path() {
+        return Ok(p.to_path_buf());
+    }
+
+    // Content URI. SAF document IDs are typically shaped like
+    // "primary:Recordings/Voice Recorder/foo.m4a" (URL-encoded in the URI),
+    // so the segment after the last '/' or ':' is a reasonable filename to
+    // preserve (keeps the real extension for format detection downstream).
+    let picked_display = picked.to_string();
+    let decoded = percent_encoding::percent_decode_str(&picked_display)
+        .decode_utf8_lossy()
+        .to_string();
+    let suggested_name = decoded
+        .rsplit(['/', ':'])
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("imported-audio");
+
+    let open_opts: tauri_plugin_fs::OpenOptions = serde_json::from_value(serde_json::json!({}))
+        .map_err(|e| format!("Failed to build file open options: {}", e))?;
+    let mut src = app
+        .fs()
+        .open(picked, open_opts)
+        .map_err(|e| format!("Failed to open picked file: {}", e))?;
+
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("Failed to get cache dir: {}", e))?
+        .join("import-tmp");
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create temp import dir: {}", e))?;
+
+    let dest_path = cache_dir.join(format!("{}-{}", Uuid::new_v4(), suggested_name));
+    let mut dest = std::fs::File::create(&dest_path)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    std::io::copy(&mut src, &mut dest)
+        .map_err(|e| format!("Failed to copy picked file: {}", e))?;
+
+    Ok(dest_path)
+}
+
 /// Select an audio file and validate it
 #[tauri::command]
 pub async fn select_and_validate_audio_command<R: Runtime>(
@@ -934,10 +992,10 @@ pub async fn select_and_validate_audio_command<R: Runtime>(
 
     match file_path {
         Some(path) => {
-            let path_str = path.to_string();
-            info!("User selected: {}", path_str);
+            info!("User selected: {}", path);
 
-            match validate_audio_file(Path::new(&path_str)) {
+            let resolved = resolve_picked_file(&app, path)?;
+            match validate_audio_file(&resolved) {
                 Ok(info) => Ok(Some(info)),
                 Err(e) => {
                     error!("Validation failed: {}", e);

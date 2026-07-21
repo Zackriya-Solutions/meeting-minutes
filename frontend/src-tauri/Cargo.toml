@@ -122,6 +122,7 @@ dirs = "5.0.1"
 
 # Additional dependencies for notification system
 url = "2.5.0"
+percent-encoding = "2"
 
 
 # System monitoring for resource management
