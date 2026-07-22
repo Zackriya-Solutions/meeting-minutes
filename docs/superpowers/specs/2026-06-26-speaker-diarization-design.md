@@ -1,7 +1,7 @@
 # Speaker Diarization Design
 
-Date: 2026-06-26  
-Status: design draft for review  
+Date: 2026-06-26
+Status: design draft for review
 Scope: macOS Apple Silicon first, local-first speaker diarization for recorded calls
 
 ## Summary
