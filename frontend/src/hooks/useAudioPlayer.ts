@@ -103,12 +103,23 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
     };
     function handleStall() {
       stallTimer = null;
-      if (!wantsPlaybackRef.current) return;
       const progressed = Number.isFinite(element.currentTime) && element.currentTime > stallAnchor + 0.1;
-      if (progressed && !element.paused) return; // playback is actually advancing
-      console.warn('Meeting audio source stalled; attempting recovery', { source: sources[sourceIndex] });
-      if (advanceSource()) return;
-      failPlayback('Audio playback timed out. Please try again.');
+      if (wantsPlaybackRef.current) {
+        // Keep the heartbeat running for the whole playback, not just the first
+        // window: while playback keeps advancing, re-arm and check again later.
+        if (progressed && !element.paused) {
+          armStallTimer();
+          return;
+        }
+        console.warn('Meeting audio source stalled; attempting recovery', { source: sources[sourceIndex] });
+        if (advanceSource()) return;
+        failPlayback('Audio playback timed out. Please try again.');
+        return;
+      }
+      // A paused scrub/load that never resolved (no `seeked`/`canplay`/`error`).
+      // There is nothing to play back to, so just release the spinner instead of
+      // leaving the transport button disabled forever.
+      setIsLoading(false);
     }
 
     const updateTime = () => {
@@ -117,9 +128,11 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
       setCurrentTime(value);
     };
     const updateDuration = () => setDuration(Number.isFinite(element.duration) ? element.duration : 0);
+    // Arm the watchdog for any pending state — playback buffering AND a paused
+    // scrub (`seeking`) — so a silent stall is recovered from in both cases.
     const markWaiting = () => {
       setIsLoading(true);
-      if (wantsPlaybackRef.current) armStallTimer();
+      armStallTimer();
     };
     const markReady = () => {
       setIsLoading(false);
@@ -129,6 +142,8 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
         element.currentTime = Math.min(requestedTimeRef.current, upperBound);
       }
       switchingSource = false;
+      // A load/seek that resolved while paused needs no further supervision.
+      if (!wantsPlaybackRef.current) clearStallTimer();
     };
     // A scrub sets currentTime, which fires `seeking` (arming the loading
     // spinner). When the seek resolves onto already-buffered data the readyState
@@ -137,13 +152,19 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
     const markSeeked = () => {
       const ready = element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
       setIsLoading(!ready);
-      if (ready) clearStallTimer();
+      if (wantsPlaybackRef.current) {
+        armStallTimer(); // keep supervising playback across the jump
+      } else if (ready) {
+        clearStallTimer(); // paused seek resolved; nothing left to supervise
+      }
+      // paused && !ready: leave the watchdog armed until markReady resolves it.
     };
     const markPlaying = () => {
-      clearStallTimer();
       setIsPlaying(true);
       setIsLoading(false);
       setError(null);
+      // Re-arm rather than clear so the watchdog supervises the whole playback.
+      if (wantsPlaybackRef.current) armStallTimer();
     };
     // Only drop the watchdog when the user actually stopped wanting playback;
     // switching sources emits a `pause` we must not treat as user intent.
