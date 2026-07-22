@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use log::{info, warn, error};
 use super::encode::encode_single_audio;
 use super::recording_state::AudioChunk;
+use super::wav_encode::{concat_wav_files, write_wav_file};
 use serde::{Serialize, Deserialize};
 
 use super::ffmpeg::find_ffmpeg_path;
@@ -23,6 +24,13 @@ pub struct IncrementalAudioSaver {
     checkpoints_dir: PathBuf,
     meeting_folder: PathBuf,
     sample_rate: u32,
+    // Whether to fall back to a plain WAV encode/concat instead of shelling
+    // out to FFmpeg. Decided once at construction: Android has no bundled
+    // FFmpeg binary (see build.rs), so find_ffmpeg_path() always returns
+    // None there and every checkpoint/finalize used to fail outright,
+    // leaving every Android recording with no audio file at all. Desktop
+    // behavior (FFmpeg-encoded .mp4) is unchanged when FFmpeg is present.
+    use_wav_fallback: bool,
 }
 
 impl IncrementalAudioSaver {
@@ -39,6 +47,11 @@ impl IncrementalAudioSaver {
             return Err(anyhow!("Checkpoints directory does not exist: {}", checkpoints_dir.display()));
         }
 
+        let use_wav_fallback = find_ffmpeg_path().is_none();
+        if use_wav_fallback {
+            info!("FFmpeg not found - recording will use the pure-Rust WAV encoder instead");
+        }
+
         Ok(Self {
             checkpoint_buffer: Vec::new(),
             checkpoint_interval_samples: sample_rate as usize * 30, // 30 seconds
@@ -46,7 +59,12 @@ impl IncrementalAudioSaver {
             checkpoints_dir,
             meeting_folder,
             sample_rate,
+            use_wav_fallback,
         })
+    }
+
+    fn checkpoint_ext(&self) -> &'static str {
+        if self.use_wav_fallback { "wav" } else { "mp4" }
     }
 
     /// Add an audio chunk to the buffer
@@ -90,15 +108,19 @@ impl IncrementalAudioSaver {
 
         // Generate checkpoint filename
         let checkpoint_path = self.checkpoints_dir
-            .join(format!("audio_chunk_{:03}.mp4", self.checkpoint_count));
+            .join(format!("audio_chunk_{:03}.{}", self.checkpoint_count, self.checkpoint_ext()));
 
         // Encode and save checkpoint
-        encode_single_audio(
-            bytemuck::cast_slice(&audio_data),
-            self.sample_rate,
-            1,  // mono
-            &checkpoint_path
-        )?;
+        if self.use_wav_fallback {
+            write_wav_file(&audio_data, self.sample_rate, 1, &checkpoint_path)?;
+        } else {
+            encode_single_audio(
+                bytemuck::cast_slice(&audio_data),
+                self.sample_rate,
+                1,  // mono
+                &checkpoint_path
+            )?;
+        }
 
         let duration_seconds = audio_data.len() as f32 / self.sample_rate as f32;
         self.checkpoint_count += 1;
@@ -128,8 +150,8 @@ impl IncrementalAudioSaver {
             return Err(anyhow!("No audio checkpoints to merge - recording may have failed"));
         }
 
-        // Merge all checkpoints using FFmpeg concat
-        let final_audio_path = self.meeting_folder.join("audio.mp4");
+        // Merge all checkpoints into the final audio file
+        let final_audio_path = self.meeting_folder.join(format!("audio.{}", self.checkpoint_ext()));
         self.merge_checkpoints(&final_audio_path).await?;
 
         // Clean up checkpoints directory
@@ -144,24 +166,34 @@ impl IncrementalAudioSaver {
         Ok(final_audio_path)
     }
 
-    /// Merge all checkpoint files into final audio.mp4 using FFmpeg concat
-    /// Uses concat demuxer for fast merging without re-encoding
+    /// Merge all checkpoint files into the final audio file: FFmpeg concat
+    /// when available, otherwise a plain WAV data-chunk concatenation.
     async fn merge_checkpoints(&self, output: &PathBuf) -> Result<()> {
         info!("Merging {} checkpoints into final audio file...", self.checkpoint_count);
+
+        let checkpoint_paths: Vec<PathBuf> = (0..self.checkpoint_count)
+            .map(|i| self.checkpoints_dir.join(format!("audio_chunk_{:03}.{}", i, self.checkpoint_ext())))
+            .collect();
+        for path in &checkpoint_paths {
+            if !path.exists() {
+                return Err(anyhow!("Checkpoint file missing: {}", path.display()));
+            }
+        }
+
+        if self.use_wav_fallback {
+            concat_wav_files(&checkpoint_paths, self.sample_rate, 1, output)?;
+
+            if !output.exists() {
+                return Err(anyhow!("Merged audio file was not created: {}", output.display()));
+            }
+            info!("Successfully merged {} checkpoints → {}", self.checkpoint_count, output.display());
+            return Ok(());
+        }
 
         // Create concat list file for FFmpeg
         let list_file = self.checkpoints_dir.join("concat_list.txt");
         let mut list_content = String::new();
-
-        for i in 0..self.checkpoint_count {
-            let checkpoint_path = self.checkpoints_dir
-                .join(format!("audio_chunk_{:03}.mp4", i));
-
-            // Verify checkpoint exists
-            if !checkpoint_path.exists() {
-                return Err(anyhow!("Checkpoint file missing: {}", checkpoint_path.display()));
-            }
-
+        for checkpoint_path in &checkpoint_paths {
             // Use absolute path for FFmpeg (required for safe mode)
             let abs_path = checkpoint_path.canonicalize()?;
             list_content.push_str(&format!("file '{}'\n", abs_path.display()));
@@ -402,12 +434,16 @@ pub async fn has_audio_checkpoints(meeting_folder: String) -> Result<bool, Strin
         return Ok(false);
     }
 
-    // Scan for .mp4 checkpoint files
+    // Scan for checkpoint files (.mp4 when FFmpeg encoded them, .wav on
+    // platforms without a bundled FFmpeg - see IncrementalAudioSaver::use_wav_fallback)
     let has_mp4_files = std::fs::read_dir(&checkpoints_dir)
         .map_err(|e| format!("Failed to read checkpoints directory: {}", e))?
         .filter_map(|entry| entry.ok())
         .any(|entry| {
-            entry.path().extension().and_then(|s| s.to_str()) == Some("mp4")
+            matches!(
+                entry.path().extension().and_then(|s| s.to_str()),
+                Some("mp4") | Some("wav")
+            )
         });
 
     Ok(has_mp4_files)

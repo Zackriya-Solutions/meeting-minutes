@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
+use super::ffmpeg::find_ffmpeg_path;
 use super::incremental_saver::IncrementalAudioSaver;
 
 /// Structured transcript segment for JSON export
@@ -255,7 +256,12 @@ impl RecordingSaver {
                 microphone: None,  // Could be enhanced to store actual device names
                 system_audio: None,
             },
-            audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
+            audio_file: if create_checkpoints {
+                let ext = if find_ffmpeg_path().is_none() { "wav" } else { "mp4" };
+                format!("audio.{}", ext)
+            } else {
+                "".to_string()
+            },
             transcript_file: "transcripts.json".to_string(),
             sample_rate: 48000,
             status: "recording".to_string(),
