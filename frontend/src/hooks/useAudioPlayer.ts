@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
+ * How long we wait for a requested playback to actually start (or resume) before
+ * treating the current source as stalled and falling back to the next one. A
+ * media element that never buffers fires neither `playing` nor `error`, so
+ * without this the play button would spin forever.
+ */
+const STALL_TIMEOUT_MS = 8_000;
+
+/**
  * Streaming player for a recording exposed through Tauri's asset protocol.
  *
  * Deliberately uses the browser's native HTMLMediaElement pipeline. The old
@@ -18,6 +26,10 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const wantsPlaybackRef = useRef(false);
   const requestedTimeRef = useRef(0);
+  // Bridges the stall watchdog (owned by the effect below) to the play/pause/stop
+  // callbacks, which live outside the effect closure.
+  const armWatchdogRef = useRef<() => void>(() => {});
+  const clearWatchdogRef = useRef<() => void>(() => {});
   const sourceKey = Array.isArray(audioUrls) ? audioUrls.join('\n') : (audioUrls || '');
 
   useEffect(() => {
@@ -47,13 +59,68 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
     element.src = sources[sourceIndex];
     elementRef.current = element;
 
+    // Watchdog for silent stalls (see STALL_TIMEOUT_MS). Some macOS WKWebView
+    // builds never buffer the asset-protocol source and emit no `error` event, so
+    // we time out and advance to the next source ourselves.
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    let stallAnchor = 0;
+    const clearStallTimer = () => {
+      if (stallTimer !== null) {
+        clearTimeout(stallTimer);
+        stallTimer = null;
+      }
+    };
+    const armStallTimer = () => {
+      clearStallTimer();
+      stallAnchor = Number.isFinite(element.currentTime) ? element.currentTime : 0;
+      stallTimer = setTimeout(handleStall, STALL_TIMEOUT_MS);
+    };
+
+    // Try the next source in the ordered fallback list. Returns false when the
+    // list is exhausted.
+    const advanceSource = () => {
+      if (sourceIndex + 1 >= sources.length) return false;
+      sourceIndex += 1;
+      switchingSource = true;
+      setError(null);
+      setIsLoading(true);
+      element.src = sources[sourceIndex];
+      element.load();
+      if (wantsPlaybackRef.current) {
+        armStallTimer();
+        void element.play().catch((fallbackError) => {
+          console.warn('Fallback meeting audio source did not start immediately:', fallbackError);
+        });
+      }
+      return true;
+    };
+    const failPlayback = (message: string) => {
+      clearStallTimer();
+      wantsPlaybackRef.current = false;
+      setIsPlaying(false);
+      setIsLoading(false);
+      setError(message);
+    };
+    function handleStall() {
+      stallTimer = null;
+      if (!wantsPlaybackRef.current) return;
+      const progressed = Number.isFinite(element.currentTime) && element.currentTime > stallAnchor + 0.1;
+      if (progressed && !element.paused) return; // playback is actually advancing
+      console.warn('Meeting audio source stalled; attempting recovery', { source: sources[sourceIndex] });
+      if (advanceSource()) return;
+      failPlayback('Audio playback timed out. Please try again.');
+    }
+
     const updateTime = () => {
       const value = Number.isFinite(element.currentTime) ? element.currentTime : 0;
       if (!switchingSource) requestedTimeRef.current = value;
       setCurrentTime(value);
     };
     const updateDuration = () => setDuration(Number.isFinite(element.duration) ? element.duration : 0);
-    const markWaiting = () => setIsLoading(true);
+    const markWaiting = () => {
+      setIsLoading(true);
+      if (wantsPlaybackRef.current) armStallTimer();
+    };
     const markReady = () => {
       setIsLoading(false);
       updateDuration();
@@ -63,13 +130,29 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
       }
       switchingSource = false;
     };
+    // A scrub sets currentTime, which fires `seeking` (arming the loading
+    // spinner). When the seek resolves onto already-buffered data the readyState
+    // never drops, so `canplay`/`playing` do not re-fire — reconcile the loading
+    // state here or the spinner would spin forever after fast-forwarding.
+    const markSeeked = () => {
+      const ready = element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
+      setIsLoading(!ready);
+      if (ready) clearStallTimer();
+    };
     const markPlaying = () => {
+      clearStallTimer();
       setIsPlaying(true);
       setIsLoading(false);
       setError(null);
     };
-    const markPaused = () => setIsPlaying(false);
+    // Only drop the watchdog when the user actually stopped wanting playback;
+    // switching sources emits a `pause` we must not treat as user intent.
+    const markPaused = () => {
+      if (!wantsPlaybackRef.current) clearStallTimer();
+      setIsPlaying(false);
+    };
     const markEnded = () => {
+      clearStallTimer();
       setIsPlaying(false);
       updateTime();
     };
@@ -80,23 +163,8 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
         code: mediaError?.code,
         message: mediaError?.message,
       });
-      if (sourceIndex + 1 < sources.length) {
-        sourceIndex += 1;
-        switchingSource = true;
-        setError(null);
-        setIsLoading(true);
-        element.src = sources[sourceIndex];
-        element.load();
-        if (wantsPlaybackRef.current) {
-          void element.play().catch((fallbackError) => {
-            console.warn('Fallback meeting audio source did not start immediately:', fallbackError);
-          });
-        }
-        return;
-      }
-      setIsPlaying(false);
-      setIsLoading(false);
-      setError('Failed to play audio recording');
+      if (advanceSource()) return;
+      failPlayback('Failed to play audio recording');
     };
 
     element.addEventListener('timeupdate', updateTime);
@@ -105,13 +173,22 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
     element.addEventListener('canplay', markReady);
     element.addEventListener('waiting', markWaiting);
     element.addEventListener('seeking', markWaiting);
+    element.addEventListener('seeked', markSeeked);
     element.addEventListener('playing', markPlaying);
     element.addEventListener('pause', markPaused);
     element.addEventListener('ended', markEnded);
     element.addEventListener('error', markError);
     element.load();
 
+    armWatchdogRef.current = () => {
+      if (wantsPlaybackRef.current) armStallTimer();
+    };
+    clearWatchdogRef.current = clearStallTimer;
+
     return () => {
+      clearStallTimer();
+      armWatchdogRef.current = () => {};
+      clearWatchdogRef.current = () => {};
       element.pause();
       element.removeEventListener('timeupdate', updateTime);
       element.removeEventListener('durationchange', updateDuration);
@@ -119,6 +196,7 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
       element.removeEventListener('canplay', markReady);
       element.removeEventListener('waiting', markWaiting);
       element.removeEventListener('seeking', markWaiting);
+      element.removeEventListener('seeked', markSeeked);
       element.removeEventListener('playing', markPlaying);
       element.removeEventListener('pause', markPaused);
       element.removeEventListener('ended', markEnded);
@@ -143,9 +221,16 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
         element.currentTime = 0;
       }
       setIsLoading(element.readyState < HTMLMediaElement.HAVE_FUTURE_DATA);
+      armWatchdogRef.current();
       await element.play();
     } catch (playError) {
+      // A new load()/pause() — including our own source fallback — rejects the
+      // pending play() promise with AbortError. That is expected and handled by
+      // the media event listeners, so it must not surface an error or disarm the
+      // stall watchdog for the source we just switched to.
+      if (playError instanceof DOMException && playError.name === 'AbortError') return;
       console.error('Native audio playback failed:', playError);
+      clearWatchdogRef.current();
       setIsLoading(false);
       // DOMException messages are browser/OS strings (for example, "The operation is not
       // supported") and therefore cannot be translated reliably in the UI.
@@ -155,6 +240,7 @@ export const useAudioPlayer = (audioUrls: string | string[] | null) => {
 
   const pause = useCallback(() => {
     wantsPlaybackRef.current = false;
+    clearWatchdogRef.current();
     elementRef.current?.pause();
   }, []);
 

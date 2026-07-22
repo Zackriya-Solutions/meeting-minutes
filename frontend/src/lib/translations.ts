@@ -1516,6 +1516,7 @@ export const RU: Record<string, string> = {
   "Export MP3": "Экспорт MP3",
   "Pause meeting audio": "Приостановить аудиозапись встречи",
   "Play meeting audio": "Воспроизвести аудиозапись встречи",
+  "Audio playback timed out. Please try again.": "Не удалось начать воспроизведение. Попробуйте ещё раз.",
   "Play audio from this moment": "Воспроизвести аудио с этого момента",
   "Audio position": "Позиция в аудиозаписи",
   "MP3 export completed": "MP3 успешно экспортирован",
