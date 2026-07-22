@@ -121,6 +121,100 @@ export async function fetchLocalRecordingTranscript(folderName: string): Promise
   }
 }
 
+export async function renameLocalRecording(folderName: string, newTitle: string): Promise<boolean> {
+  try {
+    await invoke('rename_local_recording', { folderName, newTitle });
+    return true;
+  } catch (e) {
+    console.warn('[vm] rename_local_recording failed', e);
+    return false;
+  }
+}
+
+export async function deleteLocalRecording(folderName: string): Promise<boolean> {
+  try {
+    await invoke('delete_local_recording', { folderName });
+    return true;
+  } catch (e) {
+    console.warn('[vm] delete_local_recording failed', e);
+    return false;
+  }
+}
+
+export interface VmRecordingsDiskUsage {
+  totalBytes: number;
+  recordingCount: number;
+}
+
+export async function fetchRecordingsDiskUsage(): Promise<VmRecordingsDiskUsage> {
+  try {
+    const r = await invoke<{ total_bytes: number; recording_count: number }>(
+      'get_recordings_disk_usage'
+    );
+    return { totalBytes: r.total_bytes, recordingCount: r.recording_count };
+  } catch (e) {
+    console.warn('[vm] get_recordings_disk_usage failed', e);
+    return { totalBytes: 0, recordingCount: 0 };
+  }
+}
+
+/** Writes the transcript to the Downloads folder as .txt or .srt; returns the written path. */
+export async function exportLocalRecordingTranscript(
+  folderName: string,
+  format: 'txt' | 'srt'
+): Promise<string | null> {
+  try {
+    return await invoke<string>('export_local_recording_transcript', { folderName, format });
+  } catch (e) {
+    console.warn('[vm] export_local_recording_transcript failed', e);
+    return null;
+  }
+}
+
+/** Copies a local recording's transcript into the Meetings DB (search/summary/notes). Returns the new meeting id. */
+export async function promoteLocalRecordingToMeeting(folderName: string): Promise<string | null> {
+  try {
+    return await invoke<string>('promote_local_recording_to_meeting', { folderName });
+  } catch (e) {
+    console.warn('[vm] promote_local_recording_to_meeting failed', e);
+    return null;
+  }
+}
+
+export async function startRetranscribeLocalRecording(
+  folderName: string,
+  language?: string,
+  model?: string
+): Promise<void> {
+  await invoke('start_retranscribe_local_recording_command', {
+    folderName,
+    language: language ?? null,
+    model: model ?? null,
+  });
+}
+
+export interface RetranscribeProgressEvent {
+  stage: string;
+  progress_percentage: number;
+  message: string;
+}
+
+export function onRetranscribeProgress(
+  cb: (e: RetranscribeProgressEvent) => void
+): Promise<UnlistenFn> {
+  return listen<RetranscribeProgressEvent>('retranscribe-progress', (e) => cb(e.payload));
+}
+
+export function onRetranscribeComplete(cb: (segmentsCount: number) => void): Promise<UnlistenFn> {
+  return listen<{ segments_count: number }>('retranscribe-complete', (e) =>
+    cb(e.payload.segments_count)
+  );
+}
+
+export function onRetranscribeError(cb: (error: string) => void): Promise<UnlistenFn> {
+  return listen<{ error: string }>('retranscribe-error', (e) => cb(e.payload.error));
+}
+
 // ── Recording ────────────────────────────────────────────────────────────
 
 /**

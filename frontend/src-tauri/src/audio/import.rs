@@ -1062,6 +1062,199 @@ pub async fn is_import_in_progress_command() -> bool {
     is_import_in_progress()
 }
 
+/// Re-run Whisper transcription against a local recording's saved audio
+/// file, overwriting its transcripts.json in place. Requested by users
+/// hitting language-auto-detect glitches on individual segments (VAD
+/// segments are transcribed independently, so a single short/quiet segment
+/// can occasionally get misdetected as the wrong language) - a full retry
+/// re-runs detection fresh across all segments.
+///
+/// Shares IMPORT_IN_PROGRESS/IMPORT_CANCELLED with the audio-file-import
+/// flow since both are exclusive, long-running transcription jobs; running
+/// them concurrently would contend for the same Whisper engine instance.
+#[tauri::command]
+pub async fn start_retranscribe_local_recording_command<R: Runtime>(
+    app: AppHandle<R>,
+    folder_name: String,
+    language: Option<String>,
+    model: Option<String>,
+) -> Result<(), String> {
+    if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
+        return Err("An import or retranscription is already in progress".to_string());
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let app_for_event = app.clone();
+        let result = run_retranscribe(app, folder_name, language, model).await;
+        match result {
+            Ok(segments_count) => {
+                let _ = app_for_event.emit(
+                    "retranscribe-complete",
+                    serde_json::json!({ "segments_count": segments_count }),
+                );
+            }
+            Err(e) => {
+                error!("Retranscription failed: {}", e);
+                let _ = app_for_event.emit(
+                    "retranscribe-error",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn emit_retranscribe_progress<R: Runtime>(app: &AppHandle<R>, stage: &str, progress: u32, message: &str) {
+    let _ = app.emit(
+        "retranscribe-progress",
+        serde_json::json!({
+            "stage": stage,
+            "progress_percentage": progress,
+            "message": message
+        }),
+    );
+}
+
+async fn run_retranscribe<R: Runtime>(
+    app: AppHandle<R>,
+    folder_name: String,
+    language: Option<String>,
+    model: Option<String>,
+) -> Result<usize> {
+    let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
+    IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+
+    if folder_name.is_empty()
+        || folder_name.contains('/')
+        || folder_name.contains('\\')
+        || folder_name.contains("..")
+    {
+        return Err(anyhow!("Invalid folder name"));
+    }
+    let meeting_folder = get_default_recordings_folder().join(&folder_name);
+
+    let audio_path = std::fs::read_dir(&meeting_folder)
+        .map_err(|e| anyhow!("Failed to read recording folder: {}", e))?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.is_file()
+                && matches!(
+                    p.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref(),
+                    Some("mp4") | Some("wav") | Some("m4a")
+                )
+        })
+        .ok_or_else(|| anyhow!("No audio file found for this recording - cannot retranscribe"))?;
+
+    emit_retranscribe_progress(&app, "decoding", 5, "Decoding audio file...");
+    let path_for_decode = audio_path.clone();
+    let decoded = tokio::task::spawn_blocking(move || decode_audio_file(&path_for_decode))
+        .await
+        .map_err(|e| anyhow!("Decode task join error: {}", e))??;
+    let duration_seconds = decoded.duration_seconds;
+
+    emit_retranscribe_progress(&app, "resampling", 15, "Converting audio format...");
+    let audio_samples =
+        tokio::task::spawn_blocking(move || decoded.to_whisper_format())
+            .await
+            .map_err(|e| anyhow!("Resample task join error: {}", e))?;
+
+    emit_retranscribe_progress(&app, "vad", 20, "Detecting speech segments...");
+    let app_for_vad = app.clone();
+    let speech_segments = tokio::task::spawn_blocking(move || {
+        get_speech_chunks_with_progress(
+            &audio_samples,
+            VAD_REDEMPTION_TIME_MS,
+            |vad_progress, segments_found| {
+                let overall = 20 + (vad_progress as f32 * 0.05) as u32;
+                emit_retranscribe_progress(
+                    &app_for_vad,
+                    "vad",
+                    overall,
+                    &format!("Detecting speech segments... {}% ({} found)", vad_progress, segments_found),
+                );
+                !IMPORT_CANCELLED.load(Ordering::SeqCst)
+            },
+        )
+    })
+    .await
+    .map_err(|e| anyhow!("VAD task panicked: {}", e))?
+    .map_err(|e| anyhow!("VAD processing failed: {}", e))?;
+
+    const MAX_SEGMENT_SAMPLES: usize = 25 * 16000; // 25s at 16kHz
+    let mut processable_segments: Vec<crate::audio::vad::SpeechSegment> = Vec::new();
+    for segment in &speech_segments {
+        if segment.samples.len() > MAX_SEGMENT_SAMPLES {
+            processable_segments.extend(split_segment_at_silence(segment, MAX_SEGMENT_SAMPLES));
+        } else {
+            processable_segments.push(segment.clone());
+        }
+    }
+    let processable_count = processable_segments.len();
+
+    let whisper_engine = if processable_count > 0 {
+        Some(get_or_init_whisper(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+
+    let mut all_transcripts: Vec<(String, f64, f64)> = Vec::new();
+    for (i, segment) in processable_segments.iter().enumerate() {
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            return Err(anyhow!("Retranscription cancelled"));
+        }
+
+        let progress = 25 + ((i as f32 / processable_count.max(1) as f32) * 65.0) as u32;
+        emit_retranscribe_progress(
+            &app,
+            "transcribing",
+            progress,
+            &format!("Transcribing segment {} of {}...", i + 1, processable_count),
+        );
+
+        if segment.samples.len() < 1600 {
+            continue; // Too short to be worth transcribing
+        }
+
+        let engine = whisper_engine.as_ref().unwrap();
+        let (text, _confidence, _) = engine
+            .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
+            .await
+            .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
+
+        if !text.trim().is_empty() {
+            all_transcripts.push((text, segment.start_timestamp_ms, segment.end_timestamp_ms));
+        }
+    }
+
+    emit_retranscribe_progress(&app, "saving", 95, "Saving transcript...");
+    let segments = create_transcript_segments(&all_transcripts);
+    let segments_count = segments.len();
+    write_transcripts_json(&meeting_folder, &segments)
+        .map_err(|e| anyhow!("Failed to write transcripts.json: {}", e))?;
+
+    // Metadata may have been stuck at status "recording" if the original
+    // finalize failed for an unrelated reason; a successful retranscribe is
+    // as good a signal as any that this recording is done.
+    if let Ok(content) = std::fs::read_to_string(meeting_folder.join("metadata.json")) {
+        if let Ok(mut metadata) =
+            serde_json::from_str::<crate::audio::recording_saver::MeetingMetadata>(&content)
+        {
+            metadata.duration_seconds = Some(duration_seconds);
+            metadata.status = "completed".to_string();
+            if let Ok(json_string) = serde_json::to_string_pretty(&metadata) {
+                let _ = std::fs::write(meeting_folder.join("metadata.json"), json_string);
+            }
+        }
+    }
+
+    emit_retranscribe_progress(&app, "complete", 100, "Retranscription complete");
+
+    Ok(segments_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

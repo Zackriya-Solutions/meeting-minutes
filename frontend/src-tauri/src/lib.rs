@@ -654,6 +654,11 @@ pub fn run() {
             audio::recording_commands::get_meeting_folder_path,
             audio::recording_commands::list_local_recordings,
             audio::recording_commands::read_local_recording_transcript,
+            audio::recording_commands::rename_local_recording,
+            audio::recording_commands::delete_local_recording,
+            audio::recording_commands::get_recordings_disk_usage,
+            audio::recording_commands::export_local_recording_transcript,
+            audio::recording_commands::promote_local_recording_to_meeting,
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
@@ -795,6 +800,7 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            audio::import::start_retranscribe_local_recording_command,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

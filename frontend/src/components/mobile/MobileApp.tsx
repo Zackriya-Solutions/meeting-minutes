@@ -19,6 +19,7 @@ import {
   onModelDownloadComplete,
   onModelDownloadProgress,
   selectWhisperModel,
+  VmLocalRecording,
 } from './tauriBridge';
 import { OnboardingScreen } from './OnboardingScreen';
 import { HomeScreen } from './HomeScreen';
@@ -28,6 +29,7 @@ import { ModelsScreen } from './ModelsScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { ImportAudioScreen } from './ImportAudioScreen';
 import { RecordingsScreen } from './RecordingsScreen';
+import { RecordingDetailScreen } from './RecordingDetailScreen';
 
 const LS_THEME = 'vm-theme';
 const LS_ACCENT = 'vm-accent';
@@ -59,6 +61,7 @@ export default function MobileApp() {
   const [models, setModels] = useState<VmModel[]>([]);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [detailInitialTab, setDetailInitialTab] = useState<'transcript' | 'summary' | 'notes'>('transcript');
+  const [activeRecording, setActiveRecording] = useState<VmLocalRecording | null>(null);
 
   // Restore persisted appearance + onboarding state
   useEffect(() => {
@@ -145,6 +148,11 @@ export default function MobileApp() {
     setScreen('detail');
   }, []);
 
+  const openRecording = useCallback((rec: VmLocalRecording) => {
+    setActiveRecording(rec);
+    setScreen('recording-detail');
+  }, []);
+
   const finishOnboarding = useCallback(() => {
     lsSet(LS_ONBOARDED, '1');
     setOnboarded(true);
@@ -210,7 +218,17 @@ export default function MobileApp() {
               }}
             />
           )}
-          {screen === 'recordings' && <RecordingsScreen />}
+          {screen === 'recordings' && <RecordingsScreen onOpenRecording={openRecording} />}
+          {screen === 'recording-detail' && activeRecording && (
+            <RecordingDetailScreen
+              recording={activeRecording}
+              onBack={() => setScreen('recordings')}
+              onOpenMeeting={(meetingId) => {
+                reloadMeetings();
+                openMeeting(meetingId, 'summary');
+              }}
+            />
+          )}
           {screen === 'detail' && activeMeetingId && (
             <MeetingDetailScreen
               meetingId={activeMeetingId}

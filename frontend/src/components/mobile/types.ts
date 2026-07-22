@@ -10,7 +10,8 @@ export type VmScreen =
   | 'models'
   | 'settings'
   | 'import'
-  | 'recordings';
+  | 'recordings'
+  | 'recording-detail';
 
 export interface VmMeeting {
   id: string;
