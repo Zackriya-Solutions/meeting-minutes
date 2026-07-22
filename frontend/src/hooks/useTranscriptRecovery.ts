@@ -185,6 +185,12 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       const savedMeetingId = saveResponse.meeting_id;
 
       try {
+        await storageService.syncCalendarMetadata(savedMeetingId);
+      } catch (error) {
+        console.warn('Failed to sync Google Calendar metadata for recovered meeting:', error);
+      }
+
+      try {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
       } catch (error) {
         console.warn('Failed to apply pinned summary language to recovered meeting:', error);

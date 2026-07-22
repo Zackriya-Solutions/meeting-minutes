@@ -9,6 +9,12 @@ pub struct MeetingModel {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub folder_path: Option<String>,
+    pub calendar_event_id: Option<String>,
+    /// JSON array of {name, email}
+    pub calendar_attendees: Option<String>,
+    pub calendar_meet_link: Option<String>,
+    pub calendar_start_time: Option<String>,
+    pub calendar_end_time: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
@@ -96,12 +102,26 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    /// Google OAuth token bundle for Calendar integration, stored as JSON
+    #[sqlx(rename = "googleCalendarConfig")]
+    #[serde(rename = "googleCalendarConfig")]
+    pub google_calendar_config: Option<String>,
+    #[sqlx(rename = "autoDetectMeetEnabled")]
+    #[serde(rename = "autoDetectMeetEnabled")]
+    pub auto_detect_meet_enabled: Option<i64>,
 }
 
 impl Setting {
     /// Parse the custom OpenAI config from JSON string
     pub fn get_custom_openai_config(&self) -> Option<crate::summary::CustomOpenAIConfig> {
         self.custom_openai_config.as_ref().and_then(|json| {
+            serde_json::from_str(json).ok()
+        })
+    }
+
+    /// Parse the Google Calendar OAuth config from JSON string
+    pub fn get_google_calendar_config(&self) -> Option<crate::calendar::GoogleCalendarConfig> {
+        self.google_calendar_config.as_ref().and_then(|json| {
             serde_json::from_str(json).ok()
         })
     }

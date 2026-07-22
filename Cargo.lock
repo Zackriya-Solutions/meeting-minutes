@@ -3620,6 +3620,7 @@ dependencies = [
  "chrono",
  "cidre",
  "clap 4.6.1",
+ "core-foundation 0.9.4",
  "core-graphics 0.23.2",
  "cpal",
  "criterion",

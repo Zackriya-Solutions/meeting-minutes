@@ -144,6 +144,52 @@ pub async fn trigger_system_audio_permission_command() -> Result<bool, String> {
     .map_err(|e| e.to_string())
 }
 
+// The *real* macOS Screen Recording (TCC) permission — distinct from the "Audio Capture"
+// permission above despite the similar name. This one gates whether
+// `CGWindowListCopyWindowInfo` can return other apps' window titles (`kCGWindowName`),
+// which the Google Meet auto-detect feature needs to read browser tab titles.
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[cfg(target_os = "macos")]
+pub fn check_window_title_read_permission() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn check_window_title_read_permission() -> bool {
+    true // Not required on other platforms; auto-detect is macOS-only anyway
+}
+
+/// Prompts the user for Screen Recording permission via macOS's built-in system dialog.
+/// Unlike Audio Capture, granting this does NOT require an app restart.
+#[cfg(target_os = "macos")]
+pub fn request_window_title_read_permission() -> bool {
+    info!("🔐 Requesting Screen Recording permission (for reading browser window titles)...");
+    unsafe { CGRequestScreenCaptureAccess() }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_window_title_read_permission() -> bool {
+    true
+}
+
+#[tauri::command]
+pub async fn check_window_title_read_permission_command() -> bool {
+    check_window_title_read_permission()
+}
+
+#[tauri::command]
+pub async fn request_window_title_read_permission_command() -> bool {
+    // CGRequestScreenCaptureAccess can block briefly showing the system dialog.
+    tokio::task::spawn_blocking(request_window_title_read_permission)
+        .await
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
