@@ -22,6 +22,8 @@ interface DetectSpeakersButtonProps {
     speakerCount?: number;
     /** Called after a successful diarization so the caller can refresh speakers + transcripts. */
     onDetected?: () => Promise<void> | void;
+    /** Custom button label; when set it is always shown (not hidden below the lg breakpoint). */
+    label?: string;
 }
 
 // Idle → user can start. checking → confirming models exist. diarizing → running.
@@ -35,7 +37,7 @@ const errString = (err: unknown, fallback: string): string =>
  * exist (offering a one-time ~35 MB download if not), runs `diarize_meeting`,
  * and reports the outcome via toast — matching the retranscription idiom.
  */
-export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected }: DetectSpeakersButtonProps) {
+export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, label }: DetectSpeakersButtonProps) {
     const t = useT();
     const [phase, setPhase] = useState<Phase>("idle");
     const [showDownload, setShowDownload] = useState(false);
@@ -140,8 +142,10 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected }
                 ) : (
                     <Users className="xl:mr-2" size={18} />
                 )}
-                <span className="hidden lg:inline">
-                    {phase === "diarizing" ? t('Detecting...') : `${t('Speakers')}${speakerCount > 0 ? ` · ${speakerCount}` : ''}`}
+                <span className={label ? '' : 'hidden lg:inline'}>
+                    {phase === "diarizing"
+                        ? t('Detecting...')
+                        : (label ?? `${t('Speakers')}${speakerCount > 0 ? ` · ${speakerCount}` : ''}`)}
                 </span>
             </Button>
 

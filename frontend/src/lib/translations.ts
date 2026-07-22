@@ -13,6 +13,7 @@ export const RU: Record<string, string> = {
   "Yesterday": "Вчера",
   "Earlier": "Ранее",
   "Meeting summary": "Саммари встречи",
+  "Highlight speakers": "Выделить спикеров",
   "Summary type": "Тип саммари",
   "Summary type · rebuilds the message": "Тип саммари · пересоберёт сообщение",
   "More — decisions and tasks": "Подробнее — решения и задачи",
