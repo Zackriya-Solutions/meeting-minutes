@@ -125,10 +125,13 @@ export function TranscriptPanel({
     invoke<{ path: string; playback_url?: string; duration_seconds: number }>('get_meeting_audio_playback_info', { meetingId })
       .then((info) => {
         if (!cancelled) {
-          // WKWebView support differs between macOS versions. Prefer Tauri's scoped
-          // asset protocol and automatically fall back to the byte-range localhost
-          // transport if the media engine rejects the first source.
-          setAudioSources([convertFileSrc(info.path), info.playback_url].filter(Boolean) as string[]);
+          // WKWebView support differs between macOS versions. Prefer the local
+          // byte-range HTTP transport (a real HTTP resource the media engine
+          // streams and seeks reliably) and fall back to Tauri's scoped asset
+          // protocol. The asset protocol can stall silently on some macOS builds
+          // — emitting neither `playing` nor `error` — which previously left the
+          // play button spinning forever.
+          setAudioSources([info.playback_url, convertFileSrc(info.path)].filter(Boolean) as string[]);
           setSavedAudioDuration(info.duration_seconds);
         }
       })
