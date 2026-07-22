@@ -18,6 +18,9 @@ const STOP_DEBOUNCE_POLLS: u32 = 4;
 /// After a failed auto-start (e.g. no audio device available), wait this long before retrying
 /// rather than hammering it every poll for as long as the call stays open.
 const AUTO_START_RETRY_COOLDOWN: Duration = Duration::from_secs(60);
+/// How often to re-log the missing-permission warning — otherwise it fires every single 5s
+/// poll for as long as the toggle is on and permission isn't granted, drowning out other logs.
+const PERMISSION_WARNING_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Tracks whether the *current* recording was started by this detector, so auto-stop never
 /// touches a recording the user started manually for something other than a Meet call.
@@ -56,6 +59,7 @@ pub fn spawn_meet_detection_task<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let mut consecutive_absent: u32 = 0;
         let mut last_start_failure: Option<Instant> = None;
+        let mut last_permission_warning: Option<Instant> = None;
 
         loop {
             tokio::time::sleep(POLL_INTERVAL).await;
@@ -82,11 +86,16 @@ pub fn spawn_meet_detection_task<R: Runtime>(app: AppHandle<R>) {
             }
 
             if !crate::audio::permissions::check_window_title_read_permission() {
-                warn!(
-                    "[meet-detect] auto-detect is on but Screen Recording permission isn't \
-                     granted — window titles are invisible, so detection can never fire. \
-                     Grant it in System Settings > Privacy & Security > Screen Recording."
-                );
+                let should_warn = last_permission_warning
+                    .is_none_or(|t| t.elapsed() >= PERMISSION_WARNING_INTERVAL);
+                if should_warn {
+                    warn!(
+                        "[meet-detect] auto-detect is on but Screen Recording permission isn't \
+                         granted — window titles are invisible, so detection can never fire. \
+                         Grant it in System Settings > Privacy & Security > Screen Recording."
+                    );
+                    last_permission_warning = Some(Instant::now());
+                }
             }
 
             let meet_active = tokio::task::spawn_blocking(window_scan::scan_for_active_meet_call)

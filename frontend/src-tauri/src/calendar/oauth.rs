@@ -70,9 +70,11 @@ pub fn wait_for_authorization_code(
                 // "GET /callback?code=XYZ&scope=... HTTP/1.1"
                 let path = request_line.split_whitespace().nth(1).unwrap_or("");
                 let query = path.split_once('?').map(|(_, q)| q).unwrap_or("");
-                let code = query
-                    .split('&')
-                    .find_map(|pair| pair.strip_prefix("code=").map(|c| c.to_string()));
+                // The code can be percent-encoded (e.g. embedded `/` or `+`), so this must be
+                // decoded via a real query-string parser rather than a raw substring split.
+                let code = url::form_urlencoded::parse(query.as_bytes())
+                    .find(|(key, _)| key == "code")
+                    .map(|(_, value)| value.into_owned());
 
                 let body = "<html><body>Meetily is connected to Google Calendar. \
                              You can close this tab.</body></html>";

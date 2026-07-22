@@ -69,6 +69,9 @@ pub async fn list_meet_events(
             ("timeMax", time_max.to_rfc3339()),
             ("singleEvents", "true".to_string()),
             ("orderBy", "startTime".to_string()),
+            // Without this, Google omits `conferenceData` entirely from every event regardless
+            // of whether it has a Meet link — which silently broke all Meet-link matching.
+            ("conferenceDataVersion", "1".to_string()),
         ])
         .send()
         .await?;

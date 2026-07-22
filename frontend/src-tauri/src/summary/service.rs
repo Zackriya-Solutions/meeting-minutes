@@ -641,7 +641,10 @@ impl SummaryService {
             })
             .unwrap_or_default();
 
-        if attendees.is_empty() && meeting.calendar_start_time.is_none() {
+        if attendees.is_empty()
+            && meeting.calendar_start_time.is_none()
+            && meeting.calendar_meet_link.is_none()
+        {
             return None;
         }
 
@@ -651,6 +654,12 @@ impl SummaryService {
         }
         if let Some(start) = &meeting.calendar_start_time {
             block.push_str(&format!("Scheduled start: {}\n", start));
+        }
+        if let Some(end) = &meeting.calendar_end_time {
+            block.push_str(&format!("Scheduled end: {}\n", end));
+        }
+        if let Some(meet_link) = &meeting.calendar_meet_link {
+            block.push_str(&format!("Meet link: {}\n", meet_link));
         }
         block.push_str("</meeting_metadata>");
         Some(block)

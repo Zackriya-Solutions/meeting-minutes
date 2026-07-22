@@ -145,22 +145,22 @@ pub async fn api_save_meeting_calendar_metadata<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to refresh Google Calendar access token: {}", e))?;
 
-    // A call may have started slightly before or after Meetily's recording did, so widen the
-    // fetch window generously, then match more tightly below.
+    // `meeting.created_at` is set when the transcript is saved — i.e. roughly when the recording
+    // *stopped*, not when the meeting started (see transcript.rs's INSERT). For a long meeting
+    // that drift can be significant, so this window has to be wide enough to still contain the
+    // event's actual start; a narrow (e.g. ±15min) secondary filter would cause false "no match"
+    // results for anything longer than that. `find_matching_event`'s greatest-overlap scoring
+    // already picks the best candidate among whatever's fetched, so one generous window for both
+    // fetching and matching is both simpler and more correct than fetching wide then filtering
+    // tight.
     let meeting_time = meeting.created_at.0;
-    let events = client::list_meet_events(
-        &access_token,
-        meeting_time - Duration::hours(2),
-        meeting_time + Duration::hours(2),
-    )
-    .await
-    .map_err(|e| format!("Failed to fetch Google Calendar events: {}", e))?;
+    let window_start = meeting_time - Duration::hours(2);
+    let window_end = meeting_time + Duration::hours(2);
+    let events = client::list_meet_events(&access_token, window_start, window_end)
+        .await
+        .map_err(|e| format!("Failed to fetch Google Calendar events: {}", e))?;
 
-    let Some(matched) = matcher::find_matching_event(
-        &events,
-        meeting_time - Duration::minutes(15),
-        meeting_time + Duration::minutes(15),
-    ) else {
+    let Some(matched) = matcher::find_matching_event(&events, window_start, window_end) else {
         return Ok(None);
     };
 
