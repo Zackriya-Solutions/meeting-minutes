@@ -116,6 +116,11 @@ class StatsModuleTests(unittest.TestCase):
         self.assertIn("dau", payload)
         self.assertIn("events", payload)
         self.assertIn("errors", payload)
+        self.assertEqual(
+            set(payload["overview"]), {"ever_used", "dau", "wau", "mau"}
+        )
+        self.assertNotIn("sessions_per_dau", payload["overview"])
+        self.assertNotIn("tools_per_dau", payload["overview"])
         self.assertEqual(response.headers["cache-control"], "no-store")
 
     def test_ingest_fails_closed_without_server_configuration(self) -> None:

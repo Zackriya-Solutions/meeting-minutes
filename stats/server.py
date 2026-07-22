@@ -470,6 +470,12 @@ def summary(days: float = 1.0) -> JSONResponse:
         "dau": observed,
         "events": events,
         "errors": errors,
+        "overview": {
+            "ever_used": installs,
+            "dau": product["growth"]["dau_utc"],
+            "wau": product["growth"]["wau_rolling_7d"],
+            "mau": product["growth"]["mau_rolling_30d"],
+        },
         "metrics": [
             {"label": "Weekly value devices", "value": str(product["growth"]["weekly_value_devices"])},
             {"label": f"Captured memories {label}", "value": str(usage["captured_memories"])},
