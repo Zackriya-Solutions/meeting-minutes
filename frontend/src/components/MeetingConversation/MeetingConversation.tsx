@@ -14,6 +14,7 @@ import { TranscriptCard } from './TranscriptCard';
 import { SummaryMessage } from './SummaryMessage';
 import { MeetingComposer } from './MeetingComposer';
 import { MeetingOverflowMenu } from './MeetingOverflowMenu';
+import { AnalyticsReportButton } from './AnalyticsReportButton';
 
 /**
  * Variant 2a — the meeting screen as a single vertical conversation.
@@ -204,6 +205,11 @@ export function MeetingConversation({
 
   const meetingTitleFor = useCallback(() => meetingTitle || meeting.title, [meetingTitle, meeting.title]);
 
+  // The analytics report needs a transcript to work with. Derive availability from
+  // the transcript props already flowing into this component (loaded rows, the total
+  // count, or virtualized segments) — no extra plumbing required.
+  const hasTranscript = (totalCount ?? 0) > 0 || transcripts.length > 0 || (segments?.length ?? 0) > 0;
+
   const metaLine = useMemo(() => {
     const parts: string[] = [];
     if (meeting.created_at) {
@@ -233,6 +239,11 @@ export function MeetingConversation({
           />
           {metaLine && <p className="mm-numeric mt-0.5 truncate text-xs text-[var(--fg3)]">{metaLine}</p>}
         </div>
+        <AnalyticsReportButton
+          meetingId={meetingId}
+          disabled={!hasTranscript}
+          disabledTitle={t('No transcript to analyze yet')}
+        />
         <MeetingOverflowMenu
           meetingId={meetingId}
           hasSummary={hasSummary}

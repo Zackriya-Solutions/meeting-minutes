@@ -59,6 +59,7 @@ pub mod openai;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod pipeline;
+pub mod report;
 pub mod salutespeech;
 pub mod search;
 pub mod state;
@@ -901,6 +902,12 @@ pub fn run() {
             summary::commands::api_save_meeting_detected_summary_language,
             summary::commands::api_detect_transcript_summary_language,
             summary::commands::api_cancel_summary,
+            // Deep Analytics report commands
+            report::commands::generate_analytics_report,
+            report::commands::get_analytics_report,
+            report::commands::cancel_analytics_report,
+            report::commands::submit_analytics_answers,
+            report::commands::reveal_report_in_folder,
             summary::content_window::get_meeting_content_window_suggestion,
             summary::content_window::set_meeting_content_window_preference,
             summary::standup_workflow::list_standup_records,
