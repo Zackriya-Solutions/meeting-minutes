@@ -761,3 +761,24 @@ export function onImportWarning(
     cb(e.payload.warning, e.payload.details)
   );
 }
+
+// ── Battery-optimization exemption (Android) ──────────────────────────────
+
+/** True if the OS already exempts the app from battery optimizations. */
+export async function isIgnoringBatteryOptimizations(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('is_ignoring_battery_optimizations');
+  } catch (e) {
+    console.warn('[vm] is_ignoring_battery_optimizations failed', e);
+    return true; // don't nag on failure
+  }
+}
+
+/** Launch the Android system dialog to exempt the app from battery optimizations. */
+export async function requestIgnoreBatteryOptimizations(): Promise<void> {
+  try {
+    await invoke('request_ignore_battery_optimizations');
+  } catch (e) {
+    console.warn('[vm] request_ignore_battery_optimizations failed', e);
+  }
+}

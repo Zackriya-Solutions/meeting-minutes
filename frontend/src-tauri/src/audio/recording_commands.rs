@@ -251,6 +251,13 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
+    // Keep recording alive (and satisfy Android's mic-capture notification
+    // requirement) when the app is backgrounded.
+    #[cfg(target_os = "android")]
+    {
+        let _ = crate::android_jni::start_recording_service();
+    }
+
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
     {
@@ -421,6 +428,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
+
+    // Keep recording alive (and satisfy Android's mic-capture notification
+    // requirement) when the app is backgrounded.
+    #[cfg(target_os = "android")]
+    {
+        let _ = crate::android_jni::start_recording_service();
+    }
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -850,6 +864,12 @@ pub async fn stop_recording<R: Runtime>(
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
+
+    // Tear down the microphone foreground service / notification.
+    #[cfg(target_os = "android")]
+    {
+        let _ = crate::android_jni::stop_recording_service();
+    }
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.

@@ -9,6 +9,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import { usePlatform } from "@/hooks/usePlatform";
+import { MeetingDetailScreen } from "@/components/mobile/MeetingDetailScreen";
+import "@/components/mobile/mobile.css";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -380,7 +383,64 @@ function MeetingDetailsContent() {
   />;
 }
 
+/**
+ * On Android the desktop meeting-details UI (light-only Tailwind, no dark
+ * variants) must never render — the Voice Me mobile shell owns this screen and
+ * is theme-aware. Any global `router.push('/meeting-details?id=...')` (import
+ * dialog, recording-stop hook, …) lands here, so we branch to the mobile
+ * MeetingDetailScreen wrapped in the same `.vm-app` theme container MobileApp
+ * uses, reading the persisted theme/accent so dark mode is honored.
+ */
+function AndroidMeetingDetail() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const meetingId = searchParams.get('id');
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [accent, setAccent] = useState('teal');
+
+  useEffect(() => {
+    try {
+      const t = window.localStorage.getItem('vm-theme');
+      if (t === 'light' || t === 'dark') setTheme(t);
+      const a = window.localStorage.getItem('vm-accent');
+      if (a) setAccent(a);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  if (!meetingId) {
+    router.replace('/');
+    return null;
+  }
+
+  return (
+    <div className="vm-app" data-theme={theme} data-accent={accent} style={{ height: '100vh' }}>
+      <MeetingDetailScreen
+        meetingId={meetingId}
+        initialTab="transcript"
+        onBack={() => router.push('/')}
+        onOpenSettings={() => router.push('/')}
+      />
+    </div>
+  );
+}
+
 export default function MeetingDetails() {
+  const platform = usePlatform();
+
+  if (platform === 'android') {
+    return (
+      <Suspense fallback={
+        <div className="flex items-center justify-center h-screen">
+          <LoaderIcon className="animate-spin size-6" />
+        </div>
+      }>
+        <AndroidMeetingDetail />
+      </Suspense>
+    );
+  }
+
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center h-screen">

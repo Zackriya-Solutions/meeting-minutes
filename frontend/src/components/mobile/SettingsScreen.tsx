@@ -6,6 +6,8 @@ import type { VmAccent, VmModel, VmProvider, VmTheme } from './types';
 import { VM_ACCENTS, VM_PROVIDER_NAMES } from './types';
 import {
   getModelConfig,
+  isIgnoringBatteryOptimizations,
+  requestIgnoreBatteryOptimizations,
   saveModelConfig,
   setLanguagePreference,
   VmModelConfig,
@@ -68,6 +70,11 @@ export function SettingsScreen({
   const [notify, setNotify] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [appVersion, setAppVersion] = useState('');
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
+
+  const refreshBatteryStatus = useCallback(() => {
+    isIgnoringBatteryOptimizations().then(setBatteryExempt);
+  }, []);
 
   useEffect(() => {
     try {
@@ -77,6 +84,7 @@ export function SettingsScreen({
     } catch {
       /* ignore */
     }
+    refreshBatteryStatus();
     getVersion().then(setAppVersion).catch(() => {});
     getModelConfig().then((c) => {
       if (!c) return;
@@ -248,6 +256,35 @@ export function SettingsScreen({
           <button className={`switch ${notify ? 'on' : 'off'}`} onClick={toggleNotify}>
             <div className="knob" />
           </button>
+        </div>
+        <div className="divider" />
+
+        <SectionLabel>BACKGROUND RELIABILITY</SectionLabel>
+        <div
+          className="settingrow"
+          onClick={async () => {
+            if (batteryExempt) return;
+            await requestIgnoreBatteryOptimizations();
+            // Re-check shortly after the system dialog is dismissed.
+            setTimeout(refreshBatteryStatus, 1200);
+          }}
+        >
+          <div className="col f1 gap2">
+            <span className="fs14">Unrestricted background use</span>
+            <span className="muted fs12">
+              Lets long recordings keep running when the screen is off. Without this, Android may
+              pause recording to save battery.
+            </span>
+          </div>
+          {batteryExempt === null ? (
+            <span className="muted fs13">…</span>
+          ) : batteryExempt ? (
+            <span className="pill" style={{ background: 'hsl(var(--accent))', color: 'hsl(var(--accent-fg))' }}>
+              On
+            </span>
+          ) : (
+            <span className="muted fs13">Enable</span>
+          )}
         </div>
         <div className="divider" />
 

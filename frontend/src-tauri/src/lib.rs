@@ -36,6 +36,8 @@ pub(crate) use perf_trace;
 
 // Declare audio module
 pub mod analytics;
+#[cfg(target_os = "android")]
+pub mod android_jni;
 pub mod api;
 pub mod audio;
 pub mod config;
@@ -241,6 +243,35 @@ fn read_audio_file(file_path: String) -> Result<Vec<u8>, String> {
     match std::fs::read(&file_path) {
         Ok(data) => Ok(data),
         Err(e) => Err(format!("Failed to read audio file: {}", e)),
+    }
+}
+
+/// True if the OS is already exempting the app from battery optimizations. Only
+/// meaningful on Android; every other platform returns true (nothing to prompt).
+#[tauri::command]
+async fn is_ignoring_battery_optimizations() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        android_jni::is_ignoring_battery_optimizations().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(true)
+    }
+}
+
+/// Launch the Android system dialog asking the user to exempt the app from
+/// battery optimizations (so long recordings aren't killed by Doze). No-op off
+/// Android.
+#[tauri::command]
+async fn request_ignore_battery_optimizations() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android_jni::request_ignore_battery_optimizations().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(())
     }
 }
 
@@ -801,6 +832,9 @@ pub fn run() {
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
             audio::import::start_retranscribe_local_recording_command,
+            // Battery-optimization exemption (Android)
+            is_ignoring_battery_optimizations,
+            request_ignore_battery_optimizations,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

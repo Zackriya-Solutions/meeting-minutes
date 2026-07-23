@@ -5,8 +5,12 @@
  * Applies the Android-specific pieces that Tauri's generated project does not
  * include (see docs/ANDROID.md):
  *   1. AndroidManifest.xml — microphone/notification/foreground-service permissions
+ *                            and the <service> declaration for RecordingService
  *   2. MainActivity.kt     — runtime permission request (RECORD_AUDIO, POST_NOTIFICATIONS)
- *   3. jniLibs             — libonnxruntime.so from the official onnxruntime-android
+ *   3. RecordingService.kt — mic foreground service (persistent notification) so
+ *                            recording survives the app being backgrounded; started
+ *                            /stopped from Rust via JNI (see src/android_jni.rs)
+ *   4. jniLibs             — libonnxruntime.so from the official onnxruntime-android
  *                            AAR (required by Silero VAD; `ort` dlopens it at runtime)
  *
  * Safe to re-run (idempotent). Requires: node >= 18 (fetch), a JDK on PATH
@@ -66,8 +70,9 @@ function patchManifest() {
   console.log(`✅ AndroidManifest.xml: added ${missing.length} permission(s)`);
 }
 
-function patchMainActivity() {
-  // Locate MainActivity.kt (package dir depends on the app identifier)
+// Locate MainActivity.kt (its directory + package depend on the app identifier)
+// and return { path, dir, packageName } so other patches can co-locate files.
+function findMainActivity() {
   const javaRoot = path.join(appMain, 'java');
   let mainActivityPath = null;
   const walk = (dir) => {
@@ -79,7 +84,18 @@ function patchMainActivity() {
   };
   walk(javaRoot);
   if (!mainActivityPath) fail(`MainActivity.kt not found under ${javaRoot}`);
+  const src = fs.readFileSync(mainActivityPath, 'utf8');
+  const pkg = src.match(/^package (.+)$/m);
+  if (!pkg) fail('Could not determine package of MainActivity.kt');
+  return {
+    path: mainActivityPath,
+    dir: path.dirname(mainActivityPath),
+    packageName: pkg[1].trim(),
+  };
+}
 
+function patchMainActivity() {
+  const { path: mainActivityPath } = findMainActivity();
   const current = fs.readFileSync(mainActivityPath, 'utf8');
   if (current.includes('requestPermissions')) {
     console.log('✅ MainActivity.kt already requests runtime permissions');
@@ -152,12 +168,116 @@ async function installOnnxRuntime() {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// Register the RecordingService inside <application>. foregroundServiceType
+// "microphone" is required (API 29+) to run a mic-capturing FGS; the matching
+// FOREGROUND_SERVICE_MICROPHONE permission is added by patchManifest().
+function patchServiceManifest() {
+  const manifestPath = path.join(appMain, 'AndroidManifest.xml');
+  let manifest = fs.readFileSync(manifestPath, 'utf8');
+  if (manifest.includes('.RecordingService')) {
+    console.log('✅ AndroidManifest.xml already declares RecordingService');
+    return;
+  }
+  const service =
+    '        <service\n' +
+    '            android:name=".RecordingService"\n' +
+    '            android:exported="false"\n' +
+    '            android:foregroundServiceType="microphone" />\n';
+  if (!/<\/application>/.test(manifest)) {
+    fail('Could not find </application> in AndroidManifest.xml');
+  }
+  manifest = manifest.replace(/(\s*)<\/application>/, `\n${service}$1</application>`);
+  fs.writeFileSync(manifestPath, manifest);
+  console.log('✅ AndroidManifest.xml: declared RecordingService');
+}
+
+// Write RecordingService.kt next to MainActivity (same package). This is a
+// "hollow" foreground service: the mic is captured by Rust/cpal — the service
+// exists only to keep the process alive and satisfy Android's requirement that
+// background microphone use run under a visible foreground-service notification.
+function writeRecordingService(mainActivity) {
+  const servicePath = path.join(mainActivity.dir, 'RecordingService.kt');
+  const contents = `package ${mainActivity.packageName}
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+
+/**
+ * Microphone foreground service. Started/stopped from Rust over JNI when
+ * recording begins/ends (see src/android_jni.rs). Shows a persistent, low-
+ * importance notification tapping through to the app.
+ */
+class RecordingService : Service() {
+  override fun onBind(intent: Intent?): IBinder? = null
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    val nm = getSystemService(NotificationManager::class.java)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val channel = NotificationChannel(
+        CHANNEL_ID,
+        "Recording",
+        NotificationManager.IMPORTANCE_LOW
+      )
+      channel.setShowBadge(false)
+      nm?.createNotificationChannel(channel)
+    }
+
+    val launch = packageManager.getLaunchIntentForPackage(packageName)
+    val pi = launch?.let {
+      var piFlags = PendingIntent.FLAG_UPDATE_CURRENT
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        piFlags = piFlags or PendingIntent.FLAG_IMMUTABLE
+      }
+      PendingIntent.getActivity(this, 0, it, piFlags)
+    }
+
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, CHANNEL_ID)
+    } else {
+      @Suppress("DEPRECATION")
+      Notification.Builder(this)
+    }
+    val notification = builder
+      .setContentTitle("Meetily is recording")
+      .setContentText("Transcribing in the background")
+      .setSmallIcon(applicationInfo.icon)
+      .setOngoing(true)
+      .apply { if (pi != null) setContentIntent(pi) }
+      .build()
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+    } else {
+      startForeground(NOTIF_ID, notification)
+    }
+    return START_STICKY
+  }
+
+  companion object {
+    private const val CHANNEL_ID = "meetily_recording"
+    private const val NOTIF_ID = 4242
+  }
+}
+`;
+  fs.writeFileSync(servicePath, contents);
+  console.log(`✅ RecordingService.kt written (${servicePath})`);
+}
+
 (async () => {
   if (!fs.existsSync(genAndroid)) {
     fail(`Android project not found at ${genAndroid} — run \`pnpm tauri android init\` first.`);
   }
   patchManifest();
   patchMainActivity();
+  patchServiceManifest();
+  writeRecordingService(findMainActivity());
   await installOnnxRuntime();
   console.log('🎉 Android project setup complete');
 })();

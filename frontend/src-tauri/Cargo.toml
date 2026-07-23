@@ -217,6 +217,11 @@ openssl = { version = "0.10", features = ["vendored"] }
 # library from the official `onnxruntime-android` AAR must be bundled in
 # the APK's jniLibs (see docs/ANDROID.md).
 ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
+# JNI bridge for the microphone foreground service and the battery-optimization
+# system prompt (Android platform features Tauri doesn't expose). ndk-context
+# hands us the JavaVM + Application Context that Tauri already initialized.
+jni = "0.21"
+ndk-context = "0.1"
 
 [dev-dependencies]
 tempfile = "3.3.0"
