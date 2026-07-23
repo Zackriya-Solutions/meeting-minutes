@@ -245,7 +245,7 @@ class RecordingService : Service() {
       Notification.Builder(this)
     }
     val notification = builder
-      .setContentTitle("Meetily is recording")
+      .setContentTitle("VoiceMe is recording")
       .setContentText("Transcribing in the background")
       .setSmallIcon(applicationInfo.icon)
       .setOngoing(true)

@@ -96,7 +96,7 @@ export function HomeScreen({
             </svg>
             <h2 style={{ fontSize: 19, fontWeight: 800, margin: 0 }}>Nothing recorded yet</h2>
             <p className="muted" style={{ fontSize: 14, lineHeight: 1.5, margin: 0, maxWidth: 260 }}>
-              Voice Me transcribes and summarizes meetings locally. Nothing leaves this device —
+              VoiceMe transcribes and summarizes meetings locally. Nothing leaves this device —
               ever.
             </p>
             <button className="btn btnp md" style={{ marginTop: 6 }} onClick={tapRecord}>
@@ -174,7 +174,7 @@ export function HomeScreen({
               Download a speech model first
             </h2>
             <p className="muted" style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5 }}>
-              Voice Me needs a Whisper model on this device before it can transcribe. This only
+              VoiceMe needs a Whisper model on this device before it can transcribe. This only
               happens once.
             </p>
             <button

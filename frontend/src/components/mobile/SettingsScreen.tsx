@@ -309,7 +309,7 @@ export function SettingsScreen({
           </a>
         </div>
         <div className="col ac" style={{ padding: '24px 0 10px' }}>
-          <span className="muted fs12">Meetily mobile · open source</span>
+          <span className="muted fs12">VoiceMe · open source</span>
           <span className="muted fs12">Your meetings never leave this device</span>
           <span className="muted mono fs11" style={{ marginTop: 6 }}>
             {appVersion && `v${appVersion}`}

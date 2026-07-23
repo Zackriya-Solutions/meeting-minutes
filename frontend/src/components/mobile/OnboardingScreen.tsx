@@ -130,7 +130,7 @@ export function OnboardingScreen({
         <div className="row gap8">
           <div style={{ width: 22, height: 4, borderRadius: 2, background: 'hsl(var(--primary))' }} />
           <span className="mono fs11 fw7" style={{ letterSpacing: '0.06em' }}>
-            VOICE ME
+            VOICEME
           </span>
         </div>
         {step < 3 && (
@@ -151,7 +151,7 @@ export function OnboardingScreen({
             Your meetings never leave this device
           </h1>
           <p className="muted" style={{ fontSize: 15, lineHeight: 1.5, margin: 0 }}>
-            Voice Me records, transcribes, and summarizes locally. No cloud accounts. No telemetry.
+            VoiceMe records, transcribes, and summarizes locally. No cloud accounts. No telemetry.
             Open source, start to finish.
           </p>
         </div>
@@ -174,7 +174,7 @@ export function OnboardingScreen({
           </div>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Microphone access</h1>
           <p className="muted" style={{ fontSize: 15, lineHeight: 1.5, margin: 0 }}>
-            Voice Me needs the mic to capture audio for local transcription. Audio is processed
+            VoiceMe needs the mic to capture audio for local transcription. Audio is processed
             with an on-device Whisper model and is never sent anywhere.
           </p>
           {micDenied && (
