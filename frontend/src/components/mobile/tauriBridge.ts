@@ -1,5 +1,5 @@
 /**
- * Voice Me mobile UI — bridge to the Rust/Tauri core.
+ * VoiceMe mobile UI — bridge to the Rust/Tauri core.
  *
  * Thin, defensive wrappers around the same commands/events the desktop UI
  * uses. Every call degrades gracefully (returns fallbacks instead of

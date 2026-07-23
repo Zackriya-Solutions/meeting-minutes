@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Voice Me — mobile shell (Android).
+ * VoiceMe — mobile shell (Android).
  *
- * Implements the "Voice Me" Claude Design handoff: onboarding, meetings
+ * Implements the "VoiceMe" Claude Design handoff: onboarding, meetings
  * home, live recording, meeting detail (transcript/summary/notes), model
  * manager, and settings, wired to the same Rust/Tauri core as desktop.
  */

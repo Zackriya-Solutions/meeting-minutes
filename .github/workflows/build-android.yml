@@ -216,7 +216,7 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-android-arm64-${{ steps.get-version.outputs.version }}-${{ steps.get-version.outputs.build_id }}
+          name: voiceme-android-arm64-${{ steps.get-version.outputs.version }}-${{ steps.get-version.outputs.build_id }}
           path: ${{ steps.sign-apk.outputs.apk-path }}
           retention-days: 14
 
@@ -228,7 +228,7 @@ jobs:
           # A fixed filename (no build id) so re-publishing to the same
           # per-branch release overwrites the previous asset instead of
           # accumulating a new one on every build.
-          ASSET="android-artifacts/meetily-android-arm64-${{ steps.sign-apk.outputs.suffix }}.apk"
+          ASSET="android-artifacts/voiceme-android-arm64-${{ steps.sign-apk.outputs.suffix }}.apk"
           cp "${{ steps.sign-apk.outputs.apk-path }}" "$ASSET"
           echo "asset-path=$ASSET" >> "$GITHUB_OUTPUT"
 
