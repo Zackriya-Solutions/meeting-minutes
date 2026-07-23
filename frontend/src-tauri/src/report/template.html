@@ -351,6 +351,8 @@ function bindTip(el,html){
   el.addEventListener("mouseleave",hideTip);
 }
 const mm=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
+/* injected data is script-safe but NOT html-safe: escape before any innerHTML sink */
+const escH=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 /* ===== talk time bars ===== */
 (function(){
@@ -361,12 +363,12 @@ const mm=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
     const p=SPK[s];if(!p)return;
     const row=document.createElement("div");row.className="tt-row";
     const mins=(sec/60).toFixed(1).replace(".",",");
-    row.innerHTML=`<div class="tt-name"><span class="dot" style="background:${p.c}"></span>${p.name} <small>${p.side||""}</small></div>
+    row.innerHTML=`<div class="tt-name"><span class="dot" style="background:${p.c}"></span>${escH(p.name)} <small>${escH(p.side||"")}</small></div>
       <div class="tt-track"><div class="tt-bar" style="width:${pct/max*100}%;background:${p.c}"></div></div>
       <div class="tt-val">${mins} мин · ${Math.round(pct)}%</div>`;
     box.appendChild(row);
     const t=TURNS.filter(x=>x[2]===s);
-    bindTip(row.querySelector(".tt-bar"),`<b>${p.name}</b>${t.length} реплик · ${Math.round(sec)} с речи`);
+    bindTip(row.querySelector(".tt-bar"),`<b>${escH(p.name)}</b>${t.length} реплик · ${Math.round(sec)} с речи`);
   });
 })();
 
@@ -404,7 +406,7 @@ const mm=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
     const cx=(x(a)+x(b))/2;
     const t=el("text",{x:cx,y:27,"text-anchor":"middle","font-size":10.5,"font-weight":600,fill:"var(--ink2)"});
     t.textContent=i+1;svg.appendChild(t);
-    bindTip(r,`<b>${i+1}. ${name}</b>${mm(a)}–${mm(b)}`);
+    bindTip(r,`<b>${i+1}. ${escH(name)}</b>${mm(a)}–${mm(b)}`);
   });
   MARKERS.forEach(([t,kind,label])=>{
     const cx=x(t),cy=52;let m;
@@ -413,14 +415,14 @@ const mm=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
     else m=el("rect",{x:cx-4.2,y:cy-4.2,width:8.4,height:8.4,fill:"var(--ink2)",transform:`rotate(45 ${cx} ${cy})`});
     m.setAttribute("stroke","var(--surface)");m.setAttribute("stroke-width",1.5);
     svg.appendChild(m);
-    bindTip(m,`<b>${label}</b>${mm(t)}`);
+    bindTip(m,`<b>${escH(label)}</b>${mm(t)}`);
   });
   TURNS.forEach(([a,b,s,txt],i)=>{
     if(s<0||s>=nspk)return;
     const w=Math.max(1.8,x(b)-x(a));
     const r=el("rect",{x:x(a),y:spkTop+s*rowGap,width:w,height:rowH,rx:2,fill:SPK[s].c});
     svg.appendChild(r);
-    bindTip(r,`<b>${SPK[s].name} · ${mm(a)}</b>${txt}…`);
+    bindTip(r,`<b>${escH(SPK[s].name)} · ${mm(a)}</b>${escH(txt)}…`);
     r.style.cursor="pointer";
     r.addEventListener("click",()=>jump(i));
   });
@@ -428,7 +430,7 @@ const mm=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}`;
   const key=document.getElementById("topicsKey");
   TOPICS.forEach(([a,b,name],i)=>{
     const d=document.createElement("div");
-    d.innerHTML=`<b>${i+1}</b>${name} <span style="color:var(--muted)">· ${mm(a)}–${mm(b)}</span>`;
+    d.innerHTML=`<b>${i+1}</b>${escH(name)} <span style="color:var(--muted)">· ${mm(a)}–${mm(b)}</span>`;
     key.appendChild(d);
   });
 })();

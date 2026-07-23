@@ -899,6 +899,11 @@ fn build_footer(input: &RenderInput) -> String {
 
 /// Encode a serde_json Value as a JS literal safe to embed inside `<script>`:
 /// neutralise `<` (so `</script>` can't appear) and the JS line separators.
+///
+/// This is script-boundary escaping only — `<` decodes back to a literal
+/// `<` once the script runs, so the values are NOT html-safe. Every innerHTML /
+/// template-literal sink in `template.html` must wrap these strings in `escH()`
+/// (textContent sinks need no escaping, which is why we don't escape here).
 fn js_data(v: &serde_json::Value) -> String {
     serde_json::to_string(v)
         .unwrap_or_else(|_| "null".to_string())
@@ -1095,6 +1100,27 @@ mod tests {
         let out = js_data(&v);
         assert!(!out.contains("</script>"));
         assert!(out.contains("\\u003c/script>"));
+    }
+
+    /// js_data values are not html-safe (see its doc), so every string the
+    /// template's script interpolates into innerHTML / tooltip HTML must go
+    /// through escH. Guards against reintroducing the raw interpolations.
+    #[test]
+    fn template_escapes_data_strings_at_html_sinks() {
+        assert!(TEMPLATE.contains("const escH="));
+        for raw in [
+            "${p.name}",
+            "${p.side||\"\"}",
+            "${name}",
+            "${label}",
+            "${txt}",
+            "${SPK[s].name}",
+        ] {
+            assert!(
+                !TEMPLATE.contains(raw),
+                "unescaped data interpolation `{raw}` in template.html — wrap it in escH()"
+            );
+        }
     }
 
     #[test]
