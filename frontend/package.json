@@ -99,6 +99,7 @@
         "@tailwindcss/typography": "^0.5.15",
         "@tauri-apps/cli": "^2.1.0",
         "@tauri-apps/plugin-fs": "~2.4.0",
+        "@types/bun": "^1.3.14",
         "@types/node": "^20",
         "@types/react": "^18.3.18",
         "@types/react-dom": "^18.3.5",
