@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -61,6 +61,13 @@ jobs:
           BUILD_ID="${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
           echo "Build id: $BUILD_ID"
           echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
+          # GitHub Actions artifacts require a login and expire after
+          # retention-days, so builds also get published to a per-branch
+          # GitHub Release (a stable, no-login download link). Release tags
+          # can't contain "/", so flatten the branch name into one.
+          SAFE_REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          echo "safe_ref=$SAFE_REF" >> "$GITHUB_OUTPUT"
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -198,6 +205,7 @@ jobs:
           "$BUILD_TOOLS/apksigner" verify "$APK_OUT"
 
           echo "apk-path=$APK_OUT" >> "$GITHUB_OUTPUT"
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
           echo "Signed APK: $APK_OUT"
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -211,3 +219,33 @@ jobs:
           name: meetily-android-arm64-${{ steps.get-version.outputs.version }}-${{ steps.get-version.outputs.build_id }}
           path: ${{ steps.sign-apk.outputs.apk-path }}
           retention-days: 14
+
+      - name: Prepare release asset
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
+        id: release-asset
+        shell: bash
+        run: |
+          # A fixed filename (no build id) so re-publishing to the same
+          # per-branch release overwrites the previous asset instead of
+          # accumulating a new one on every build.
+          ASSET="android-artifacts/meetily-android-arm64-${{ steps.sign-apk.outputs.suffix }}.apk"
+          cp "${{ steps.sign-apk.outputs.apk-path }}" "$ASSET"
+          echo "asset-path=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ steps.get-version.outputs.safe_ref }}
+          name: "Android build — ${{ github.ref_name }} (#${{ github.run_number }})"
+          body: |
+            Automated Android APK build — not a tagged app release, just the latest build off this branch.
+
+            - Branch: `${{ github.ref_name }}`
+            - Commit: ${{ github.sha }}
+            - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Signed with an ephemeral debug key unless the repo's signing secrets are configured — fine for sideloading, not for Play Store distribution.
+          prerelease: true
+          make_latest: false
+          files: ${{ steps.release-asset.outputs.asset-path }}
