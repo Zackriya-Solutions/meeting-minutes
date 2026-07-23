@@ -227,7 +227,7 @@ export function ImportAudioDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="sm:max-w-[500px]"
+        className="w-[calc(100vw-2rem)] max-w-[500px] overflow-hidden"
         onEscapeKeyDown={handleEscapeKeyDown}
         onInteractOutside={handleInteractOutside}
       >
@@ -264,7 +264,7 @@ export function ImportAudioDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-4 max-w-full">
           {/* File selection / info */}
           {!isProcessing && !error && (
             <>
@@ -273,8 +273,10 @@ export function ImportAudioDialog({
                   <div className="flex items-start gap-3">
                     <FileAudio className="h-8 w-8 text-blue-600 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{fileInfo.filename}</p>
-                      <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
+                      <p className="font-medium text-gray-900 truncate w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                        {fileInfo.filename}
+                      </p>
+                      <div className="flex items-center gap-4 text-sm text-gray-500 mt-1 min-w-0">
                         <span className="flex items-center gap-1">
                           <Clock className="h-3.5 w-3.5" />
                           {formatDuration(fileInfo.duration_seconds)}
@@ -298,6 +300,7 @@ export function ImportAudioDialog({
                         setTitleModifiedByUser(true);
                       }}
                       placeholder="Enter meeting title"
+                      className="w-full min-w-0"
                     />
                   </div>
 
@@ -436,7 +439,7 @@ export function ImportAudioDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-shrink-0">
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
