@@ -202,6 +202,24 @@ impl HardwareProfile {
 
     /// Generate adaptive Whisper configuration based on hardware
     pub fn get_whisper_config(&self) -> AdaptiveWhisperConfig {
+        // Android is always CPU-only (no CUDA/Vulkan/Metal) and memory detection
+        // defaults conservatively, so the generic tiering pins every phone to
+        // the "Low" tier (beam 1, 2 threads). That massively under-uses modern
+        // 6-8 core phones. Override with a greedy decode (fastest) plus a much
+        // higher thread count for real-time on-device transcription. One core is
+        // left free for audio capture / VAD / the UI thread.
+        #[cfg(target_os = "android")]
+        {
+            let threads = (self.cpu_cores.saturating_sub(1) as usize).clamp(4, 8);
+            return AdaptiveWhisperConfig {
+                beam_size: 1, // greedy — lowest latency on CPU
+                temperature: 0.2,
+                use_gpu: false,
+                max_threads: Some(threads),
+                chunk_size_preference: ChunkSizePreference::Fast,
+            };
+        }
+
         // Windows-specific override: Always use beam size 2 for stability
         #[cfg(target_os = "windows")]
         {
@@ -214,8 +232,8 @@ impl HardwareProfile {
             };
         }
 
-        // Platform-adaptive configuration for non-Windows systems
-        #[cfg(not(target_os = "windows"))]
+        // Platform-adaptive configuration for other desktop systems
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
         {
             match self.performance_tier {
                 PerformanceTier::Ultra => AdaptiveWhisperConfig {
