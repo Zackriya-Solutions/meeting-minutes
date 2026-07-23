@@ -74,7 +74,7 @@
       <div class="sub" id="sub">Loading opted-in product activity…</div>
     </div>
     <nav class="periods" id="periods" aria-label="Reporting window">
-      <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button>
+      <button data-days="7">7 dates</button><button data-days="30" class="on">30 dates</button><button data-days="90">90 dates</button>
     </nav>
   </header>
   <main>
@@ -82,7 +82,7 @@
     <div class="grid">
       <section class="panel wide">
         <h2>Daily value devices and captured memories</h2>
-        <div class="caption" id="trend-caption">UTC day · opted-in anonymous devices</div>
+        <div class="caption" id="trend-caption">Moscow date · opted-in anonymous devices</div>
         <div class="chart" id="trend"><div class="empty">Loading…</div></div>
         <div class="legend"><span><i style="background:var(--blue)"></i>value devices</span><span><i style="background:var(--gold)"></i>captured memories</span></div>
       </section>
@@ -125,7 +125,7 @@
 
   function renderKpis(data) {
     const cards = [
-      [number(data.growth.weekly_value_devices), 'Weekly value devices', 'rolling 7d outcome'],
+      [number(data.growth.weekly_value_devices), 'Weekly value devices', 'current Moscow ISO week'],
       [pct(data.retention.rates.d7), 'Value retention D7', `n=${data.retention.cohorts.d7}`],
       [number(data.usage.captured_memories), `Captured memories · ${data.window_label}`, `${number(data.usage.recordings)} recorded · ${number(data.usage.imports)} imported`],
       [hours(data.usage.captured_seconds), `Captured time · ${data.window_label}`, `${number(data.usage.memories_per_value_device)} memories / value device`],
@@ -182,7 +182,7 @@
     try {
       const data = await fetch(`product?days=${days}`, {cache:'no-store'}).then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); });
       document.getElementById('sub').textContent = `Updated ${data.updated_at} · ${number(data.identity.observed_devices)} opted-in devices in ${data.window_label}`;
-      document.getElementById('trend-caption').textContent = `UTC day · ${data.window_label} window · same count scale for both series`;
+      document.getElementById('trend-caption').textContent = `Moscow date · ${data.window_label} window · same count scale for both series`;
       renderKpis(data); renderTrend(data.daily); renderFunnel(data.funnel); renderRetention(data.retention); renderQuality(data.quality); renderVersions(data.versions);
       const source = Object.entries(data.data_quality.sources).map(([key,value])=>`${key} ${number(value)}`).join(' · ') || 'no window events';
       document.getElementById('coverage').textContent = `Coverage ${data.data_quality.first_event_at || '—'} → ${data.data_quality.last_event_at || '—'} · sources: ${source} · invalid durations: ${number(data.data_quality.invalid_duration_events)}`;
