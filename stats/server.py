@@ -9,9 +9,10 @@ import os
 import time
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -31,6 +32,7 @@ VERSION_FILE = HERE / "VERSION"
 VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
 MAX_BODY_BYTES = 1_000_000
 DAY = 86_400.0
+REPORTING_TZ = ZoneInfo("Europe/Moscow")
 
 CAPTURE_COMPLETED = {"meeting_ended", "import_audio_completed"}
 VALUE_EVENTS = {
@@ -76,11 +78,17 @@ async def lifespan(_: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-def _window(days: float) -> tuple[float, float, str]:
-    window_days = max(0.04, min(float(days), 365.0))
-    since = time.time() - window_days * DAY
-    label = "24h" if abs(window_days - 1.0) < 1e-9 else f"{window_days:g}d"
-    return window_days, since, label
+def _day_index(timestamp: float) -> int:
+    return datetime.fromtimestamp(timestamp, REPORTING_TZ).date().toordinal()
+
+
+def _window(days: float, now: float | None = None) -> tuple[float, float, str]:
+    window_days = max(1, min(int(float(days) + 0.999999), 365))
+    current = datetime.fromtimestamp(time.time() if now is None else now, REPORTING_TZ)
+    day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    since = (day_start - timedelta(days=window_days - 1)).timestamp()
+    label = "today MSK" if window_days == 1 else f"{window_days} Moscow dates"
+    return float(window_days), since, label
 
 
 def _props(raw: str | None) -> dict[str, str]:
@@ -198,13 +206,21 @@ async def ingest(request: Request) -> JSONResponse:
 
 
 def compute_product(days: float = 30.0) -> dict[str, Any]:
-    window_days, since, label = _window(days)
+    now = time.time()
+    window_days, since, label = _window(days, now)
     excluded = excluded_device_ids()
     clause, params = exclusion_clause(excluded)
-    today = int(time.time() // DAY)
-    # Retention needs at most the latest 90 UTC days; longer requested windows
+    today = _day_index(now)
+    current_date = date.fromordinal(today)
+    week_start = today - current_date.weekday()
+    month_start = current_date.replace(day=1).toordinal()
+    # Retention needs at most the latest 90 Moscow dates; longer requested windows
     # still receive their complete selected history.
-    history_since = min(since, (today - 90) * DAY)
+    history_date = date.fromordinal(today - 90)
+    history_since = min(
+        since,
+        datetime.combine(history_date, datetime.min.time(), REPORTING_TZ).timestamp(),
+    )
     rows = _db.execute(
         "SELECT ts,device_id,name,properties,source FROM events"
         " WHERE ts >= ? AND device_id != ''" + clause + " ORDER BY ts",
@@ -235,7 +251,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
         [*params, *value_names, *success_value_names],
     ).fetchall()
     first_value_days = {
-        device: int(first_value_ts // DAY)
+        device: _day_index(first_value_ts)
         for device, first_value_ts in first_value_rows
     }
 
@@ -263,11 +279,11 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
 
     for ts, device, name, raw_properties, source in rows:
         properties = _props(raw_properties)
-        day = int(ts // DAY)
+        day = _day_index(ts)
         active_days[device].add(day)
         if _is_value(name, properties):
             value_days[device].add(day)
-        if ts <= since:
+        if ts < since or ts > now:
             continue
 
         observed.add(device)
@@ -317,8 +333,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
             counters["errors"] += 1
             item["errors"] += 1
 
-    def rolling_active(source: dict[str, set[int]], span: int) -> int:
-        low = today - span + 1
+    def period_active(source: dict[str, set[int]], low: int) -> int:
         return sum(any(low <= day <= today for day in days_set) for days_set in source.values())
 
     horizons = (1, 7, 30)
@@ -360,7 +375,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
         item = daily[day]
         daily_out.append(
             {
-                "date": datetime.fromtimestamp(day * DAY, timezone.utc).date().isoformat(),
+                "date": date.fromordinal(day).isoformat(),
                 "dau": len(item["observed"]),
                 "value_devices": len(item["value"]),
                 "recordings": item["recordings"],
@@ -383,14 +398,14 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
             "excluded_internal_devices": len(excluded),
         },
         "growth": {
-            "dau_utc": rolling_active(active_days, 1),
-            "wau_rolling_7d": rolling_active(active_days, 7),
-            "mau_rolling_30d": rolling_active(active_days, 30),
+            "dau": period_active(active_days, today),
+            "wau": period_active(active_days, week_start),
+            "mau": period_active(active_days, month_start),
             "stickiness": (
-                rolling_active(active_days, 1) / rolling_active(active_days, 30)
-                if rolling_active(active_days, 30) else None
+                period_active(active_days, today) / period_active(active_days, month_start)
+                if period_active(active_days, month_start) else None
             ),
-            "weekly_value_devices": rolling_active(value_days, 7),
+            "weekly_value_devices": period_active(value_days, week_start),
             "value_devices_in_window": len(value_devices),
             "new_value_devices": new_value_devices,
             "returning_value_devices": len(value_devices) - new_value_devices,
@@ -449,14 +464,16 @@ def summary(days: float = 1.0) -> JSONResponse:
     product = compute_product(days)
     excluded = excluded_device_ids()
     clause, params = exclusion_clause(excluded)
-    _, since, label = _window(days)
+    now = datetime.fromisoformat(product["updated_at"]).timestamp()
+    _, since, label = _window(days, now)
     installs = _db.execute(
         "SELECT COUNT(DISTINCT device_id) FROM events WHERE device_id != ''" + clause,
         params,
     ).fetchone()[0]
-    window_params: list[Any] = [since, *params]
+    window_params: list[Any] = [since, now, *params]
     events = _db.execute(
-        "SELECT COUNT(*) FROM events WHERE ts > ?" + clause, window_params
+        "SELECT COUNT(*) FROM events WHERE ts >= ? AND ts <= ?" + clause,
+        window_params,
     ).fetchone()[0]
     errors = product["quality"]["errors"]
     observed = product["identity"]["observed_devices"]
@@ -472,9 +489,9 @@ def summary(days: float = 1.0) -> JSONResponse:
         "errors": errors,
         "overview": {
             "ever_used": installs,
-            "dau": product["growth"]["dau_utc"],
-            "wau": product["growth"]["wau_rolling_7d"],
-            "mau": product["growth"]["mau_rolling_30d"],
+            "dau": product["growth"]["dau"],
+            "wau": product["growth"]["wau"],
+            "mau": product["growth"]["mau"],
         },
         "metrics": [
             {"label": "Weekly value devices", "value": str(product["growth"]["weekly_value_devices"])},
