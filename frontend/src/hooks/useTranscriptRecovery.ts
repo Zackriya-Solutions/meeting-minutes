@@ -44,7 +44,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       const meetings = await indexedDBService.getAllMeetings();
 
       // Filter out meetings older than 7 days and newer than 15 seconds
-      // The 15 seconds threshold prevents showing meetings from the current session(jus in case)
+      // The 15 seconds threshold prevents showing meetings from the current session (just in case)
       // where recording just stopped but hasn't been fully saved yet
       const cutoffTime = Date.now() - (7 * 24 * 60 * 60 * 1000);
       const secondsAgo = Date.now() - (2 * 1000);
