@@ -2,6 +2,7 @@
 
 use crate::api::TranscriptSegment;
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
+use crate::audio::transcription::TranscriptionEngine;
 use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
@@ -330,6 +331,7 @@ async fn run_import<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_api = provider.as_deref() == Some("openaiCompatible");
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -508,13 +510,29 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
-    let whisper_engine = if !use_parakeet && total_segments > 0 {
+    let whisper_engine = if !use_parakeet && !use_api && total_segments > 0 {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
     };
     let parakeet_engine = if use_parakeet && total_segments > 0 {
         Some(get_or_init_parakeet(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    let api_provider = if use_api && total_segments > 0 {
+        match crate::audio::transcription::get_or_init_transcription_engine(&app)
+            .await
+            .map_err(anyhow::Error::msg)?
+        {
+            TranscriptionEngine::Provider(provider) => Some(provider),
+            engine => {
+                return Err(anyhow!(
+                    "Configured API transcription returned the '{}' engine",
+                    engine.provider_name()
+                ))
+            }
+        }
     } else {
         None
     };
@@ -586,6 +604,14 @@ async fn run_import<R: Runtime>(
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
             (text, 0.9f32)
+        } else if use_api {
+            let result = api_provider
+                .as_ref()
+                .unwrap()
+                .transcribe(segment.samples.clone(), language.clone())
+                .await
+                .map_err(|e| anyhow!("API transcription failed on segment {}: {}", i, e))?;
+            (result.text, result.confidence.unwrap_or(0.0))
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine

@@ -395,7 +395,8 @@ export function ImportAudioDialog({
                                   key={`${model.provider}:${model.name}`}
                                   value={`${model.provider}:${model.name}`}
                                 >
-                                  {model.displayName} ({Math.round(model.size_mb)} MB)
+                                  {model.displayName}
+                                  {model.provider !== 'openaiCompatible' && ` (${Math.round(model.size_mb)} MB)`}
                                 </SelectItem>
                               ))}
                             </SelectContent>
