@@ -1,3 +1,4 @@
+pub mod analytics_report;
 pub mod audio_identity;
 pub mod meeting;
 pub mod setting;

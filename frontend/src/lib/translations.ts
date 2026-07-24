@@ -8,6 +8,25 @@
  * Generated/maintained alongside the Settings i18n conversion.
  */
 export const RU: Record<string, string> = {
+  // Deep Analytics report (meeting top bar + build dialog)
+  "Analytical report": "Аналитический отчёт",
+  "Open report": "Открыть отчёт",
+  "Building report": "Собираем отчёт",
+  "Report failed": "Не удалось собрать отчёт",
+  "Regenerate report": "Пересобрать отчёт",
+  "Cancel report": "Отменить",
+  "No transcript to analyze yet": "Нет расшифровки для анализа",
+  "Show in Finder": "Показать отчёт",
+  "Skip questions": "Пропустить вопросы",
+  "Answer and continue": "Ответить и продолжить",
+  "Clarifying questions": "Уточняющие вопросы",
+  "Answers refine the report — all optional": "Ответы уточнят разбор — всё опционально",
+  "Questions — tap to answer": "Есть вопросы · ответить",
+  "Report ready": "Отчёт готов",
+  "Other": "Другое",
+  "Affects": "влияет на",
+  "Generation continues in background": "Сборка продолжится в фоне, окно можно закрыть",
+
   // Meeting conversation (variant 2a/3a)
   "Today": "Сегодня",
   "Yesterday": "Вчера",

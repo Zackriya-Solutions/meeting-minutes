@@ -127,8 +127,36 @@ impl DeepSeekClient {
 
     /// Run a system+user completion, returning the assistant text.
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, String> {
-        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
         let body = build_request_body(&self.model, system, user, Some(self.max_tokens));
+        self.post_chat(body).await
+    }
+
+    /// Run a system+user completion in strict JSON-object mode (`response_format`
+    /// `json_object`) with an explicit sampling temperature. Used by structured
+    /// extraction pipelines (e.g. the Deep Analytics report) that need the model to
+    /// return a parseable JSON document rather than free-form prose.
+    pub async fn complete_json(
+        &self,
+        system: &str,
+        user: &str,
+        temperature: f32,
+    ) -> Result<String, String> {
+        let body = build_request_body_with_options(
+            &self.model,
+            system,
+            user,
+            Some(self.max_tokens),
+            Some(temperature),
+            None,
+            true,
+        );
+        self.post_chat(body).await
+    }
+
+    /// Shared non-streaming chat POST + response validation for [`Self::complete`]
+    /// and [`Self::complete_json`], so the HTTP plumbing lives in exactly one place.
+    async fn post_chat(&self, body: Value) -> Result<String, String> {
+        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
         let resp = self
             .client

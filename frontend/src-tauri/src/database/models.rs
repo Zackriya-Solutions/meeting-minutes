@@ -67,6 +67,29 @@ pub struct SummaryProcess {
     pub result_backup_timestamp: Option<chrono::DateTime<chrono::Utc>>, // When backup was created
 }
 
+/// Wire + persistence view of one Deep Analytics report row. Field names are
+/// snake_case on the wire (the report UI codes against these exact names). This is a
+/// SUBSET of the `analytics_reports` table — `model` and `artifacts` are internal and
+/// intentionally not exposed to the frontend contract. `created_at`/`completed_at`
+/// stay as raw SQLite TEXT (`datetime('now')`), never decoded into chrono here.
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct AnalyticsReportMeta {
+    pub id: String,
+    pub meeting_id: String,
+    pub status: String,
+    pub stage: Option<String>,
+    pub stage_index: i64,
+    pub total_stages: i64,
+    pub html_path: Option<String>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+    /// Raw clarify-questions JSON (the array persisted when the pipeline reaches the
+    /// `waiting_input` state). Lets the frontend restore the question screen after a
+    /// reload. NULL until (and unless) the clarify stage produces questions.
+    pub questions: Option<String>,
+}
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct TranscriptChunk {
     pub meeting_id: String,
