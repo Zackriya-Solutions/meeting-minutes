@@ -1799,17 +1799,22 @@ async fn resolve_import_transcription(
             .await
             .map_err(|error| anyhow!("Failed to query transcription settings: {error}"))?;
     if let Some((configured_provider, configured_model)) = configured {
-        if normalize(&configured_provider) == Some("gigaam") {
-            return Ok((
-                Some("gigaam".to_string()),
-                model.or(Some(configured_model)),
-            ));
+        match normalize(&configured_provider) {
+            Some(normalized @ ("gigaam" | "parakeet" | "salutespeech")) => {
+                return Ok((
+                    Some(normalized.to_string()),
+                    model.or(Some(configured_model)),
+                ));
+            }
+            Some("whisper") => warn!(
+                "Persisted legacy Whisper provider would select an unavailable default model; \
+                 falling back to GigaAM"
+            ),
+            _ => warn!(
+                "Unsupported persisted transcription provider '{}'; falling back to GigaAM",
+                configured_provider
+            ),
         }
-        warn!(
-            "Persisted transcription provider '{}' is not the supported import default; \
-             falling back to GigaAM",
-            configured_provider
-        );
     }
 
     // GigaAM is the supported/default local transcription path. Never silently fall
@@ -2430,6 +2435,40 @@ mod tests {
             .unwrap();
         assert_eq!(provider.as_deref(), Some("gigaam"));
         assert!(model.is_none(), "legacy Whisper model must not leak into GigaAM");
+    }
+
+    #[tokio::test]
+    async fn omitted_import_provider_preserves_configured_non_whisper_provider() {
+        for (configured_provider, configured_model) in [
+            ("parakeet", "parakeet-tdt-0.6b-v3"),
+            ("salutespeech", "ru-RU"),
+        ] {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(
+                "CREATE TABLE transcript_settings(id TEXT PRIMARY KEY, provider TEXT, model TEXT)",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO transcript_settings(id, provider, model) VALUES('1', ?, ?)",
+            )
+            .bind(configured_provider)
+            .bind(configured_model)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            let (provider, model) = resolve_import_transcription(&pool, None, None)
+                .await
+                .unwrap();
+            assert_eq!(provider.as_deref(), Some(configured_provider));
+            assert_eq!(model.as_deref(), Some(configured_model));
+        }
     }
 
     #[test]
