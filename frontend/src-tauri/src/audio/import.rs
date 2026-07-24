@@ -1772,23 +1772,61 @@ async fn delete_newly_imported_meeting(pool: &sqlx::SqlitePool, meeting_id: &str
 /// The import dialog loads model choices asynchronously. Older builds allowed the
 /// Import button to win that race and sent `provider = null`, which silently selected
 /// Whisper's `large-v3-turbo` default even when the app was configured for GigaAM.
+fn normalize_import_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "localWhisper" | "whisper" => Some("whisper"),
+        "parakeet" => Some("parakeet"),
+        "gigaam" => Some("gigaam"),
+        "salutespeech" => Some("salutespeech"),
+        _ => None,
+    }
+}
+
+fn configured_import_selection(
+    provider: &str,
+    configured_model: String,
+    requested_model: Option<String>,
+    whisper_model_available: bool,
+) -> Option<(Option<String>, Option<String>)> {
+    let normalized = normalize_import_provider(provider)?;
+    if normalized == "whisper" && !whisper_model_available {
+        return None;
+    }
+    Some((
+        Some(normalized.to_string()),
+        requested_model.or(Some(configured_model)),
+    ))
+}
+
+async fn whisper_model_is_available(model_name: &str) -> bool {
+    use crate::whisper_engine::commands::WHISPER_ENGINE;
+    use crate::whisper_engine::whisper_engine::ModelStatus;
+
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap_or_else(|error| error.into_inner());
+        guard.as_ref().cloned()
+    };
+    let Some(engine) = engine else {
+        return false;
+    };
+    match engine.discover_models().await {
+        Ok(models) => models
+            .iter()
+            .any(|model| model.name == model_name && matches!(model.status, ModelStatus::Available)),
+        Err(error) => {
+            warn!("Could not verify configured Whisper model '{model_name}': {error}");
+            false
+        }
+    }
+}
+
 async fn resolve_import_transcription(
     pool: &sqlx::SqlitePool,
     provider: Option<String>,
     model: Option<String>,
 ) -> Result<(Option<String>, Option<String>)> {
-    fn normalize(provider: &str) -> Option<&'static str> {
-        match provider {
-            "localWhisper" | "whisper" => Some("whisper"),
-            "parakeet" => Some("parakeet"),
-            "gigaam" => Some("gigaam"),
-            "salutespeech" => Some("salutespeech"),
-            _ => None,
-        }
-    }
-
     if let Some(provider) = provider {
-        let normalized = normalize(&provider)
+        let normalized = normalize_import_provider(&provider)
             .ok_or_else(|| anyhow!("Unsupported transcription provider: {provider}"))?;
         return Ok((Some(normalized.to_string()), model));
     }
@@ -1799,16 +1837,27 @@ async fn resolve_import_transcription(
             .await
             .map_err(|error| anyhow!("Failed to query transcription settings: {error}"))?;
     if let Some((configured_provider, configured_model)) = configured {
-        match normalize(&configured_provider) {
-            Some(normalized @ ("gigaam" | "parakeet" | "salutespeech")) => {
-                return Ok((
-                    Some(normalized.to_string()),
-                    model.or(Some(configured_model)),
-                ));
-            }
+        let normalized = normalize_import_provider(&configured_provider);
+        let target_model = model
+            .clone()
+            .unwrap_or_else(|| configured_model.clone());
+        let whisper_available = if normalized == Some("whisper") {
+            whisper_model_is_available(&target_model).await
+        } else {
+            false
+        };
+        if let Some(selection) = configured_import_selection(
+            &configured_provider,
+            configured_model,
+            model,
+            whisper_available,
+        ) {
+            return Ok(selection);
+        }
+        match normalized {
             Some("whisper") => warn!(
-                "Persisted legacy Whisper provider would select an unavailable default model; \
-                 falling back to GigaAM"
+                "Persisted Whisper model '{}' is unavailable; falling back to GigaAM",
+                target_model
             ),
             _ => warn!(
                 "Unsupported persisted transcription provider '{}'; falling back to GigaAM",
@@ -1819,7 +1868,7 @@ async fn resolve_import_transcription(
 
     // GigaAM is the supported/default local transcription path. Never silently fall
     // back to a large Whisper download when no provider was supplied.
-    Ok((Some("gigaam".to_string()), model))
+    Ok((Some("gigaam".to_string()), None))
 }
 
 /// Get or initialize the Whisper engine
@@ -2435,6 +2484,30 @@ mod tests {
             .unwrap();
         assert_eq!(provider.as_deref(), Some("gigaam"));
         assert!(model.is_none(), "legacy Whisper model must not leak into GigaAM");
+    }
+
+    #[test]
+    fn omitted_import_provider_preserves_available_configured_whisper_model() {
+        let selection = configured_import_selection(
+            "localWhisper",
+            "small".to_string(),
+            None,
+            true,
+        )
+        .expect("downloaded Whisper model remains selected");
+        assert_eq!(selection.0.as_deref(), Some("whisper"));
+        assert_eq!(selection.1.as_deref(), Some("small"));
+
+        assert!(
+            configured_import_selection(
+                "localWhisper",
+                "large-v3-turbo".to_string(),
+                None,
+                false,
+            )
+            .is_none(),
+            "missing Whisper model falls back instead of failing late"
+        );
     }
 
     #[tokio::test]
