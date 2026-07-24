@@ -3,7 +3,13 @@
 //! `selected_variant.txt` so startup reloads it. Variants differ in decoder (CTC vs
 //! RNN-T) and precision (int8 vs fp32) for A/B quality testing — see `variant.rs`.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -11,6 +17,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use super::variant::GigaamVariant;
 
 const HF_BASE: &str = "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/main";
+static DOWNLOAD_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static DOWNLOAD_PROGRESS: Mutex<Option<DownloadProgress>> = Mutex::new(None);
 
 /// The variants offered in the UI. Narrowed to RNN-T fp32 only (2026-07-20): it is the
 /// measured-best variant, and offering int8/CTC alternatives only produced confusing
@@ -64,6 +72,29 @@ struct DownloadProgress {
     percent: u8,
 }
 
+struct DownloadGuard;
+
+impl DownloadGuard {
+    fn acquire() -> Result<Self, String> {
+        DOWNLOAD_IN_PROGRESS
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| "GigaAM model download is already in progress".to_string())?;
+        if let Ok(mut progress) = DOWNLOAD_PROGRESS.lock() {
+            *progress = None;
+        }
+        Ok(Self)
+    }
+}
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        DOWNLOAD_IN_PROGRESS.store(false, Ordering::SeqCst);
+        if let Ok(mut progress) = DOWNLOAD_PROGRESS.lock() {
+            *progress = None;
+        }
+    }
+}
+
 async fn download_file<R: Runtime>(app: &AppHandle<R>, url: &str, dest: &Path, label: &str) -> Result<(), String> {
     if dest.exists() {
         return Ok(());
@@ -92,9 +123,18 @@ async fn download_file<R: Runtime>(app: &AppHandle<R>, url: &str, dest: &Path, l
             let pct = ((downloaded.saturating_mul(100)) / total) as u8;
             if pct != last_pct {
                 last_pct = pct;
+                let progress = DownloadProgress {
+                    file: label.to_string(),
+                    downloaded,
+                    total,
+                    percent: pct,
+                };
+                if let Ok(mut current) = DOWNLOAD_PROGRESS.lock() {
+                    *current = Some(progress.clone());
+                }
                 let _ = app.emit(
                     "gigaam-download-progress",
-                    DownloadProgress { file: label.to_string(), downloaded, total, percent: pct },
+                    progress,
                 );
             }
         }
@@ -135,6 +175,8 @@ pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::
         "model_present": variant_present(&dir, selected),
         "loaded": super::is_loaded(),
         "loaded_variant": super::loaded_variant().map(|v| v.id()),
+        "downloading": DOWNLOAD_IN_PROGRESS.load(Ordering::SeqCst),
+        "download_progress": DOWNLOAD_PROGRESS.lock().ok().and_then(|progress| progress.clone()),
         "variants": variants,
     }))
 }
@@ -144,6 +186,9 @@ pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::
 /// previously loaded model is left running until the new one is ready.
 #[tauri::command]
 pub async fn gigaam_select_variant<R: Runtime>(app: AppHandle<R>, variant: String) -> Result<(), String> {
+    if DOWNLOAD_IN_PROGRESS.load(Ordering::SeqCst) {
+        return Err("Wait for the current GigaAM model download to finish".to_string());
+    }
     let v = GigaamVariant::from_id(&variant).ok_or_else(|| format!("unknown GigaAM variant: {variant}"))?;
     if !OFFERED_VARIANTS.contains(&v) {
         return Err(format!("GigaAM variant {variant} is not offered in this build"));
@@ -165,21 +210,36 @@ pub async fn gigaam_select_variant<R: Runtime>(app: AppHandle<R>, variant: Strin
 /// Download the currently-selected variant's files (vocab + ONNX) and load it.
 #[tauri::command]
 pub async fn gigaam_download_model<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    let dir = gigaam_dir(&app)?;
-    let v = read_selected(&dir);
-    for f in v.all_files() {
-        download_file(&app, &format!("{HF_BASE}/{f}"), &dir.join(f), f).await?;
+    let guard = DownloadGuard::acquire()?;
+    let result = async {
+        let dir = gigaam_dir(&app)?;
+        let v = read_selected(&dir);
+        for f in v.all_files() {
+            download_file(&app, &format!("{HF_BASE}/{f}"), &dir.join(f), f).await?;
+        }
+
+        let d = dir.clone();
+        tokio::task::spawn_blocking(move || super::load_global(v, d))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        Ok::<GigaamVariant, String>(v)
     }
+    .await;
 
-    let d = dir.clone();
-    tokio::task::spawn_blocking(move || super::load_global(v, d))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-
-    let _ = app.emit("gigaam-ready", ());
-    log::info!("GigaAM {} downloaded and loaded", v.id());
-    Ok(())
+    // Clear the process-wide state before notifying remounted Settings components.
+    drop(guard);
+    match result {
+        Ok(v) => {
+            let _ = app.emit("gigaam-ready", ());
+            log::info!("GigaAM {} downloaded and loaded", v.id());
+            Ok(())
+        }
+        Err(error) => {
+            let _ = app.emit("gigaam-download-error", error.clone());
+            Err(error)
+        }
+    }
 }
 
 /// Load the selected GigaAM variant at startup if its files are already present.
@@ -201,5 +261,25 @@ pub async fn init_gigaam_at_startup<R: Runtime>(app: &AppHandle<R>) {
             }
         })
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_guard_rejects_duplicates_and_releases_state() {
+        let first = DownloadGuard::acquire().expect("first download acquires the guard");
+        assert!(DOWNLOAD_IN_PROGRESS.load(Ordering::SeqCst));
+        assert!(
+            DownloadGuard::acquire().is_err(),
+            "a second download must be rejected"
+        );
+
+        drop(first);
+        assert!(!DOWNLOAD_IN_PROGRESS.load(Ordering::SeqCst));
+        let second = DownloadGuard::acquire().expect("guard is reusable after completion");
+        drop(second);
     }
 }

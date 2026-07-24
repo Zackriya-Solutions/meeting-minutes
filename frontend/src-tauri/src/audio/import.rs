@@ -1044,6 +1044,8 @@ async fn run_import<R: Runtime>(
         return Ok(ImportRunOutcome::AlreadyImported(existing));
     }
 
+    let (provider, model) =
+        resolve_import_transcription(pool, provider, model).await?;
     info!(
         "Starting import for '{}' from {} with language {:?}, model {:?}, provider {:?}",
         title, source_path, language, model, provider
@@ -1053,6 +1055,11 @@ async fn run_import<R: Runtime>(
     let use_parakeet = provider.as_deref() == Some("parakeet");
     let use_gigaam = provider.as_deref() == Some("gigaam");
     let use_salutespeech = provider.as_deref() == Some("salutespeech");
+    if use_gigaam && !crate::gigaam_engine::is_loaded() {
+        return Err(anyhow!(
+            "GigaAM model is not loaded. Download it in Settings → Transcription first."
+        ));
+    }
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -1760,6 +1767,110 @@ async fn delete_newly_imported_meeting(pool: &sqlx::SqlitePool, meeting_id: &str
     Ok(())
 }
 
+/// Resolve an omitted import provider from the persisted transcription settings.
+///
+/// The import dialog loads model choices asynchronously. Older builds allowed the
+/// Import button to win that race and sent `provider = null`, which silently selected
+/// Whisper's `large-v3-turbo` default even when the app was configured for GigaAM.
+fn normalize_import_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "localWhisper" | "whisper" => Some("whisper"),
+        "parakeet" => Some("parakeet"),
+        "gigaam" => Some("gigaam"),
+        "salutespeech" => Some("salutespeech"),
+        _ => None,
+    }
+}
+
+fn configured_import_selection(
+    provider: &str,
+    configured_model: String,
+    requested_model: Option<String>,
+    whisper_model_available: bool,
+) -> Option<(Option<String>, Option<String>)> {
+    let normalized = normalize_import_provider(provider)?;
+    if normalized == "whisper" && !whisper_model_available {
+        return None;
+    }
+    Some((
+        Some(normalized.to_string()),
+        requested_model.or(Some(configured_model)),
+    ))
+}
+
+async fn whisper_model_is_available(model_name: &str) -> bool {
+    use crate::whisper_engine::commands::WHISPER_ENGINE;
+    use crate::whisper_engine::whisper_engine::ModelStatus;
+
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap_or_else(|error| error.into_inner());
+        guard.as_ref().cloned()
+    };
+    let Some(engine) = engine else {
+        return false;
+    };
+    match engine.discover_models().await {
+        Ok(models) => models
+            .iter()
+            .any(|model| model.name == model_name && matches!(model.status, ModelStatus::Available)),
+        Err(error) => {
+            warn!("Could not verify configured Whisper model '{model_name}': {error}");
+            false
+        }
+    }
+}
+
+async fn resolve_import_transcription(
+    pool: &sqlx::SqlitePool,
+    provider: Option<String>,
+    model: Option<String>,
+) -> Result<(Option<String>, Option<String>)> {
+    if let Some(provider) = provider {
+        let normalized = normalize_import_provider(&provider)
+            .ok_or_else(|| anyhow!("Unsupported transcription provider: {provider}"))?;
+        return Ok((Some(normalized.to_string()), model));
+    }
+
+    let configured: Option<(String, String)> =
+        sqlx::query_as("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| anyhow!("Failed to query transcription settings: {error}"))?;
+    if let Some((configured_provider, configured_model)) = configured {
+        let normalized = normalize_import_provider(&configured_provider);
+        let target_model = model
+            .clone()
+            .unwrap_or_else(|| configured_model.clone());
+        let whisper_available = if normalized == Some("whisper") {
+            whisper_model_is_available(&target_model).await
+        } else {
+            false
+        };
+        if let Some(selection) = configured_import_selection(
+            &configured_provider,
+            configured_model,
+            model,
+            whisper_available,
+        ) {
+            return Ok(selection);
+        }
+        match normalized {
+            Some("whisper") => warn!(
+                "Persisted Whisper model '{}' is unavailable; falling back to GigaAM",
+                target_model
+            ),
+            _ => warn!(
+                "Unsupported persisted transcription provider '{}'; falling back to GigaAM",
+                configured_provider
+            ),
+        }
+    }
+
+    // GigaAM is the supported/default local transcription path. Never silently fall
+    // back to a large Whisper download when no provider was supplied.
+    Ok((Some("gigaam".to_string()), None))
+}
+
 /// Get or initialize the Whisper engine
 async fn get_or_init_whisper<R: Runtime>(
     app: &AppHandle<R>,
@@ -2296,6 +2407,141 @@ mod tests {
         assert!(!has_parallel_cloud_work(true, 0));
         assert!(has_parallel_cloud_work(true, 1));
         assert!(!has_parallel_cloud_work(false, 1));
+    }
+
+    #[tokio::test]
+    async fn omitted_import_provider_uses_persisted_gigaam_instead_of_whisper_default() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcript_settings(id TEXT PRIMARY KEY, provider TEXT, model TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO transcript_settings(id, provider, model) \
+             VALUES('1', 'gigaam', 'gigaam-v3-e2e-rnnt-fp32')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (provider, model) = resolve_import_transcription(&pool, None, None)
+            .await
+            .unwrap();
+        assert_eq!(provider.as_deref(), Some("gigaam"));
+        assert_eq!(model.as_deref(), Some("gigaam-v3-e2e-rnnt-fp32"));
+    }
+
+    #[tokio::test]
+    async fn omitted_import_provider_defaults_to_gigaam_without_settings() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcript_settings(id TEXT PRIMARY KEY, provider TEXT, model TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (provider, model) = resolve_import_transcription(&pool, None, None)
+            .await
+            .unwrap();
+        assert_eq!(provider.as_deref(), Some("gigaam"));
+        assert!(model.is_none());
+    }
+
+    #[tokio::test]
+    async fn omitted_import_provider_does_not_revive_legacy_whisper_default() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcript_settings(id TEXT PRIMARY KEY, provider TEXT, model TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO transcript_settings(id, provider, model) \
+             VALUES('1', 'localWhisper', 'large-v3-turbo')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (provider, model) = resolve_import_transcription(&pool, None, None)
+            .await
+            .unwrap();
+        assert_eq!(provider.as_deref(), Some("gigaam"));
+        assert!(model.is_none(), "legacy Whisper model must not leak into GigaAM");
+    }
+
+    #[test]
+    fn omitted_import_provider_preserves_available_configured_whisper_model() {
+        let selection = configured_import_selection(
+            "localWhisper",
+            "small".to_string(),
+            None,
+            true,
+        )
+        .expect("downloaded Whisper model remains selected");
+        assert_eq!(selection.0.as_deref(), Some("whisper"));
+        assert_eq!(selection.1.as_deref(), Some("small"));
+
+        assert!(
+            configured_import_selection(
+                "localWhisper",
+                "large-v3-turbo".to_string(),
+                None,
+                false,
+            )
+            .is_none(),
+            "missing Whisper model falls back instead of failing late"
+        );
+    }
+
+    #[tokio::test]
+    async fn omitted_import_provider_preserves_configured_non_whisper_provider() {
+        for (configured_provider, configured_model) in [
+            ("parakeet", "parakeet-tdt-0.6b-v3"),
+            ("salutespeech", "ru-RU"),
+        ] {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(
+                "CREATE TABLE transcript_settings(id TEXT PRIMARY KEY, provider TEXT, model TEXT)",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO transcript_settings(id, provider, model) VALUES('1', ?, ?)",
+            )
+            .bind(configured_provider)
+            .bind(configured_model)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            let (provider, model) = resolve_import_transcription(&pool, None, None)
+                .await
+                .unwrap();
+            assert_eq!(provider.as_deref(), Some(configured_provider));
+            assert_eq!(model.as_deref(), Some(configured_model));
+        }
     }
 
     #[test]
