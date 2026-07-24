@@ -1,0 +1,251 @@
+name: "Build - Android"
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload-artifacts:
+        description: 'Upload build artifacts'
+        required: false
+        type: boolean
+        default: true
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'frontend/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/build-android.yml'
+
+# Cancel duplicate workflow runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: '27.1.12297006'
+  # ort-sys has no prebuilt ONNX Runtime binaries for Android; the library is
+  # dlopen'd from jniLibs at runtime instead (see docs/ANDROID.md)
+  ORT_SKIP_DOWNLOAD: '1'
+
+jobs:
+  build-android:
+    name: Build Android (arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from tauri.conf.json
+        id: get-version
+        shell: bash
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' frontend/src-tauri/tauri.conf.json | cut -d'"' -f4)
+          echo "Application version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # tauri.conf.json's version is a static "0.4.0" that never changes
+          # between test builds, making artifacts/APKs from different commits
+          # indistinguishable by filename alone. Combine the CI run number
+          # (monotonic, human-readable) with the short commit SHA (unambiguous)
+          # into a build id used for the APK filename, the artifact name, and
+          # (via NEXT_PUBLIC_BUILD_ID below) the in-app version display.
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          BUILD_ID="${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          echo "Build id: $BUILD_ID"
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
+          # GitHub Actions artifacts require a login and expire after
+          # retention-days, so builds also get published to a per-branch
+          # GitHub Release (a stable, no-login download link). Release tags
+          # can't contain "/", so flatten the branch name into one.
+          SAFE_REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          echo "safe_ref=$SAFE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+          # The vendored OpenSSL build (openssl-src, needed by reqwest on
+          # Android) invokes <triple>-ranlib/-ar, which NDK r23+ no longer
+          # ships — shim them to the llvm tools and expose the toolchain on
+          # PATH.
+          TOOLCHAIN="$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          ln -sf "$TOOLCHAIN/llvm-ranlib" "$TOOLCHAIN/aarch64-linux-android-ranlib"
+          ln -sf "$TOOLCHAIN/llvm-ar" "$TOOLCHAIN/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN" >> "$GITHUB_PATH"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-arm64-v3
+          # whisper-rs-sys's build.rs copies the vendored whisper.cpp source
+          # tree into its OUT_DIR under target/ before invoking cmake. Caching
+          # that directory has now corrupted itself twice in a row (a fresh
+          # "v2" cache failed on its very next restore with the same CMake
+          # "examples dir missing" error a from-scratch build never hits) —
+          # this looks like a structural issue with how actions/cache
+          # archives that particular tree, not a one-off fluke. Don't cache
+          # target/ at all; still cache the Cargo registry/git download
+          # cache, which is safe and cuts dependency-fetch time.
+          cache-targets: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # pnpm-lock.yaml is lockfileVersion 9.0 (requires pnpm >= 9)
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        # --no-frozen-lockfile: the committed pnpm-lock.yaml has a pre-existing
+        # "overrides" mismatch with package.json that fails CI's default frozen
+        # install (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH)
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Initialize Android project
+        working-directory: frontend
+        run: pnpm tauri android init
+
+      - name: Configure Android project (permissions, MainActivity, ONNX Runtime)
+        working-directory: frontend
+        run: node scripts/setup-android-project.js
+
+      - name: Build Android APK (release, arm64)
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_BUILD_ID: ${{ steps.get-version.outputs.build_id }}
+        run: pnpm tauri android build --apk --target aarch64
+
+      - name: Sign APK
+        id: sign-apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_UNSIGNED=$(find frontend/src-tauri/gen/android/app/build/outputs/apk -name '*-unsigned.apk' | head -1)
+          if [[ -z "$APK_UNSIGNED" ]]; then
+            echo "No unsigned APK found; listing outputs:"
+            find frontend/src-tauri/gen/android/app/build/outputs -name '*.apk'
+            exit 1
+          fi
+          echo "Unsigned APK: $APK_UNSIGNED"
+
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME/build-tools/"* | sort -V | tail -1)
+          echo "Using build-tools: $BUILD_TOOLS"
+
+          VERSION="${{ steps.get-version.outputs.version }}"
+          BUILD_ID="${{ steps.get-version.outputs.build_id }}"
+          OUT_DIR="$PWD/android-artifacts"
+          mkdir -p "$OUT_DIR"
+
+          if [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]]; then
+            # Real signing keystore provided via repository secrets
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+            KEYSTORE=/tmp/release.keystore
+            KS_PASS="$ANDROID_KEYSTORE_PASSWORD"
+            KEY_ALIAS="$ANDROID_KEY_ALIAS"
+            SUFFIX="release"
+          else
+            # No secrets configured: sign with an ephemeral debug key so the
+            # APK is installable for testing (not for Play Store distribution)
+            keytool -genkeypair -v -keystore /tmp/debug.keystore \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Meetily Debug,O=Meetily,C=US"
+            KEYSTORE=/tmp/debug.keystore
+            KS_PASS=android
+            KEY_ALIAS=androiddebugkey
+            SUFFIX="debug-signed"
+          fi
+
+          APK_OUT="$OUT_DIR/meetily_${VERSION}-${BUILD_ID}_arm64_${SUFFIX}.apk"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/aligned.apk
+          "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-pass "pass:$KS_PASS" \
+            --ks-key-alias "$KEY_ALIAS" --out "$APK_OUT" /tmp/aligned.apk
+          "$BUILD_TOOLS/apksigner" verify "$APK_OUT"
+
+          echo "apk-path=$APK_OUT" >> "$GITHUB_OUTPUT"
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "Signed APK: $APK_OUT"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      - name: Upload APK artifact
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: voiceme-android-arm64-${{ steps.get-version.outputs.version }}-${{ steps.get-version.outputs.build_id }}
+          path: ${{ steps.sign-apk.outputs.apk-path }}
+          retention-days: 14
+
+      - name: Prepare release asset
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
+        id: release-asset
+        shell: bash
+        run: |
+          # A fixed filename (no build id) so re-publishing to the same
+          # per-branch release overwrites the previous asset instead of
+          # accumulating a new one on every build.
+          ASSET="android-artifacts/voiceme-android-arm64-${{ steps.sign-apk.outputs.suffix }}.apk"
+          cp "${{ steps.sign-apk.outputs.apk-path }}" "$ASSET"
+          echo "asset-path=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.upload-artifacts != 'false' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ steps.get-version.outputs.safe_ref }}
+          name: "Android build — ${{ github.ref_name }} (#${{ github.run_number }})"
+          body: |
+            Automated Android APK build — not a tagged app release, just the latest build off this branch.
+
+            - Branch: `${{ github.ref_name }}`
+            - Commit: ${{ github.sha }}
+            - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Signed with an ephemeral debug key unless the repo's signing secrets are configured — fine for sideloading, not for Play Store distribution.
+          prerelease: true
+          make_latest: false
+          files: ${{ steps.release-asset.outputs.asset-path }}

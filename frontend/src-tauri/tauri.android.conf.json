@@ -1,0 +1,60 @@
+{
+    "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+    "app": {
+        "security": {
+            "csp": {
+                "default-src": "'self'",
+                "style-src": "'self' 'unsafe-inline'",
+                "img-src": "'self' asset: https://asset.localhost data:",
+                "connect-src": "'self' ipc: http://ipc.localhost http://localhost:11434 https://api.ollama.ai"
+            },
+            "assetProtocol": {
+                "enable": true,
+                "scope": [
+                    "$APPDATA/**"
+                ]
+            },
+            "capabilities": [
+                {
+                    "identifier": "mobile-main",
+                    "description": "Android main webview capability. Excludes desktop-only plugins (updater, process, tray, menu).",
+                    "windows": [
+                        "main"
+                    ],
+                    "permissions": [
+                        "fs:default",
+                        "fs:allow-read-file",
+                        "fs:read-all",
+                        "fs:write-all",
+                        "fs:allow-app-read",
+                        "fs:allow-app-write",
+                        "fs:allow-download-write",
+                        "fs:allow-download-read",
+                        "fs:scope-download",
+                        "core:path:default",
+                        "core:event:default",
+                        "core:window:default",
+                        "core:app:default",
+                        "core:resources:default",
+                        "core:window:allow-set-title",
+                        "store:default",
+                        "notification:default",
+                        "notification:allow-is-permission-granted",
+                        {
+                            "identifier": "fs:scope",
+                            "allow": [
+                                {
+                                    "path": "$APPDATA/*"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    },
+    "bundle": {
+        "externalBin": [],
+        "createUpdaterArtifacts": false
+    }
+}

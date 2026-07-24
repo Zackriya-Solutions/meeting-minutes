@@ -9,6 +9,9 @@ pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+#[cfg(target_os = "android")]
+pub mod android;
+
 // Re-export platform-specific functions
 #[cfg(target_os = "windows")]
 pub use windows::{configure_windows_audio, get_windows_device};
@@ -18,3 +21,6 @@ pub use macos::configure_macos_audio;
 
 #[cfg(target_os = "linux")]
 pub use linux::configure_linux_audio;
+
+#[cfg(target_os = "android")]
+pub use android::configure_android_audio;

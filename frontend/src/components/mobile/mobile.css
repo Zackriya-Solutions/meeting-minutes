@@ -1,0 +1,389 @@
+/*
+ * VoiceMe mobile UI — design tokens and component styles.
+ * Ported from the Claude Design handoff (Voice Me.dc.html); scoped under
+ * .vm-app so it cannot leak into the desktop UI.
+ */
+
+.vm-app {
+  --radius: 10px;
+}
+.vm-app[data-theme='light'] {
+  --bg: 0 0% 100%;
+  --fg: 30 8% 12%;
+  --card: 0 0% 100%;
+  --card-fg: 30 8% 12%;
+  --muted: 36 14% 96%;
+  --muted-fg: 30 6% 46%;
+  --border: 30 10% 90%;
+  --destructive: 4 72% 48%;
+  --destructive-fg: 0 0% 100%;
+  --shell: 220 14% 90%;
+  --sheen: 0 0% 100%;
+}
+.vm-app[data-theme='dark'] {
+  --bg: 0 0% 9%;
+  --fg: 0 0% 92%;
+  --card: 0 0% 12.5%;
+  --card-fg: 0 0% 92%;
+  --muted: 0 0% 16%;
+  --muted-fg: 0 0% 60%;
+  --border: 0 0% 22%;
+  --destructive: 4 68% 56%;
+  --destructive-fg: 0 0% 100%;
+  --shell: 0 0% 3%;
+  --sheen: 0 0% 22%;
+}
+.vm-app[data-theme='light'][data-accent='teal'] { --primary: 168 74% 30%; --primary-fg: 0 0% 100%; --accent: 168 55% 93%; --accent-fg: 168 74% 24%; --ring: 168 74% 30%; }
+.vm-app[data-theme='dark'][data-accent='teal'] { --primary: 168 55% 48%; --primary-fg: 168 45% 8%; --accent: 168 30% 17%; --accent-fg: 168 55% 78%; --ring: 168 55% 48%; }
+.vm-app[data-theme='light'][data-accent='blue'] { --primary: 211 90% 45%; --primary-fg: 0 0% 100%; --accent: 211 80% 94%; --accent-fg: 211 85% 32%; --ring: 211 90% 45%; }
+.vm-app[data-theme='dark'][data-accent='blue'] { --primary: 211 85% 62%; --primary-fg: 211 45% 10%; --accent: 211 45% 18%; --accent-fg: 211 80% 78%; --ring: 211 85% 62%; }
+.vm-app[data-theme='light'][data-accent='green'] { --primary: 142 42% 32%; --primary-fg: 0 0% 100%; --accent: 142 45% 92%; --accent-fg: 142 45% 24%; --ring: 142 42% 32%; }
+.vm-app[data-theme='dark'][data-accent='green'] { --primary: 142 40% 50%; --primary-fg: 142 35% 9%; --accent: 142 25% 17%; --accent-fg: 142 45% 75%; --ring: 142 40% 50%; }
+.vm-app[data-theme='light'][data-accent='amber'] { --primary: 30 85% 40%; --primary-fg: 0 0% 100%; --accent: 40 90% 92%; --accent-fg: 30 70% 28%; --ring: 30 85% 40%; }
+.vm-app[data-theme='dark'][data-accent='amber'] { --primary: 35 80% 55%; --primary-fg: 30 45% 9%; --accent: 35 40% 18%; --accent-fg: 40 80% 75%; --ring: 35 80% 55%; }
+.vm-app[data-theme='light'][data-accent='berry'] { --primary: 342 58% 42%; --primary-fg: 0 0% 100%; --accent: 342 65% 94%; --accent-fg: 342 55% 30%; --ring: 342 58% 42%; }
+.vm-app[data-theme='dark'][data-accent='berry'] { --primary: 342 55% 60%; --primary-fg: 342 45% 10%; --accent: 342 30% 18%; --accent-fg: 342 55% 78%; --ring: 342 55% 60%; }
+
+.vm-app,
+.vm-app * {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Full-device shell — on a phone the app IS the design's .screen */
+.vm-app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: 'Public Sans', system-ui, sans-serif;
+  overflow: hidden;
+  z-index: 40;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.vm-app .mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Layout primitives (the prototype's support.js utilities) */
+.vm-app .row { display: flex; align-items: center; gap: 12px; }
+.vm-app .col { display: flex; flex-direction: column; }
+.vm-app .between { justify-content: space-between; }
+.vm-app .wrap { flex-wrap: wrap; }
+.vm-app .f1 { flex: 1; min-height: 0; }
+.vm-app .ac { align-items: center; }
+.vm-app .jc { justify-content: center; }
+.vm-app .gap2 { gap: 2px; }
+.vm-app .gap6 { gap: 6px; }
+.vm-app .gap8 { gap: 8px; }
+.vm-app .gap10 { gap: 10px; }
+.vm-app .gap12 { gap: 12px; }
+.vm-app .gap14 { gap: 14px; }
+.vm-app .fs11 { font-size: 11px; }
+.vm-app .fs12 { font-size: 12px; }
+.vm-app .fs13 { font-size: 13px; }
+.vm-app .fs14 { font-size: 14px; }
+.vm-app .fs15 { font-size: 15px; }
+.vm-app .fw6 { font-weight: 600; }
+.vm-app .fw7 { font-weight: 700; }
+.vm-app .fw8 { font-weight: 800; }
+.vm-app .posabs { position: absolute; }
+.vm-app .muted { color: hsl(var(--muted-fg)); }
+.vm-app .divider { height: 1px; background: hsl(var(--border)); flex-shrink: 0; }
+
+/* App bar */
+.vm-app .appbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  min-height: 52px;
+}
+.vm-app .appbar h1 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+  letter-spacing: -0.01em;
+}
+.vm-app .iconbtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: hsl(var(--fg));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.vm-app .iconbtn:active { background: hsl(var(--muted)); }
+
+/* Scrollable content region */
+.vm-app .content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Extra bottom clearance for scrollable content sitting under the
+   floating Record FAB, so the last list item isn't clipped by it.
+   Matches the FAB's own safe-area-aware bottom offset (82px) plus its
+   height (50px) plus a margin, instead of a flat px value that ignores
+   the gesture-nav inset on Android. */
+.vm-app .content--above-fab {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 150px) !important;
+}
+
+/* Bottom tab bar */
+.vm-app .tabbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px calc(env(safe-area-inset-bottom, 0px) + 6px);
+  gap: 4px;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--bg));
+  position: relative;
+  z-index: 6;
+}
+.vm-app .tabitem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: hsl(var(--muted-fg));
+}
+.vm-app .tabitem.on { color: hsl(var(--primary)); }
+.vm-app .tabitem span { font-size: 11px; font-weight: 600; }
+
+/* Record FAB */
+.vm-app .fab {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 82px);
+  left: 50%;
+  transform: translateX(-50%);
+  height: 50px;
+  padding: 0 20px;
+  border-radius: 16px;
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-fg));
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: 'Public Sans', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  box-shadow: 0 8px 18px -6px hsl(var(--destructive) / 0.45);
+  cursor: pointer;
+  z-index: 7;
+}
+
+/* Surfaces */
+.vm-app .card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+.vm-app .pill {
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Buttons */
+.vm-app .btn {
+  font-family: 'Public Sans', system-ui, sans-serif;
+  border-radius: 9px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.vm-app .btnp { background: hsl(var(--primary)); color: hsl(var(--primary-fg)); }
+.vm-app .btns { background: hsl(var(--muted)); color: hsl(var(--fg)); }
+.vm-app .btnd { background: hsl(var(--destructive)); color: hsl(var(--destructive-fg)); }
+.vm-app .btnghost { background: transparent; color: hsl(var(--primary)); border: 1.5px solid hsl(var(--border)); }
+.vm-app .lg { height: 52px; padding: 0 22px; font-size: 15px; width: 100%; }
+.vm-app .md { height: 44px; padding: 0 18px; font-size: 14px; }
+.vm-app .sm { height: 34px; padding: 0 14px; font-size: 12.5px; }
+.vm-app .btn:disabled { opacity: 0.55; cursor: default; }
+
+/* Inputs */
+.vm-app input,
+.vm-app textarea {
+  font-family: 'Public Sans', system-ui, sans-serif;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--fg));
+  border-radius: 8px;
+  padding: 11px 13px;
+  font-size: 14px;
+  width: 100%;
+}
+.vm-app input::placeholder,
+.vm-app textarea::placeholder { color: hsl(var(--muted-fg)); }
+
+/* Segmented control */
+.vm-app .seg {
+  display: flex;
+  background: hsl(var(--muted));
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.vm-app .seg button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 9px 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--muted-fg));
+  cursor: pointer;
+  font-family: 'Public Sans', system-ui, sans-serif;
+}
+.vm-app .seg button.on {
+  background: hsl(var(--card));
+  color: hsl(var(--fg));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* Chips */
+.vm-app .chip {
+  border-radius: 7px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--fg));
+  cursor: pointer;
+}
+.vm-app .chip.on {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-fg));
+  border-color: transparent;
+}
+
+/* Settings rows */
+.vm-app .settingrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  cursor: pointer;
+}
+.vm-app .settingrow:active { background: hsl(var(--muted)); }
+
+/* Switch */
+.vm-app .switch {
+  width: 44px;
+  height: 26px;
+  border-radius: 100px;
+  position: relative;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.vm-app .switch.off { background: hsl(var(--border)); }
+.vm-app .switch.on { background: hsl(var(--primary)); }
+.vm-app .switch .knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.vm-app .switch.on .knob { transform: translateX(18px); }
+
+/* Accent swatches */
+.vm-app .swatchbtn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.vm-app .swatchbtn.on { border-color: hsl(var(--muted-fg)); }
+
+/* Recording pulse + shield */
+@keyframes vm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.vm-app .recdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: hsl(var(--destructive));
+  animation: vm-pulse 1.4s ease-in-out infinite;
+}
+.vm-app .shield { width: 64px; height: 74px; }
+
+.vm-app a { color: hsl(var(--primary)); }
+
+/* Bottom sheets */
+.vm-app .sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  z-index: 20;
+}
+.vm-app .sheet {
+  width: 100%;
+  border-radius: 24px 24px 0 0;
+  padding: 22px 22px calc(env(safe-area-inset-bottom, 0px) + 30px);
+  background: hsl(var(--bg));
+  border: none;
+}
+.vm-app .sheet-grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(var(--border));
+  margin: 0 auto 6px;
+}
+
+/* Progress bars */
+.vm-app .progress-track {
+  height: 6px;
+  border-radius: 100px;
+  background: hsl(var(--muted));
+  overflow: hidden;
+}
+.vm-app .progress-fill {
+  height: 100%;
+  border-radius: 100px;
+  background: hsl(var(--primary));
+  transition: width 0.3s;
+}

@@ -116,7 +116,46 @@ pub async fn get_device_and_config(
         return super::platform::get_windows_device(audio_device);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "android")]
+    {
+        use cpal::traits::HostTrait;
+
+        // Deliberately bypasses `host.input_devices()` name-matching, unlike
+        // every other platform below: cpal's oboe backend implements device
+        // enumeration via a JNI call into AudioManager that has been observed
+        // to hang indefinitely on-device. There is exactly one microphone as
+        // far as this app is concerned, so go straight to the (JNI-call-free)
+        // default device regardless of the name that was resolved earlier.
+        if audio_device.device_type == DeviceType::Input {
+            let host = cpal::default_host();
+            let device = host
+                .default_input_device()
+                .ok_or_else(|| anyhow!("No default input device available"))?;
+
+            // Also deliberately bypasses device.default_input_config(): on the
+            // oboe backend, the placeholder "default" device has no cached
+            // AudioDeviceInfo, so querying its supported configs falls back to
+            // brute-forcing every (format x channel-mask x sample-rate)
+            // combination — 2 x 2 x 13 = 52 combinations — via
+            // AudioRecord.getMinBufferSize(), a JNI call per combination. That
+            // hits the exact same hang as the enumeration call above, and the
+            // resulting buffer-size range is discarded anyway: converting
+            // SupportedStreamConfig -> cpal::StreamConfig always replaces it
+            // with BufferSize::Default (see cpal's SupportedStreamConfig::config()).
+            // Build the config directly with values matching this app's
+            // pipeline expectation (48kHz) instead of querying for them.
+            let default_config = cpal::SupportedStreamConfig::new(
+                1,
+                cpal::SampleRate(48000),
+                cpal::SupportedBufferSize::Unknown,
+                cpal::SampleFormat::F32,
+            );
+            return Ok((device, default_config));
+        }
+        return Err(anyhow!("Device not found: {}", audio_device.name));
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "android")))]
     {
         use cpal::traits::{DeviceTrait, HostTrait};
 

@@ -306,14 +306,20 @@ impl WhisperEngine {
 
                 // PERFORMANCE: Suppress verbose C library logs during model loading
                 // This hides the excessive Metal/GGML initialization logs in release builds
-                let ctx = {
-                    // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
-
-                    // Load whisper context with hardware-optimized parameters
-                    WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
-                        .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?
-                    // Suppressor dropped here, stderr restored
-                };
+                //
+                // WhisperContext::new_with_params does synchronous, CPU-bound file I/O and
+                // GGML graph init that can take many seconds on slower hardware (e.g. a phone
+                // on first load). Run it on a blocking-pool thread instead of inline so it
+                // can't stall the async runtime the rest of the app (including this very
+                // command's timeout/cancellation path) depends on.
+                let model_path = model_info.path.clone();
+                let model_name_for_error = model_name.to_string();
+                let ctx = tokio::task::spawn_blocking(move || {
+                    WhisperContext::new_with_params(&model_path.to_string_lossy(), context_param)
+                })
+                .await
+                .map_err(|e| anyhow!("Model loading task panicked: {}", e))?
+                .map_err(|e| anyhow!("Failed to load model {}: {}", model_name_for_error, e))?;
 
                 // Update current context and model
                 *self.current_context.write().await = Some(ctx);
@@ -567,10 +573,12 @@ impl WhisperEngine {
         params.set_max_len(200);
         params.set_single_segment(false);
 
-        // Set thread count based on hardware (if supported by whisper.cpp)
-        if let Some(_max_threads) = adaptive_config.max_threads {
-            // Note: whisper.cpp may or may not expose thread control through params
-            // Removed debug log to reduce I/O overhead in transcription hot path
+        // Set thread count based on hardware. whisper.cpp otherwise defaults to
+        // min(4, hardware_concurrency) — leaving cores idle on 6-8 core phones,
+        // which was a major cause of slow on-device transcription. Apply the
+        // adaptive count so all usable cores participate.
+        if let Some(max_threads) = adaptive_config.max_threads {
+            params.set_n_threads(max_threads as i32);
         }
 
         let duration_seconds = audio_data.len() as f64 / 16000.0;
@@ -683,6 +691,12 @@ impl WhisperEngine {
         // Reasonable length limits
         params.set_max_len(200);                 // Reasonable length
         params.set_single_segment(false);        // Allow multiple segments for better accuracy
+
+        // Use the hardware-adaptive thread count instead of whisper.cpp's
+        // conservative default of min(4, cores), which left phone cores idle.
+        if let Some(max_threads) = adaptive_config.max_threads {
+            params.set_n_threads(max_threads as i32);
+        }
 
         // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
         // This would help detect repetitive outputs: params.set_compression_ratio_threshold(2.4);

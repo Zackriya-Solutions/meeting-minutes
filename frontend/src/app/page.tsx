@@ -21,8 +21,21 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { usePlatform } from '@/hooks/usePlatform';
+
+// Voice Me mobile shell (Android build) — loaded only on Android
+const MobileApp = dynamic(() => import('@/components/mobile/MobileApp'), { ssr: false });
 
 export default function Home() {
+  const platform = usePlatform();
+  if (platform === 'android') {
+    return <MobileApp />;
+  }
+  return <DesktopHome />;
+}
+
+function DesktopHome() {
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);

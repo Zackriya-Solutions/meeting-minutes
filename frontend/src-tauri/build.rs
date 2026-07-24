@@ -15,8 +15,12 @@ fn main() {
         // The swift-rs crate build will be handled in the enhanced_macos crate's build.rs
     }
 
-    // Download and bundle FFmpeg binary at build-time
-    ffmpeg::ensure_ffmpeg_binary();
+    // Download and bundle FFmpeg binary at build-time (desktop only —
+    // mobile targets have no ffmpeg sidecar builds and cannot exec them)
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "android" && target_os != "ios" {
+        ffmpeg::ensure_ffmpeg_binary();
+    }
 
     tauri_build::build()
 }

@@ -25,6 +25,7 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { usePlatform } from '@/hooks/usePlatform'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -68,6 +69,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  const platform = usePlatform()
+  const isAndroid = platform === 'android'
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
 
@@ -247,8 +250,13 @@ export default function RootLayout({
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
 
-                              {/* Show onboarding or main app */}
-                              {showOnboarding ? (
+                              {/* Show onboarding or main app.
+                                  Android renders the Voice Me mobile shell
+                                  (page.tsx) directly — no desktop sidebar or
+                                  desktop onboarding. */}
+                              {isAndroid ? (
+                                children
+                              ) : showOnboarding ? (
                                 <OnboardingFlow onComplete={handleOnboardingComplete} />
                               ) : (
                                 <div className="flex">

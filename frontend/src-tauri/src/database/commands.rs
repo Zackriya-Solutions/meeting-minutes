@@ -204,11 +204,21 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         error!("Failed to set default summary model config: {}", e);
     }
 
-    // Default Transcription Model: Parakeet
+    // Default Transcription Model: Parakeet is not supported on Android (see
+    // parakeet_engine and docs/ANDROID.md), so seed Whisper there instead —
+    // otherwise every fresh Android install starts with a saved config that
+    // makes start_recording fail immediately with "No Parakeet models are
+    // available", even before the user has picked anything.
+    #[cfg(not(target_os = "android"))]
+    let (default_transcript_provider, default_transcript_model) =
+        ("parakeet", crate::config::DEFAULT_PARAKEET_MODEL);
+    #[cfg(target_os = "android")]
+    let (default_transcript_provider, default_transcript_model) = ("localWhisper", "base");
+
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
         pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
+        default_transcript_provider,
+        default_transcript_model,
     ).await {
         error!("Failed to set default transcription model config: {}", e);
     }

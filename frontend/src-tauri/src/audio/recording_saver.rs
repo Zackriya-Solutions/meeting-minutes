@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
+use super::ffmpeg::find_ffmpeg_path;
 use super::incremental_saver::IncrementalAudioSaver;
 
 /// Structured transcript segment for JSON export
@@ -255,7 +256,12 @@ impl RecordingSaver {
                 microphone: None,  // Could be enhanced to store actual device names
                 system_audio: None,
             },
-            audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
+            audio_file: if create_checkpoints {
+                let ext = if find_ffmpeg_path().is_none() { "wav" } else { "mp4" };
+                format!("audio.{}", ext)
+            } else {
+                "".to_string()
+            },
             transcript_file: "transcripts.json".to_string(),
             sample_rate: 48000,
             status: "recording".to_string(),
@@ -379,22 +385,31 @@ impl RecordingSaver {
             return Ok(None);
         }
 
-        // Finalize incremental saver (merge checkpoints into final audio.mp4)
-        let final_audio_path = if let Some(saver_arc) = &self.incremental_saver {
+        // Finalize incremental saver (merge checkpoints into final audio.mp4).
+        //
+        // Deliberately non-fatal: on platforms without a bundled FFmpeg
+        // (Android - see build.rs), this always fails, and previously that
+        // meant returning Err() here short-circuited everything below —
+        // transcripts.json never got its final write and metadata.status
+        // stayed "recording" forever, even though the transcript itself had
+        // already been saved incrementally throughout the recording (see
+        // add_transcript_segment). A recording with no audio file is still a
+        // complete, useful recording; only the audio is missing.
+        let final_audio_path: Option<PathBuf> = if let Some(saver_arc) = &self.incremental_saver {
             let mut saver = saver_arc.lock().await;
             match saver.finalize().await {
                 Ok(path) => {
                     info!("✅ Successfully finalized audio: {}", path.display());
-                    path
+                    Some(path)
                 }
                 Err(e) => {
-                    error!("❌ Failed to finalize incremental saver: {}", e);
-                    return Err(format!("Failed to finalize audio: {}", e));
+                    warn!("⚠️ Failed to finalize audio (recording will have no audio file): {}", e);
+                    None
                 }
             }
         } else {
-            error!("No incremental saver initialized - cannot save recording");
-            return Err("No incremental saver initialized".to_string());
+            warn!("No incremental saver initialized - recording will have no audio file");
+            None
         };
 
         // Save final transcripts.json with validation
@@ -438,7 +453,7 @@ impl RecordingSaver {
 
         // Emit save event with audio and transcript paths
         let save_event = serde_json::json!({
-            "audio_file": final_audio_path.to_string_lossy(),
+            "audio_file": final_audio_path.as_ref().map(|p| p.to_string_lossy().to_string()),
             "transcript_file": self.meeting_folder.as_ref()
                 .map(|f| f.join("transcripts.json").to_string_lossy().to_string()),
             "meeting_name": self.meeting_name,
@@ -455,7 +470,7 @@ impl RecordingSaver {
             segments.clear();
         }
 
-        Ok(Some(final_audio_path.to_string_lossy().to_string()))
+        Ok(final_audio_path.map(|p| p.to_string_lossy().to_string()))
     }
 
     /// Get the meeting folder path (for passing to backend)

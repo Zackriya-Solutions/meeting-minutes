@@ -853,6 +853,7 @@ impl AudioPipeline {
                                                 warn!("Failed to send VAD segment: {}", e);
                                             } else {
                                                 self.chunk_id_counter += 1;
+                                                self.state.record_vad_segment_sent();
                                             }
                                         } else {
                                             debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",

@@ -25,9 +25,19 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         {
             platform::configure_macos_audio(&host)?
         }
+
+        #[cfg(target_os = "android")]
+        {
+            platform::configure_android_audio(&host)?
+        }
     };
 
-    // Add any additional devices from the default host
+    // Add any additional devices from the default host. Skipped on Android:
+    // cpal's oboe backend implements `devices()` via a JNI call into
+    // AudioManager that has been observed to hang indefinitely on-device, and
+    // Android doesn't expose extra capturable output devices anyway (see
+    // platform::configure_android_audio).
+    #[cfg(not(target_os = "android"))]
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {

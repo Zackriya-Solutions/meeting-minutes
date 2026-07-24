@@ -122,6 +122,7 @@ dirs = "5.0.1"
 
 # Additional dependencies for notification system
 url = "2.5.0"
+percent-encoding = "2"
 
 
 # System monitoring for resource management
@@ -147,17 +148,18 @@ ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", bran
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
 
 # Common Tauri configuration
-tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }
+# NOTE: "tray-icon" is desktop-only and added in the desktop target sections below
+tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset"] }
 tauri-plugin-fs = "2.4.0"
 tauri-plugin-dialog = "2.3.0"
 tauri-plugin-store = "2.4.0"
 tauri-plugin-notification = "2.3.1"
-tauri-plugin-updater = "2.3.0"
-tauri-plugin-process = "2.3.0"
 
-# Desktop-only single instance guard
+# Desktop-only plugins (single instance guard, auto-updater, process control)
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "=2.3.7"
+tauri-plugin-updater = "2.3.0"
+tauri-plugin-process = "2.3.0"
 
 # macOS-specific dependencies with Metal GPU acceleration
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -184,6 +186,7 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
+tauri = { version = "2.6.2", features = ["tray-icon"] }
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
 
@@ -195,8 +198,30 @@ futures-channel = "0.3.31"
 #   --features hipblas  (AMD ROCm)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "2.6.2", features = ["tray-icon"] }
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+
+# Android-specific dependencies (Tauri mobile target)
+# Microphone capture works through cpal's AAudio/oboe backend.
+# System audio capture is not available on Android (platform restriction).
+[target.'cfg(target_os = "android")'.dependencies]
+whisper-rs = { version = "0.13.2", features = ["raw-api"] }
+futures-channel = "0.3.31"
+# logcat output for the `log` crate
+android_logger = "0.14"
+# reqwest/native-tls needs a vendored OpenSSL when cross-compiling for Android
+openssl = { version = "0.10", features = ["vendored"] }
+# ONNX Runtime (used by Silero VAD and Parakeet) cannot download prebuilt
+# binaries for Android; dlopen libonnxruntime.so at runtime instead. The
+# library from the official `onnxruntime-android` AAR must be bundled in
+# the APK's jniLibs (see docs/ANDROID.md).
+ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
+# JNI bridge for the microphone foreground service and the battery-optimization
+# system prompt (Android platform features Tauri doesn't expose). ndk-context
+# hands us the JavaVM + Application Context that Tauri already initialized.
+jni = "0.21"
+ndk-context = "0.1"
 
 [dev-dependencies]
 tempfile = "3.3.0"

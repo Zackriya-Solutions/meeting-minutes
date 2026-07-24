@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export type Platform = 'macos' | 'windows' | 'linux' | 'unknown';
+export type Platform = 'macos' | 'windows' | 'linux' | 'android' | 'unknown';
 
 // Extend Window type to include Tauri internals
 declare global {
@@ -16,7 +16,10 @@ function detectPlatformFromUserAgent(): Platform {
   if (typeof navigator === 'undefined') return 'unknown';
 
   const userAgent = navigator.userAgent.toLowerCase();
-  if (userAgent.includes('mac')) {
+  if (userAgent.includes('android')) {
+    // Check before 'linux': Android user agents contain both
+    return 'android';
+  } else if (userAgent.includes('mac')) {
     return 'macos';
   } else if (userAgent.includes('win')) {
     return 'windows';
@@ -58,8 +61,10 @@ export function usePlatform(): Platform {
             setCurrentPlatform('windows');
             break;
           case 'linux':
-          case 'android':
             setCurrentPlatform('linux');
+            break;
+          case 'android':
+            setCurrentPlatform('android');
             break;
           default:
             setCurrentPlatform('unknown');

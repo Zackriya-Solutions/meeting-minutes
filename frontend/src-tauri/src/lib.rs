@@ -36,6 +36,8 @@ pub(crate) use perf_trace;
 
 // Declare audio module
 pub mod analytics;
+#[cfg(target_os = "android")]
+pub mod android_jni;
 pub mod api;
 pub mod audio;
 pub mod config;
@@ -51,8 +53,25 @@ pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
+#[cfg(desktop)]
 pub mod tray;
 pub mod utils;
+
+/// No-op tray shim for mobile builds: Android/iOS have no system tray, so
+/// call sites (recording commands, engine commands) compile unchanged.
+#[cfg(mobile)]
+pub mod tray {
+    use tauri::{AppHandle, Runtime};
+
+    pub fn create_tray<R: Runtime>(_app: &AppHandle<R>) -> tauri::Result<()> {
+        Ok(())
+    }
+
+    pub fn update_tray_menu<R: Runtime>(_app: &AppHandle<R>) {}
+
+    #[allow(dead_code)]
+    pub(crate) fn focus_main_window<R: Runtime>(_app: &AppHandle<R>) {}
+}
 pub mod whisper_engine;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
@@ -227,6 +246,35 @@ fn read_audio_file(file_path: String) -> Result<Vec<u8>, String> {
     }
 }
 
+/// True if the OS is already exempting the app from battery optimizations. Only
+/// meaningful on Android; every other platform returns true (nothing to prompt).
+#[tauri::command]
+async fn is_ignoring_battery_optimizations() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        android_jni::is_ignoring_battery_optimizations().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(true)
+    }
+}
+
+/// Launch the Android system dialog asking the user to exempt the app from
+/// battery optimizations (so long recordings aren't killed by Doze). No-op off
+/// Android.
+#[tauri::command]
+async fn request_ignore_battery_optimizations() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android_jni::request_ignore_battery_optimizations().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 async fn save_transcript(file_path: String, content: String) -> Result<(), String> {
     log_info!("Saving transcript to: {}", file_path);
@@ -387,9 +435,19 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Route `log` output to logcat on Android (no terminal/env_logger there)
+    #[cfg(target_os = "android")]
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Info)
+            .with_tag("meetily"),
+    );
+
     log::set_max_level(log::LevelFilter::Info);
 
+    #[cfg_attr(mobile, allow(unused_mut))]
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
@@ -405,12 +463,19 @@ pub fn run() {
         }));
     }
 
-    builder
+    // Desktop-only plugins: auto-updater and process control (relaunch/exit)
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
+    }
+
+    let builder = builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -453,6 +518,11 @@ pub fn run() {
 
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
+
+            // Android has no dirs::document_dir()/audio_dir(); recordings must
+            // use the app data dir instead (see recording_preferences.rs).
+            #[cfg(target_os = "android")]
+            audio::recording_preferences::set_android_recordings_dir(&_app.handle());
 
             // Initialize Whisper engine on startup
             tauri::async_runtime::spawn(async {
@@ -510,19 +580,25 @@ pub fn run() {
             }
 
             Ok(())
-        })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
-                    } else {
-                        log::info!("Main window hidden to tray on close request");
-                    }
+        });
+
+    // Hide-to-tray on window close is desktop-only behavior; Android manages
+    // the activity lifecycle itself.
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if window.label() == "main" {
+                api.prevent_close();
+                if let Err(e) = window.hide() {
+                    log::error!("Failed to hide main window on close request: {}", e);
+                } else {
+                    log::info!("Main window hidden to tray on close request");
                 }
             }
-        })
+        }
+    });
+
+    builder
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,
@@ -607,6 +683,13 @@ pub fn run() {
             audio::recording_commands::is_recording_paused,
             audio::recording_commands::get_recording_state,
             audio::recording_commands::get_meeting_folder_path,
+            audio::recording_commands::list_local_recordings,
+            audio::recording_commands::read_local_recording_transcript,
+            audio::recording_commands::rename_local_recording,
+            audio::recording_commands::delete_local_recording,
+            audio::recording_commands::get_recordings_disk_usage,
+            audio::recording_commands::export_local_recording_transcript,
+            audio::recording_commands::promote_local_recording_to_meeting,
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
@@ -748,6 +831,10 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            audio::import::start_retranscribe_local_recording_command,
+            // Battery-optimization exemption (Android)
+            is_ignoring_battery_optimizations,
+            request_ignore_battery_optimizations,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
