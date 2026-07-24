@@ -53,16 +53,12 @@ impl JobHandler for ChunkEmbedHandler {
         let run_analysis = payload
             .get("run_analysis")
             .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+            // Pre-upgrade post-meeting jobs used `{}`. Preserve their historical
+            // behavior; archive work created by this build is explicitly tagged false.
+            .unwrap_or(true);
         let source = payload
             .get("source")
             .and_then(serde_json::Value::as_str);
-        if !run_analysis && !matches!(source, Some("archive_backfill")) {
-            log::info!(
-                "[chunk_embed] meeting {meeting_id}: skipped stale/untagged background job"
-            );
-            return Ok(());
-        }
 
         let indexing_allowed: Option<i64> = sqlx::query_scalar(
             "SELECT indexing_allowed FROM meetings WHERE id = ?",
@@ -273,21 +269,10 @@ impl JobHandler for EmbeddingRepairHandler {
         &self,
         ctx: &JobContext,
         meeting_id: Option<&str>,
-        payload: &serde_json::Value,
+        _payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
         let meeting_id =
             meeting_id.ok_or_else(|| anyhow::anyhow!("embedding_repair requires a meeting_id"))?;
-        if !matches!(
-            payload
-                .get("source")
-                .and_then(serde_json::Value::as_str),
-            Some("post_meeting" | "archive_backfill")
-        ) {
-            log::info!(
-                "[embedding_repair] meeting {meeting_id}: skipped stale/untagged background job"
-            );
-            return Ok(());
-        }
         let _model_index_guard = crate::pipeline::embedder::model_index_read_guard().await;
         if !crate::pipeline::embedder::is_loaded() {
             log::info!(
@@ -391,7 +376,7 @@ impl JobHandler for DiarizeHandler {
         if payload
             .get("run_analysis")
             .and_then(serde_json::Value::as_bool)
-            != Some(true)
+            == Some(false)
         {
             log::info!(
                 "[diarize] meeting {meeting_id}: skipped stale/untagged background analysis job"
@@ -480,7 +465,7 @@ impl JobHandler for ExtractHandler {
         if payload
             .get("run_analysis")
             .and_then(serde_json::Value::as_bool)
-            != Some(true)
+            == Some(false)
         {
             log::info!(
                 "[extract] meeting {meeting_id}: skipped stale/untagged background analysis job"

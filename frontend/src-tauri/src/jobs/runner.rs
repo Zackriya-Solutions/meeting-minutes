@@ -72,6 +72,14 @@ impl JobRunner {
     }
 
     async fn run_loop(self) {
+        match store::retire_legacy_startup_backfill_fanout(&self.pool).await {
+            Ok(n) if n > 0 => {
+                log::info!("job runner retired {n} legacy startup archive job(s)")
+            }
+            Ok(_) => {}
+            Err(e) => log::error!("job runner legacy startup cleanup failed: {e}"),
+        }
+
         // Startup recovery: requeue anything left `running` from a previous run.
         match store::recover_running(&self.pool).await {
             Ok(n) if n > 0 => log::info!("job runner recovered {n} interrupted job(s)"),
