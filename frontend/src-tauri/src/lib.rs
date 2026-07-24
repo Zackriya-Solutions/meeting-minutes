@@ -47,6 +47,7 @@ pub mod ollama;
 pub mod i18n;
 pub mod transcription_preferences;
 pub mod llm_postprocess;
+pub mod llm_diagnostics;
 pub mod hotword_stats;
 pub mod onboarding;
 pub mod openai;
@@ -528,6 +529,7 @@ pub fn run() {
             if let Some(state) = _app.try_state::<state::AppState>() {
                 hotword_stats::init(state.db_manager.pool().clone());
                 llm_postprocess::init_app(_app.handle().clone());
+                _app.manage(llm_diagnostics::LLMDiagnosticsState::default());
             }
 
             // Initialize bundled templates directory for dynamic template discovery
@@ -777,6 +779,11 @@ pub fn run() {
             transcription_preferences::set_transcription_hotwords,
             transcription_preferences::get_protected_terms,
             hotword_stats::get_hotword_hit_stats,
+            // Wave 28 / PR-45a: LLM failure diagnostics + inline retry
+            llm_diagnostics::get_llm_diagnostics,
+            llm_diagnostics::clear_llm_diagnostics,
+            llm_postprocess::test_llm_connection,
+            llm_postprocess::retry_segment_postprocess,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
             onboarding::complete_onboarding,
