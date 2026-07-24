@@ -8,7 +8,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'openaiCompatible';
   name: string;
   displayName: string;
   size_mb: number;
@@ -20,7 +20,7 @@ interface TranscriptModelConfig {
 }
 
 /**
- * Custom hook for fetching and managing transcription models (Whisper and Parakeet).
+ * Custom hook for fetching and managing local and API transcription models.
  *
  * This hook centralizes the model fetching logic that was previously duplicated
  * in ImportAudioDialog and RetranscribeDialog components.
@@ -77,6 +77,15 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    if (transcriptModelConfig?.provider === 'openaiCompatible' && transcriptModelConfig.model) {
+      allModels.push({
+        provider: 'openaiCompatible',
+        name: transcriptModelConfig.model,
+        displayName: `API: ${transcriptModelConfig.model}`,
+        size_mb: 0,
+      });
+    }
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -88,7 +97,10 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'openaiCompatible' &&
+          m.provider === 'openaiCompatible' &&
+          m.name === configuredModel)
     );
 
     // Only set default model if user hasn't manually selected one

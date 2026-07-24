@@ -101,6 +101,9 @@ pub struct TranscriptConfig {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    pub endpoint: Option<String>,
+    #[serde(rename = "whisperModelPath")]
+    pub whisper_model_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -109,6 +112,9 @@ pub struct SaveTranscriptConfigRequest {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    pub endpoint: Option<String>,
+    #[serde(rename = "whisperModelPath")]
+    pub whisper_model_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -619,6 +625,8 @@ pub async fn api_get_transcript_config<R: Runtime>(
                         provider: config.provider,
                         model: config.model,
                         api_key,
+                        endpoint: config.endpoint,
+                        whisper_model_path: config.whisper_model_path,
                     }))
                 }
                 Err(e) => {
@@ -637,6 +645,8 @@ pub async fn api_get_transcript_config<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                endpoint: None,
+                whisper_model_path: None,
             }))
         }
         Err(e) => {
@@ -653,6 +663,8 @@ pub async fn api_save_transcript_config<R: Runtime>(
     provider: String,
     model: String,
     api_key: Option<String>,
+    endpoint: Option<String>,
+    whisper_model_path: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -661,7 +673,16 @@ pub async fn api_save_transcript_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
-    if let Err(e) = SettingsRepository::save_transcript_config(pool, &provider, &model).await {
+    let endpoint = endpoint.filter(|value| !value.trim().is_empty());
+    let whisper_model_path = whisper_model_path.filter(|value| !value.trim().is_empty());
+
+    if let Err(e) = SettingsRepository::save_transcript_config(
+        pool,
+        &provider,
+        &model,
+        endpoint.as_deref(),
+        whisper_model_path.as_deref(),
+    ).await {
         log_error!("Failed to save transcript config: {}", e);
         return Err(e.to_string());
     }

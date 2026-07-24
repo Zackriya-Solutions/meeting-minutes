@@ -8,11 +8,18 @@ import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 
+const providerLabels: Partial<Record<TranscriptModelProps['provider'], string>> = {
+    parakeet: 'Parakeet (recommended)',
+    localWhisper: 'Local Whisper',
+    openaiCompatible: 'OpenAI-compatible ASR API',
+};
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'openaiCompatible' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
+    endpoint?: string | null;
+    whisperModelPath?: string | null;
 }
 
 export interface TranscriptSettingsProps {
@@ -58,7 +65,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = uiProvider === 'openaiCompatible' || transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -73,12 +80,29 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         setTranscriptModelConfig({
             ...transcriptModelConfig,
             provider: 'localWhisper', // Ensure provider is set correctly
-            model: modelName
+            model: modelName,
+            whisperModelPath: null
         });
         // Close modal after selection
         if (onModelSelect) {
             onModelSelect();
         }
+    };
+
+    const saveConfiguration = async () => {
+        const config = {
+            ...transcriptModelConfig,
+            provider: uiProvider,
+            apiKey: apiKey || null,
+        };
+        await invoke('api_save_transcript_config', {
+            provider: config.provider,
+            model: config.model,
+            apiKey: config.apiKey,
+            endpoint: config.endpoint || null,
+            whisperModelPath: config.whisperModelPath || null,
+        });
+        setTranscriptModelConfig(config);
     };
 
     const handleParakeetModelSelect = (modelName: string) => {
@@ -112,17 +136,21 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
+                                    setTranscriptModelConfig({ ...transcriptModelConfig, provider });
                                     if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
                                     }
                                 }}
                             >
                                 <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                    <SelectValue placeholder="Select provider" />
+                                    <SelectValue placeholder="Select provider">
+                                        {providerLabels[uiProvider] || uiProvider}
+                                    </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
-                                    <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="parakeet">Parakeet (recommended)</SelectItem>
+                                    <SelectItem value="localWhisper">Local Whisper</SelectItem>
+                                    <SelectItem value="openaiCompatible">OpenAI-compatible ASR API</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +158,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'openaiCompatible' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -159,6 +187,26 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleWhisperModelSelect}
                                 autoSave={true}
                             />
+                            <div className="mt-4 space-y-2">
+                                <Label htmlFor="whisper-model-path">Custom GGML model file</Label>
+                                <Input
+                                    id="whisper-model-path"
+                                    value={transcriptModelConfig.whisperModelPath || ''}
+                                    onChange={(event) => setTranscriptModelConfig({
+                                        ...transcriptModelConfig,
+                                        provider: 'localWhisper',
+                                        model: event.target.value.split(/[\\/]/).pop()?.replace(/\.bin$/i, '') || 'custom-whisper',
+                                        whisperModelPath: event.target.value,
+                                    })}
+                                    placeholder="/path/to/ggml-model.bin"
+                                />
+                                <p className="text-xs text-gray-500">
+                                    Absolute paths are supported. The file must be a whisper.cpp GGML model; safetensors and PyTorch folders require conversion.
+                                </p>
+                                <Button type="button" variant="outline" onClick={saveConfiguration}>
+                                    Save custom model path
+                                </Button>
+                            </div>
                         </div>
                     )}
 
@@ -169,6 +217,37 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleParakeetModelSelect}
                                 autoSave={true}
                             />
+                        </div>
+                    )}
+
+                    {uiProvider === 'openaiCompatible' && (
+                        <div className="space-y-4">
+                            <div>
+                                <Label htmlFor="asr-endpoint">ASR endpoint or base URL</Label>
+                                <Input
+                                    id="asr-endpoint"
+                                    value={transcriptModelConfig.endpoint || ''}
+                                    onChange={(event) => setTranscriptModelConfig({
+                                        ...transcriptModelConfig,
+                                        provider: 'openaiCompatible',
+                                        endpoint: event.target.value,
+                                    })}
+                                    placeholder="https://api.openai.com/v1"
+                                />
+                            </div>
+                            <div>
+                                <Label htmlFor="asr-model">ASR model</Label>
+                                <Input
+                                    id="asr-model"
+                                    value={transcriptModelConfig.model}
+                                    onChange={(event) => setTranscriptModelConfig({
+                                        ...transcriptModelConfig,
+                                        provider: 'openaiCompatible',
+                                        model: event.target.value,
+                                    })}
+                                    placeholder="gpt-4o-mini-transcribe"
+                                />
+                            </div>
                         </div>
                     )}
 
@@ -184,7 +263,14 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''
                                         }`}
                                     value={apiKey || ''}
-                                    onChange={(e) => setApiKey(e.target.value)}
+                                    onChange={(e) => {
+                                        setApiKey(e.target.value);
+                                        setTranscriptModelConfig({
+                                            ...transcriptModelConfig,
+                                            provider: uiProvider,
+                                            apiKey: e.target.value,
+                                        });
+                                    }}
                                     disabled={isApiKeyLocked}
                                     onClick={handleInputClick}
                                     placeholder="Enter your API key"
@@ -219,14 +305,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             </div>
                         </div>
                     )}
+                    {uiProvider === 'openaiCompatible' && (
+                        <Button type="button" onClick={saveConfiguration}>
+                            Save ASR service
+                        </Button>
+                    )}
                 </div>
             </div>
         </div >
     )
 }
-
-
-
 
 
 

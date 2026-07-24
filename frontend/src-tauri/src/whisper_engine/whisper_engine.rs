@@ -37,6 +37,7 @@ pub struct WhisperEngine {
     models_dir: PathBuf,
     current_context: Arc<RwLock<Option<WhisperContext>>>,
     current_model: Arc<RwLock<Option<String>>>,
+    current_model_path: Arc<RwLock<Option<PathBuf>>>,
     available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     // State tracking for smart logging
     last_transcription_was_short: Arc<RwLock<bool>>,
@@ -153,6 +154,7 @@ impl WhisperEngine {
             models_dir,
             current_context: Arc::new(RwLock::new(None)),
             current_model: Arc::new(RwLock::new(None)),
+            current_model_path: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             // Initialize state tracking
             last_transcription_was_short: Arc::new(RwLock::new(false)),
@@ -259,73 +261,16 @@ impl WhisperEngine {
     }
     
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
-        let models = self.available_models.read().await;
-        let model_info = models.get(model_name)
-            .ok_or_else(|| anyhow!("Model {} not found", model_name))?;
+        let model_info = {
+            let models = self.available_models.read().await;
+            models.get(model_name)
+                .cloned()
+                .ok_or_else(|| anyhow!("Model {} not found", model_name))?
+        };
 
         match model_info.status {
             ModelStatus::Available => {
-                // FIX 5: Check if this model is already loaded
-                if let Some(current_model) = self.current_model.read().await.as_ref() {
-                    if current_model == model_name {
-                        log::info!("Model {} is already loaded, skipping reload", model_name);
-                        return Ok(());
-                    }
-
-                    // FIX 5: Unload current model before loading new one
-                    log::info!("Unloading current model '{}' before loading '{}'", current_model, model_name);
-                    self.unload_model().await;
-                }
-
-                log::info!("Loading model: {}", model_name);
-
-                // PERFORMANCE OPTIMIZATION: Use comprehensive hardware profile for optimal GPU configuration
-                let hardware_profile = crate::audio::HardwareProfile::detect();
-                let adaptive_config = hardware_profile.get_whisper_config();
-                let acceleration = whisper_context_acceleration_for(
-                    WhisperCompiledBackend::current(),
-                    hardware_profile.gpu_type,
-                    hardware_profile.performance_tier,
-                );
-
-                let context_param = WhisperContextParameters {
-                    use_gpu: acceleration.use_gpu,
-                    gpu_device: acceleration.gpu_device,
-                    flash_attn: acceleration.flash_attn,
-                    ..Default::default()
-                };
-
-                log::info!(
-                    "Whisper acceleration decision: compiled_backend={} runtime_detected_gpu={:?} use_gpu={} flash_attn={} gpu_device={}",
-                    acceleration.compiled_backend.as_str(),
-                    acceleration.runtime_detected_gpu,
-                    acceleration.use_gpu,
-                    acceleration.flash_attn,
-                    acceleration.gpu_device,
-                );
-
-                // PERFORMANCE: Suppress verbose C library logs during model loading
-                // This hides the excessive Metal/GGML initialization logs in release builds
-                let ctx = {
-                    // let _suppressor = crate::whisper_engine::StderrSuppressor::new();
-
-                    // Load whisper context with hardware-optimized parameters
-                    WhisperContext::new_with_params(&model_info.path.to_string_lossy(), context_param)
-                        .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?
-                    // Suppressor dropped here, stderr restored
-                };
-
-                // Update current context and model
-                *self.current_context.write().await = Some(ctx);
-                *self.current_model.write().await = Some(model_name.to_string());
-
-                // Enhanced acceleration status reporting
-                let acceleration_status = acceleration.status_label();
-
-                log::info!("Successfully loaded model: {} with {} (Performance Tier: {:?}, Beam Size: {}, Threads: {:?})",
-                          model_name, acceleration_status, hardware_profile.performance_tier,
-                          adaptive_config.beam_size, adaptive_config.max_threads);
-                Ok(())
+                self.load_model_from_path(model_name, &model_info.path).await
             },
             ModelStatus::Missing => {
                 Err(anyhow!("Model {} is not downloaded", model_name))
@@ -342,6 +287,56 @@ impl WhisperEngine {
         }
     }
 
+    /// Load a whisper.cpp GGML model from any local file path.
+    pub async fn load_model_from_path(&self, model_name: &str, model_path: &std::path::Path) -> Result<()> {
+        let model_path = model_path.canonicalize()
+            .map_err(|error| anyhow!("Could not access model file '{}': {}", model_path.display(), error))?;
+        if !model_path.is_file() {
+            return Err(anyhow!("Whisper model path must point to a file"));
+        }
+        self.validate_model_file(&model_path).await.map_err(|_| {
+            anyhow!(
+                "Unsupported Whisper model format at '{}'. Meetily requires a whisper.cpp GGML model file (usually ggml-*.bin); convert safetensors or PyTorch models first.",
+                model_path.display()
+            )
+        })?;
+
+        if self.current_model.read().await.as_deref() == Some(model_name)
+            && self.current_model_path.read().await.as_deref() == Some(model_path.as_path()) {
+            log::info!("Model {} is already loaded, skipping reload", model_name);
+            return Ok(());
+        }
+        let current_model = self.current_model.read().await.clone();
+        if let Some(current_model) = current_model {
+            log::info!("Unloading current model '{}' before loading '{}'", current_model, model_name);
+            self.unload_model().await;
+        }
+
+        let hardware_profile = crate::audio::HardwareProfile::detect();
+        let adaptive_config = hardware_profile.get_whisper_config();
+        let acceleration = whisper_context_acceleration_for(
+            WhisperCompiledBackend::current(),
+            hardware_profile.gpu_type,
+            hardware_profile.performance_tier,
+        );
+        let context_param = WhisperContextParameters {
+            use_gpu: acceleration.use_gpu,
+            gpu_device: acceleration.gpu_device,
+            flash_attn: acceleration.flash_attn,
+            ..Default::default()
+        };
+        let ctx = WhisperContext::new_with_params(&model_path.to_string_lossy(), context_param)
+            .map_err(|error| anyhow!("Failed to load model {}: {}", model_name, error))?;
+        *self.current_context.write().await = Some(ctx);
+        *self.current_model.write().await = Some(model_name.to_string());
+        *self.current_model_path.write().await = Some(model_path);
+
+        log::info!("Successfully loaded model: {} with {} (Performance Tier: {:?}, Beam Size: {}, Threads: {:?})",
+                  model_name, acceleration.status_label(), hardware_profile.performance_tier,
+                  adaptive_config.beam_size, adaptive_config.max_threads);
+        Ok(())
+    }
+
     pub async fn unload_model(&self) -> bool  {
         let mut ctx_guard = self.current_context.write().await;
         let unloaded = ctx_guard.take().is_some();
@@ -351,6 +346,7 @@ impl WhisperEngine {
 
         let mut model_name_guard = self.current_model.write().await;
         model_name_guard.take();
+        self.current_model_path.write().await.take();
 
         unloaded
     }
@@ -358,9 +354,16 @@ impl WhisperEngine {
     pub async fn get_current_model(&self) -> Option<String> {
         self.current_model.read().await.clone()
     }
-    
+
     pub async fn is_model_loaded(&self) -> bool {
         self.current_context.read().await.is_some()
+    }
+
+    pub async fn is_model_loaded_from_path(&self, model_path: &std::path::Path) -> bool {
+        let Ok(model_path) = fs::canonicalize(model_path).await else {
+            return false;
+        };
+        self.current_model_path.read().await.as_deref() == Some(model_path.as_path())
     }
     
     // Enhanced function to clean repetitive text patterns and meaningless outputs
@@ -808,7 +811,7 @@ impl WhisperEngine {
     }
 
     /// Validate if a model file is a valid GGML file by checking its header
-    async fn validate_model_file(&self, model_path: &PathBuf) -> Result<()> {
+    async fn validate_model_file(&self, model_path: &std::path::Path) -> Result<()> {
         use tokio::io::AsyncReadExt;
 
         let mut file = fs::File::open(model_path).await
@@ -820,11 +823,11 @@ impl WhisperEngine {
             .map_err(|e| anyhow!("Failed to read model file header: {}", e))?;
 
         // Check for GGML magic number (various versions and endianness)
-        if buffer.starts_with(b"ggml") || buffer.starts_with(b"GGUF") || buffer.starts_with(b"ggmf") ||
+        if buffer.starts_with(b"ggml") || buffer.starts_with(b"ggmf") ||
            buffer.starts_with(b"lmgg") || buffer.starts_with(b"FUGU") || buffer.starts_with(b"fmgg") {
             Ok(())
         } else {
-            Err(anyhow!("Invalid model file: missing GGML/GGUF magic number. Found: {:?}",
+            Err(anyhow!("Invalid model file: missing GGML magic number. Found: {:?}",
                        String::from_utf8_lossy(&buffer[..4])))
         }
     }
