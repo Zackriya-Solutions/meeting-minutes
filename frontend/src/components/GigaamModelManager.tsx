@@ -18,6 +18,8 @@ interface GigaamStatus {
   model_present: boolean;
   loaded: boolean;
   loaded_variant: string | null;
+  downloading: boolean;
+  download_progress: DownloadProgress | null;
   variants: VariantInfo[];
 }
 
@@ -46,25 +48,63 @@ export function GigaamModelManager() {
   const t = useT();
 
   const refresh = useCallback(() => {
-    invoke<GigaamStatus>('gigaam_status').then(setStatus).catch(() => setStatus(null));
+    invoke<GigaamStatus>('gigaam_status')
+      .then((next) => {
+        setStatus(next);
+        setDownloading(next.downloading);
+        setProgress(next.download_progress);
+      })
+      .catch(() => setStatus(null));
   }, []);
 
   useEffect(() => {
-    refresh();
     let unProgress: (() => void) | undefined;
     let unReady: (() => void) | undefined;
+    let unError: (() => void) | undefined;
+    let disposed = false;
     (async () => {
-      unProgress = await listen<DownloadProgress>('gigaam-download-progress', (e) => setProgress(e.payload));
-      unReady = await listen('gigaam-ready', () => {
+      const progressListener = await listen<DownloadProgress>('gigaam-download-progress', (e) => {
+        setDownloading(true);
+        setProgress(e.payload);
+      });
+      if (disposed) {
+        progressListener();
+        return;
+      }
+      unProgress = progressListener;
+
+      const readyListener = await listen('gigaam-ready', () => {
         setDownloading(false);
         setSwitching(false);
         setProgress(null);
         refresh();
       });
+      if (disposed) {
+        readyListener();
+        return;
+      }
+      unReady = readyListener;
+
+      const errorListener = await listen<string>('gigaam-download-error', (e) => {
+        setDownloading(false);
+        setProgress(null);
+        setError(e.payload);
+        refresh();
+      });
+      if (disposed) {
+        errorListener();
+        return;
+      }
+      unError = errorListener;
+      // Read the backend state only after listeners are attached so completion cannot
+      // be lost while this Settings tab is mounting.
+      refresh();
     })();
     return () => {
+      disposed = true;
       unProgress?.();
       unReady?.();
+      unError?.();
     };
   }, [refresh]);
 

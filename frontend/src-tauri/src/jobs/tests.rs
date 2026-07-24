@@ -314,7 +314,11 @@ async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
     let ctx = ctx(&pool);
     let handler = super::handlers::ChunkEmbedHandler;
     handler
-        .run(&ctx, Some("m1"), &serde_json::json!({}))
+        .run(
+            &ctx,
+            Some("m1"),
+            &serde_json::json!({ "run_analysis": true }),
+        )
         .await
         .unwrap();
 
@@ -333,7 +337,11 @@ async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
 
     // Idempotent: re-running does not duplicate chunks.
     handler
-        .run(&ctx, Some("m1"), &serde_json::json!({}))
+        .run(
+            &ctx,
+            Some("m1"),
+            &serde_json::json!({ "run_analysis": true }),
+        )
         .await
         .unwrap();
     let n2: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m1'")
@@ -349,6 +357,37 @@ async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
         .unwrap();
     assert!(kinds.contains(&kind::DIARIZE.to_string()));
     assert!(kinds.contains(&kind::EXTRACT.to_string()));
+
+    // Old untagged jobs may have been fanned out by an automatic startup backfill in a
+    // previous build. They must become no-ops after upgrade.
+    sqlx::query("INSERT INTO meetings(id) VALUES('m2')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO transcripts(id,meeting_id,transcript,audio_start_time,audio_end_time) \
+         VALUES('t-m2','m2','архивный импорт',0,1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    handler
+        .run(&ctx, Some("m2"), &serde_json::json!({}))
+        .await
+        .unwrap();
+    let analysis_jobs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM jobs WHERE meeting_id='m2' AND kind IN ('diarize','extract')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(analysis_jobs, 0, "untagged/archive jobs are index-only");
+    let archived_chunks: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m2'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(archived_chunks, 0, "stale untagged index job is skipped");
 }
 
 #[tokio::test]
@@ -376,7 +415,11 @@ async fn private_memory_skips_indexing_but_still_chains_analysis() {
     let ctx = ctx(&pool);
     let handler = super::handlers::ChunkEmbedHandler;
     handler
-        .run(&ctx, Some("m1"), &serde_json::json!({}))
+        .run(
+            &ctx,
+            Some("m1"),
+            &serde_json::json!({ "run_analysis": true }),
+        )
         .await
         .unwrap();
 
@@ -424,7 +467,11 @@ async fn private_memory_blocks_cloud_extraction_handler() {
 
     let handler = super::handlers::ExtractHandler;
     handler
-        .run(&ctx(&pool), Some("m1"), &serde_json::json!({}))
+        .run(
+            &ctx(&pool),
+            Some("m1"),
+            &serde_json::json!({ "run_analysis": true }),
+        )
         .await
         .unwrap();
 }
@@ -469,6 +516,19 @@ async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
     let handler = super::handlers::BackfillHandler;
     let context = ctx(&pool);
     handler
+        .run(
+            &context,
+            None,
+            &serde_json::json!({ "reason": "startup" }),
+        )
+        .await
+        .unwrap();
+    let startup_jobs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(startup_jobs, 0, "legacy startup backfill is a no-op");
+    handler
         .run(&context, None, &serde_json::json!({}))
         .await
         .unwrap();
@@ -486,6 +546,14 @@ async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
         rows,
         vec![(kind::CHUNK_EMBED.to_string(), Some("with-text".into()))]
     );
+    let payload: String =
+        sqlx::query_scalar("SELECT payload FROM jobs WHERE kind='chunk_embed' LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(payload["run_analysis"], false);
+    assert_eq!(payload["source"], "archive_backfill");
     let repaired_status: String =
         sqlx::query_scalar("SELECT embedding_status FROM chunks WHERE id=1")
             .fetch_one(&pool)

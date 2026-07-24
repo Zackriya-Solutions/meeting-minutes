@@ -131,7 +131,7 @@ pub async fn enqueue_post_meeting_pipeline(
         pool,
         kind::CHUNK_EMBED,
         Some(meeting_id),
-        &serde_json::json!({}),
+        &serde_json::json!({ "run_analysis": true, "source": "post_meeting" }),
     )
     .await?
     .id)
