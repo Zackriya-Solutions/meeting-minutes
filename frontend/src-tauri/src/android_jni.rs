@@ -61,6 +61,11 @@ fn service_intent<'a>(env: &mut JNIEnv<'a>, context: &JObject) -> Result<JObject
 
 /// Start the microphone foreground service (persistent notification). Idempotent
 /// on the Android side — a second start just refreshes the notification.
+///
+/// Currently not called from the recording path (see recording_commands.rs):
+/// auto-start was disabled after being implicated in a record-start timeout and
+/// must be re-enabled off the critical path + device-verified.
+#[allow(dead_code)]
 pub fn start_recording_service() -> Result<()> {
     let res = with_context(|env, context| {
         let intent = service_intent(env, context)?;
@@ -82,6 +87,7 @@ pub fn start_recording_service() -> Result<()> {
 }
 
 /// Stop the microphone foreground service (dismisses the notification).
+#[allow(dead_code)]
 pub fn stop_recording_service() -> Result<()> {
     let res = with_context(|env, context| {
         let intent = service_intent(env, context)?;

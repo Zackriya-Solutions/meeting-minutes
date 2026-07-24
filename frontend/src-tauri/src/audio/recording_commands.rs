@@ -251,11 +251,15 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Keep recording alive (and satisfy Android's mic-capture notification
-    // requirement) when the app is backgrounded.
+    // NOTE: Foreground-service auto-start is temporarily disabled. It ran on
+    // the recording-start critical path and was implicated in a "timed out
+    // waiting for recording to start" regression on-device (a JNI/service call
+    // blocking or the service failing to post its notification in time). The
+    // feature (android_jni + RecordingService) is kept but must be re-enabled
+    // off the critical path (detached) and verified on a device first.
     #[cfg(target_os = "android")]
     {
-        let _ = crate::android_jni::start_recording_service();
+        // let _ = crate::android_jni::start_recording_service();
     }
 
     // Start optimized parallel transcription task and store handle
@@ -429,11 +433,15 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Keep recording alive (and satisfy Android's mic-capture notification
-    // requirement) when the app is backgrounded.
+    // NOTE: Foreground-service auto-start is temporarily disabled. It ran on
+    // the recording-start critical path and was implicated in a "timed out
+    // waiting for recording to start" regression on-device (a JNI/service call
+    // blocking or the service failing to post its notification in time). The
+    // feature (android_jni + RecordingService) is kept but must be re-enabled
+    // off the critical path (detached) and verified on a device first.
     #[cfg(target_os = "android")]
     {
-        let _ = crate::android_jni::start_recording_service();
+        // let _ = crate::android_jni::start_recording_service();
     }
 
     // Start optimized parallel transcription task and store handle
@@ -865,10 +873,11 @@ pub async fn stop_recording<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
 
-    // Tear down the microphone foreground service / notification.
+    // Foreground-service teardown disabled while the FGS auto-start is off
+    // (see the start path). No-op until the service is re-enabled + verified.
     #[cfg(target_os = "android")]
     {
-        let _ = crate::android_jni::stop_recording_service();
+        // let _ = crate::android_jni::stop_recording_service();
     }
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
