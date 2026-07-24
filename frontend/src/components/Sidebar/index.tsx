@@ -215,7 +215,9 @@ const Sidebar: React.FC = () => {
       const payload = {
         provider: configToSave.provider,
         model: configToSave.model,
-        apiKey: configToSave.apiKey ?? null
+        apiKey: configToSave.apiKey ?? null,
+        endpoint: configToSave.endpoint ?? null,
+        whisperModelPath: configToSave.whisperModelPath ?? null
       };
       console.log('Saving transcript config with payload:', payload);
 
@@ -223,6 +225,8 @@ const Sidebar: React.FC = () => {
         provider: payload.provider,
         model: payload.model,
         apiKey: payload.apiKey,
+        endpoint: payload.endpoint,
+        whisperModelPath: payload.whisperModelPath,
       });
 
 

@@ -286,51 +286,40 @@ pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
     };
 
     if let Some(engine) = engine {
-        // Check if a model is currently loaded
-        if engine.is_model_loaded().await {
-            if let Some(current_model) = engine.get_current_model().await {
-                log::info!("Model already loaded: {}", current_model);
-                return Ok(current_model);
-            }
+        let config = crate::api::api::api_get_transcript_config(app.clone(), app.state(), None)
+            .await
+            .map_err(|error| format!("Failed to read Whisper configuration: {error}"))?
+            .ok_or_else(|| "Whisper configuration is missing".to_string())?;
+        if config.provider != "localWhisper" {
+            return Err(format!("Whisper validation requested for '{}' provider", config.provider));
         }
 
-        // No model loaded - try to load user's configured model from transcript config
-        let model_to_load = match crate::api::api::api_get_transcript_config(
-            app.clone(),
-            app.state(),
-            None,
-        )
-        .await
-        {
-            Ok(Some(config)) => {
-                log::info!(
-                    "Got transcript config from API - provider: {}, model: {}",
-                    config.provider,
-                    config.model
-                );
-                if config.provider == "localWhisper" && !config.model.is_empty() {
-                    log::info!("Using user's configured model: {}", config.model);
-                    Some(config.model)
-                } else {
-                    log::info!(
-                        "API config uses non-local provider ({}) or empty model, will auto-select",
-                        config.provider
-                    );
-                    None
+        let model_to_load = (!config.model.trim().is_empty()).then_some(config.model);
+        let custom_model_path = config.whisper_model_path.filter(|path| !path.trim().is_empty());
+        let desired_model = model_to_load.clone().unwrap_or_else(|| "custom-whisper".to_string());
+
+        if engine.is_model_loaded().await {
+            if engine.get_current_model().await.as_deref() == Some(desired_model.as_str()) {
+                let path_matches = match custom_model_path.as_deref() {
+                    Some(path) => engine
+                        .is_model_loaded_from_path(std::path::Path::new(path))
+                        .await,
+                    None => true,
+                };
+                if path_matches {
+                    return Ok(desired_model);
                 }
             }
-            Ok(None) => {
-                log::info!("No transcript config found in API, will auto-select model");
-                None
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to get transcript config from API: {}, will auto-select model",
-                    e
-                );
-                None
-            }
-        };
+            engine.unload_model().await;
+        }
+
+        if let Some(model_path) = custom_model_path {
+            engine
+                .load_model_from_path(&desired_model, std::path::Path::new(&model_path))
+                .await
+                .map_err(|error| error.to_string())?;
+            return Ok(desired_model);
+        }
 
         // Check available models
         let models = engine

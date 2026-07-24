@@ -74,6 +74,8 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                endpoint: None,
+                whisper_model_path: None,
             }
         }
         Err(e) => {
@@ -82,6 +84,8 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                endpoint: None,
+                whisper_model_path: None,
             }
         }
     };
@@ -135,10 +139,19 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "openaiCompatible" => {
+            if config.endpoint.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_none() {
+                return Err("Configure an OpenAI-compatible ASR endpoint before recording.".to_string());
+            }
+            if config.model.trim().is_empty() {
+                return Err("Configure an ASR model before recording.".to_string());
+            }
+            Ok(())
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for transcription. Please select Local Whisper, Parakeet, or OpenAI-compatible ASR.",
                 other
             ))
         }
@@ -170,6 +183,8 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                endpoint: None,
+                whisper_model_path: None,
             }
         }
         Err(e) => {
@@ -178,6 +193,8 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                endpoint: None,
+                whisper_model_path: None,
             }
         }
     };
@@ -211,6 +228,19 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "openaiCompatible" => {
+            let endpoint = config.endpoint
+                .ok_or_else(|| "OpenAI-compatible ASR endpoint is not configured".to_string())?;
+            let provider = crate::audio::transcription::OpenAiCompatibleProvider::new(
+                crate::audio::transcription::OpenAiCompatibleConfig {
+                    endpoint,
+                    api_key: config.api_key,
+                    model: config.model,
+                    request_timeout: std::time::Duration::from_secs(300),
+                },
+            )?;
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");
@@ -255,7 +285,7 @@ pub async fn get_or_init_whisper<R: Runtime>(
                         config.provider, config.model
                     );
                     if config.provider == "localWhisper" && !config.model.is_empty() {
-                        Some(config.model)
+                        Some((config.model, config.whisper_model_path))
                     } else {
                         None
                     }
@@ -271,8 +301,14 @@ pub async fn get_or_init_whisper<R: Runtime>(
             };
 
             // If loaded model matches config, reuse it
-            if let Some(ref expected_model) = configured_model {
-                if current_model == *expected_model {
+            if let Some((ref expected_model, ref expected_path)) = configured_model {
+                let path_matches = match expected_path {
+                    Some(path) if !path.trim().is_empty() => engine
+                        .is_model_loaded_from_path(std::path::Path::new(path))
+                        .await,
+                    _ => true,
+                };
+                if current_model == *expected_model && path_matches {
                     info!(
                         "✅ Loaded model '{}' matches saved config, reusing",
                         current_model
@@ -321,7 +357,7 @@ pub async fn get_or_init_whisper<R: Runtime>(
     };
 
     // Get model configuration from API
-    let model_to_load =
+    let (model_to_load, custom_model_path) =
         match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None)
             .await
         {
@@ -332,7 +368,7 @@ pub async fn get_or_init_whisper<R: Runtime>(
                 );
                 if config.provider == "localWhisper" {
                     info!("Using model from API config: {}", config.model);
-                    config.model
+                    (config.model, config.whisper_model_path)
                 } else {
                     // Non-Whisper provider (e.g., parakeet) - this function shouldn't be called
                     return Err(format!(
@@ -343,18 +379,26 @@ pub async fn get_or_init_whisper<R: Runtime>(
             }
             Ok(None) => {
                 info!("No transcript config found in API, falling back to 'small'");
-                "small".to_string()
+                ("small".to_string(), None)
             }
             Err(e) => {
                 warn!(
                     "Failed to get transcript config from API: {}, falling back to 'small'",
                     e
                 );
-                "small".to_string()
+                ("small".to_string(), None)
             }
         };
 
     info!("Selected model to load: {}", model_to_load);
+
+    if let Some(model_path) = custom_model_path.filter(|path| !path.trim().is_empty()) {
+        engine
+            .load_model_from_path(&model_to_load, std::path::Path::new(&model_path))
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(engine);
+    }
 
     // Discover available models to check if the desired model is downloaded
     let models = engine
