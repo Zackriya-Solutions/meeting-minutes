@@ -103,6 +103,7 @@ export function SettingsModals({
                         });
                       }}
                     >
+                      <option value="atlascloud">Atlas Cloud</option>
                       <option value="builtin-ai">Built-in AI</option>
                       <option value="claude">Claude</option>
                       <option value="groq">Groq</option>
