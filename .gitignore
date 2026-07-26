@@ -79,3 +79,7 @@ target/
 frontend/src-tauri/binaries/
 # Local toolchain configuration (machine-specific bindgen include paths)
 .cargo/config.toml
+frontend/src-tauri/tests/fixtures/*.webm
+frontend/src-tauri/tests/fixtures/*.json3
+frontend/src-tauri/tests/results_*.json
+frontend/src-tauri/tests/fixtures/*.f32

@@ -38,6 +38,14 @@ enum Request {
     /// nothing for roughly its first second, so resetting per utterance would silently
     /// swallow every short VAD segment. Send `reset` when a new session starts.
     Transcribe { audio_b64: String },
+    /// Feed one step of a continuous stream and return only what it decoded.
+    ///
+    /// Unlike `transcribe` the reply is *not* trimmed. Nemotron emits
+    /// SentencePiece text, where a leading space is what marks the start of a
+    /// word; trimming each piece turns "speed" + " masters" into "speed" +
+    /// "masters" and the caller can no longer tell whether to join them. Callers
+    /// concatenate pieces verbatim and trim once at the end.
+    TranscribeStream { audio_b64: String },
     /// Clear decoder state so the next `transcribe` starts a fresh session.
     Reset,
     Ping,
@@ -51,6 +59,9 @@ enum Response {
     /// CPU fallback internally, so this is not proof the GPU is in use.
     Loaded { provider: String },
     Transcript { text: String },
+    /// One streaming step's output, verbatim. Empty when the step produced no
+    /// tokens, which is normal: the encoder needs a whole 560 ms before it emits.
+    Piece { text: String },
     Pong,
     Goodbye,
     Error { message: String },
@@ -98,6 +109,17 @@ fn handle(request: Request, model: &mut Option<Nemotron>) -> Result<Response> {
                 .context("no model loaded; send a `load` request first")?;
             let samples = decode_samples(&audio_b64)?;
             Ok(Response::Transcript { text: transcribe(model, &samples)? })
+        }
+        Request::TranscribeStream { audio_b64 } => {
+            let model = model
+                .as_mut()
+                .context("no model loaded; send a `load` request first")?;
+            let samples = decode_samples(&audio_b64)?;
+            let text = model
+                .transcribe_chunk(&samples)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .context("transcribe_chunk failed")?;
+            Ok(Response::Piece { text })
         }
         Request::Reset => {
             if let Some(model) = model.as_mut() {
