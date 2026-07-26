@@ -199,6 +199,47 @@ Concretely:
    `TranscriptionEngine`; Whisper keeps the VAD-segmented path unchanged, since
    it genuinely cannot stream. Streaming is the Nemotron path's behaviour.
 
+### Implementation, file by file
+
+Not yet applied. Nothing below has been written; the harness, the sidecar's
+`transcribe_stream` and this document are all that landed.
+
+1. `audio/transcription/provider.rs:50` — add two methods to
+   `TranscriptionProvider`, both defaulted so Whisper and Parakeet need no edit:
+   `fn supports_streaming(&self) -> bool { false }` and
+   `async fn transcribe_step(&self, audio: Vec<f32>) -> Result<String, TranscriptionError>`
+   returning `EngineFailed` by default. A step is exactly 560 ms; the contract
+   says so, because handing it more silently loses audio.
+2. `audio/transcription/nemotron_provider.rs` — add `Request::TranscribeStream`
+   and `Response::Piece` to the local mirrors of the protocol (lines 26-42),
+   implement `transcribe_step` on top of `exchange`, and return `true` from
+   `supports_streaming`. Do **not** trim the piece.
+3. `audio/recording_state.rs:19` — add `pub is_stream_step: bool` to
+   `AudioChunk`, defaulted `false` in `final_chunk` (line 36). Three literal
+   constructions in `pipeline.rs` need the field.
+4. `audio/pipeline.rs` — in `run`, after mixing each window, also push the mixed
+   audio into a 560 ms accumulator and emit one `is_stream_step` chunk per
+   completed step, **outside** the VAD branch. This is the change that stops the
+   33% loss: the transcriber now sees every sample. VAD keeps running and its
+   segment ends become segment-close markers rather than the only source of text.
+5. `audio/transcription/worker.rs:181` — before the `chunk_is_partial` branch,
+   handle `is_stream_step`: call `transcribe_step`, append the piece verbatim to a
+   per-recording accumulator, and emit `transcript-partial` with the accumulated
+   text so the screen moves every 560 ms. On a segment-close marker, emit the
+   accumulated text as a `transcript-update` and clear. This keeps one clean
+   bubble per utterance instead of 92 tiny ones per minute, while the visible
+   text advances continuously.
+6. Delete `emit_partial_if_due` and `MAX_PREVIEWED_SAMPLES`
+   (`pipeline.rs:794-843`) once step 5 works — the streaming path replaces it and
+   the 15 s cliff goes with it.
+7. Reset `SEQUENCE_COUNTER` (`worker.rs:16`) per recording, the cosmetic bug the
+   handoff noted, since this change is already in that function.
+
+Then re-run the harness and check the four numbers against the targets below.
+The `stream` strategy in the harness already exercises exactly the model call
+sequence steps 1-4 produce, so a gap between the harness and the app means the
+app is doing something extra — most likely still filtering through VAD.
+
 ### What this does not do
 
 It does not touch mixing, recording, or the VAD improvements from `1a34886`.
