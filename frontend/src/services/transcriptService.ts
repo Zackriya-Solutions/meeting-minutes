@@ -60,6 +60,22 @@ export class TranscriptService {
   }
 
   /**
+   * Listen for the sentence currently being spoken.
+   *
+   * These previews arrive while the speaker is still talking and each one replaces the
+   * last. They carry no sequence id and are never persisted - the committed segment for
+   * the same utterance arrives on 'transcript-update' once the speaker pauses.
+   *
+   * @param callback - Function to call with the text heard so far
+   * @returns Promise that resolves to unlisten function
+   */
+  async onTranscriptPartial(callback: (text: string) => void): Promise<UnlistenFn> {
+    return listen<{ text: string }>('transcript-partial', (event) => {
+      callback(event.payload?.text ?? '');
+    });
+  }
+
+  /**
    * Listen for transcription-complete event
    * @param callback - Function to call when transcription processing is complete
    * @returns Promise that resolves to unlisten function

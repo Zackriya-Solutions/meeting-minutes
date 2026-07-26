@@ -10,6 +10,9 @@ import { indexedDBService } from '@/services/indexedDBService';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
+  /** Utterance the speaker is still in the middle of, shown live and replaced by the
+   *  committed transcript once they pause. Empty when nobody is mid-sentence. */
+  partialTranscript: string;
   transcriptsRef: MutableRefObject<Transcript[]>
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
@@ -26,6 +29,7 @@ const TranscriptContext = createContext<TranscriptContextType | undefined>(undef
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [partialTranscript, setPartialTranscript] = useState<string>('');
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
@@ -296,6 +300,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             buffer_size_before: transcriptBuffer.size
           });
 
+          // A committed segment has arrived, so whatever preview was on screen for that
+          // utterance is now superseded.
+          setPartialTranscript('');
+
           // Check for duplicate sequence_id before processing
           if (transcriptBuffer.has(update.sequence_id)) {
             console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
@@ -335,6 +343,18 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
           processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
+        // Live preview of the sentence still being spoken. Deliberately separate from the
+        // ordered transcript stream: it carries no sequence id, is never persisted, and
+        // is simply overwritten - so it cannot disturb the committed transcript.
+        const unlistenPartial = await transcriptService.onTranscriptPartial((text) => {
+          setPartialTranscript(text);
+        });
+        const previousUnlisten = unlistenFn;
+        unlistenFn = () => {
+          previousUnlisten?.();
+          unlistenPartial();
+        };
+
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
@@ -483,6 +503,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    setPartialTranscript('');
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
@@ -511,6 +532,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   const value: TranscriptContextType = {
     transcripts,
+    partialTranscript,
     transcriptsRef,
     addTranscript,
     copyTranscript,

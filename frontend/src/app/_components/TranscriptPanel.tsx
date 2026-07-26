@@ -31,7 +31,7 @@ export function TranscriptPanel({
   showModal
 }: TranscriptPanelProps) {
   // Contexts
-  const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, partialTranscript, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
@@ -114,6 +114,16 @@ export function TranscriptPanel({
               enableStreaming={isRecording}
               showConfidence={true}
             />
+
+            {/* The sentence still being spoken. Rendered outside the list because it is
+                not a committed segment: it has no timestamp, is not saved, and is
+                replaced by the real one as soon as the speaker pauses. */}
+            {isRecording && partialTranscript && (
+              <div className="mt-2 px-3 py-2 text-gray-500 italic border-l-2 border-blue-300">
+                {partialTranscript}
+                <span className="ml-1 animate-pulse">…</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

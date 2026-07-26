@@ -7,6 +7,7 @@ use super::provider::TranscriptionError;
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime};
@@ -142,6 +143,8 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                            let chunk_is_partial = chunk.is_partial;
+                            let chunk_utterance_id = chunk.utterance_id;
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -168,6 +171,26 @@ pub fn start_transcription_task<R: Runtime>(
 
                                     // Check confidence threshold (or accept if no confidence provided)
                                     let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
+
+                                    // A partial is a preview of an utterance the speaker has
+                                    // not finished. It goes out on its own event so it never
+                                    // touches the ordered, persisted transcript stream: no
+                                    // sequence id to collide with, nothing written to disk,
+                                    // and it is simply superseded when the real segment for
+                                    // the same utterance arrives.
+                                    if chunk_is_partial {
+                                        if !transcript.trim().is_empty() {
+                                            let _ = app_clone.emit(
+                                                "transcript-partial",
+                                                serde_json::json!({
+                                                    "text": transcript.trim(),
+                                                    "utterance_id": chunk_utterance_id,
+                                                }),
+                                            );
+                                        }
+                                        chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                        continue;
+                                    }
 
                                     if !transcript.trim().is_empty() && meets_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step

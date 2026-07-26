@@ -13,6 +13,16 @@ use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType}
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
+/// How much silence VAD waits for before deciding an utterance has ended.
+///
+/// Pauses inside a sentence run roughly 300-700 ms, so anything below that cuts speech
+/// mid-phrase: each fragment reaches the model without its context and most of the words
+/// are lost. The batch import path already uses 2000 ms for the same reason.
+///
+/// Raising this delays a segment by the same amount, so it is set to the smallest value
+/// measured to keep sentences intact rather than the largest one that works.
+const PIPELINE_VAD_REDEMPTION_MS: u32 = 800;
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -607,13 +617,13 @@ impl AudioCapture {
 
         // RAW AUDIO CHUNK: No gain applied - will be mixed and gained downstream
         // Use 48kHz if we resampled, otherwise use original rate
-        let audio_chunk = AudioChunk {
-            data: mono_data,  // Raw audio (resampled if needed), no gain yet
-            sample_rate: if self.needs_resampling { 48000 } else { self.sample_rate },
+        let audio_chunk = AudioChunk::final_chunk(
+            mono_data,  // Raw audio (resampled if needed), no gain yet
+            if self.needs_resampling { 48000 } else { self.sample_rate },
             timestamp,
             chunk_id,
-            device_type: self.device_type.clone(),
-        };
+            self.device_type.clone(),
+        );
 
         // NOTE: Raw audio is NOT sent to recording saver to prevent echo
         // Only the mixed audio (from AudioPipeline) is saved to file (see pipeline.rs:726-736)
@@ -684,6 +694,15 @@ pub struct AudioPipeline {
     vad_processor: ContinuousVadProcessor,
     sample_rate: u32,
     chunk_id_counter: u64,
+    /// Identifies the utterance currently being spoken, so the partials sent while it is
+    /// still going and the final segment that closes it share one identity.
+    utterance_id_counter: u64,
+    /// Speech accumulated since the current utterance began, resent in full on every
+    /// partial. Resending the whole thing rather than only the new audio is what keeps
+    /// partial text as accurate as the final - the model never sees a clipped phrase.
+    partial_speech: Vec<f32>,
+    /// Length `partial_speech` had reached when the last partial went out.
+    last_partial_len: usize,
     // Performance optimization: reduce logging frequency
     last_summary_time: std::time::Instant,
     processed_chunks: u64,
@@ -719,14 +738,8 @@ impl AudioPipeline {
         // For now, we log it for monitoring and potential optimization
         let _ = (mic_device_name, mic_device_kind, system_device_name, system_device_kind);
 
-        // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
-
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
+        // The VAD processor handles 48kHz->16kHz resampling internally.
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, PIPELINE_VAD_REDEMPTION_MS) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
                 processor
@@ -751,6 +764,9 @@ impl AudioPipeline {
             vad_processor,
             sample_rate,
             chunk_id_counter: 0,
+            utterance_id_counter: 0,
+            partial_speech: Vec::new(),
+            last_partial_len: 0,
             // Performance optimization: reduce logging frequency
             last_summary_time: std::time::Instant::now(),
             processed_chunks: 0,
@@ -760,6 +776,65 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+        }
+    }
+
+    /// Send the utterance so far while the speaker is still talking, so text appears
+    /// before they pause instead of only after.
+    ///
+    /// The whole utterance is resent each time rather than just the new audio. Sending
+    /// only the new slice would hand the model a phrase clipped at an arbitrary point,
+    /// which measurably wrecks the transcript - a 6 s slice of ordinary speech came back
+    /// as the single word "amazing". Re-running the full utterance costs GPU time but
+    /// keeps every partial as accurate as the final.
+    fn emit_partial_if_due(&mut self) {
+        /// Utterances shorter than this finish on their own quickly enough that a partial
+        /// would only duplicate work.
+        const MIN_UTTERANCE_SAMPLES: usize = 3 * 16_000 / 2; // 1.5 s
+        /// How much new speech has to arrive before the next partial.
+        const PARTIAL_STRIDE_SAMPLES: usize = 2 * 16_000; // 2 s
+        /// Point past which previewing stops.
+        ///
+        /// Each partial re-runs the whole utterance, so the work done across one
+        /// utterance grows with the square of its length. By this point there is already
+        /// plenty of text on screen, and continuing would put long transcriptions in the
+        /// queue ahead of the final segment - delaying the very text that gets kept.
+        const MAX_PREVIEWED_SAMPLES: usize = 15 * 16_000; // 15 s
+
+        let in_progress = match self.vad_processor.speech_in_progress() {
+            Some(samples) => samples,
+            None => return,
+        };
+
+        if in_progress.len() < MIN_UTTERANCE_SAMPLES
+            || in_progress.len() > MAX_PREVIEWED_SAMPLES
+            || in_progress.len() < self.last_partial_len + PARTIAL_STRIDE_SAMPLES
+        {
+            return;
+        }
+
+        self.partial_speech.clear();
+        self.partial_speech.extend_from_slice(in_progress);
+        self.last_partial_len = self.partial_speech.len();
+
+        info!(
+            "📝 Partial for utterance {}: {:.1}s so far",
+            self.utterance_id_counter,
+            self.partial_speech.len() as f64 / 16000.0
+        );
+
+        let partial = AudioChunk {
+            data: self.partial_speech.clone(),
+            sample_rate: 16000,
+            timestamp: 0.0,
+            chunk_id: self.chunk_id_counter,
+            device_type: DeviceType::Microphone,
+            is_partial: true,
+            utterance_id: Some(self.utterance_id_counter),
+        };
+
+        if let Err(e) = self.transcription_sender.send(partial) {
+            warn!("Failed to send partial: {}", e);
         }
     }
 
@@ -847,6 +922,8 @@ impl AudioPipeline {
                                                 timestamp: segment.start_timestamp_ms / 1000.0,
                                                 chunk_id: self.chunk_id_counter,
                                                 device_type: DeviceType::Microphone,  // Mixed audio
+                                                is_partial: false,
+                                                utterance_id: Some(self.utterance_id_counter),
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -858,7 +935,15 @@ impl AudioPipeline {
                                             debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
                                                    duration_ms, segment.samples.len());
                                         }
+
+                                        // The utterance is closed either way; the next one
+                                        // gets a fresh identity and partial buffer.
+                                        self.utterance_id_counter += 1;
+                                        self.partial_speech.clear();
+                                        self.last_partial_len = 0;
                                     }
+
+                                    self.emit_partial_if_due();
                                 }
                                 Err(e) => {
                                     warn!("⚠️ VAD error: {}", e);
@@ -867,13 +952,13 @@ impl AudioPipeline {
 
                             // STEP 4: Send mixed audio for recording (WAV file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
-                                let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
-                                    sample_rate: self.sample_rate,
-                                    timestamp: chunk.timestamp,
-                                    chunk_id: self.chunk_id_counter,
-                                    device_type: DeviceType::Microphone,  // Mixed audio
-                                };
+                                let recording_chunk = AudioChunk::final_chunk(
+                                    mixed_with_gain.clone(),
+                                    self.sample_rate,
+                                    chunk.timestamp,
+                                    self.chunk_id_counter,
+                                    DeviceType::Microphone,  // Mixed audio
+                                );
                                 let _ = sender.send(recording_chunk);
                             }
                         }
@@ -917,6 +1002,8 @@ impl AudioPipeline {
                             timestamp: segment.start_timestamp_ms / 1000.0,
                             chunk_id: self.chunk_id_counter,
                             device_type: DeviceType::Microphone,
+                            is_partial: false,
+                            utterance_id: Some(self.utterance_id_counter),
                         };
 
                         if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -924,6 +1011,7 @@ impl AudioPipeline {
                         } else {
                             self.chunk_id_counter += 1;
                         }
+                        self.utterance_id_counter += 1;
                     } else {
                         info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
                               duration_ms, segment.samples.len());
@@ -1033,13 +1121,13 @@ impl AudioPipelineManager {
         // If we have a sender, send a special flush signal first
         if let Some(sender) = &self.audio_sender {
             // Create a special flush chunk to trigger immediate processing
-            let flush_chunk = AudioChunk {
-                data: vec![], // Empty data signals flush
-                sample_rate: 16000,
-                timestamp: 0.0,
-                chunk_id: u64::MAX, // Special ID to indicate flush
-                device_type: super::recording_state::DeviceType::Microphone,
-            };
+            let flush_chunk = AudioChunk::final_chunk(
+                vec![], // Empty data signals flush
+                16000,
+                0.0,
+                u64::MAX, // Special ID to indicate flush
+                super::recording_state::DeviceType::Microphone,
+            );
 
             if let Err(e) = sender.send(flush_chunk) {
                 warn!("Failed to send flush signal: {}", e);
@@ -1053,13 +1141,13 @@ impl AudioPipelineManager {
                 // Send multiple flush signals to ensure the pipeline catches it
                 // This aggressive approach eliminates shutdown delay issues
                 for i in 0..3 {
-                    let additional_flush = AudioChunk {
-                        data: vec![],
-                        sample_rate: 16000,
-                        timestamp: 0.0,
-                        chunk_id: u64::MAX - (i as u64),
-                        device_type: super::recording_state::DeviceType::Microphone,
-                    };
+                    let additional_flush = AudioChunk::final_chunk(
+                        vec![],
+                        16000,
+                        0.0,
+                        u64::MAX - (i as u64),
+                        super::recording_state::DeviceType::Microphone,
+                    );
                     let _ = sender.send(additional_flush);
                 }
 
@@ -1076,5 +1164,30 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards against the redemption time drifting back down.
+    ///
+    /// Measured on a 42 s recording of ordinary speech, transcribed segment by segment
+    /// with Parakeet (see `vad_redemption_time_changes_transcript_quality`):
+    ///
+    ///   400 ms -> 5 segments, mean 1486 ms: "Mm-hmm. | I mean | Then | Maybe the"
+    ///   800 ms -> 1 segment,  mean 8620 ms: "But this is just millions of dollars per
+    ///                                        minute. Maybe they'll make you"
+    ///
+    /// Natural pauses inside a sentence run 300-700 ms, so a 400 ms threshold decides the
+    /// utterance ended mid-phrase and most of the words never reach the model.
+    #[test]
+    fn vad_redemption_bridges_pauses_inside_a_sentence() {
+        assert!(
+            PIPELINE_VAD_REDEMPTION_MS >= 800,
+            "redemption of {}ms cuts speech at pauses inside a sentence",
+            PIPELINE_VAD_REDEMPTION_MS
+        );
     }
 }

@@ -22,6 +22,34 @@ pub struct AudioChunk {
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    /// A partial carries the utterance as heard so far, while the speaker is still
+    /// talking, so text can appear before they pause. The final chunk for the same
+    /// utterance arrives later with this cleared and supersedes it.
+    pub is_partial: bool,
+    /// Ties the partials and the final chunk of one utterance together so the UI
+    /// replaces a line instead of appending a new one. `None` outside VAD speech.
+    pub utterance_id: Option<u64>,
+}
+
+impl AudioChunk {
+    /// Chunk of a finished utterance - the ordinary case outside live partials.
+    pub fn final_chunk(
+        data: Vec<f32>,
+        sample_rate: u32,
+        timestamp: f64,
+        chunk_id: u64,
+        device_type: DeviceType,
+    ) -> Self {
+        Self {
+            data,
+            sample_rate,
+            timestamp,
+            chunk_id,
+            device_type,
+            is_partial: false,
+            utterance_id: None,
+        }
+    }
 }
 
 /// Processed audio chunk (post-VAD) for recording
