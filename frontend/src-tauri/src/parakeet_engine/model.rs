@@ -1,6 +1,8 @@
 use ndarray::{Array, Array1, Array2, Array3, ArrayD, ArrayViewD, IxDyn};
 use once_cell::sync::Lazy;
 use ort::execution_providers::CPUExecutionProvider;
+#[cfg(windows)]
+use ort::execution_providers::DirectMLExecutionProvider;
 use ort::inputs;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -89,8 +91,6 @@ impl ParakeetModel {
         intra_threads: Option<usize>,
         try_quantized: bool,
     ) -> Result<Session, ParakeetError> {
-        let providers = vec![CPUExecutionProvider::default().build()];
-
         // Try quantized version first if requested, fallback to regular version
         let model_filename = if try_quantized {
             let quantized_name = format!("{}.int8.onnx", model_name);
@@ -112,10 +112,58 @@ impl ParakeetModel {
             regular_name
         };
 
-        let mut builder = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
-            .with_execution_providers(providers)?
-            .with_parallel_execution(true)?;
+        let model_path = model_dir.as_ref().join(&model_filename);
+
+        // On Windows, prefer DirectML: it runs on any Direct3D 12 device, so unlike ort's
+        // CUDA provider it needs neither the CUDA toolkit nor cuDNN. `error_on_failure`
+        // makes an unavailable GPU a hard error here rather than a silent CPU fallback,
+        // so the CPU attempt below keeps its own (faster) parallel configuration.
+        #[cfg(windows)]
+        {
+            match Self::commit_session(&model_path, true, intra_threads) {
+                Ok(session) => {
+                    log::info!("Parakeet '{}' loaded on the DirectML GPU provider", model_filename);
+                    return Ok(Self::log_session_inputs(session, &model_filename));
+                }
+                Err(e) => log::warn!(
+                    "DirectML unavailable for '{}' ({}), falling back to CPU",
+                    model_filename,
+                    e
+                ),
+            }
+        }
+
+        let session = Self::commit_session(&model_path, false, intra_threads)?;
+
+        Ok(Self::log_session_inputs(session, &model_filename))
+    }
+
+    /// Build a session for `model_path`, either on DirectML or on the CPU provider.
+    ///
+    /// DirectML only supports sequential execution with memory-pattern optimisation
+    /// disabled, so the two configurations cannot be shared.
+    fn commit_session(
+        model_path: &Path,
+        use_directml: bool,
+        intra_threads: Option<usize>,
+    ) -> Result<Session, ParakeetError> {
+        let mut builder =
+            Session::builder()?.with_optimization_level(GraphOptimizationLevel::Level3)?;
+
+        #[cfg(windows)]
+        if use_directml {
+            builder = builder
+                .with_execution_providers([DirectMLExecutionProvider::default()
+                    .build()
+                    .error_on_failure()])?
+                .with_memory_pattern(false)?;
+        }
+
+        if !use_directml {
+            builder = builder
+                .with_execution_providers([CPUExecutionProvider::default().build()])?
+                .with_parallel_execution(true)?;
+        }
 
         if let Some(threads) = intra_threads {
             builder = builder
@@ -123,8 +171,10 @@ impl ParakeetModel {
                 .with_inter_threads(threads)?;
         }
 
-        let session = builder.commit_from_file(model_dir.as_ref().join(&model_filename))?;
+        Ok(builder.commit_from_file(model_path)?)
+    }
 
+    fn log_session_inputs(session: Session, model_filename: &str) -> Session {
         for input in &session.inputs {
             log::info!(
                 "Parakeet Model '{}' input: name={}, type={:?}",
@@ -133,8 +183,7 @@ impl ParakeetModel {
                 input.input_type
             );
         }
-
-        Ok(session)
+        session
     }
 
     fn load_vocab<P: AsRef<Path>>(model_dir: P) -> Result<(Vec<String>, i32), ParakeetError> {
@@ -494,5 +543,45 @@ impl ParakeetModel {
         })?;
 
         Ok(timestamped_result)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    /// Proves the DirectML execution provider can actually run the installed Parakeet
+    /// encoder on this machine. `error_on_failure` turns a silent CPU fallback into a
+    /// hard error, so a pass here means the GPU path is genuinely in use.
+    ///
+    /// Needs the model installed, so it is ignored by default. Run with:
+    ///   cargo test -p meetily --lib parakeet_engine::model::tests -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn directml_runs_the_installed_parakeet_encoder() {
+        let encoder = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.meetily.ai")
+            .join("models")
+            .join("parakeet")
+            .join("parakeet-tdt-0.6b-v3-int8")
+            .join("encoder-model.int8.onnx");
+
+        assert!(encoder.is_file(), "model not installed at {}", encoder.display());
+
+        let session = Session::builder()
+            .unwrap()
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .unwrap()
+            .with_execution_providers([DirectMLExecutionProvider::default()
+                .build()
+                .error_on_failure()])
+            .unwrap()
+            .with_memory_pattern(false)
+            .unwrap()
+            .commit_from_file(&encoder)
+            .expect("DirectML could not run the Parakeet encoder");
+
+        println!("DirectML session created; inputs: {:?}",
+            session.inputs.iter().map(|i| i.name.as_str()).collect::<Vec<_>>());
     }
 }

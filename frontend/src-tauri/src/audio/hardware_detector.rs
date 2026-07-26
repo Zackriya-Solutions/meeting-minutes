@@ -158,6 +158,14 @@ impl HardwareProfile {
     }
 
     fn has_cuda_support() -> bool {
+        // whisper.cpp can only offload to CUDA when whisper-rs was compiled with the
+        // `cuda` feature. A CUDA toolkit merely being installed says nothing about the
+        // running binary, and treating it as acceleration made the Windows branch of
+        // get_whisper_config() select beam size 5 on a CPU-only build.
+        if !cfg!(feature = "cuda") {
+            return false;
+        }
+
         // Check for CUDA environment or libraries
         std::env::var("CUDA_PATH").is_ok() ||
         std::env::var("CUDA_HOME").is_ok() ||
@@ -165,6 +173,12 @@ impl HardwareProfile {
     }
 
     fn has_vulkan_support() -> bool {
+        // Same reasoning as has_cuda_support: a Vulkan loader on the system is
+        // irrelevant unless whisper-rs was built with the `vulkan` feature.
+        if !cfg!(feature = "vulkan") {
+            return false;
+        }
+
         if std::env::var("VULKAN_SDK").is_ok() ||
             std::path::Path::new("/usr/lib/x86_64-linux-gnu/libvulkan.so").exists() ||
             std::path::Path::new("/usr/lib/libvulkan.so").exists()
@@ -202,11 +216,14 @@ impl HardwareProfile {
 
     /// Generate adaptive Whisper configuration based on hardware
     pub fn get_whisper_config(&self) -> AdaptiveWhisperConfig {
-        // Windows-specific override: Always use beam size 2 for stability
+        // Windows-specific override: beam size 2 is a stability fallback for CPU-only
+        // machines. When GPU acceleration is available (e.g. CUDA), the extra beam
+        // search cost is negligible and a wider beam noticeably improves accuracy.
         #[cfg(target_os = "windows")]
         {
+            let beam_size = if self.has_gpu_acceleration { 5 } else { 2 };
             return AdaptiveWhisperConfig {
-                beam_size: 2,
+                beam_size,
                 temperature: 0.2,
                 use_gpu: self.has_gpu_acceleration,
                 max_threads: Some(self.cpu_cores.min(8) as usize),
@@ -322,5 +339,40 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
 
         assert!(!HardwareProfile::has_windows_vulkan_loader(temp_dir.path()));
+    }
+
+    #[test]
+    fn gpu_backends_require_their_cargo_feature() {
+        // A CUDA toolkit or Vulkan loader being installed says nothing about the
+        // running binary: whisper.cpp can only offload when whisper-rs was compiled
+        // with the matching feature. Reporting acceleration without it made the
+        // Windows branch of get_whisper_config() pick beam size 5 on a CPU build.
+        if !cfg!(feature = "cuda") {
+            assert!(
+                !HardwareProfile::has_cuda_support(),
+                "CUDA reported as available in a build without the `cuda` feature"
+            );
+        }
+        if !cfg!(feature = "vulkan") {
+            assert!(
+                !HardwareProfile::has_vulkan_support(),
+                "Vulkan reported as available in a build without the `vulkan` feature"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_beam_size_tracks_gpu_acceleration() {
+        let profile_with = |has_gpu_acceleration| HardwareProfile {
+            cpu_cores: 8,
+            has_gpu_acceleration,
+            gpu_type: if has_gpu_acceleration { GpuType::Cuda } else { GpuType::None },
+            memory_gb: 16,
+            performance_tier: PerformanceTier::High,
+        };
+
+        assert_eq!(profile_with(false).get_whisper_config().beam_size, 2);
+        assert_eq!(profile_with(true).get_whisper_config().beam_size, 5);
     }
 }
