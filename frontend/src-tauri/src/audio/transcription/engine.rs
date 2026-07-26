@@ -7,6 +7,106 @@ use log::{info, warn};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 
+/// Load the configured Whisper model at startup so the first recording does not stall.
+///
+/// The model is otherwise loaded during pre-record validation, where a ~3 GB file reaching
+/// the GPU shows up as several seconds of dead time after the user presses record. Doing
+/// it here costs nothing the user waits on. Skipped when Whisper is not the selected
+/// provider, so a Parakeet or Nemotron user does not pay for a model they will not use.
+pub async fn preload_configured_whisper_model<R: Runtime>(app: &AppHandle<R>) {
+    // This runs from `setup`, where the database state may not be registered yet.
+    // `State::state()` panics in that case, and a panic inside a spawned task disappears
+    // without a trace - which is exactly how the first version of this failed silently.
+    let mut attempts = 0;
+    let config = loop {
+        if app.try_state::<crate::state::AppState>().is_some() {
+            match crate::api::api::api_get_transcript_config(
+                app.clone(),
+                app.state(),
+                None,
+            )
+            .await
+            {
+                Ok(Some(config)) => break config,
+                Ok(None) => return,
+                Err(e) => {
+                    warn!("Could not read the transcript config for pre-loading: {}", e);
+                    return;
+                }
+            }
+        }
+
+        attempts += 1;
+        if attempts > 20 {
+            warn!("App state never became available; skipping Whisper pre-load");
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    };
+
+    if config.provider != "localWhisper" {
+        return;
+    }
+
+    info!("⏳ Pre-loading Whisper model '{}' so recording starts instantly", config.model);
+    match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
+        Ok(model) => {
+            info!("✅ Whisper model '{}' ready before the first recording", model);
+            warm_up_whisper().await;
+        }
+        Err(e) => warn!("Could not pre-load the Whisper model: {}", e),
+    }
+}
+
+/// Run one throwaway inference so the first real segment is not the one paying for GPU
+/// kernel setup. Measured at roughly half a second on an RTX 5000 Ada - small next to the
+/// model load, but it lands on the user's very first sentence.
+async fn warm_up_whisper() {
+    let engine = {
+        let guard = match crate::whisper_engine::commands::WHISPER_ENGINE.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        guard.as_ref().cloned()
+    };
+
+    let engine = match engine {
+        Some(engine) => engine,
+        None => return,
+    };
+
+    // A second of silence: enough to walk the whole encode/decode path, and whatever text
+    // comes back is discarded.
+    let silence = vec![0.0f32; 16_000];
+    match engine.transcribe_audio_with_confidence(silence, Some("en".to_string())).await {
+        Ok(_) => info!("✅ Whisper GPU kernels warmed up"),
+        Err(e) => warn!("Whisper warm-up pass failed (harmless): {}", e),
+    }
+}
+
+/// Resolve where the Nemotron ONNX files for `model_name` live, falling back to the
+/// default model directory when the stored configuration carries no model name.
+fn nemotron_model_dir<R: Runtime>(
+    app: &AppHandle<R>,
+    model_name: &str,
+) -> Result<std::path::PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not resolve the app data directory: {}", e))?;
+
+    let model_name = if model_name.trim().is_empty() {
+        super::nemotron_provider::DEFAULT_NEMOTRON_MODEL
+    } else {
+        model_name
+    };
+
+    Ok(super::nemotron_provider::NemotronProvider::model_dir_for(
+        &app_data_dir,
+        model_name,
+    ))
+}
+
 // ============================================================================
 // TRANSCRIPTION ENGINE ENUM
 // ============================================================================
@@ -135,10 +235,24 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "nemotron" => {
+            info!("🔍 Validating Nemotron model...");
+            let model_dir = nemotron_model_dir(app, &config.model)?;
+            if super::nemotron_provider::NemotronProvider::model_is_installed(&model_dir) {
+                info!("✅ Nemotron model found at {}", model_dir.display());
+                Ok(())
+            } else {
+                warn!("❌ Nemotron model files missing from {}", model_dir.display());
+                Err(format!(
+                    "Nemotron model files are missing from {}. Download the model before recording.",
+                    model_dir.display()
+                ))
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper', 'parakeet' or 'nemotron'.",
                 other
             ))
         }
@@ -211,6 +325,20 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "nemotron" => {
+            info!("🧠 Initializing Nemotron transcription provider");
+            let model_dir = nemotron_model_dir(app, &config.model)?;
+            let provider = super::nemotron_provider::NemotronProvider::new(model_dir, None);
+
+            // Start the sidecar now. The worker skips every chunk unless the provider
+            // already reports a loaded model, so this cannot be deferred to first use.
+            provider
+                .ensure_started()
+                .await
+                .map_err(|e| format!("Failed to start the Nemotron sidecar: {}", e))?;
+
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");

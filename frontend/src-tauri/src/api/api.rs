@@ -606,7 +606,17 @@ pub async fn api_get_transcript_config<R: Runtime>(
     let pool = state.db_manager.pool();
 
     match SettingsRepository::get_transcript_config(pool).await {
-        Ok(Some(config)) => {
+        Ok(Some(mut config)) => {
+            // Guard against a persisted provider the app cannot serve. Without this a
+            // stale value only surfaces once the user hits record, as an error.
+            if !crate::config::SUPPORTED_TRANSCRIPT_PROVIDERS.contains(&config.provider.as_str()) {
+                log_info!(
+                    "Transcript provider '{}' is not supported, falling back to the default",
+                    &config.provider
+                );
+                config.provider = "parakeet".to_string();
+                config.model = crate::config::DEFAULT_PARAKEET_MODEL.to_string();
+            }
             log_info!(
                 "Found transcript config: provider={}, model={}",
                 &config.provider,

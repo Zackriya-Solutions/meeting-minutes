@@ -5,6 +5,13 @@ members = [
     "llama-helper"
 ]
 
+# nemotron-helper needs ort 2.0.0-rc.12 (via parakeet-rs) while silero_rs pins ort to
+# exactly 2.0.0-rc.10. Excluding it gives that crate its own lockfile and resolution,
+# so both ONNX Runtime versions can exist side by side as separate binaries.
+exclude = [
+    "nemotron-helper"
+]
+
 # Shared workspace settings
 [workspace.package]
 edition = "2021"

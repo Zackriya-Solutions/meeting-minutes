@@ -1,0 +1,28 @@
+# Deliberately NOT a member of the meetily workspace.
+#
+# parakeet-rs requires `ort ^2.0.0-rc.12`, while meetily's VAD crate (silero_rs) pins
+# `ort = "=2.0.0-rc.10"`. Cargo cannot satisfy both in one resolution graph, and VAD is
+# core to the audio pipeline. Keeping this crate outside the workspace gives it its own
+# lockfile, so the two ONNX Runtime versions never have to agree. Meetily talks to the
+# resulting binary as a sidecar over stdin/stdout, the same way it drives llama-helper.
+[package]
+name = "nemotron-helper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+parakeet-rs = "0.3.6"
+
+# DirectML runs on any Direct3D 12 device, so it needs neither the CUDA toolkit nor
+# cuDNN - matching the execution provider the main app uses for Parakeet.
+[target.'cfg(windows)'.dependencies]
+parakeet-rs = { version = "0.3.6", features = ["directml"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3

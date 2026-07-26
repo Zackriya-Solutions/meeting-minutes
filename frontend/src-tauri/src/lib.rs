@@ -455,9 +455,19 @@ pub fn run() {
             whisper_engine::commands::set_models_directory(&_app.handle());
 
             // Initialize Whisper engine on startup
-            tauri::async_runtime::spawn(async {
+            let whisper_app_handle = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
                 if let Err(e) = whisper_engine::commands::whisper_init().await {
                     log::error!("Failed to initialize Whisper engine on startup: {}", e);
+                } else {
+                    // Apply any persisted business/domain glossary to the engine
+                    whisper_engine::commands::restore_custom_vocabulary(&whisper_app_handle).await;
+
+                    // Load the configured model now rather than when the user hits record.
+                    // large-v3 is ~3 GB and takes about three seconds to reach the GPU;
+                    // paying that here, in the background, is the difference between
+                    // recording starting instantly and stalling on the first press.
+                    audio::transcription::preload_configured_whisper_model(&whisper_app_handle).await;
                 }
             });
 
@@ -559,6 +569,8 @@ pub fn run() {
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,
+            whisper_engine::commands::whisper_get_custom_vocabulary,
+            whisper_engine::commands::whisper_set_custom_vocabulary,
             whisper_engine::commands::whisper_is_model_loaded,
             whisper_engine::commands::whisper_has_available_models,
             whisper_engine::commands::whisper_validate_model_ready,

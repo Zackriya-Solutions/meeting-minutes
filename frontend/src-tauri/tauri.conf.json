@@ -99,7 +99,8 @@
         ],
         "externalBin": [
             "binaries/llama-helper",
-            "binaries/ffmpeg"
+            "binaries/ffmpeg",
+            "binaries/nemotron-helper"
         ],
         "macOS": {
             "entitlements": "entitlements.plist",

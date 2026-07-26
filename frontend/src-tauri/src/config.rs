@@ -11,6 +11,23 @@ pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
+/// Transcription providers the app knows how to serve.
+///
+/// Kept in sync with the api-key column mapping in
+/// `database::repositories::setting::SettingsRepository`. A persisted provider outside
+/// this set - a removed experiment, a hand-edited database value, a downgrade from a
+/// newer build - is treated as unknown and replaced with the default rather than
+/// failing later at recording time.
+pub const SUPPORTED_TRANSCRIPT_PROVIDERS: &[&str] = &[
+    "localWhisper",
+    "parakeet",
+    "nemotron",
+    "deepgram",
+    "elevenLabs",
+    "groq",
+    "openai",
+];
+
 /// Whisper model catalog with metadata for all supported models.
 /// Used by both WhisperEngine::discover_models() and discover_models_standalone().
 ///
