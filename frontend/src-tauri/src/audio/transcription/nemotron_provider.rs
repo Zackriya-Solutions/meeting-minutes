@@ -8,10 +8,12 @@
 // The protocol is newline-delimited JSON over stdin/stdout, matching llama-helper.
 
 use super::provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};
+use crate::audio::recording_state::DeviceType;
 use async_trait::async_trait;
 use base64::Engine as _;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -70,12 +72,15 @@ pub struct NemotronProvider {
     model_dir: PathBuf,
     language: Option<String>,
     /// Spawned on first use and reused afterwards; loading the model costs ~4 s.
-    sidecar: Mutex<Option<Sidecar>>,
+    /// One sidecar per audio source. Two streams cannot share one: the encoder cache
+    /// and decoder state are a running memory of a single voice channel, so
+    /// interleaving the room and the call would leave each conditioned on the other.
+    sidecars: Mutex<HashMap<DeviceType, Sidecar>>,
 }
 
 impl NemotronProvider {
     pub fn new(model_dir: PathBuf, language: Option<String>) -> Self {
-        Self { model_dir, language, sidecar: Mutex::new(None) }
+        Self { model_dir, language, sidecars: Mutex::new(HashMap::new()) }
     }
 
     /// Start the sidecar and load the model, unless that already happened.
@@ -85,11 +90,22 @@ impl NemotronProvider {
     /// dispatch a chunk, so a provider that only becomes loaded *through* transcribing
     /// would never load at all - every chunk gets skipped and `transcribe` never runs.
     pub async fn ensure_started(&self) -> Result<(), String> {
-        let mut guard = self.sidecar.lock().await;
-        if guard.is_none() {
-            *guard = Some(self.spawn()?);
+        let mut guard = self.sidecars.lock().await;
+        // The microphone entry is the one the non-streaming path uses, and the one
+        // whose presence answers `is_model_loaded`. The system lane starts on demand.
+        if !guard.contains_key(&DeviceType::Microphone) {
+            let started = self.spawn()?;
+            guard.insert(DeviceType::Microphone, started);
         }
         Ok(())
+    }
+
+    /// How many decoders are currently running.
+    ///
+    /// Used by tests to prove sources stay separate, and useful in logs when
+    /// diagnosing memory: each one holds its own copy of the model's caches.
+    pub async fn live_stream_count(&self) -> usize {
+        self.sidecars.lock().await.len()
     }
 
     /// Directory holding the Nemotron ONNX files for `model_name`.
@@ -245,14 +261,19 @@ impl TranscriptionProvider for NemotronProvider {
         }
         let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
-        let mut guard = self.sidecar.lock().await;
-        if guard.is_none() {
-            *guard = Some(self.spawn().map_err(TranscriptionError::EngineFailed)?);
+        // The whole-utterance path is the non-streaming one, so it uses the microphone
+        // decoder. Nothing else shares it while this path is in use.
+        let mut guard = self.sidecars.lock().await;
+        if !guard.contains_key(&DeviceType::Microphone) {
+            let started = self.spawn().map_err(TranscriptionError::EngineFailed)?;
+            guard.insert(DeviceType::Microphone, started);
         }
 
         let request = Request::Transcribe { audio_b64 };
         let result = {
-            let sidecar = guard.as_mut().expect("sidecar was just created");
+            let sidecar = guard
+                .get_mut(&DeviceType::Microphone)
+                .expect("sidecar was just created");
             Self::exchange(sidecar, &request)
         };
 
@@ -271,14 +292,14 @@ impl TranscriptionProvider for NemotronProvider {
             Err(e) => {
                 // A broken pipe means the helper died; drop it so the next call respawns.
                 warn!("nemotron-helper call failed, restarting it next time: {}", e);
-                *guard = None;
+                guard.remove(&DeviceType::Microphone);
                 Err(TranscriptionError::EngineFailed(e))
             }
         }
     }
 
     async fn is_model_loaded(&self) -> bool {
-        self.sidecar.lock().await.is_some()
+        !self.sidecars.lock().await.is_empty()
     }
 
     async fn get_current_model(&self) -> Option<String> {
@@ -295,10 +316,13 @@ impl TranscriptionProvider for NemotronProvider {
         true
     }
 
-    async fn reset_stream(&self) -> std::result::Result<(), TranscriptionError> {
-        let mut guard = self.sidecar.lock().await;
+    async fn reset_stream(
+        &self,
+        source: DeviceType,
+    ) -> std::result::Result<(), TranscriptionError> {
+        let mut guard = self.sidecars.lock().await;
         // Nothing running means nothing to forget: the next start is already fresh.
-        let sidecar = match guard.as_mut() {
+        let sidecar = match guard.get_mut(&source) {
             Some(sidecar) => sidecar,
             None => return Ok(()),
         };
@@ -309,7 +333,7 @@ impl TranscriptionProvider for NemotronProvider {
             Err(e) => {
                 // Dropping the process is a heavier reset that reaches the same state.
                 warn!("nemotron-helper reset failed, restarting it instead: {}", e);
-                *guard = None;
+                guard.remove(&source);
                 Ok(())
             }
         }
@@ -318,6 +342,7 @@ impl TranscriptionProvider for NemotronProvider {
     async fn transcribe_step(
         &self,
         audio: Vec<f32>,
+        source: DeviceType,
     ) -> std::result::Result<String, TranscriptionError> {
         if audio.len() != super::provider::STREAM_STEP_SAMPLES {
             // Refused rather than truncated or padded. The encoder advances one step
@@ -336,14 +361,15 @@ impl TranscriptionProvider for NemotronProvider {
         }
         let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
-        let mut guard = self.sidecar.lock().await;
-        if guard.is_none() {
-            *guard = Some(self.spawn().map_err(TranscriptionError::EngineFailed)?);
+        let mut guard = self.sidecars.lock().await;
+        if !guard.contains_key(&source) {
+            let started = self.spawn().map_err(TranscriptionError::EngineFailed)?;
+            guard.insert(source.clone(), started);
         }
 
         let request = Request::TranscribeStream { audio_b64 };
         let result = {
-            let sidecar = guard.as_mut().expect("sidecar was just created");
+            let sidecar = guard.get_mut(&source).expect("sidecar was just created");
             Self::exchange(sidecar, &request)
         };
 
@@ -356,10 +382,14 @@ impl TranscriptionProvider for NemotronProvider {
                 "unexpected reply to a streaming step".to_string(),
             )),
             Err(e) => {
-                // The encoder cache dies with the process, so the stream restarts
-                // from scratch rather than resuming mid-sentence.
-                warn!("nemotron-helper streaming call failed, restarting it next time: {}", e);
-                *guard = None;
+                // The encoder cache dies with the process, so this stream restarts from
+                // scratch rather than resuming mid-sentence. The other source is
+                // untouched, which is the point of keeping them apart.
+                warn!(
+                    "nemotron-helper stream {:?} failed, restarting it next time: {}",
+                    source, e
+                );
+                guard.remove(&source);
                 Err(TranscriptionError::EngineFailed(e))
             }
         }
@@ -436,7 +466,7 @@ mod tests {
             0,
         ] {
             let error = provider
-                .transcribe_step(vec![0.0; wrong])
+                .transcribe_step(vec![0.0; wrong], DeviceType::Microphone)
                 .await
                 .expect_err("a step of the wrong length must be refused");
 
@@ -447,6 +477,23 @@ mod tests {
                 error
             );
         }
+    }
+
+    /// Two streams must not share a decoder. State is a running memory of one voice
+    /// channel; feeding the room and the call into the same one corrupts both.
+    #[tokio::test]
+    async fn each_source_gets_its_own_decoder() {
+        let provider = NemotronProvider::new(PathBuf::from("no-such-model"), None);
+
+        // Reset is a no-op when nothing is running, and stays per-source either way.
+        provider.reset_stream(DeviceType::Microphone).await.expect("mic reset");
+        provider.reset_stream(DeviceType::System).await.expect("system reset");
+
+        assert_eq!(
+            provider.live_stream_count().await,
+            0,
+            "resetting must not spawn a decoder for a source that never spoke"
+        );
     }
 
     /// The pipeline sends steps whatever engine is loaded, so this is what tells the

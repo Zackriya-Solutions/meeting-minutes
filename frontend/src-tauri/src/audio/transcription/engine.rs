@@ -163,9 +163,10 @@ impl TranscriptionEngine {
     pub async fn transcribe_step(
         &self,
         audio: Vec<f32>,
+        source: crate::audio::recording_state::DeviceType,
     ) -> std::result::Result<String, super::provider::TranscriptionError> {
         match self {
-            Self::Provider(provider) => provider.transcribe_step(audio).await,
+            Self::Provider(provider) => provider.transcribe_step(audio, source).await,
             _ => Err(super::provider::TranscriptionError::EngineFailed(format!(
                 "{} does not decode streams a step at a time",
                 self.provider_name()
@@ -176,9 +177,10 @@ impl TranscriptionEngine {
     /// Forget decoder state carried over from a previous recording.
     pub async fn reset_stream(
         &self,
+        source: crate::audio::recording_state::DeviceType,
     ) -> std::result::Result<(), super::provider::TranscriptionError> {
         match self {
-            Self::Provider(provider) => provider.reset_stream().await,
+            Self::Provider(provider) => provider.reset_stream(source).await,
             _ => Ok(()),
         }
     }

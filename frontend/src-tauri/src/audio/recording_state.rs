@@ -8,7 +8,10 @@ use super::devices::AudioDevice;
 use super::buffer_pool::AudioBufferPool;
 
 /// Device type for audio chunks
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Eq` and `Hash` so it can key the per-source decoders: each audio source is
+/// transcribed by its own decoder, and this is the identity that keeps them apart.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeviceType {
     Microphone,
     System,
@@ -61,17 +64,26 @@ impl AudioChunk {
         }
     }
 
-    /// One 560 ms step of the continuous stream, straight off the mixer.
+    /// One 560 ms step of a single source's stream.
     ///
     /// `timestamp` is where the step *starts*, in seconds from the beginning of the
     /// recording, so committed text can be placed on the timeline without VAD.
-    pub fn stream_step(data: Vec<f32>, sample_rate: u32, timestamp: f64, chunk_id: u64) -> Self {
+    /// `device_type` is the source it came from, and stays with the text all the way
+    /// to the transcript: the microphone is the room, the system audio is everyone
+    /// dialling in.
+    pub fn stream_step(
+        data: Vec<f32>,
+        sample_rate: u32,
+        timestamp: f64,
+        chunk_id: u64,
+        device_type: DeviceType,
+    ) -> Self {
         Self {
             data,
             sample_rate,
             timestamp,
             chunk_id,
-            device_type: DeviceType::Microphone, // mixed audio, not a real device
+            device_type,
             is_partial: false,
             utterance_id: None,
             is_stream_step: true,

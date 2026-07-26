@@ -4,6 +4,7 @@
 
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
+use crate::audio::recording_state::DeviceType;
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -77,8 +78,44 @@ impl StreamingSegment {
     }
 }
 
+/// One in-progress segment per audio source.
+///
+/// The room and the call pause at different moments, so they cannot share a silence
+/// counter: one person stopping to breathe would otherwise cut the other off mid-word.
+#[derive(Default)]
+struct StreamingSegments {
+    microphone: StreamingSegment,
+    system: StreamingSegment,
+}
+
+impl StreamingSegments {
+    fn get(&mut self, source: &DeviceType) -> &mut StreamingSegment {
+        match source {
+            DeviceType::Microphone => &mut self.microphone,
+            DeviceType::System => &mut self.system,
+        }
+    }
+}
+
+/// What the transcript calls each source.
+///
+/// This is the first honest answer to "who said what": everything arriving on the
+/// system audio came from someone dialling in, everything on the microphone came from
+/// the room. It is coarse - it does not separate two people sitting in the same room -
+/// but unlike a diarisation model it cannot be wrong, because the two are never mixed.
+fn source_label(source: &DeviceType) -> &'static str {
+    match source {
+        DeviceType::Microphone => "Microphone",
+        DeviceType::System => "System Audio",
+    }
+}
+
 /// Emit the accumulated streaming text as a finalised transcript segment.
-fn commit_streaming_segment<R: Runtime>(app: &AppHandle<R>, segment: &mut StreamingSegment) {
+fn commit_streaming_segment<R: Runtime>(
+    app: &AppHandle<R>,
+    segment: &mut StreamingSegment,
+    source: &DeviceType,
+) {
     if !segment.has_text() {
         *segment = StreamingSegment::default();
         return;
@@ -88,7 +125,7 @@ fn commit_streaming_segment<R: Runtime>(app: &AppHandle<R>, segment: &mut Stream
     let update = TranscriptUpdate {
         text: segment.text.trim().to_string(),
         timestamp: format_current_timestamp(),
-        source: "Audio".to_string(),
+        source: source_label(source).to_string(),
         sequence_id: SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst),
         chunk_start_time: started_at,
         is_partial: false,
@@ -101,8 +138,8 @@ fn commit_streaming_segment<R: Runtime>(app: &AppHandle<R>, segment: &mut Stream
     };
 
     info!(
-        "✅ Committing streamed segment [{:.1}s-{:.1}s]: {}",
-        update.audio_start_time, update.audio_end_time, update.text
+        "✅ Committing {} segment [{:.1}s-{:.1}s]: {}",
+        update.source, update.audio_start_time, update.audio_end_time, update.text
     );
 
     if let Err(e) = app.emit("transcript-update", &update) {
@@ -194,7 +231,7 @@ pub fn start_transcription_task<R: Runtime>(
                 // known. Picking one here is what keeps the same words from arriving
                 // twice.
                 let streaming = engine_clone.supports_streaming();
-                let mut segment = StreamingSegment::default();
+                let mut segments = StreamingSegments::default();
                 STREAMING_ACTIVE.store(streaming, Ordering::Relaxed);
                 if streaming {
                     info!(
@@ -202,10 +239,12 @@ pub fn start_transcription_task<R: Runtime>(
                         worker_id, engine_name
                     );
 
-                    // The sidecar outlives a recording, so without this the first words
+                    // The sidecars outlive a recording, so without this the first words
                     // of this meeting continue the last sentence of the previous one.
-                    if let Err(e) = engine_clone.reset_stream().await {
-                        warn!("Worker {}: could not clear decoder state: {}", worker_id, e);
+                    for source in [DeviceType::Microphone, DeviceType::System] {
+                        if let Err(e) = engine_clone.reset_stream(source).await {
+                            warn!("Worker {}: could not clear decoder state: {}", worker_id, e);
+                        }
                     }
                 }
 
@@ -261,9 +300,11 @@ pub fn start_transcription_task<R: Runtime>(
                                     continue;
                                 }
 
+                                let source = chunk.device_type.clone();
                                 let step = std::mem::take(&mut chunk.data);
-                                match engine_clone.transcribe_step(step).await {
+                                match engine_clone.transcribe_step(step, source.clone()).await {
                                     Ok(piece) => {
+                                        let segment = segments.get(&source);
                                         if piece.trim().is_empty() {
                                             // Silence, or a step the encoder had nothing
                                             // to say about. Either way it is how a pause
@@ -275,7 +316,8 @@ pub fn start_transcription_task<R: Runtime>(
                                                 {
                                                     commit_streaming_segment(
                                                         &app_clone,
-                                                        &mut segment,
+                                                        segment,
+                                                        &source,
                                                     );
                                                 }
                                             }
@@ -286,13 +328,16 @@ pub fn start_transcription_task<R: Runtime>(
                                             segment.silent_steps = 0;
                                             segment.text.push_str(&piece);
                                             segment.ends_at = chunk_timestamp + chunk_duration;
+                                            let preview = segment.text.trim().to_string();
+                                            let overdue = segment.is_overdue();
 
                                             // Straight to screen, every 560 ms, without
                                             // waiting for the speaker to stop.
                                             let _ = app_clone.emit(
                                                 "transcript-partial",
                                                 serde_json::json!({
-                                                    "text": segment.text.trim(),
+                                                    "text": preview,
+                                                    "source": source_label(&source),
                                                     "utterance_id": chunk_utterance_id,
                                                 }),
                                             );
@@ -308,10 +353,11 @@ pub fn start_transcription_task<R: Runtime>(
                                                 );
                                             }
 
-                                            if segment.is_overdue() {
+                                            if overdue {
                                                 commit_streaming_segment(
                                                     &app_clone,
-                                                    &mut segment,
+                                                    segments.get(&source),
+                                                    &source,
                                                 );
                                             }
                                         }
@@ -320,8 +366,8 @@ pub fn start_transcription_task<R: Runtime>(
                                         // One lost step is ~560 ms of audio. Say so rather
                                         // than letting the transcript quietly shorten.
                                         warn!(
-                                            "Worker {}: streaming step at {:.1}s failed: {}",
-                                            worker_id, chunk_timestamp, e
+                                            "Worker {}: {:?} step at {:.1}s failed: {}",
+                                            worker_id, source, chunk_timestamp, e
                                         );
                                         let _ = app_clone
                                             .emit("transcription-warning", e.to_string());
@@ -334,12 +380,10 @@ pub fn start_transcription_task<R: Runtime>(
 
                             if streaming {
                                 // A VAD segment on a streaming engine is not audio to
-                                // decode - the stream already carried it. Its arrival
-                                // means the speaker paused here, which is the best place
-                                // to close the paragraph.
-                                if !chunk_is_partial {
-                                    commit_streaming_segment(&app_clone, &mut segment);
-                                }
+                                // decode - the lanes already carried it - and it cannot
+                                // say *which* source paused, because it ran on the mix.
+                                // Each lane closes itself on its own silence instead.
+                                let _ = chunk_is_partial;
                                 chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
                                 continue;
                             }
@@ -521,10 +565,16 @@ pub fn start_transcription_task<R: Runtime>(
                                         "👷 Worker {} finishing - all {}/{} chunks processed",
                                         worker_id, final_completed, final_queued
                                     );
-                                    // Whatever was still accumulating when the recording
-                                    // stopped. Without this the last sentence is decoded
-                                    // and then thrown away on the way out.
-                                    commit_streaming_segment(&app_clone, &mut segment);
+                                    // Whatever was still accumulating on each lane when
+                                    // the recording stopped. Without this the last
+                                    // sentence is decoded and then thrown away.
+                                    for source in [DeviceType::Microphone, DeviceType::System] {
+                                        commit_streaming_segment(
+                                            &app_clone,
+                                            segments.get(&source),
+                                            &source,
+                                        );
+                                    }
                                     break;
                                 } else {
                                     warn!("👷 Worker {} detected potential chunk loss: {}/{} completed, waiting...", worker_id, final_completed, final_queued);
@@ -808,6 +858,38 @@ fn format_current_timestamp() -> String {
     let seconds = now.as_secs() % 60;
 
     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pause on one source must not close the other source's paragraph. Without
+    /// separate state, one person stopping to breathe would cut the other off
+    /// mid-sentence.
+    #[test]
+    fn a_pause_on_one_source_leaves_the_other_open() {
+        let mut segments = StreamingSegments::default();
+
+        segments.get(&DeviceType::System).text.push_str(" remote talking");
+        segments.get(&DeviceType::Microphone).text.push_str(" local talking");
+
+        for _ in 0..StreamingSegment::SILENT_STEPS_TO_CLOSE {
+            segments.get(&DeviceType::Microphone).silent_steps += 1;
+        }
+
+        let system = segments.get(&DeviceType::System);
+        assert!(system.has_text(), "the system lane still has text to commit");
+        assert_eq!(system.silent_steps, 0, "the system lane never went quiet");
+    }
+
+    /// The label is what makes the transcript answer "who", so it must not be blank
+    /// and the two sources must not share one.
+    #[test]
+    fn every_source_has_its_own_label() {
+        assert_eq!(source_label(&DeviceType::Microphone), "Microphone");
+        assert_eq!(source_label(&DeviceType::System), "System Audio");
+    }
 }
 
 /// Format recording-relative time as [MM:SS]

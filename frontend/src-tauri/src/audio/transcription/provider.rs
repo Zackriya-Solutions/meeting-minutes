@@ -94,18 +94,21 @@ pub trait TranscriptionProvider: Send + Sync {
     /// concatenate pieces with nothing between them and trim once at the end.
     /// An empty piece is normal and means the step decoded to nothing, which is
     /// what silence produces.
+    /// Each `source` decodes independently, with its own state, so the room's noise
+    /// never reaches the words spoken by people dialling in.
     async fn transcribe_step(
         &self,
         audio: Vec<f32>,
+        source: crate::audio::recording_state::DeviceType,
     ) -> std::result::Result<String, TranscriptionError> {
-        let _ = audio;
+        let _ = (audio, source);
         Err(TranscriptionError::EngineFailed(format!(
             "{} does not decode streams a step at a time",
             self.provider_name()
         )))
     }
 
-    /// Discard everything the decoder remembers, so the next step starts fresh.
+    /// Discard what the decoder for `source` remembers, so its next step starts fresh.
     ///
     /// State is deliberately kept *within* a recording - that continuity is what lets
     /// a word split across two steps come out whole. But it must not survive between
@@ -113,7 +116,11 @@ pub trait TranscriptionProvider: Send + Sync {
     /// last sentence of the previous one, which is a different conversation.
     ///
     /// A provider that does not stream has no state to clear and does nothing.
-    async fn reset_stream(&self) -> std::result::Result<(), TranscriptionError> {
+    async fn reset_stream(
+        &self,
+        source: crate::audio::recording_state::DeviceType,
+    ) -> std::result::Result<(), TranscriptionError> {
+        let _ = source;
         Ok(())
     }
 }

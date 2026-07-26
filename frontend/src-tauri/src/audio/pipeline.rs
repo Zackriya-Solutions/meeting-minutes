@@ -38,6 +38,117 @@ fn take_whole_steps(accumulator: &mut Vec<f32>) -> Vec<Vec<f32>> {
     steps
 }
 
+/// One audio source on its way to the transcriber.
+///
+/// Holds everything that must not be shared between sources: a resampler with its own
+/// filter state, the audio still waiting to complete a step, and the position on the
+/// timeline. Two lanes running side by side is what stops the microphone's room noise
+/// from ever reaching the words spoken by people dialling in - summed, the same content
+/// measured 62.1% word error rate against 5.9% unmixed.
+struct StreamLane {
+    source: DeviceType,
+    resampler: Option<SincFixedIn<f32>>,
+    resampler_chunk: usize,
+    pending_input: Vec<f32>,
+    /// 16 kHz audio waiting to complete the next step. Never longer than one step.
+    accumulator: Vec<f32>,
+    /// Absolute 16 kHz sample index of `accumulator[0]`.
+    position: usize,
+}
+
+impl StreamLane {
+    fn new(source: DeviceType, input_sample_rate: u32) -> Result<Self> {
+        // Rebuilding a resampler per call loses its filter state at every boundary,
+        // which the capture path already learned the hard way.
+        let (resampler, resampler_chunk) = if input_sample_rate == 16_000 {
+            (None, 0)
+        } else {
+            let chunk = 1024;
+            let parameters = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Linear,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+            let built = SincFixedIn::<f32>::new(
+                16_000.0 / input_sample_rate as f64,
+                2.0,
+                parameters,
+                chunk,
+                1,
+            )?;
+            (Some(built), chunk)
+        };
+
+        Ok(Self {
+            source,
+            resampler,
+            resampler_chunk,
+            pending_input: Vec::new(),
+            accumulator: Vec::with_capacity(STREAM_STEP_SAMPLES),
+            position: 0,
+        })
+    }
+
+    /// Feed input-rate samples, get back every step they completed.
+    ///
+    /// Each returned step is paired with the second it starts at, so committed text
+    /// lands on the recording's timeline without consulting a voice detector.
+    fn push(&mut self, samples: &[f32]) -> Vec<(f64, Vec<f32>)> {
+        let resampled = self.to_16k(samples);
+        self.accumulator.extend_from_slice(&resampled);
+
+        let mut steps = Vec::new();
+        for step in take_whole_steps(&mut self.accumulator) {
+            let starts_at = self.position as f64 / 16_000.0;
+            self.position += step.len();
+            steps.push((starts_at, step));
+        }
+        steps
+    }
+
+    /// Pad the leftover into one final step so the end of a recording is not lost.
+    ///
+    /// A step must be exactly one step long, so without this the last few hundred
+    /// milliseconds would never be decoded - and that is where Stop lands, which is
+    /// exactly when the speaker was mid-word.
+    fn flush(&mut self) -> Option<(f64, Vec<f32>)> {
+        if self.accumulator.is_empty() {
+            return None;
+        }
+        let mut tail = std::mem::take(&mut self.accumulator);
+        let starts_at = self.position as f64 / 16_000.0;
+        self.position += tail.len();
+        tail.resize(STREAM_STEP_SAMPLES, 0.0);
+        Some((starts_at, tail))
+    }
+
+    fn to_16k(&mut self, samples: &[f32]) -> Vec<f32> {
+        let chunk = self.resampler_chunk;
+        let source = self.source.clone();
+        let resampler = match self.resampler.as_mut() {
+            Some(resampler) => resampler,
+            None => return samples.to_vec(),
+        };
+
+        self.pending_input.extend_from_slice(samples);
+        let mut out = Vec::new();
+        while self.pending_input.len() >= chunk {
+            let input: Vec<f32> = self.pending_input.drain(..chunk).collect();
+            match resampler.process(&[input], None) {
+                Ok(mut waves) if !waves.is_empty() => out.append(&mut waves[0]),
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("resampling {:?} failed: {}", source, e);
+                    break;
+                }
+            }
+        }
+        out
+    }
+}
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -732,16 +843,12 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
-    /// 16 kHz audio waiting to complete the next streaming step.
-    ///
-    /// Never longer than one step: a step is dispatched the moment it fills. The
-    /// encoder on the far side advances by exactly one step per call and buries
-    /// anything extra without catching up, so over-filling this is silent audio
-    /// loss rather than a visible error.
-    stream_accumulator: Vec<f32>,
-    /// Absolute 16 kHz sample index where `stream_accumulator[0]` sits, which is
-    /// what puts committed text on the recording's timeline without consulting VAD.
-    stream_position: usize,
+    /// The two transcription lanes. The mixer still feeds the recorder, but the
+    /// transcriber never sees the blend: summing the microphone into the system audio
+    /// adds a delayed room copy of the same words, which measured 62.1% word error
+    /// rate against 5.9% for the same content unmixed.
+    mic_lane: StreamLane,
+    system_lane: StreamLane,
 }
 
 impl AudioPipeline {
@@ -805,8 +912,10 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
-            stream_accumulator: Vec::with_capacity(STREAM_STEP_SAMPLES),
-            stream_position: 0,
+            mic_lane: StreamLane::new(DeviceType::Microphone, sample_rate)
+                .expect("microphone lane"),
+            system_lane: StreamLane::new(DeviceType::System, sample_rate)
+                .expect("system lane"),
         }
     }
 
@@ -820,20 +929,27 @@ impl AudioPipeline {
     /// Sending audio VAD rejected is the entire point. VAD forwarded about two
     /// thirds of it, and spans shorter than one step came back empty, which together
     /// account for the missing words in the live transcript.
-    fn dispatch_stream_steps(&mut self) {
-        self.stream_accumulator
-            .extend_from_slice(&self.vad_processor.drain_resampled_16k());
+    fn dispatch_stream_steps(&mut self, mic_window: &[f32], sys_window: &[f32]) {
+        let batches = [
+            (DeviceType::Microphone, self.mic_lane.push(mic_window)),
+            (DeviceType::System, self.system_lane.push(sys_window)),
+        ];
 
-        for step in take_whole_steps(&mut self.stream_accumulator) {
-            let starts_at = self.stream_position as f64 / 16_000.0;
-            self.stream_position += step.len();
+        for (source, steps) in batches {
+            for (starts_at, step) in steps {
+                let chunk = AudioChunk::stream_step(
+                    step,
+                    16_000,
+                    starts_at,
+                    self.chunk_id_counter,
+                    source.clone(),
+                );
+                self.chunk_id_counter += 1;
 
-            let chunk = AudioChunk::stream_step(step, 16_000, starts_at, self.chunk_id_counter);
-            self.chunk_id_counter += 1;
-
-            if let Err(e) = self.transcription_sender.send(chunk) {
-                warn!("Failed to send streaming step: {}", e);
-                return;
+                if let Err(e) = self.transcription_sender.send(chunk) {
+                    warn!("Failed to send streaming step: {}", e);
+                    return;
+                }
             }
         }
     }
@@ -1026,9 +1142,9 @@ impl AudioPipeline {
                                 }
                             }
 
-                            // STEP 3b: Hand the same audio to the streaming lane,
-                            // whole and unfiltered.
-                            self.dispatch_stream_steps();
+                            // STEP 3b: hand each source to its own streaming lane -
+                            // whole, unfiltered, and crucially unmixed.
+                            self.dispatch_stream_steps(&mic_window, &sys_window);
 
                             // STEP 4: Send mixed audio for recording (WAV file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
@@ -1065,21 +1181,27 @@ impl AudioPipeline {
     fn flush_remaining_audio(&mut self) -> Result<()> {
         info!("Flushing remaining audio from pipeline (processed {} chunks)", self.processed_chunks);
 
-        // The streaming lane first, and pad the tail rather than drop it. A step must
-        // be exactly one step long, so the last few hundred milliseconds of a
+        // The streaming lanes first, padding each tail rather than dropping it. A step
+        // must be exactly one step long, so the last few hundred milliseconds of a
         // recording would otherwise never be decoded - and that is where "stop" lands,
         // which is exactly when the speaker was mid-word.
-        self.dispatch_stream_steps();
-        if !self.stream_accumulator.is_empty() {
-            let mut tail = std::mem::take(&mut self.stream_accumulator);
-            let starts_at = self.stream_position as f64 / 16_000.0;
-            self.stream_position += tail.len();
-            tail.resize(STREAM_STEP_SAMPLES, 0.0);
-
-            let chunk = AudioChunk::stream_step(tail, 16_000, starts_at, self.chunk_id_counter);
-            self.chunk_id_counter += 1;
-            if let Err(e) = self.transcription_sender.send(chunk) {
-                warn!("Failed to send the final streaming step: {}", e);
+        let tails = [
+            (DeviceType::Microphone, self.mic_lane.flush()),
+            (DeviceType::System, self.system_lane.flush()),
+        ];
+        for (source, tail) in tails {
+            if let Some((starts_at, samples)) = tail {
+                let chunk = AudioChunk::stream_step(
+                    samples,
+                    16_000,
+                    starts_at,
+                    self.chunk_id_counter,
+                    source,
+                );
+                self.chunk_id_counter += 1;
+                if let Err(e) = self.transcription_sender.send(chunk) {
+                    warn!("Failed to send the final streaming step: {}", e);
+                }
             }
         }
 
@@ -1324,12 +1446,145 @@ mod tests {
         assert_eq!(accumulator[0], (STREAM_STEP_SAMPLES * 2) as f32);
     }
 
+    /// Each source keeps its own place on the timeline. Sharing a counter would put
+    /// one stream's text at the other stream's timestamps.
+    #[test]
+    fn lanes_advance_independently() {
+        let mut mic = StreamLane::new(DeviceType::Microphone, 16_000).expect("lane");
+        let mut system = StreamLane::new(DeviceType::System, 16_000).expect("lane");
+
+        let one_step = vec![0.0f32; STREAM_STEP_SAMPLES];
+        let mic_steps = mic.push(&one_step);
+        assert_eq!(mic_steps.len(), 1);
+        assert_eq!(mic_steps[0].0, 0.0, "first mic step starts at zero");
+
+        let two_steps = [one_step.clone(), one_step.clone()].concat();
+        let system_steps = system.push(&two_steps);
+        assert_eq!(system_steps.len(), 2);
+        assert_eq!(system_steps[1].0, 0.56, "second system step starts at 560 ms");
+
+        // The microphone lane is untouched by the system lane's two steps.
+        let next_mic = mic.push(&one_step);
+        assert_eq!(next_mic[0].0, 0.56, "mic resumed from its own position");
+    }
+
+    /// A lane holds a partial step rather than sending it short, and pads it on flush.
+    #[test]
+    fn a_lane_holds_a_partial_step_until_flush() {
+        let mut lane = StreamLane::new(DeviceType::System, 16_000).expect("lane");
+        assert!(lane.push(&vec![0.0f32; STREAM_STEP_SAMPLES - 1]).is_empty());
+
+        let (starts_at, tail) = lane.flush().expect("the tail must not be dropped");
+        assert_eq!(starts_at, 0.0);
+        assert_eq!(
+            tail.len(),
+            STREAM_STEP_SAMPLES,
+            "the tail is padded, never sent short"
+        );
+    }
+
     /// Nothing is emitted until a whole step exists, and nothing is consumed either.
     #[test]
     fn a_partial_step_is_never_dispatched() {
         let mut accumulator: Vec<f32> = vec![1.0; STREAM_STEP_SAMPLES - 1];
         assert!(take_whole_steps(&mut accumulator).is_empty());
         assert_eq!(accumulator.len(), STREAM_STEP_SAMPLES - 1);
+    }
+
+    /// The whole point of separating the lanes, stated as a number.
+    ///
+    /// Runs both lanes at once: the system lane carries the clean source, the
+    /// microphone lane carries the same content after it went out of a speaker and back
+    /// in through a microphone. Summed, those two scored 62.1% word error rate. Kept
+    /// apart, the system lane must be unaffected by its noisy neighbour.
+    ///
+    ///   $env:MEETILY_STREAM_CASE="tests/fixtures/watchshop_60s_16k.f32"
+    ///   $env:MEETILY_STREAM_NOISY="tests/fixtures/device_60s_16k.f32"
+    ///   $env:MEETILY_STREAM_REFERENCE="tests/fixtures/watchshop_60s_reference.txt"
+    ///   cargo test --features cuda --lib separates -- --ignored --nocapture
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "needs MEETILY_STREAM_CASE, MEETILY_STREAM_NOISY and the Nemotron model"]
+    async fn separates_a_clean_source_from_a_noisy_one() {
+        use crate::audio::transcription::nemotron_provider::{
+            NemotronProvider, DEFAULT_NEMOTRON_MODEL,
+        };
+        use crate::audio::transcription::provider::TranscriptionProvider;
+        use std::path::PathBuf;
+
+        fn load(key: &str) -> Vec<f32> {
+            let path = std::env::var(key).unwrap_or_else(|_| panic!("set {key}"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+            bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
+        }
+
+        let clean = load("MEETILY_STREAM_CASE");
+        let noisy = load("MEETILY_STREAM_NOISY");
+
+        std::env::set_var(
+            "MEETILY_NEMOTRON_HELPER",
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("binaries")
+                .join("nemotron-helper-x86_64-pc-windows-msvc.exe"),
+        );
+        let model_dir = PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.meetily.ai")
+            .join("models")
+            .join("nemotron")
+            .join(DEFAULT_NEMOTRON_MODEL);
+        let provider = NemotronProvider::new(model_dir, Some("en-US".to_string()));
+        provider.ensure_started().await.expect("sidecar should start");
+
+        // Both fixtures are already 16 kHz, so the lanes pass audio straight through.
+        let mut system_lane = StreamLane::new(DeviceType::System, 16_000).expect("lane");
+        let mut mic_lane = StreamLane::new(DeviceType::Microphone, 16_000).expect("lane");
+        let mut system_text = String::new();
+
+        // Interleaved in 100 ms windows, the way the mixer hands them over live.
+        let shared = clean.len().min(noisy.len());
+        for start in (0..shared).step_by(1_600) {
+            let end = (start + 1_600).min(shared);
+
+            for (_, step) in mic_lane.push(&noisy[start..end]) {
+                provider
+                    .transcribe_step(step, DeviceType::Microphone)
+                    .await
+                    .expect("mic step");
+            }
+            for (_, step) in system_lane.push(&clean[start..end]) {
+                let piece = provider
+                    .transcribe_step(step, DeviceType::System)
+                    .await
+                    .expect("system step");
+                system_text.push_str(&piece);
+            }
+        }
+
+        assert_eq!(
+            provider.live_stream_count().await,
+            2,
+            "each lane must have brought up its own decoder"
+        );
+        println!("system stream: {}", system_text.trim());
+
+        let reference = std::fs::read_to_string(
+            std::env::var("MEETILY_STREAM_REFERENCE").expect("set MEETILY_STREAM_REFERENCE"),
+        )
+        .expect("reference");
+        let wer = word_error_rate(&reference, &system_text);
+        println!("system stream wer {:.1}%", wer * 100.0);
+
+        // Mixed, this exact pairing scored 62.1%. Unmixed, the clean lane must land near
+        // its own ceiling; 10% leaves room for variation without tolerating the
+        // contamination this change removes.
+        assert!(
+            wer <= 0.10,
+            "the noisy microphone contaminated the system stream: {:.1}%",
+            wer * 100.0
+        );
     }
 
     /// Word error rate against a reference, on normalised words.
@@ -1450,10 +1705,9 @@ mod tests {
         let provider = NemotronProvider::new(model_dir, Some("en-US".to_string()));
         provider.ensure_started().await.expect("sidecar should start");
 
-        let mut vad = ContinuousVadProcessor::new(48_000, PIPELINE_VAD_REDEMPTION_MS)
-            .expect("VAD processor");
-        let mut accumulator: Vec<f32> = Vec::new();
-        let mut position = 0usize;
+        // One lane, fed the whole clip: this case has a single source, so it exercises
+        // the same path a system-audio-only meeting takes.
+        let mut lane = StreamLane::new(DeviceType::System, 48_000).expect("lane");
 
         let mut transcript = String::new();
         let mut first_word_at: Option<f64> = None;
@@ -1472,15 +1726,11 @@ mod tests {
 
         // 100 ms windows, the size the mixer hands over during a real recording.
         for window in samples.chunks(4_800) {
-            let _ = vad.process_audio(window);
-            accumulator.extend_from_slice(&vad.drain_resampled_16k());
-
-            for step in take_whole_steps(&mut accumulator) {
-                let at = (position + step.len()) as f64 / 16_000.0;
-                position += step.len();
+            for (starts_at, step) in lane.push(window) {
+                let at = starts_at + step.len() as f64 / 16_000.0;
 
                 let piece = provider
-                    .transcribe_step(step)
+                    .transcribe_step(step, DeviceType::System)
                     .await
                     .expect("a whole step must be accepted");
 
