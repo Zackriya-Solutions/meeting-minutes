@@ -1,7 +1,11 @@
-use crate::summary::templates;
+use crate::summary::templates::{self, TemplateSection, TemplateSource};
 use serde::{Deserialize, Serialize};
-use tauri::Runtime;
+use tauri::{Emitter, Runtime};
 use tracing::{info, warn};
+
+/// Emitted after a custom template is saved or deleted so open template pickers
+/// can refresh without an app restart.
+const TEMPLATES_CHANGED_EVENT: &str = "templates-changed";
 
 /// Template metadata for UI display
 #[derive(Debug, Serialize, Deserialize)]
@@ -14,6 +18,12 @@ pub struct TemplateInfo {
 
     /// Brief description of the template's purpose
     pub description: String,
+
+    /// Where the template resolves from: builtin, bundled or custom
+    pub source: TemplateSource,
+
+    /// Whether the template editor may modify or delete it
+    pub editable: bool,
 }
 
 /// Detailed template structure for preview/debugging
@@ -49,10 +59,15 @@ pub async fn api_list_templates<R: Runtime>(
 
     let template_infos: Vec<TemplateInfo> = templates
         .into_iter()
-        .map(|(id, name, description)| TemplateInfo {
-            id,
-            name,
-            description,
+        .map(|(id, name, description)| {
+            let source = templates::template_source(&id).unwrap_or(TemplateSource::Builtin);
+            TemplateInfo {
+                id,
+                name,
+                description,
+                source,
+                editable: source == TemplateSource::Custom,
+            }
         })
         .collect();
 
@@ -121,6 +136,95 @@ pub async fn api_validate_template<R: Runtime>(
             Err(e)
         }
     }
+}
+
+/// Full template definition for the editor.
+///
+/// `api_get_template_details` deliberately returns section *titles* only, which
+/// is enough for a preview but not for editing; this returns the whole thing.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TemplateWithSource {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub sections: Vec<TemplateSection>,
+    pub source: TemplateSource,
+    /// False for builtin and bundled templates, which must be duplicated first.
+    pub editable: bool,
+    /// A free id to duplicate this template under, e.g. `standard_meeting_copy`.
+    pub suggested_copy_id: String,
+}
+
+/// Gets a template's full definition plus where it came from.
+#[tauri::command]
+pub async fn api_get_template_source<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateWithSource, String> {
+    info!("api_get_template_source called for '{}'", template_id);
+
+    let template = templates::get_template(&template_id)?;
+    let source = templates::template_source(&template_id)
+        .ok_or_else(|| format!("Template '{}' not found", template_id))?;
+
+    Ok(TemplateWithSource {
+        suggested_copy_id: templates::suggest_available_id(&template_id),
+        id: template_id,
+        name: template.name,
+        description: template.description,
+        sections: template.sections,
+        source,
+        editable: source == TemplateSource::Custom,
+    })
+}
+
+/// Saves a custom template to the user's templates directory.
+///
+/// Rejects ids that belong to a builtin or bundled template: a same-named custom
+/// file would silently shadow the original, which is confusing when it happened
+/// by accident from the editor.
+#[tauri::command]
+pub async fn api_save_custom_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+    template_json: String,
+) -> Result<TemplateInfo, String> {
+    info!("api_save_custom_template called for '{}'", template_id);
+
+    let template = templates::save_custom_template(&template_id, &template_json).inspect_err(
+        |e| warn!("Failed to save template '{}': {}", template_id, e),
+    )?;
+
+    if let Err(e) = app.emit(TEMPLATES_CHANGED_EVENT, &template_id) {
+        warn!("Failed to emit {}: {}", TEMPLATES_CHANGED_EVENT, e);
+    }
+
+    Ok(TemplateInfo {
+        id: template_id,
+        name: template.name,
+        description: template.description,
+        source: TemplateSource::Custom,
+        editable: true,
+    })
+}
+
+/// Deletes a custom template. Builtin and bundled templates cannot be deleted.
+#[tauri::command]
+pub async fn api_delete_custom_template<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<(), String> {
+    info!("api_delete_custom_template called for '{}'", template_id);
+
+    templates::delete_custom_template(&template_id).inspect_err(|e| {
+        warn!("Failed to delete template '{}': {}", template_id, e)
+    })?;
+
+    if let Err(e) = app.emit(TEMPLATES_CHANGED_EVENT, &template_id) {
+        warn!("Failed to emit {}: {}", TEMPLATES_CHANGED_EVENT, e);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

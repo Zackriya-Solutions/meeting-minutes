@@ -15,6 +15,7 @@ import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
+import { useExportOperations } from '@/hooks/meeting-details/useExportOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 
@@ -130,6 +131,14 @@ export default function PageContent({
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
   });
 
+  const exportOperations = useExportOperations({
+    meeting,
+    meetingTitle: meetingData.meetingTitle,
+    aiSummary: meetingData.aiSummary,
+    blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
+    fetchAllTranscripts: copyOperations.fetchAllTranscripts,
+  });
+
   const meetingOperations = useMeetingOperations({
     meeting,
   });
@@ -176,6 +185,8 @@ export default function PageContent({
           customPrompt={customPrompt}
           onPromptChange={setCustomPrompt}
           onCopyTranscript={copyOperations.handleCopyTranscript}
+          onExport={exportOperations.handleExport}
+          hasSummary={!!meetingData.aiSummary}
           onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
           isRecording={isRecording}
           disableAutoScroll={true}

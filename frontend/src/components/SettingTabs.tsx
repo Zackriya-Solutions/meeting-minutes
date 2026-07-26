@@ -3,6 +3,7 @@ import { ModelConfig, ModelSettingsModal } from "./ModelSettingsModal"
 import { TranscriptModelProps, TranscriptSettings } from "./TranscriptSettings"
 import { RecordingSettings, RecordingPreferences } from "./RecordingSettings"
 import { About } from "./About";
+import { TemplateManager } from "./SummaryTemplates/TemplateManager";
 
 interface SettingTabsProps {
     modelConfig: ModelConfig;
@@ -35,6 +36,7 @@ export function SettingTabs({
   <TabsList>
     <TabsTrigger value="transcriptSettings">Transcript</TabsTrigger>
     <TabsTrigger value="modelSettings">Ai Summary</TabsTrigger>
+    <TabsTrigger value="templateSettings">Templates</TabsTrigger>
     <TabsTrigger value="recordingSettings">Preferences</TabsTrigger>
     <TabsTrigger value="about">About</TabsTrigger>
   </TabsList>
@@ -52,6 +54,9 @@ onSave={onSave}
     setTranscriptModelConfig={setTranscriptModelConfig}
     // onSave={onSaveTranscript}
   />
+  </TabsContent>
+  <TabsContent value="templateSettings">
+    <TemplateManager />
   </TabsContent>
   <TabsContent value="recordingSettings">
     <RecordingSettings />

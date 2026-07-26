@@ -158,6 +158,11 @@ tauri-plugin-notification = "2.3.1"
 tauri-plugin-updater = "2.3.0"
 tauri-plugin-process = "2.3.0"
 
+# Document export (Markdown / PDF / DOCX)
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+printpdf = { version = "0.12.4", default-features = false, features = ["html"] }
+docx-rs = "0.4.22"
+
 # Desktop-only single instance guard
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "=2.3.7"

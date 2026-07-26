@@ -192,5 +192,7 @@ export function useCopyOperations({
   return {
     handleCopyTranscript,
     handleCopySummary,
+    // Shared with the export flow so both read every transcript the same way.
+    fetchAllTranscripts,
   };
 }

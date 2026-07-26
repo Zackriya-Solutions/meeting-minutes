@@ -4,6 +4,7 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
+import { ExportFormat, ExportScope } from '@/lib/export-markdown';
 import { useMemo } from 'react';
 
 interface TranscriptPanelProps {
@@ -11,6 +12,8 @@ interface TranscriptPanelProps {
   customPrompt: string;
   onPromptChange: (value: string) => void;
   onCopyTranscript: () => void;
+  onExport?: (scope: ExportScope, format: ExportFormat) => Promise<void>;
+  hasSummary?: boolean;
   onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
   disableAutoScroll?: boolean;
@@ -35,6 +38,8 @@ export function TranscriptPanel({
   customPrompt,
   onPromptChange,
   onCopyTranscript,
+  onExport,
+  hasSummary = false,
   onOpenMeetingFolder,
   isRecording,
   disableAutoScroll = false,
@@ -71,6 +76,8 @@ export function TranscriptPanel({
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
+          onExport={onExport}
+          hasSummary={hasSummary}
           onOpenMeetingFolder={onOpenMeetingFolder}
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}

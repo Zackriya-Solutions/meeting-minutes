@@ -6,12 +6,19 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
+import { ExportMenu } from './ExportMenu';
+import { ExportFormat, ExportScope } from '@/lib/export-markdown';
 import { useConfig } from '@/contexts/ConfigContext';
 
 
 interface TranscriptButtonGroupProps {
   transcriptCount: number;
   onCopyTranscript: () => void;
+  /** Export lives here rather than next to the summary: the summary button
+   *  group only renders once a summary exists, which would make a
+   *  transcript-only export unreachable. */
+  onExport?: (scope: ExportScope, format: ExportFormat) => Promise<void>;
+  hasSummary?: boolean;
   onOpenMeetingFolder: () => Promise<void>;
   meetingId?: string;
   meetingFolderPath?: string | null;
@@ -22,6 +29,8 @@ interface TranscriptButtonGroupProps {
 export function TranscriptButtonGroup({
   transcriptCount,
   onCopyTranscript,
+  onExport,
+  hasSummary = false,
   onOpenMeetingFolder,
   meetingId,
   meetingFolderPath,
@@ -53,6 +62,14 @@ export function TranscriptButtonGroup({
           <Copy />
           <span className="hidden lg:inline">Copy</span>
         </Button>
+
+        {onExport && (
+          <ExportMenu
+            hasSummary={hasSummary}
+            hasTranscripts={transcriptCount > 0}
+            onExport={onExport}
+          />
+        )}
 
         <Button
           size="sm"
