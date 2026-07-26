@@ -9,7 +9,9 @@ const VOCABULARY_STORE_FILE: &str = "transcription_vocabulary.json";
 const VOCABULARY_STORE_KEY: &str = "vocabulary";
 
 /// Load the persisted glossary/custom vocabulary text from disk, if any.
-fn load_persisted_vocabulary<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+/// Shared with the streaming path, which cannot pass a prompt to its model and has to
+/// repair the same names in the text afterwards instead.
+pub fn load_persisted_vocabulary<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     let store = app.store(VOCABULARY_STORE_FILE).ok()?;
     let value = store.get(VOCABULARY_STORE_KEY)?;
     value.as_str().map(|s| s.to_string())

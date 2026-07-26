@@ -4,6 +4,7 @@
 
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
+use super::glossary::Glossary;
 use crate::audio::recording_state::DeviceType;
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
@@ -115,6 +116,7 @@ fn commit_streaming_segment<R: Runtime>(
     app: &AppHandle<R>,
     segment: &mut StreamingSegment,
     source: &DeviceType,
+    glossary: &Glossary,
 ) {
     if !segment.has_text() {
         *segment = StreamingSegment::default();
@@ -123,7 +125,9 @@ fn commit_streaming_segment<R: Runtime>(
 
     let started_at = segment.started_at.unwrap_or(0.0);
     let update = TranscriptUpdate {
-        text: segment.text.trim().to_string(),
+        // Applied at commit rather than per step, because a name split across a step
+        // boundary is only whole once the segment is.
+        text: glossary.correct(segment.text.trim()),
         timestamp: format_current_timestamp(),
         source: source_label(source).to_string(),
         sequence_id: SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst),
@@ -232,6 +236,16 @@ pub fn start_transcription_task<R: Runtime>(
                 // twice.
                 let streaming = engine_clone.supports_streaming();
                 let mut segments = StreamingSegments::default();
+                // The names the model was never trained on. Loaded once per recording:
+                // it is a handful of terms, and re-reading it per segment would put a
+                // file read in the transcription path.
+                let glossary = Glossary::parse(
+                    &crate::whisper_engine::commands::load_persisted_vocabulary(&app_clone)
+                        .unwrap_or_default(),
+                );
+                if !glossary.is_empty() {
+                    info!("📓 Worker {} will spell the user's glossary terms", worker_id);
+                }
                 STREAMING_ACTIVE.store(streaming, Ordering::Relaxed);
                 if streaming {
                     info!(
@@ -318,6 +332,7 @@ pub fn start_transcription_task<R: Runtime>(
                                                         &app_clone,
                                                         segment,
                                                         &source,
+                                                        &glossary,
                                                     );
                                                 }
                                             }
@@ -358,6 +373,7 @@ pub fn start_transcription_task<R: Runtime>(
                                                     &app_clone,
                                                     segments.get(&source),
                                                     &source,
+                                                    &glossary,
                                                 );
                                             }
                                         }
@@ -573,6 +589,7 @@ pub fn start_transcription_task<R: Runtime>(
                                             &app_clone,
                                             segments.get(&source),
                                             &source,
+                                            &glossary,
                                         );
                                     }
                                     break;

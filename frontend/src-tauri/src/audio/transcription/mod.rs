@@ -6,6 +6,7 @@ pub mod provider;
 pub mod whisper_provider;
 pub mod parakeet_provider;
 pub mod nemotron_provider;
+pub mod glossary;
 pub mod engine;
 pub mod worker;
 
