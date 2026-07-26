@@ -7,10 +7,12 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { Textarea } from './ui/textarea';
+import { toast } from 'sonner';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'nemotron' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
@@ -27,6 +29,34 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
+    const [customVocabulary, setCustomVocabulary] = useState<string>('');
+    const [savedVocabulary, setSavedVocabulary] = useState<string>('');
+    const [isSavingVocabulary, setIsSavingVocabulary] = useState<boolean>(false);
+
+    useEffect(() => {
+        invoke<string | null>('whisper_get_custom_vocabulary')
+            .then((vocabulary) => {
+                const value = vocabulary ?? '';
+                setCustomVocabulary(value);
+                setSavedVocabulary(value);
+            })
+            .catch((err) => console.error('Error fetching custom vocabulary:', err));
+    }, []);
+
+    const handleSaveVocabulary = async () => {
+        setIsSavingVocabulary(true);
+        try {
+            await invoke('whisper_set_custom_vocabulary', { vocabulary: customVocabulary });
+            setSavedVocabulary(customVocabulary.trim());
+            setCustomVocabulary(customVocabulary.trim());
+            toast.success('Custom vocabulary saved');
+        } catch (err) {
+            console.error('Error saving custom vocabulary:', err);
+            toast.error('Failed to save custom vocabulary', { description: String(err) });
+        } finally {
+            setIsSavingVocabulary(false);
+        }
+    };
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
@@ -34,7 +64,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     }, [transcriptModelConfig.provider]);
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
+        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet' || transcriptModelConfig.provider === 'nemotron') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -53,11 +83,29 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
+        nemotron: ['nemotron-3.5-asr-streaming-0.6b'],
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
     };
+
+    // Nemotron has no model-manager component of its own, so its selection is written
+    // straight through the way ParakeetModelManager and ModelManager do for theirs.
+    const persistTranscriptConfig = async (config: TranscriptModelProps) => {
+        try {
+            await invoke('api_save_transcript_config', {
+                provider: config.provider,
+                model: config.model,
+                apiKey: null,
+            });
+            toast.success('Transcription settings saved', { description: config.model });
+        } catch (err) {
+            console.error('Failed to save transcript config:', err);
+            toast.error('Failed to save transcription settings', { description: String(err) });
+        }
+    };
+
     const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
 
     const handleInputClick = () => {
@@ -112,7 +160,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet') {
+                                    if (provider === 'nemotron') {
+                                        const config: TranscriptModelProps = {
+                                            ...transcriptModelConfig,
+                                            provider,
+                                            model: modelOptions.nemotron[0],
+                                            apiKey: null,
+                                        };
+                                        setTranscriptModelConfig(config);
+                                        persistTranscriptConfig(config);
+                                    } else if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
                                     }
                                 }}
@@ -123,6 +180,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="nemotron">🧠 Nemotron 3.5 (GPU - Streaming / 40 Languages)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -169,6 +227,34 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleParakeetModelSelect}
                                 autoSave={true}
                             />
+                        </div>
+                    )}
+
+                    {uiProvider === 'localWhisper' && (
+                        <div className="mt-6">
+                            <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                Custom Vocabulary (Whisper)
+                            </Label>
+                            <p className="text-xs text-gray-500 mb-2 mx-1">
+                                Names, acronyms and technical terms that often get misheard (e.g. company names, project codenames). Separated by commas. This is given to Whisper as context to improve accuracy.
+                            </p>
+                            <div className="mx-1 space-y-2">
+                                <Textarea
+                                    value={customVocabulary}
+                                    onChange={(e) => setCustomVocabulary(e.target.value)}
+                                    placeholder="e.g. Meetily, Mercedes-Benz, MBUX, Tauri, Qwen, DevOps, Kubernetes"
+                                    rows={3}
+                                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={handleSaveVocabulary}
+                                    disabled={isSavingVocabulary || customVocabulary.trim() === savedVocabulary}
+                                >
+                                    {isSavingVocabulary ? 'Saving...' : 'Save Vocabulary'}
+                                </Button>
+                            </div>
                         </div>
                     )}
 

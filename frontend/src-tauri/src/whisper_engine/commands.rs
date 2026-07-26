@@ -2,7 +2,29 @@ use crate::whisper_engine::{ModelInfo, WhisperEngine};
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};
+use tauri_plugin_store::StoreExt;
 use crate::config::WHISPER_MODEL_CATALOG;
+
+const VOCABULARY_STORE_FILE: &str = "transcription_vocabulary.json";
+const VOCABULARY_STORE_KEY: &str = "vocabulary";
+
+/// Load the persisted glossary/custom vocabulary text from disk, if any.
+fn load_persisted_vocabulary<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let store = app.store(VOCABULARY_STORE_FILE).ok()?;
+    let value = store.get(VOCABULARY_STORE_KEY)?;
+    value.as_str().map(|s| s.to_string())
+}
+
+/// Persist the glossary/custom vocabulary text to disk.
+fn save_persisted_vocabulary<R: Runtime>(app: &AppHandle<R>, vocabulary: &str) -> Result<(), String> {
+    let store = app
+        .store(VOCABULARY_STORE_FILE)
+        .map_err(|e| format!("Failed to access vocabulary store: {}", e))?;
+    store.set(VOCABULARY_STORE_KEY, serde_json::Value::String(vocabulary.to_string()));
+    store
+        .save()
+        .map_err(|e| format!("Failed to persist vocabulary store: {}", e))
+}
 
 // Global whisper engine
 pub static WHISPER_ENGINE: Mutex<Option<Arc<WhisperEngine>>> = Mutex::new(None);
@@ -48,6 +70,63 @@ pub async fn whisper_init() -> Result<(), String> {
     let engine = WhisperEngine::new_with_models_dir(models_dir)
         .map_err(|e| format!("Failed to initialize whisper engine: {}", e))?;
     *guard = Some(Arc::new(engine));
+    Ok(())
+}
+
+/// Restore the persisted glossary into the engine. Call after `whisper_init` during
+/// app startup (requires an AppHandle, which Tauri commands can't always provide generically).
+pub async fn restore_custom_vocabulary<R: Runtime>(app: &AppHandle<R>) {
+    let vocabulary = match load_persisted_vocabulary(app) {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => return,
+    };
+
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        log::info!("Restoring persisted transcription glossary ({} chars)", vocabulary.len());
+        engine.set_custom_vocabulary(Some(vocabulary)).await;
+    }
+}
+
+/// Get the currently configured transcription glossary (business/domain vocabulary).
+/// Falls back to the persisted value if the engine isn't initialized yet.
+#[command]
+pub async fn whisper_get_custom_vocabulary(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        Ok(engine.get_custom_vocabulary().await.unwrap_or_default())
+    } else {
+        Ok(load_persisted_vocabulary(&app_handle).unwrap_or_default())
+    }
+}
+
+/// Set the transcription glossary (business/domain vocabulary) used to bias Whisper's
+/// output via `initial_prompt`. Persisted to disk and applied immediately if the
+/// engine is already loaded.
+#[command]
+pub async fn whisper_set_custom_vocabulary(
+    app_handle: tauri::AppHandle,
+    vocabulary: String,
+) -> Result<(), String> {
+    save_persisted_vocabulary(&app_handle, &vocabulary)?;
+
+    let engine = {
+        let guard = WHISPER_ENGINE.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    if let Some(engine) = engine {
+        engine.set_custom_vocabulary(Some(vocabulary)).await;
+    }
+
     Ok(())
 }
 

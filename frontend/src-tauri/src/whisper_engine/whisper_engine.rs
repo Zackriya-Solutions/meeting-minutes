@@ -47,6 +47,9 @@ pub struct WhisperEngine {
     cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
     // Active downloads tracking to prevent concurrent downloads
     active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
+    // User-provided glossary/business terms injected as Whisper's initial_prompt to
+    // bias transcription toward correct spellings of domain-specific vocabulary
+    custom_vocabulary: Arc<RwLock<Option<String>>>,
 }
 
 impl WhisperEngine {
@@ -163,9 +166,43 @@ impl WhisperEngine {
             cancel_download_flag: Arc::new(RwLock::new(None)),
             // Initialize active downloads tracking
             active_downloads: Arc::new(RwLock::new(HashSet::new())),
+            // No glossary configured by default
+            custom_vocabulary: Arc::new(RwLock::new(None)),
         };
         
         Ok(engine)
+    }
+
+    /// Set the custom vocabulary / glossary text used as Whisper's initial_prompt.
+    /// Pass `None` or an empty string to clear it.
+    ///
+    /// The text is capped: whisper.cpp only honours the first `n_text_ctx / 2` tokens
+    /// (224 for every current model) and an over-long prompt is a known trigger for
+    /// repetition and hallucination in the decoder.
+    pub async fn set_custom_vocabulary(&self, vocabulary: Option<String>) {
+        const MAX_VOCABULARY_CHARS: usize = 800; // ~200 tokens, under whisper's 224 limit
+
+        let cleaned = vocabulary.and_then(|v| {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if trimmed.chars().count() <= MAX_VOCABULARY_CHARS {
+                return Some(trimmed.to_string());
+            }
+            log::warn!(
+                "Custom vocabulary is {} chars, truncating to {} to avoid hallucination",
+                trimmed.chars().count(),
+                MAX_VOCABULARY_CHARS
+            );
+            Some(trimmed.chars().take(MAX_VOCABULARY_CHARS).collect())
+        });
+        *self.custom_vocabulary.write().await = cleaned;
+    }
+
+    /// Get the currently configured custom vocabulary / glossary text.
+    pub async fn get_custom_vocabulary(&self) -> Option<String> {
+        self.custom_vocabulary.read().await.clone()
     }
     
     pub async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
@@ -567,6 +604,11 @@ impl WhisperEngine {
         params.set_max_len(200);
         params.set_single_segment(false);
 
+        // Bias decoding toward configured business/domain vocabulary (glossary), if any
+        if let Some(vocabulary) = self.custom_vocabulary.read().await.as_deref() {
+            params.set_initial_prompt(vocabulary);
+        }
+
         // Set thread count based on hardware (if supported by whisper.cpp)
         if let Some(_max_threads) = adaptive_config.max_threads {
             // Note: whisper.cpp may or may not expose thread control through params
@@ -599,12 +641,22 @@ impl WhisperEngine {
                 Err(_) => continue,
             };
 
-            // Calculate confidence based on segment length and duration (simplified approach)
-            let segment_length = segment_text.len() as f32;
-            let segment_confidence = if segment_length > 0.0 {
-                (segment_length / 100.0).min(0.9) + 0.1 // 0.1 to 1.0 confidence based on text length
+            // ACCURACY FIX: Real confidence from mean token probability.
+            // The previous text-length heuristic ((len/100).min(0.9)+0.1) silently
+            // dropped short-but-correct segments (e.g. "Eight thousand" -> 0.24 < 0.30 threshold).
+            let n_tokens = state.full_n_tokens(i).unwrap_or(0);
+            let mut token_prob_sum = 0.0f32;
+            let mut token_count = 0u32;
+            for t in 0..n_tokens {
+                if let Ok(p) = state.full_get_token_prob(i, t) {
+                    token_prob_sum += p;
+                    token_count += 1;
+                }
+            }
+            let segment_confidence = if token_count > 0 {
+                token_prob_sum / token_count as f32
             } else {
-                0.1
+                0.5 // No token data available; neutral confidence
             };
             total_confidence += segment_confidence;
             segment_count += 1;
@@ -683,6 +735,11 @@ impl WhisperEngine {
         // Reasonable length limits
         params.set_max_len(200);                 // Reasonable length
         params.set_single_segment(false);        // Allow multiple segments for better accuracy
+
+        // Bias decoding toward configured business/domain vocabulary (glossary), if any
+        if let Some(vocabulary) = self.custom_vocabulary.read().await.as_deref() {
+            params.set_initial_prompt(vocabulary);
+        }
 
         // Note: compression_ratio_threshold would be ideal but not available in current whisper-rs
         // This would help detect repetitive outputs: params.set_compression_ratio_threshold(2.4);
@@ -1133,5 +1190,114 @@ impl WhisperEngine {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Decode a 16 kHz mono 16-bit PCM WAV, walking the RIFF chunks.
+    fn read_wav_16k_mono(path: &std::path::Path) -> Vec<f32> {
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+
+        let mut offset = 12;
+        let mut data: Option<&[u8]> = None;
+        while offset + 8 <= bytes.len() {
+            let id = &bytes[offset..offset + 4];
+            let size =
+                u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+            let body = &bytes[offset + 8..(offset + 8 + size).min(bytes.len())];
+            if id == b"fmt " {
+                let channels = u16::from_le_bytes(body[2..4].try_into().unwrap());
+                let rate = u32::from_le_bytes(body[4..8].try_into().unwrap());
+                let bits = u16::from_le_bytes(body[14..16].try_into().unwrap());
+                assert_eq!(
+                    (channels, rate, bits),
+                    (1, 16_000, 16),
+                    "test wav must be 16 kHz mono 16-bit"
+                );
+            } else if id == b"data" {
+                data = Some(body);
+                break;
+            }
+            offset += 8 + size + (size & 1);
+        }
+
+        data.expect("wav has no data chunk")
+            .chunks_exact(2)
+            .map(|s| i16::from_le_bytes([s[0], s[1]]) as f32 / 32768.0)
+            .collect()
+    }
+
+    /// Transcribe a real recording the way the pipeline does - VAD segments through
+    /// `transcribe_audio_with_confidence` - and report the confidence of each segment
+    /// alongside whether the worker's threshold would discard it.
+    ///
+    /// The worker applies a 0.30 floor to Whisper output on top of whisper.cpp's own
+    /// no-speech, log-probability and entropy gates. This shows what that costs on real
+    /// speech instead of guessing.
+    ///
+    /// Run with:
+    ///   cargo test -p meetily --lib whisper_engine::whisper_engine::tests -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn transcribes_vad_segments_of_a_real_recording() {
+        const WORKER_CONFIDENCE_THRESHOLD: f32 = 0.30;
+
+        let models_dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.meetily.ai")
+            .join("models");
+        let engine = WhisperEngine::new_with_models_dir(Some(models_dir))
+            .expect("engine should construct");
+        engine.discover_models().await.expect("discovery should succeed");
+
+        let model = std::env::var("MEETILY_TEST_WHISPER_MODEL")
+            .unwrap_or_else(|_| crate::config::DEFAULT_WHISPER_MODEL.to_string());
+        println!("loading whisper model: {model}");
+        let load_start = std::time::Instant::now();
+        engine.load_model(&model).await.expect("model should load");
+        println!("model load: {:.1}s", load_start.elapsed().as_secs_f64());
+
+        let wav = std::path::PathBuf::from(
+            std::env::var("MEETILY_TEST_WAV")
+                .expect("set MEETILY_TEST_WAV to a 16 kHz mono recording"),
+        );
+        let samples = read_wav_16k_mono(&wav);
+        println!("recording: {:.1}s\n", samples.len() as f64 / 16000.0);
+
+        let segments = crate::audio::vad::get_speech_chunks(&samples, 800)
+            .expect("VAD should segment the recording");
+
+        let mut kept = 0usize;
+        let mut dropped = 0usize;
+        for (i, segment) in segments.iter().enumerate() {
+            let secs = segment.samples.len() as f64 / 16000.0;
+            let started = std::time::Instant::now();
+            let (text, confidence, _) = engine
+                .transcribe_audio_with_confidence(segment.samples.clone(), None)
+                .await
+                .expect("transcription should succeed");
+            let elapsed = started.elapsed().as_secs_f64();
+
+            let would_drop = !text.trim().is_empty() && confidence < WORKER_CONFIDENCE_THRESHOLD;
+            if text.trim().is_empty() {
+                // nothing to keep or drop
+            } else if would_drop {
+                dropped += 1;
+            } else {
+                kept += 1;
+            }
+
+            println!(
+                "  [{i:2}] audio {secs:5.1}s | took {elapsed:5.1}s | RTFx {:4.1} | conf={confidence:.2}{}\n       {:?}",
+                secs / elapsed.max(0.001),
+                if would_drop { " DROPPED" } else { "" },
+                text.trim()
+            );
+        }
+
+        println!("\n{} segments kept, {} discarded by the {WORKER_CONFIDENCE_THRESHOLD} floor",
+            kept, dropped);
     }
 }
