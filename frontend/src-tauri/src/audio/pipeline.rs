@@ -12,6 +12,7 @@ use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
+use super::echo_cancel::EchoCanceller;
 use super::transcription::provider::STREAM_STEP_SAMPLES;
 
 /// How much silence VAD waits for before deciding an utterance has ended.
@@ -96,8 +97,23 @@ impl StreamLane {
     /// Each returned step is paired with the second it starts at, so committed text
     /// lands on the recording's timeline without consulting a voice detector.
     fn push(&mut self, samples: &[f32]) -> Vec<(f64, Vec<f32>)> {
-        let resampled = self.to_16k(samples);
-        self.accumulator.extend_from_slice(&resampled);
+        let resampled = self.resample(samples);
+        self.accumulate(&resampled)
+    }
+
+    /// Bring input-rate samples to 16 kHz without accumulating them yet.
+    ///
+    /// Split out from `push` so the speakers can be cancelled out of the microphone
+    /// after resampling but before it becomes a step - the canceller needs both sources
+    /// at the same rate, and doing it here rather than at the input rate is three times
+    /// cheaper at 48 kHz.
+    fn resample(&mut self, samples: &[f32]) -> Vec<f32> {
+        self.to_16k(samples)
+    }
+
+    /// Take 16 kHz audio and return every step it completed.
+    fn accumulate(&mut self, samples_16k: &[f32]) -> Vec<(f64, Vec<f32>)> {
+        self.accumulator.extend_from_slice(samples_16k);
 
         let mut steps = Vec::new();
         for step in take_whole_steps(&mut self.accumulator) {
@@ -849,6 +865,11 @@ pub struct AudioPipeline {
     /// rate against 5.9% for the same content unmixed.
     mic_lane: StreamLane,
     system_lane: StreamLane,
+    /// Removes from the microphone whatever the speakers were playing.
+    ///
+    /// Only the transcription path gets this. The saved recording keeps the raw mix,
+    /// because a listener wants to hear the room as it sounded.
+    echo_canceller: EchoCanceller,
 }
 
 impl AudioPipeline {
@@ -916,6 +937,7 @@ impl AudioPipeline {
                 .expect("microphone lane"),
             system_lane: StreamLane::new(DeviceType::System, sample_rate)
                 .expect("system lane"),
+            echo_canceller: EchoCanceller::new(),
         }
     }
 
@@ -930,9 +952,17 @@ impl AudioPipeline {
     /// thirds of it, and spans shorter than one step came back empty, which together
     /// account for the missing words in the live transcript.
     fn dispatch_stream_steps(&mut self, mic_window: &[f32], sys_window: &[f32]) {
+        // Resample both first, then take the speakers back out of the microphone. The
+        // system audio is an exact copy of what was played, so whatever of it the
+        // microphone picked up out of the room is removable rather than something to
+        // live with. Without this the microphone lane carries every remote voice twice.
+        let system = self.system_lane.resample(sys_window);
+        let microphone = self.mic_lane.resample(mic_window);
+        let microphone = self.echo_canceller.cancel(&microphone, &system);
+
         let batches = [
-            (DeviceType::Microphone, self.mic_lane.push(mic_window)),
-            (DeviceType::System, self.system_lane.push(sys_window)),
+            (DeviceType::Microphone, self.mic_lane.accumulate(&microphone)),
+            (DeviceType::System, self.system_lane.accumulate(&system)),
         ];
 
         for (source, steps) in batches {
