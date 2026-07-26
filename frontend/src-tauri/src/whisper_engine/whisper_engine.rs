@@ -550,7 +550,27 @@ impl WhisperEngine {
     }
     
     /// Transcribe audio with streaming support for partial results and adaptive quality
+    /// Length whisper.cpp demands before it will decode anything.
+    ///
+    /// Below 1000 ms it bails out with "input is too short - N ms < 1000 ms" and
+    /// returns no segments, so the audio is silently lost. 1.01 s leaves a little
+    /// room above the boundary.
+    const WHISPER_MIN_SAMPLES: usize = 16_160;
+
+    /// Pads short audio with trailing silence so whisper will decode it.
+    ///
+    /// One-word answers, the opening of a sentence and quick interjections all
+    /// land under a second; without this they never reach the transcript at all.
+    /// Trailing silence leaves the speech itself untouched.
+    fn pad_to_whisper_minimum(mut audio: Vec<f32>) -> Vec<f32> {
+        if !audio.is_empty() && audio.len() < Self::WHISPER_MIN_SAMPLES {
+            audio.resize(Self::WHISPER_MIN_SAMPLES, 0.0);
+        }
+        audio
+    }
+
     pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
+        let audio_data = Self::pad_to_whisper_minimum(audio_data);
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
@@ -683,6 +703,7 @@ impl WhisperEngine {
     }
 
     pub async fn transcribe_audio(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<String> {
+        let audio_data = Self::pad_to_whisper_minimum(audio_data);
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
@@ -1196,6 +1217,38 @@ impl WhisperEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// whisper.cpp drops anything under 1000 ms without producing a segment, so
+    /// short utterances have to be padded or they never reach the transcript.
+    #[test]
+    fn short_audio_is_padded_up_to_whispers_minimum() {
+        // 400 ms of speech - a one-word answer.
+        let short = vec![0.5f32; 6_400];
+        let padded = WhisperEngine::pad_to_whisper_minimum(short);
+
+        assert_eq!(padded.len(), WhisperEngine::WHISPER_MIN_SAMPLES);
+        assert!(
+            padded.len() as f64 / 16_000.0 > 1.0,
+            "padded audio must clear whisper's one-second floor"
+        );
+        // The speech itself is untouched; only silence is appended.
+        assert!(padded[..6_400].iter().all(|&s| s == 0.5));
+        assert!(padded[6_400..].iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn audio_already_long_enough_is_left_alone() {
+        let long = vec![0.25f32; 32_000]; // 2 s
+        let result = WhisperEngine::pad_to_whisper_minimum(long.clone());
+        assert_eq!(result, long);
+    }
+
+    #[test]
+    fn empty_audio_is_not_turned_into_silence() {
+        // Padding nothing would hand whisper a second of pure silence to
+        // hallucinate over.
+        assert!(WhisperEngine::pad_to_whisper_minimum(Vec::new()).is_empty());
+    }
 
     /// Decode a 16 kHz mono 16-bit PCM WAV, walking the RIFF chunks.
     fn read_wav_16k_mono(path: &std::path::Path) -> Vec<f32> {
