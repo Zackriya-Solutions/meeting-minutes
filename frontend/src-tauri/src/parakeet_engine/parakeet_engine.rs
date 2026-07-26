@@ -1086,3 +1086,144 @@ impl ParakeetEngine {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Decode a 16 kHz mono 16-bit PCM WAV, walking the RIFF chunks rather than assuming
+    /// the data starts at byte 44.
+    fn read_wav_16k_mono(path: &std::path::Path) -> Vec<f32> {
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+
+        let mut offset = 12;
+        let mut data: Option<&[u8]> = None;
+        while offset + 8 <= bytes.len() {
+            let id = &bytes[offset..offset + 4];
+            let size =
+                u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+            let body = &bytes[offset + 8..(offset + 8 + size).min(bytes.len())];
+            if id == b"fmt " {
+                let channels = u16::from_le_bytes(body[2..4].try_into().unwrap());
+                let rate = u32::from_le_bytes(body[4..8].try_into().unwrap());
+                let bits = u16::from_le_bytes(body[14..16].try_into().unwrap());
+                assert_eq!(
+                    (channels, rate, bits),
+                    (1, 16_000, 16),
+                    "test wav must be 16 kHz mono 16-bit"
+                );
+            } else if id == b"data" {
+                data = Some(body);
+                break;
+            }
+            offset += 8 + size + (size & 1);
+        }
+
+        data.expect("wav has no data chunk")
+            .chunks_exact(2)
+            .map(|s| i16::from_le_bytes([s[0], s[1]]) as f32 / 32768.0)
+            .collect()
+    }
+
+    /// Measure how VAD's redemption time - the silence it waits for before deciding an
+    /// utterance ended - changes transcript quality on a real recording.
+    ///
+    /// The live pipeline passes 400 ms, which is shorter than the natural pauses inside a
+    /// sentence, so it cuts mid-phrase and the transcript comes back as fragments. This
+    /// prints the resulting text for several values so the choice rests on evidence.
+    ///
+    /// Point MEETILY_TEST_WAV at a 16 kHz mono recording of real speech. Run with:
+    ///   cargo test -p meetily --lib vad_redemption -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn vad_redemption_time_changes_transcript_quality() {
+        let models_dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.meetily.ai")
+            .join("models");
+        let engine = ParakeetEngine::new_with_models_dir(Some(models_dir)).unwrap();
+        engine.discover_models().await.unwrap();
+        let model = std::env::var("MEETILY_TEST_PARAKEET_MODEL")
+            .unwrap_or_else(|_| crate::config::DEFAULT_PARAKEET_MODEL.to_string());
+        engine.load_model(&model).await.unwrap();
+
+        let wav = std::path::PathBuf::from(
+            std::env::var("MEETILY_TEST_WAV")
+                .expect("set MEETILY_TEST_WAV to a 16 kHz mono recording"),
+        );
+        let samples = read_wav_16k_mono(&wav);
+        println!("recording: {:.1}s\n", samples.len() as f64 / 16000.0);
+
+        for redemption_ms in [400u32, 800, 1200, 2000] {
+            let segments = crate::audio::vad::get_speech_chunks(&samples, redemption_ms)
+                .expect("VAD should segment the recording");
+
+            let durations: Vec<f64> = segments
+                .iter()
+                .map(|s| s.end_timestamp_ms - s.start_timestamp_ms)
+                .collect();
+            let mean = durations.iter().sum::<f64>() / durations.len().max(1) as f64;
+
+            let mut pieces = Vec::new();
+            for segment in &segments {
+                let text = engine.transcribe_audio(segment.samples.clone()).await.unwrap();
+                if !text.trim().is_empty() {
+                    pieces.push(text.trim().to_string());
+                }
+            }
+
+            println!(
+                "redemption {:>4}ms: {:2} segments, mean {:.0}ms",
+                redemption_ms,
+                segments.len(),
+                mean
+            );
+            println!("  {}\n", pieces.join(" | "));
+        }
+    }
+
+    /// End-to-end check of the engine the recording pipeline actually calls: discover the
+    /// installed model, load it, transcribe real speech, and assert the words come back.
+    ///
+    /// This is what proves the execution provider produces *correct* output, not merely
+    /// that a session could be created. Override the clip with MEETILY_TEST_WAV.
+    ///
+    /// Needs the model installed, so it is ignored by default. Run with:
+    ///   cargo test -p meetily --lib parakeet_engine::parakeet_engine::tests -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn transcribes_real_speech_with_the_installed_model() {
+        let models_dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.meetily.ai")
+            .join("models");
+
+        let engine = ParakeetEngine::new_with_models_dir(Some(models_dir))
+            .expect("engine should construct");
+
+        engine.discover_models().await.expect("model discovery should succeed");
+
+        let model = std::env::var("MEETILY_TEST_PARAKEET_MODEL")
+            .unwrap_or_else(|_| crate::config::DEFAULT_PARAKEET_MODEL.to_string());
+        println!("loading parakeet model: {model}");
+        engine
+            .load_model(&model)
+            .await
+            .expect("installed model should load");
+        assert!(engine.is_model_loaded().await);
+
+        let wav = std::path::PathBuf::from(
+            std::env::var("MEETILY_TEST_WAV")
+                .unwrap_or_else(|_| r"C:\Work\models\jfk_norm.wav".to_string()),
+        );
+        let text = engine
+            .transcribe_audio(read_wav_16k_mono(&wav))
+            .await
+            .expect("transcription should succeed");
+
+        println!("parakeet transcript: {text:?}");
+        let lowered = text.to_lowercase();
+        assert!(
+            lowered.contains("fellow americans") && lowered.contains("your country"),
+            "unexpected transcript: {text:?}"
+        );
+    }
+}

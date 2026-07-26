@@ -209,6 +209,17 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
+    /// Speech accumulated since the current utterance began, while the speaker is still
+    /// going. `None` once they pause, because the utterance is then delivered as a
+    /// completed segment instead.
+    pub fn speech_in_progress(&self) -> Option<&[f32]> {
+        if self.in_speech && !self.current_speech.is_empty() {
+            Some(&self.current_speech)
+        } else {
+            None
+        }
+    }
+
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
         // Track accumulated speech buffer size to detect memory issues
         let current_speech_size = self.current_speech.len();
@@ -445,6 +456,15 @@ mod tests {
 
         samples
     }
+
+    // A maximum segment length was tried here so a long monologue would not leave the
+    // screen blank until the speaker stopped. Measured with whisper large-v3 on a real
+    // recording, capping at 6 s turned
+    //   "Oh my God. $10,000 up on A&B here today. It's amazing. People are kicking up
+    //    with their stocks. They just want to buy more and more..."
+    // into "amazing" plus "more and more people feel like building with". Cutting an
+    // utterance at an arbitrary point costs far more accuracy than the latency is worth,
+    // so segments stay bounded by the speaker's own pauses.
 
     #[test]
     fn test_vad_chunked_vs_single_processing() {
