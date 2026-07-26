@@ -14,9 +14,21 @@ const nextConfig = {
   basePath: '',
   assetPrefix: '/',
 
+  // Keep dev-compiled pages in memory during long idle periods (e.g. laptop
+  // sleep / app left open). Prevents "ChunkLoadError: Loading chunk app/layout
+  // failed (timeout)" caused by the dev server disposing inactive entries.
+  onDemandEntries: {
+    maxInactiveAge: 1000 * 60 * 60 * 24, // 24h
+    pagesBufferLength: 50,
+  },
+
   // Add webpack configuration for Tauri
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, dev }) => {
     if (!isServer) {
+      if (dev) {
+        // Allow slow dev-server recompiles after idle without failing the chunk request
+        config.output.chunkLoadTimeout = 300000; // 5 min (default 120s)
+      }
       config.resolve.fallback = {
         ...config.resolve.fallback,
         fs: false,

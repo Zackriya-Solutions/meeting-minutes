@@ -232,6 +232,37 @@ export default function RootLayout({
 
   return (
     <html lang="en">
+      <head>
+        {/* Self-recovery for stale chunks after long idle/sleep: reload once when a
+            chunk fails to load. Inlined in the document so it runs even if the
+            app/layout chunk itself fails. sessionStorage guard prevents reload loops. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+  function isChunkError(name, msg){
+    return name === 'ChunkLoadError' || (typeof msg === 'string' && (msg.indexOf('ChunkLoadError') !== -1 || msg.indexOf('Loading chunk') !== -1));
+  }
+  function recover(){
+    try {
+      var key = '__meetily_chunk_reload_ts';
+      var last = Number(sessionStorage.getItem(key) || 0);
+      if (Date.now() - last < 15000) return;
+      sessionStorage.setItem(key, String(Date.now()));
+    } catch (e) {}
+    window.location.reload();
+  }
+  window.addEventListener('error', function(e){
+    var err = e && e.error;
+    if (isChunkError((err && err.name) || '', (e && e.message) || (err && err.message) || '')) recover();
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var r = e && e.reason;
+    if (isChunkError((r && r.name) || '', (r && r.message) || '')) recover();
+  });
+})();`,
+          }}
+        />
+      </head>
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
