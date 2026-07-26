@@ -650,11 +650,20 @@ impl ContinuousVadProcessor {
                     // transcriber must never see that.
                     let start_sample = Self::ms_to_sample(start_timestamp_ms as f64);
                     let end_sample = Self::ms_to_sample(end_timestamp_ms as f64);
-                    let mut speech_samples = self.slice_clean(start_sample, end_sample);
 
-                    // History cannot serve the range (very long utterance, or a
-                    // resampler hiccup) - fall back to what was accumulated, then
-                    // to Silero's own copy.
+                    // History is bounded, so an utterance longer than
+                    // HISTORY_MAX_SECONDS no longer has its opening in there.
+                    // Slicing anyway would quietly drop the first words, which is
+                    // the exact failure this whole change exists to remove.
+                    let history_covers_start = start_sample >= self.history_start_sample;
+                    let mut speech_samples = if history_covers_start {
+                        self.slice_clean(start_sample, end_sample)
+                    } else {
+                        Vec::new()
+                    };
+
+                    // Fall back to what was accumulated, then to Silero's own
+                    // copy. Both hold the whole utterance.
                     if speech_samples.is_empty() {
                         speech_samples = if !self.current_speech.is_empty() {
                             self.current_speech.clone()
