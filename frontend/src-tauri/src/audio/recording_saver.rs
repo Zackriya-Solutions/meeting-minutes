@@ -379,43 +379,63 @@ impl RecordingSaver {
             return Ok(None);
         }
 
+        // Each of the three closing steps is attempted independently.
+        //
+        // These used to short-circuit: a failed audio finalize returned before
+        // the transcripts and metadata were written, so the recording was left
+        // claiming `status: "recording"` forever even though it had ended. The
+        // bookkeeping must survive an encoder failure.
+        let mut failures: Vec<String> = Vec::new();
+
         // Finalize incremental saver (merge checkpoints into final audio.mp4)
-        let final_audio_path = if let Some(saver_arc) = &self.incremental_saver {
+        let final_audio_path: Option<PathBuf> = if let Some(saver_arc) = &self.incremental_saver {
             let mut saver = saver_arc.lock().await;
             match saver.finalize().await {
                 Ok(path) => {
                     info!("✅ Successfully finalized audio: {}", path.display());
-                    path
+                    Some(path)
                 }
                 Err(e) => {
                     error!("❌ Failed to finalize incremental saver: {}", e);
-                    return Err(format!("Failed to finalize audio: {}", e));
+                    failures.push(format!("audio: {}", e));
+                    None
                 }
             }
         } else {
             error!("No incremental saver initialized - cannot save recording");
-            return Err("No incremental saver initialized".to_string());
+            failures.push("audio: no incremental saver initialized".to_string());
+            None
         };
 
         // Save final transcripts.json with validation
         if let Some(folder) = &self.meeting_folder {
-            if let Err(e) = self.write_transcripts_json(folder) {
-                error!("❌ Failed to write final transcripts: {}", e);
-                return Err(format!("Failed to save transcripts: {}", e));
+            match self.write_transcripts_json(folder) {
+                Ok(()) => {
+                    let transcript_path = folder.join("transcripts.json");
+                    if transcript_path.exists() {
+                        info!("✅ Transcripts saved and verified at: {}", transcript_path.display());
+                    } else {
+                        error!("❌ Transcript file was not created at: {}", transcript_path.display());
+                        failures.push("transcripts: file missing after write".to_string());
+                    }
+                }
+                Err(e) => {
+                    error!("❌ Failed to write final transcripts: {}", e);
+                    failures.push(format!("transcripts: {}", e));
+                }
             }
-
-            // Verify transcripts were written correctly
-            let transcript_path = folder.join("transcripts.json");
-            if !transcript_path.exists() {
-                error!("❌ Transcript file was not created at: {}", transcript_path.display());
-                return Err("Transcript file verification failed".to_string());
-            }
-            info!("✅ Transcripts saved and verified at: {}", transcript_path.display());
         }
 
-        // Update metadata to completed status with actual recording duration
+        // Update metadata with the recording's real outcome and duration
         if let (Some(folder), Some(mut metadata)) = (&self.meeting_folder, self.metadata.clone()) {
-            metadata.status = "completed".to_string();
+            // Record what actually happened. Leaving "recording" behind is worse
+            // than recording an error: it is indistinguishable from a session
+            // that is still running.
+            metadata.status = if failures.is_empty() {
+                "completed".to_string()
+            } else {
+                "error".to_string()
+            };
             metadata.completed_at = Some(chrono::Utc::now().to_rfc3339());
 
             // Use actual recording duration from RecordingState (more accurate than transcript segments)
@@ -429,16 +449,19 @@ impl RecordingSaver {
             });
 
             if let Err(e) = self.write_metadata(folder, &metadata) {
-                error!("❌ Failed to update metadata to completed: {}", e);
-                return Err(format!("Failed to update metadata: {}", e));
+                error!("❌ Failed to update metadata: {}", e);
+                failures.push(format!("metadata: {}", e));
+            } else {
+                info!(
+                    "✅ Metadata updated: status={}, duration={:?}s",
+                    metadata.status, metadata.duration_seconds
+                );
             }
-
-            info!("✅ Metadata updated with duration: {:?}s", metadata.duration_seconds);
         }
 
         // Emit save event with audio and transcript paths
         let save_event = serde_json::json!({
-            "audio_file": final_audio_path.to_string_lossy(),
+            "audio_file": final_audio_path.as_ref().map(|p| p.to_string_lossy().to_string()),
             "transcript_file": self.meeting_folder.as_ref()
                 .map(|f| f.join("transcripts.json").to_string_lossy().to_string()),
             "meeting_name": self.meeting_name,
@@ -455,7 +478,12 @@ impl RecordingSaver {
             segments.clear();
         }
 
-        Ok(Some(final_audio_path.to_string_lossy().to_string()))
+        // Report the failure only now, with the bookkeeping already on disk.
+        if !failures.is_empty() {
+            return Err(format!("Recording closed with errors - {}", failures.join("; ")));
+        }
+
+        Ok(final_audio_path.map(|p| p.to_string_lossy().to_string()))
     }
 
     /// Get the meeting folder path (for passing to backend)

@@ -1117,6 +1117,7 @@ mod tests {
             start_timestamp_ms: 0.0,
             end_timestamp_ms: 1000.0,
             confidence: 0.9,
+            origin: crate::audio::vad::SegmentOrigin::Vad,
         };
         let result = split_segment_at_silence(&segment, 25 * 16000);
         assert_eq!(result.len(), 1);
@@ -1136,6 +1137,7 @@ mod tests {
             start_timestamp_ms: 0.0,
             end_timestamp_ms: 60_000.0,
             confidence: 0.9,
+            origin: crate::audio::vad::SegmentOrigin::Vad,
         };
 
         let result = split_segment_at_silence(&segment, 25 * 16000);
@@ -1160,6 +1162,7 @@ mod tests {
             start_timestamp_ms: 0.0,
             end_timestamp_ms: 60_000.0,
             confidence: 0.9,
+            origin: crate::audio::vad::SegmentOrigin::Vad,
         };
 
         let result = split_segment_at_silence(&segment, 25 * 16000);

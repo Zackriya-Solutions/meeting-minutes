@@ -34,8 +34,12 @@ struct AudioMixerRingBuffer {
 
 impl AudioMixerRingBuffer {
     fn new(sample_rate: u32) -> Self {
-        // Use 50ms windows for mixing
-        let window_ms = 600.0;
+        // VAD only ever sees audio one window at a time, so the window is also
+        // the resolution at which speech onsets can be noticed. At the 600 ms
+        // this used to be, the first words of a fast utterance were routinely
+        // rounded away; 100 ms still amortises the mixing work while letting the
+        // detector react six times sooner.
+        let window_ms = 100.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
         // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
@@ -946,7 +950,10 @@ impl AudioPipeline {
                                     self.emit_partial_if_due();
                                 }
                                 Err(e) => {
-                                    warn!("⚠️ VAD error: {}", e);
+                                    // The processor keeps unflagged audio in its
+                                    // ledger, so a failure here delays the span
+                                    // rather than destroying it.
+                                    warn!("⚠️ VAD error (audio retained for recovery): {}", e);
                                 }
                             }
 

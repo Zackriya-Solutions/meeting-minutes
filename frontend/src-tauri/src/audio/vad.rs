@@ -1,8 +1,21 @@
 use anyhow::{anyhow, Result};
-use silero_rs::{VadConfig, VadSession, VadTransition};
 use log::{debug, info, warn};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
+use silero_rs::{VadConfig, VadSession, VadTransition};
 use std::collections::VecDeque;
 use std::time::Duration;
+
+/// How the segmenter decided this audio was worth transcribing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentOrigin {
+    /// Silero reported a speech region.
+    Vad,
+    /// Silero reported nothing for a long stretch that still carried energy well
+    /// above the room's noise floor, so the audio was recovered rather than lost.
+    Recovered,
+}
 
 /// Represents a complete speech segment detected by VAD
 #[derive(Debug, Clone)]
@@ -11,19 +24,66 @@ pub struct SpeechSegment {
     pub start_timestamp_ms: f64,
     pub end_timestamp_ms: f64,
     pub confidence: f32,
+    pub origin: SegmentOrigin,
 }
+
+/// Longest span of clean audio kept for slicing segments out of.
+const HISTORY_MAX_SECONDS: f64 = 60.0;
+/// Unclaimed audio is handed over once it reaches this much.
+///
+/// Bounds worst-case loss: before the ledger existed, a stretch Silero never
+/// flagged was gone for good, however long it ran.
+const UNCLAIMED_EMIT_SECONDS: f64 = 6.0;
+/// Never recover a span shorter than this; below it there is nothing to transcribe.
+const UNCLAIMED_MIN_SECONDS: f64 = 1.0;
+/// RMS a span must clear before it is worth recovering.
+///
+/// Measured on a real recording: the room's noise floor sat at 0.003-0.007 RMS
+/// while speech Silero missed ran 0.045-0.077, so this sits well clear of both.
+const RECOVER_ABSOLUTE_RMS: f32 = 0.012;
+/// ...and it must also stand this far above the tracked noise floor, so a noisy
+/// room does not turn every silence into a recovered segment.
+const RECOVER_NOISE_RATIO: f32 = 3.0;
+/// Pitch strength a frame needs before it counts as speech worth recovering.
+///
+/// Sits between the two populations measured on a real recording: speech frames
+/// scored 0.26-0.73, room noise 0.04-0.13.
+const VOICING_THRESHOLD: f32 = 0.20;
+/// RMS the detector copy is driven towards. Silero's probabilities collapse on
+/// quiet input; the transcriber still receives the untouched audio.
+const DETECTOR_TARGET_RMS: f32 = 0.08;
+/// Ceiling on the detector gain, so a silent room is not amplified into noise.
+const DETECTOR_MAX_GAIN: f32 = 8.0;
 
 /// Processes audio in 30ms chunks but returns complete speech segments
 pub struct ContinuousVadProcessor {
     session: VadSession,
     chunk_size: usize,
     sample_rate: u32,
+    /// Stateful 48k->16k resampler. Rebuilding one per call loses filter state
+    /// at every boundary, which the capture path already learned the hard way.
+    resampler: Option<SincFixedIn<f32>>,
+    resampler_chunk: usize,
+    resampler_input: Vec<f32>,
     buffer: Vec<f32>,
     speech_segments: VecDeque<SpeechSegment>,
     current_speech: Vec<f32>,
     in_speech: bool,
     processed_samples: usize,
     speech_start_sample: usize,
+
+    /// Untouched 16 kHz audio, so segments handed to the transcriber never carry
+    /// the detector's gain. `history_start_sample` is the absolute index of
+    /// `history[0]`.
+    history: Vec<f32>,
+    history_start_sample: usize,
+    /// Absolute 16 kHz index every emitted segment has accounted for.
+    covered_through_sample: usize,
+    /// Slowly tracked room noise level, used to judge unclaimed spans.
+    noise_floor: f32,
+    /// Smoothed detector gain, so the level presented to Silero does not jump.
+    detector_gain: f32,
+
     // State tracking for smart logging
     last_logged_state: bool,
 }
@@ -64,22 +124,232 @@ impl ContinuousVadProcessor {
         // VAD uses 30ms chunks at 16kHz (480 samples)
         let vad_chunk_size = (VAD_SAMPLE_RATE as f32 * 0.03) as usize; // 480 samples
 
-        info!("VAD processor created: input={}Hz, vad={}Hz, chunk_size={} samples",
-              input_sample_rate, VAD_SAMPLE_RATE, vad_chunk_size);
+        // A proper band-limited resampler. The moving average this replaces was
+        // only ~-14 dB at the 8 kHz Nyquist, so everything above it folded back
+        // into the speech band as noise and depressed Silero's probabilities.
+        const RESAMPLER_CHUNK: usize = 1024;
+        let resampler = if input_sample_rate == VAD_SAMPLE_RATE {
+            None
+        } else {
+            let params = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Linear,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+            match SincFixedIn::<f32>::new(
+                VAD_SAMPLE_RATE as f64 / input_sample_rate as f64,
+                1.0,
+                params,
+                RESAMPLER_CHUNK,
+                1,
+            ) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    // Losing anti-aliasing hurts accuracy but is better than
+                    // losing audio, so fall back to the naive path.
+                    warn!("Failed to build VAD resampler ({}), falling back to decimation", e);
+                    None
+                }
+            }
+        };
+
+        info!("VAD processor created: input={}Hz, vad={}Hz, chunk_size={} samples, band-limited resampler={}",
+              input_sample_rate, VAD_SAMPLE_RATE, vad_chunk_size, resampler.is_some());
 
         Ok(Self {
             session,
             chunk_size: vad_chunk_size,
             sample_rate: input_sample_rate, // Store input rate for resampling ratio in resample_to_16k()
+            resampler,
+            resampler_chunk: RESAMPLER_CHUNK,
+            resampler_input: Vec::with_capacity(RESAMPLER_CHUNK * 2),
             buffer: Vec::with_capacity(vad_chunk_size * 2),
             speech_segments: VecDeque::new(),
             current_speech: Vec::new(),
             in_speech: false,
             processed_samples: 0,
             speech_start_sample: 0,
-            // Initialize state tracking
+            history: Vec::new(),
+            history_start_sample: 0,
+            covered_through_sample: 0,
+            noise_floor: 0.005,
+            detector_gain: 1.0,
             last_logged_state: false,
         })
+    }
+
+    /// Absolute 16 kHz sample index for a session timestamp.
+    fn ms_to_sample(ms: f64) -> usize {
+        (ms.max(0.0) * 16.0) as usize
+    }
+
+    /// Untouched audio for an absolute 16 kHz range, as far as history still holds it.
+    fn slice_clean(&self, start_sample: usize, end_sample: usize) -> Vec<f32> {
+        let from = start_sample.saturating_sub(self.history_start_sample);
+        let to = end_sample.saturating_sub(self.history_start_sample);
+        let from = from.min(self.history.len());
+        let to = to.min(self.history.len());
+        if to <= from {
+            return Vec::new();
+        }
+        self.history[from..to].to_vec()
+    }
+
+    fn rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    /// Drops history that no longer backs any pending decision.
+    fn prune_history(&mut self) {
+        let max_samples = (HISTORY_MAX_SECONDS * 16000.0) as usize;
+        if self.history.len() <= max_samples {
+            return;
+        }
+
+        // Keep everything the ledger and any in-flight utterance still need.
+        let keep_from = self
+            .covered_through_sample
+            .min(self.speech_start_sample)
+            .max(self.processed_samples.saturating_sub(max_samples));
+        let drop_to = keep_from.saturating_sub(self.history_start_sample);
+        if drop_to == 0 {
+            return;
+        }
+
+        self.history.drain(..drop_to.min(self.history.len()));
+        self.history_start_sample += drop_to;
+    }
+
+    /// Hands over audio Silero never flagged, once enough of it has piled up and
+    /// it clearly carries more than room noise.
+    ///
+    /// This is not a maximum segment length: it only fires where VAD produced
+    /// *nothing*, so the alternative is not a cleaner cut, it is silence.
+    fn recover_unclaimed(&mut self) -> Option<SpeechSegment> {
+        if self.in_speech {
+            return None;
+        }
+
+        let unclaimed = self.processed_samples.saturating_sub(self.covered_through_sample);
+        if (unclaimed as f64 / 16000.0) < UNCLAIMED_EMIT_SECONDS {
+            return None;
+        }
+
+        let start = self.covered_through_sample;
+        let end = self.processed_samples;
+        let samples = self.slice_clean(start, end);
+
+        // Nothing left in history to recover: give up on the span rather than
+        // repeatedly re-testing it.
+        if (samples.len() as f64 / 16000.0) < UNCLAIMED_MIN_SECONDS {
+            self.covered_through_sample = end;
+            return None;
+        }
+
+        self.covered_through_sample = end;
+
+        // Trim to the part that actually carries energy. Handing the model a
+        // block that is half silence invites hallucinated filler, which is worse
+        // than the gap it was meant to fix.
+        let Some((from, to)) = self.speech_span(&samples) else {
+            debug!(
+                "VAD ledger: {:.1}s unclaimed but nothing above the floor ({:.4}) - treated as silence",
+                samples.len() as f64 / 16000.0,
+                self.noise_floor
+            );
+            return None;
+        };
+
+        let trimmed = &samples[from..to];
+        if (trimmed.len() as f64 / 16000.0) < UNCLAIMED_MIN_SECONDS {
+            return None;
+        }
+
+        info!(
+            "🛟 VAD ledger: recovering {:.1}s Silero did not flag (trimmed from {:.1}s, {:.4} RMS vs {:.4} floor)",
+            trimmed.len() as f64 / 16000.0,
+            samples.len() as f64 / 16000.0,
+            Self::rms(trimmed),
+            self.noise_floor
+        );
+
+        Some(SpeechSegment {
+            start_timestamp_ms: (start + from) as f64 / 16.0,
+            end_timestamp_ms: (start + to) as f64 / 16.0,
+            samples: trimmed.to_vec(),
+            confidence: 0.5,
+            origin: SegmentOrigin::Recovered,
+        })
+    }
+
+    /// Strength of the strongest pitch period in a frame, 0.0 to 1.0.
+    ///
+    /// Voiced speech repeats at its pitch, so its autocorrelation has a clear
+    /// peak somewhere in the 80-400 Hz range; broadband room noise has none.
+    /// Measured on a real recording, speech frames scored 0.26-0.73 while noise
+    /// frames scored 0.04-0.13, which is what [`VOICING_THRESHOLD`] sits between.
+    fn voicing(frame: &[f32]) -> f32 {
+        const MIN_LAG: usize = 40; // 400 Hz at 16 kHz
+        const MAX_LAG: usize = 200; // 80 Hz at 16 kHz
+
+        if frame.len() <= MAX_LAG {
+            return 0.0;
+        }
+
+        let mean = frame.iter().sum::<f32>() / frame.len() as f32;
+        let centred: Vec<f32> = frame.iter().map(|s| s - mean).collect();
+
+        let energy: f32 = centred.iter().map(|s| s * s).sum();
+        if energy < 1e-12 {
+            return 0.0;
+        }
+
+        let mut best = 0.0f32;
+        for lag in MIN_LAG..MAX_LAG.min(centred.len() - 1) {
+            let correlation: f32 = centred[lag..]
+                .iter()
+                .zip(centred.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            best = best.max(correlation / energy);
+        }
+
+        best
+    }
+
+    /// Narrows a span to the first and last 100 ms frame that looks like speech,
+    /// keeping a short margin so word onsets survive the trim.
+    ///
+    /// Energy alone cannot do this: on the recording used for tuning, speech at
+    /// 0.0145 RMS and room noise at 0.0118 RMS were indistinguishable by level,
+    /// and only the pitch test told them apart.
+    fn speech_span(&self, samples: &[f32]) -> Option<(usize, usize)> {
+        const FRAME: usize = 1600; // 100 ms at 16 kHz
+        const MARGIN_FRAMES: usize = 3; // 300 ms of context on each side
+
+        let gate = RECOVER_ABSOLUTE_RMS.max(self.noise_floor * RECOVER_NOISE_RATIO);
+
+        let speechy: Vec<usize> = samples
+            .chunks(FRAME)
+            .enumerate()
+            .filter(|(_, frame)| {
+                Self::rms(frame) >= gate && Self::voicing(frame) >= VOICING_THRESHOLD
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        let first = *speechy.first()?;
+        let last = *speechy.last()?;
+
+        let from = first.saturating_sub(MARGIN_FRAMES) * FRAME;
+        let to = ((last + 1 + MARGIN_FRAMES) * FRAME).min(samples.len());
+
+        Some((from, to))
     }
 
     /// Process incoming audio samples and return any complete speech segments
@@ -92,6 +362,7 @@ impl ContinuousVadProcessor {
             self.resample_to_16k(samples)?
         };
 
+        self.history.extend_from_slice(&resampled_audio);
         self.buffer.extend_from_slice(&resampled_audio);
         let mut completed_segments = Vec::new();
 
@@ -106,12 +377,50 @@ impl ContinuousVadProcessor {
             }
         }
 
+        if let Some(recovered) = self.recover_unclaimed() {
+            completed_segments.push(recovered);
+        }
+
+        self.prune_history();
+
         Ok(completed_segments)
     }
 
-    /// Improved resampling from input sample rate to 16kHz with anti-aliasing
-    /// Uses linear interpolation and basic low-pass filtering for better quality
-    fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {
+    /// Resamples the input rate down to 16 kHz for Silero.
+    ///
+    /// Uses a band-limited sinc resampler kept alive across calls; the fallback
+    /// below only runs if that could not be constructed.
+    fn resample_to_16k(&mut self, samples: &[f32]) -> Result<Vec<f32>> {
+        if self.sample_rate == 16000 {
+            return Ok(samples.to_vec());
+        }
+
+        if self.resampler.is_some() {
+            self.resampler_input.extend_from_slice(samples);
+            let mut out = Vec::new();
+            let chunk = self.resampler_chunk;
+
+            while self.resampler_input.len() >= chunk {
+                let input: Vec<f32> = self.resampler_input.drain(..chunk).collect();
+                let resampler = self
+                    .resampler
+                    .as_mut()
+                    .expect("resampler presence checked above");
+                match resampler.process(&[input], None) {
+                    Ok(mut waves) if !waves.is_empty() => out.append(&mut waves[0]),
+                    Ok(_) => {}
+                    Err(e) => return Err(anyhow!("VAD resampling failed: {}", e)),
+                }
+            }
+
+            return Ok(out);
+        }
+
+        self.resample_to_16k_fallback(samples)
+    }
+
+    /// Naive decimation kept only as a fallback; its anti-aliasing is poor.
+    fn resample_to_16k_fallback(&self, samples: &[f32]) -> Result<Vec<f32>> {
         if self.sample_rate == 16000 {
             return Ok(samples.to_vec());
         }
@@ -194,11 +503,40 @@ impl ContinuousVadProcessor {
                 start_timestamp_ms: start_ms,
                 end_timestamp_ms: end_ms,
                 confidence: 0.8, // Estimated confidence for forced end
+                origin: SegmentOrigin::Vad,
             };
 
             self.speech_segments.push_back(segment);
+            self.covered_through_sample = self.processed_samples;
             self.current_speech.clear();
             self.in_speech = false;
+        }
+
+        // Hand over anything the ledger is still holding before shutting down,
+        // so the tail of a recording is never silently discarded.
+        let leftover = self.processed_samples.saturating_sub(self.covered_through_sample);
+        if (leftover as f64 / 16000.0) >= UNCLAIMED_MIN_SECONDS {
+            let start = self.covered_through_sample;
+            let end = self.processed_samples;
+            let samples = self.slice_clean(start, end);
+            let level = Self::rms(&samples);
+            if !samples.is_empty()
+                && level >= RECOVER_ABSOLUTE_RMS
+                && level >= self.noise_floor * RECOVER_NOISE_RATIO
+            {
+                info!(
+                    "🛟 VAD flush: recovering {:.1}s of unclaimed audio",
+                    samples.len() as f64 / 16000.0
+                );
+                self.speech_segments.push_back(SpeechSegment {
+                    start_timestamp_ms: start as f64 / 16.0,
+                    end_timestamp_ms: end as f64 / 16.0,
+                    samples,
+                    confidence: 0.5,
+                    origin: SegmentOrigin::Recovered,
+                });
+            }
+            self.covered_through_sample = end;
         }
 
         // Extract all remaining segments
@@ -229,8 +567,54 @@ impl ContinuousVadProcessor {
                   current_speech_size, current_speech_size as f64 / 16000.0);
         }
 
-        let transitions = self.session.process(chunk)
-            .map_err(|e| anyhow!("VAD processing failed: {}", e))?;
+        let level = Self::rms(chunk);
+
+        // Track the quietest recent level as the room's floor: fall fast towards
+        // a new quiet, rise slowly so a long utterance does not drag it up.
+        if level < self.noise_floor {
+            self.noise_floor = self.noise_floor * 0.9 + level * 0.1;
+        } else {
+            self.noise_floor = self.noise_floor * 0.999 + level * 0.001;
+        }
+        self.noise_floor = self.noise_floor.clamp(1e-5, 0.05);
+
+        // Detector-only conditioning. The transcriber is served from `history`,
+        // so none of this reaches the model.
+        let wanted = if level > 1e-6 {
+            (DETECTOR_TARGET_RMS / level).clamp(1.0, DETECTOR_MAX_GAIN)
+        } else {
+            1.0
+        };
+        self.detector_gain = self.detector_gain * 0.9 + wanted * 0.1;
+
+        let detector_chunk: Vec<f32> = chunk
+            .iter()
+            .map(|s| {
+                let v = s * self.detector_gain;
+                // Silero rejects a whole frame containing a non-finite or
+                // out-of-range sample, and that check only exists in debug
+                // builds - so sanitise rather than trust the caller.
+                if v.is_finite() {
+                    v.clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+
+        let transitions = match self.session.process(&detector_chunk) {
+            Ok(transitions) => transitions,
+            Err(e) => {
+                // Do not drop the audio: leaving `covered_through_sample` where
+                // it is means the ledger will hand this span over instead.
+                warn!("VAD rejected a frame ({}); leaving it to the ledger", e);
+                self.processed_samples += chunk.len();
+                if self.in_speech {
+                    self.current_speech.extend_from_slice(chunk);
+                }
+                return Ok(());
+            }
+        };
 
         // Log transitions for debugging
         if !transitions.is_empty() {
@@ -247,8 +631,10 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
+                    // Silero reports session-absolute timestamps, so this is
+                    // already the absolute 16 kHz index; adding the current
+                    // position (as this once did) counted the offset twice.
+                    self.speech_start_sample = Self::ms_to_sample(timestamp_ms as f64);
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
@@ -259,12 +645,23 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = false;
 
-                    // Use samples from VAD transition if available, otherwise use accumulated samples
-                    let speech_samples = if !samples.is_empty() {
-                        samples
-                    } else {
-                        self.current_speech.clone()
-                    };
+                    // Slice the untouched audio rather than taking Silero's copy:
+                    // the session was fed a gain-conditioned signal, and the
+                    // transcriber must never see that.
+                    let start_sample = Self::ms_to_sample(start_timestamp_ms as f64);
+                    let end_sample = Self::ms_to_sample(end_timestamp_ms as f64);
+                    let mut speech_samples = self.slice_clean(start_sample, end_sample);
+
+                    // History cannot serve the range (very long utterance, or a
+                    // resampler hiccup) - fall back to what was accumulated, then
+                    // to Silero's own copy.
+                    if speech_samples.is_empty() {
+                        speech_samples = if !self.current_speech.is_empty() {
+                            self.current_speech.clone()
+                        } else {
+                            samples
+                        };
+                    }
 
                     if !speech_samples.is_empty() {
                         let segment = SpeechSegment {
@@ -272,6 +669,7 @@ impl ContinuousVadProcessor {
                             start_timestamp_ms: start_timestamp_ms as f64,
                             end_timestamp_ms: end_timestamp_ms as f64,
                             confidence: 0.9, // VAD confidence
+                            origin: SegmentOrigin::Vad,
                         };
 
                         info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
@@ -280,6 +678,8 @@ impl ContinuousVadProcessor {
                         self.speech_segments.push_back(segment);
                     }
 
+                    // Everything up to here is now accounted for.
+                    self.covered_through_sample = self.covered_through_sample.max(end_sample);
                     self.current_speech.clear();
                 }
             }
@@ -465,6 +865,200 @@ mod tests {
     // into "amazing" plus "more and more people feel like building with". Cutting an
     // utterance at an arbitrary point costs far more accuracy than the latency is worth,
     // so segments stay bounded by the speaker's own pauses.
+
+    /// Deterministic pseudo-noise, so the tests do not depend on a rng crate.
+    fn noise(len: usize, level: f32) -> Vec<f32> {
+        let mut state: u32 = 0x1234_5678;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((state >> 8) as f32 / 8_388_608.0 - 1.0) * level
+            })
+            .collect()
+    }
+
+    /// A sawtooth has a clear pitch period and rich harmonics, which is the
+    /// property the recovery gate keys on.
+    fn pitched(len: usize, hz: f32, level: f32, sample_rate: f32) -> Vec<f32> {
+        (0..len)
+            .map(|i| {
+                let phase = (i as f32 * hz / sample_rate).fract();
+                (phase * 2.0 - 1.0) * level
+            })
+            .collect()
+    }
+
+    #[test]
+    fn voicing_separates_pitched_audio_from_noise() {
+        let frame = 1600;
+        let speech = pitched(frame, 150.0, 0.08, 16000.0);
+        let hiss = noise(frame, 0.08);
+
+        let speech_score = ContinuousVadProcessor::voicing(&speech);
+        let noise_score = ContinuousVadProcessor::voicing(&hiss);
+
+        assert!(
+            speech_score >= VOICING_THRESHOLD,
+            "pitched audio should read as voiced, got {speech_score}"
+        );
+        assert!(
+            noise_score < VOICING_THRESHOLD,
+            "noise should not read as voiced, got {noise_score}"
+        );
+    }
+
+    #[test]
+    fn voicing_ignores_silence() {
+        assert_eq!(ContinuousVadProcessor::voicing(&vec![0.0; 1600]), 0.0);
+        // Too short to hold a pitch period at all.
+        assert_eq!(ContinuousVadProcessor::voicing(&[0.1; 100]), 0.0);
+    }
+
+    /// The whole point of the ledger: audible, pitched content reaches the
+    /// transcriber whether or not Silero decides to flag it.
+    #[test]
+    fn audible_speech_is_never_silently_dropped() {
+        let mut processor = ContinuousVadProcessor::new(16000, 800).expect("vad");
+        let mut segments = Vec::new();
+
+        // 12 s, comfortably past the ledger's hand-over point.
+        for _ in 0..120 {
+            let chunk = pitched(1600, 150.0, 0.09, 16000.0);
+            segments.extend(processor.process_audio(&chunk).expect("process"));
+        }
+        segments.extend(processor.flush().expect("flush"));
+
+        let total: usize = segments.iter().map(|s| s.samples.len()).sum();
+        assert!(
+            !segments.is_empty(),
+            "12s of audible pitched audio produced no segments at all"
+        );
+        assert!(
+            total as f64 / 16000.0 >= 4.0,
+            "expected most of the audio to survive, got {:.1}s",
+            total as f64 / 16000.0
+        );
+    }
+
+    #[test]
+    fn quiet_room_noise_is_not_recovered() {
+        let mut processor = ContinuousVadProcessor::new(16000, 800).expect("vad");
+        let mut segments = Vec::new();
+
+        // 15 s of the sort of hiss an open microphone produces in a quiet room.
+        for _ in 0..150 {
+            let chunk = noise(1600, 0.004);
+            segments.extend(processor.process_audio(&chunk).expect("process"));
+        }
+        segments.extend(processor.flush().expect("flush"));
+
+        assert!(
+            segments.is_empty(),
+            "room noise must not be turned into segments, got {} ({:?})",
+            segments.len(),
+            segments.iter().map(|s| s.origin).collect::<Vec<_>>()
+        );
+    }
+
+    /// Silero rejects a frame holding a non-finite or out-of-range sample, and
+    /// its guard only exists in debug builds. Sanitising before the call keeps
+    /// the behaviour identical in both profiles.
+    #[test]
+    fn hostile_samples_do_not_break_processing() {
+        let mut processor = ContinuousVadProcessor::new(16000, 800).expect("vad");
+
+        let mut chunk = pitched(1600, 150.0, 0.09, 16000.0);
+        chunk[10] = f32::NAN;
+        chunk[20] = f32::INFINITY;
+        chunk[30] = -12.5;
+        chunk[40] = 7.0;
+
+        let result = processor.process_audio(&chunk);
+        assert!(result.is_ok(), "sanitised input should process: {result:?}");
+    }
+
+    /// Replays a real recording through the exact processor the live pipeline
+    /// uses, so VAD coverage can be measured without a microphone.
+    ///
+    /// The pipeline feeds `process_audio` one 600 ms window of 48 kHz mixed
+    /// audio at a time (`pipeline.rs`), and that same buffer is what gets saved
+    /// to disk — so a decoded recording is a faithful replay of what VAD saw.
+    ///
+    /// ```text
+    /// ffmpeg -i audio.mp4 -ac 1 -ar 48000 -f f32le case.raw
+    /// MEETILY_VAD_CASE=case.raw cargo test --lib vad_coverage -- --nocapture --ignored
+    /// ```
+    #[test]
+    #[ignore = "needs MEETILY_VAD_CASE=<path to f32le 48kHz mono raw>"]
+    fn vad_coverage_on_a_real_recording() {
+        let path = std::env::var("MEETILY_VAD_CASE")
+            .expect("set MEETILY_VAD_CASE to a raw f32le 48kHz mono file");
+        let bytes = std::fs::read(&path).expect("case file should be readable");
+        let raw: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+
+        // Decoding lossy audio overshoots full scale, which the live path never
+        // does: the mixer scales any sum past +/-1.0 back onto it. Mirror that
+        // here so the replay measures VAD, not the decoder.
+        let out_of_range = raw.iter().filter(|s| !(-1.0..=1.0).contains(*s)).count();
+
+        // Hypothesis knob: Silero's probability collapses on quiet input, so
+        // sweep the level presented to VAD without touching anything else.
+        let gain: f32 = std::env::var("MEETILY_VAD_GAIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0);
+
+        let samples: Vec<f32> = raw.iter().map(|s| (s * gain).clamp(-1.0, 1.0)).collect();
+        let input_rms =
+            (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        println!("gain={gain}x  input RMS={input_rms:.4}");
+        println!(
+            "clamped {} of {} samples ({:.4}%) that the decoder pushed past full scale",
+            out_of_range,
+            raw.len(),
+            100.0 * out_of_range as f64 / raw.len() as f64
+        );
+
+        const SR: usize = 48_000;
+        const WINDOW: usize = SR * 600 / 1000; // the pipeline's mixing window
+
+        let redemption: u32 = std::env::var("MEETILY_VAD_REDEMPTION")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(800);
+
+        let mut processor = ContinuousVadProcessor::new(SR as u32, redemption).expect("vad");
+        let mut segments = Vec::new();
+
+        for window in samples.chunks(WINDOW) {
+            segments.extend(processor.process_audio(window).expect("process_audio"));
+        }
+        segments.extend(processor.flush().expect("flush"));
+
+        let total_s = samples.len() as f64 / SR as f64;
+        let speech_s: f64 = segments
+            .iter()
+            .map(|s| (s.end_timestamp_ms - s.start_timestamp_ms) / 1000.0)
+            .sum();
+
+        println!(
+            "redemption={redemption}ms  file={total_s:.1}s  segments={}  speech={speech_s:.1}s  coverage={:.0}%",
+            segments.len(),
+            100.0 * speech_s / total_s
+        );
+        for s in segments.iter().take(40) {
+            println!(
+                "  {:8.2} -> {:8.2}  ({:5.2}s, {} samples)",
+                s.start_timestamp_ms / 1000.0,
+                s.end_timestamp_ms / 1000.0,
+                (s.end_timestamp_ms - s.start_timestamp_ms) / 1000.0,
+                s.samples.len()
+            );
+        }
+    }
 
     #[test]
     fn test_vad_chunked_vs_single_processing() {

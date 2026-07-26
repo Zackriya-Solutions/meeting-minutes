@@ -143,6 +143,7 @@ pub(crate) fn split_segment_at_silence(
                 start_timestamp_ms: chunk_start_ms,
                 end_timestamp_ms: chunk_end_ms,
                 confidence: segment.confidence,
+                origin: segment.origin,
             });
             break;
         }
@@ -201,6 +202,7 @@ pub(crate) fn split_segment_at_silence(
             start_timestamp_ms: chunk_start_ms,
             end_timestamp_ms: chunk_end_ms,
             confidence: segment.confidence,
+            origin: segment.origin,
         });
 
         // Advance position to where the current chunk actually ends
