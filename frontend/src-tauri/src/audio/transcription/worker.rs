@@ -18,6 +18,15 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+/// Whether the engine that ended up loaded decodes a continuous stream.
+///
+/// The pipeline starts before the engine is known, so it cannot decide this itself and
+/// sends both lanes regardless. This lets it skip the work behind the lane nobody is
+/// reading, once the answer exists. Correctness never depends on it - the worker
+/// discards the wrong lane either way - so a stale read costs a little wasted work at
+/// startup and nothing else.
+pub static STREAMING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
@@ -186,11 +195,18 @@ pub fn start_transcription_task<R: Runtime>(
                 // twice.
                 let streaming = engine_clone.supports_streaming();
                 let mut segment = StreamingSegment::default();
+                STREAMING_ACTIVE.store(streaming, Ordering::Relaxed);
                 if streaming {
                     info!(
                         "🌊 Worker {} decoding a continuous stream with {} - VAD segments are pause hints only",
                         worker_id, engine_name
                     );
+
+                    // The sidecar outlives a recording, so without this the first words
+                    // of this meeting continue the last sentence of the previous one.
+                    if let Err(e) = engine_clone.reset_stream().await {
+                        warn!("Worker {}: could not clear decoder state: {}", worker_id, e);
+                    }
                 }
 
                 if initial_model_loaded {

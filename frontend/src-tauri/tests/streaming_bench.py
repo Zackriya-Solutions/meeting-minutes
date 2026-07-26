@@ -42,6 +42,7 @@ import re
 import subprocess
 import sys
 import time
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -177,10 +178,77 @@ class Run:
 
 
 def read_f32(path: Path) -> array.array:
+    """Load audio as mono 16 kHz f32.
+
+    Accepts a headerless f32le fixture or a WAV file. WAV matters because it is what
+    the app itself writes for every recording: after a real session, its own mixed
+    output can be scored here. That is the only way to check the part of the path this
+    harness cannot reach - real devices, real levels, the mixer's ducking - without
+    driving the UI by hand.
+    """
+    if path.suffix.lower() == ".wav":
+        return read_wav(path)
+
     samples = array.array("f")
     data = path.read_bytes()
     samples.frombytes(data[: len(data) - len(data) % 4])
     return samples
+
+
+def read_wav(path: Path) -> array.array:
+    with wave.open(str(path), "rb") as wav:
+        channels, width, rate = wav.getnchannels(), wav.getsampwidth(), wav.getframerate()
+        raw = wav.readframes(wav.getnframes())
+
+    if width == 2:
+        pcm = array.array("h")
+        pcm.frombytes(raw)
+        samples = array.array("f", (s / 32768.0 for s in pcm))
+    elif width == 4:
+        # Could be f32 or s32; the app writes f32, and s32 samples read as f32 would be
+        # wildly out of range, so the range is what tells them apart.
+        samples = array.array("f")
+        samples.frombytes(raw)
+        if any(abs(s) > 8.0 for s in samples[:4096]):
+            pcm = array.array("i")
+            pcm.frombytes(raw)
+            samples = array.array("f", (s / 2147483648.0 for s in pcm))
+    else:
+        raise RuntimeError(f"{path}: {width * 8}-bit WAV is not supported")
+
+    if channels > 1:
+        samples = array.array(
+            "f",
+            (
+                sum(samples[i : i + channels]) / channels
+                for i in range(0, len(samples) - channels + 1, channels)
+            ),
+        )
+
+    if rate != SAMPLE_RATE:
+        samples = resample_linear(samples, rate, SAMPLE_RATE)
+
+    return samples
+
+
+def resample_linear(samples: array.array, source_rate: int, target_rate: int) -> array.array:
+    """Good enough to score a recording, and not what the app uses.
+
+    The pipeline resamples with a band-limited sinc filter; this is linear
+    interpolation, which adds a little aliasing. It exists so a WAV at any rate can be
+    fed in, not to reproduce the app's own resampling - the Rust end-to-end test covers
+    that path exactly.
+    """
+    ratio = source_rate / target_rate
+    count = int(len(samples) / ratio)
+    out = array.array("f", bytes(4 * count))
+    for i in range(count):
+        position = i * ratio
+        left = int(position)
+        right = min(left + 1, len(samples) - 1)
+        weight = position - left
+        out[i] = samples[left] * (1.0 - weight) + samples[right] * weight
+    return out
 
 
 def pad(samples: array.array) -> array.array:
@@ -364,13 +432,26 @@ def report(run: Run, reference: str) -> dict:
         "commits_with_text": sum(1 for c in run.commits if c.text.strip()),
         "commits_total": len(run.commits),
         **counts,
+        # When each commit landed, so a long gap can be looked at rather than guessed
+        # at. A gap that lines up with silence in the audio is content; gaps that recur
+        # on a fixed period are the decoder stalling.
+        "timeline": [
+            {"audio_s": round(c.audio_s, 2), "text": c.text}
+            for c in run.commits
+            if c.text.strip()
+        ],
         "transcript": run.transcript,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--audio", required=True, type=Path, help="f32le mono 16 kHz raw")
+    parser.add_argument(
+        "--audio",
+        required=True,
+        type=Path,
+        help="f32le mono 16 kHz raw, or a WAV (including one the app recorded)",
+    )
     parser.add_argument("--reference", type=Path, help="reference transcript, plain text")
     parser.add_argument(
         "--strategy",

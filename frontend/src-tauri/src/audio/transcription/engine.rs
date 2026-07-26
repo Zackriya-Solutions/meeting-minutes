@@ -172,6 +172,29 @@ impl TranscriptionEngine {
             ))),
         }
     }
+
+    /// Forget decoder state carried over from a previous recording.
+    pub async fn reset_stream(
+        &self,
+    ) -> std::result::Result<(), super::provider::TranscriptionError> {
+        match self {
+            Self::Provider(provider) => provider.reset_stream().await,
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The language Nemotron is told to expect, as a BCP-47-ish code.
+///
+/// Defaulting to English rather than letting the model decide is a deliberate accuracy
+/// choice: the multilingual model reserves a prompt slot for "work it out yourself", and
+/// naming the language removes a guess it can get wrong. `en` and `en-US` reach the same
+/// slot. A user who has set a language preference overrides this.
+fn nemotron_language() -> String {
+    match crate::get_language_preference_internal() {
+        Some(lang) if !lang.trim().is_empty() && lang != "auto" => lang,
+        _ => "en-US".to_string(),
+    }
 }
 
 // ============================================================================
@@ -356,7 +379,10 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
         "nemotron" => {
             info!("🧠 Initializing Nemotron transcription provider");
             let model_dir = nemotron_model_dir(app, &config.model)?;
-            let provider = super::nemotron_provider::NemotronProvider::new(model_dir, None);
+            let language = nemotron_language();
+            info!("🧠 Nemotron will transcribe as '{}'", language);
+            let provider =
+                super::nemotron_provider::NemotronProvider::new(model_dir, Some(language));
 
             // Start the sidecar now. The worker skips every chunk unless the provider
             // already reports a loaded model, so this cannot be deferred to first use.

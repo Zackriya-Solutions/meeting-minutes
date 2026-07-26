@@ -31,6 +31,8 @@ enum Request<'a> {
     /// One step of a continuous stream. The reply is not trimmed - see
     /// `TranscriptionProvider::transcribe_step`.
     TranscribeStream { audio_b64: String },
+    /// Clear decoder state so the next step starts a fresh session.
+    Reset,
     Shutdown,
 }
 
@@ -291,6 +293,26 @@ impl TranscriptionProvider for NemotronProvider {
 
     fn supports_streaming(&self) -> bool {
         true
+    }
+
+    async fn reset_stream(&self) -> std::result::Result<(), TranscriptionError> {
+        let mut guard = self.sidecar.lock().await;
+        // Nothing running means nothing to forget: the next start is already fresh.
+        let sidecar = match guard.as_mut() {
+            Some(sidecar) => sidecar,
+            None => return Ok(()),
+        };
+
+        match Self::exchange(sidecar, &Request::Reset) {
+            Ok(Response::Error { message }) => Err(TranscriptionError::EngineFailed(message)),
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Dropping the process is a heavier reset that reaches the same state.
+                warn!("nemotron-helper reset failed, restarting it instead: {}", e);
+                *guard = None;
+                Ok(())
+            }
+        }
     }
 
     async fn transcribe_step(

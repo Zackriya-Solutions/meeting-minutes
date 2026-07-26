@@ -104,6 +104,18 @@ pub trait TranscriptionProvider: Send + Sync {
             self.provider_name()
         )))
     }
+
+    /// Discard everything the decoder remembers, so the next step starts fresh.
+    ///
+    /// State is deliberately kept *within* a recording - that continuity is what lets
+    /// a word split across two steps come out whole. But it must not survive between
+    /// recordings: without this the first words of a meeting are conditioned on the
+    /// last sentence of the previous one, which is a different conversation.
+    ///
+    /// A provider that does not stream has no state to clear and does nothing.
+    async fn reset_stream(&self) -> std::result::Result<(), TranscriptionError> {
+        Ok(())
+    }
 }
 
 /// Samples in one streaming step: 560 ms at 16 kHz.
