@@ -77,3 +77,5 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+# Local toolchain configuration (machine-specific bindgen include paths)
+.cargo/config.toml
