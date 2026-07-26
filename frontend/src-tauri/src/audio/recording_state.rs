@@ -29,6 +29,15 @@ pub struct AudioChunk {
     /// Ties the partials and the final chunk of one utterance together so the UI
     /// replaces a line instead of appending a new one. `None` outside VAD speech.
     pub utterance_id: Option<u64>,
+    /// One step of a continuous stream, to be decoded by
+    /// `TranscriptionProvider::transcribe_step` rather than as a whole utterance.
+    ///
+    /// A step chunk carries *all* the audio for its slice of time, speech or not -
+    /// it has not been through VAD. That is the point: VAD forwarded only about two
+    /// thirds of the audio, so a third of the words never reached the model, and
+    /// spans too short for the encoder to emit anything came back empty. A
+    /// streaming model needs neither filter.
+    pub is_stream_step: bool,
 }
 
 impl AudioChunk {
@@ -48,6 +57,24 @@ impl AudioChunk {
             device_type,
             is_partial: false,
             utterance_id: None,
+            is_stream_step: false,
+        }
+    }
+
+    /// One 560 ms step of the continuous stream, straight off the mixer.
+    ///
+    /// `timestamp` is where the step *starts*, in seconds from the beginning of the
+    /// recording, so committed text can be placed on the timeline without VAD.
+    pub fn stream_step(data: Vec<f32>, sample_rate: u32, timestamp: f64, chunk_id: u64) -> Self {
+        Self {
+            data,
+            sample_rate,
+            timestamp,
+            chunk_id,
+            device_type: DeviceType::Microphone, // mixed audio, not a real device
+            is_partial: false,
+            utterance_id: None,
+            is_stream_step: true,
         }
     }
 }

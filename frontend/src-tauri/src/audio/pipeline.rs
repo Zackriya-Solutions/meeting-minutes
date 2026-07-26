@@ -12,6 +12,7 @@ use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
+use super::transcription::provider::STREAM_STEP_SAMPLES;
 
 /// How much silence VAD waits for before deciding an utterance has ended.
 ///
@@ -22,6 +23,20 @@ use super::vad::{ContinuousVadProcessor};
 /// Raising this delays a segment by the same amount, so it is set to the smallest value
 /// measured to keep sentences intact rather than the largest one that works.
 const PIPELINE_VAD_REDEMPTION_MS: u32 = 800;
+
+/// Take every complete step out of `accumulator`, leaving the remainder for next time.
+///
+/// Every returned buffer is exactly [`STREAM_STEP_SAMPLES`] long and what stays behind
+/// is always shorter than that. Both halves matter: the encoder advances by one step per
+/// call regardless of how much it is handed, so a longer buffer loses the excess with no
+/// error, and a shorter one decodes to nothing while its audio waits.
+fn take_whole_steps(accumulator: &mut Vec<f32>) -> Vec<Vec<f32>> {
+    let mut steps = Vec::new();
+    while accumulator.len() >= STREAM_STEP_SAMPLES {
+        steps.push(accumulator.drain(..STREAM_STEP_SAMPLES).collect());
+    }
+    steps
+}
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -717,6 +732,16 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    /// 16 kHz audio waiting to complete the next streaming step.
+    ///
+    /// Never longer than one step: a step is dispatched the moment it fills. The
+    /// encoder on the far side advances by exactly one step per call and buries
+    /// anything extra without catching up, so over-filling this is silent audio
+    /// loss rather than a visible error.
+    stream_accumulator: Vec<f32>,
+    /// Absolute 16 kHz sample index where `stream_accumulator[0]` sits, which is
+    /// what puts committed text on the recording's timeline without consulting VAD.
+    stream_position: usize,
 }
 
 impl AudioPipeline {
@@ -780,6 +805,36 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            stream_accumulator: Vec::with_capacity(STREAM_STEP_SAMPLES),
+            stream_position: 0,
+        }
+    }
+
+    /// Hand every completed 560 ms step of the mixed stream to the transcriber.
+    ///
+    /// This runs unconditionally, alongside VAD rather than after it, because the
+    /// pipeline starts before the engine has finished loading and so cannot know
+    /// whether a streaming engine is on the other end. A worker driving Whisper
+    /// discards these; a worker driving Nemotron discards the VAD segments instead.
+    ///
+    /// Sending audio VAD rejected is the entire point. VAD forwarded about two
+    /// thirds of it, and spans shorter than one step came back empty, which together
+    /// account for the missing words in the live transcript.
+    fn dispatch_stream_steps(&mut self) {
+        self.stream_accumulator
+            .extend_from_slice(&self.vad_processor.drain_resampled_16k());
+
+        for step in take_whole_steps(&mut self.stream_accumulator) {
+            let starts_at = self.stream_position as f64 / 16_000.0;
+            self.stream_position += step.len();
+
+            let chunk = AudioChunk::stream_step(step, 16_000, starts_at, self.chunk_id_counter);
+            self.chunk_id_counter += 1;
+
+            if let Err(e) = self.transcription_sender.send(chunk) {
+                warn!("Failed to send streaming step: {}", e);
+                return;
+            }
         }
     }
 
@@ -835,6 +890,7 @@ impl AudioPipeline {
             device_type: DeviceType::Microphone,
             is_partial: true,
             utterance_id: Some(self.utterance_id_counter),
+            is_stream_step: false,
         };
 
         if let Err(e) = self.transcription_sender.send(partial) {
@@ -928,6 +984,7 @@ impl AudioPipeline {
                                                 device_type: DeviceType::Microphone,  // Mixed audio
                                                 is_partial: false,
                                                 utterance_id: Some(self.utterance_id_counter),
+                                                is_stream_step: false,
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -950,12 +1007,19 @@ impl AudioPipeline {
                                     self.emit_partial_if_due();
                                 }
                                 Err(e) => {
+                                    // Fall through to dispatch_stream_steps below: a
+                                    // detector failure must not stop the stream, which
+                                    // does not depend on VAD's verdict at all.
                                     // The processor keeps unflagged audio in its
                                     // ledger, so a failure here delays the span
                                     // rather than destroying it.
                                     warn!("⚠️ VAD error (audio retained for recovery): {}", e);
                                 }
                             }
+
+                            // STEP 3b: Hand the same audio to the streaming lane,
+                            // whole and unfiltered.
+                            self.dispatch_stream_steps();
 
                             // STEP 4: Send mixed audio for recording (WAV file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
@@ -992,6 +1056,24 @@ impl AudioPipeline {
     fn flush_remaining_audio(&mut self) -> Result<()> {
         info!("Flushing remaining audio from pipeline (processed {} chunks)", self.processed_chunks);
 
+        // The streaming lane first, and pad the tail rather than drop it. A step must
+        // be exactly one step long, so the last few hundred milliseconds of a
+        // recording would otherwise never be decoded - and that is where "stop" lands,
+        // which is exactly when the speaker was mid-word.
+        self.dispatch_stream_steps();
+        if !self.stream_accumulator.is_empty() {
+            let mut tail = std::mem::take(&mut self.stream_accumulator);
+            let starts_at = self.stream_position as f64 / 16_000.0;
+            self.stream_position += tail.len();
+            tail.resize(STREAM_STEP_SAMPLES, 0.0);
+
+            let chunk = AudioChunk::stream_step(tail, 16_000, starts_at, self.chunk_id_counter);
+            self.chunk_id_counter += 1;
+            if let Err(e) = self.transcription_sender.send(chunk) {
+                warn!("Failed to send the final streaming step: {}", e);
+            }
+        }
+
         // Flush any remaining audio from VAD processor and send segments to transcription
         match self.vad_processor.flush() {
             Ok(final_segments) => {
@@ -1011,6 +1093,7 @@ impl AudioPipeline {
                             device_type: DeviceType::Microphone,
                             is_partial: false,
                             utterance_id: Some(self.utterance_id_counter),
+                            is_stream_step: false,
                         };
 
                         if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -1196,5 +1279,223 @@ mod tests {
             "redemption of {}ms cuts speech at pauses inside a sentence",
             PIPELINE_VAD_REDEMPTION_MS
         );
+    }
+
+    /// A step is 560 ms at 16 kHz because that is what the encoder consumes per call.
+    #[test]
+    fn a_stream_step_is_560ms_at_16khz() {
+        assert_eq!(STREAM_STEP_SAMPLES, 560 * 16_000 / 1000);
+    }
+
+    /// The invariant that separates 5.9% word error rate from 62.6%.
+    ///
+    /// Handing the encoder more than one step per call does not fail: it decodes the
+    /// first step, buffers the rest and never catches up. So the slicing has to be exact
+    /// in both directions - every dispatched buffer a whole step, every partial step held
+    /// back rather than sent short.
+    #[test]
+    fn steps_are_taken_whole_and_the_remainder_is_kept() {
+        let mut accumulator: Vec<f32> = (0..STREAM_STEP_SAMPLES * 2 + 100)
+            .map(|i| i as f32)
+            .collect();
+
+        let steps = take_whole_steps(&mut accumulator);
+
+        assert_eq!(steps.len(), 2, "two whole steps were available");
+        assert!(
+            steps.iter().all(|s| s.len() == STREAM_STEP_SAMPLES),
+            "a step must never be sent short or long"
+        );
+        assert_eq!(accumulator.len(), 100, "the partial step waits for more audio");
+
+        // Contiguous and in order: a gap here would be lost audio, an overlap would be
+        // words decoded twice.
+        assert_eq!(steps[0][0], 0.0);
+        assert_eq!(steps[1][0], STREAM_STEP_SAMPLES as f32);
+        assert_eq!(accumulator[0], (STREAM_STEP_SAMPLES * 2) as f32);
+    }
+
+    /// Nothing is emitted until a whole step exists, and nothing is consumed either.
+    #[test]
+    fn a_partial_step_is_never_dispatched() {
+        let mut accumulator: Vec<f32> = vec![1.0; STREAM_STEP_SAMPLES - 1];
+        assert!(take_whole_steps(&mut accumulator).is_empty());
+        assert_eq!(accumulator.len(), STREAM_STEP_SAMPLES - 1);
+    }
+
+    /// Word error rate against a reference, on normalised words.
+    ///
+    /// Folds case, punctuation, digits-versus-words and casual spellings, matching
+    /// `tests/streaming_bench.py` so the two harnesses produce comparable numbers.
+    /// None of those differences are mishearings, and charging for them would mean
+    /// tuning the transcript's formatter instead of its accuracy.
+    #[cfg(windows)]
+    fn word_error_rate(reference: &str, hypothesis: &str) -> f64 {
+        fn words(text: &str) -> Vec<String> {
+            const SPELLED: [&str; 20] = [
+                "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+                "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+                "sixteen", "seventeen", "eighteen", "nineteen",
+            ];
+            const COLLOQUIAL: [(&str, &str); 9] = [
+                ("gonna", "going to"),
+                ("wanna", "want to"),
+                ("gotta", "got to"),
+                ("kinda", "kind of"),
+                ("sorta", "sort of"),
+                ("cuz", "because"),
+                ("yep", "yeah"),
+                ("yup", "yeah"),
+                ("ok", "okay"),
+            ];
+
+            text.to_lowercase()
+                .replace(">>", " ")
+                .replace('-', " ")
+                .split(|c: char| !c.is_ascii_alphanumeric() && c != '\'')
+                .filter(|w| !w.is_empty())
+                .flat_map(|w| {
+                    let expanded = match COLLOQUIAL.iter().find(|(from, _)| *from == w) {
+                        Some((_, to)) => to.to_string(),
+                        None => match w.parse::<usize>() {
+                            Ok(n) if n < SPELLED.len() => SPELLED[n].to_string(),
+                            _ => w.to_string(),
+                        },
+                    };
+                    expanded
+                        .split(' ')
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        }
+
+        let (reference, hypothesis) = (words(reference), words(hypothesis));
+        if reference.is_empty() {
+            return f64::NAN;
+        }
+
+        let mut row: Vec<usize> = (0..=hypothesis.len()).collect();
+        for (i, r) in reference.iter().enumerate() {
+            let mut next = vec![i + 1];
+            for (j, h) in hypothesis.iter().enumerate() {
+                let cost = if r == h { 0 } else { 1 };
+                next.push(
+                    (row[j] + cost)
+                        .min(row[j + 1] + 1)
+                        .min(next[j] + 1),
+                );
+            }
+            row = next;
+        }
+
+        row[hypothesis.len()] as f64 / reference.len() as f64
+    }
+
+    /// End-to-end offline check of the streaming lane, through the real components.
+    ///
+    /// `tests/streaming_bench.py` proves the *model* can stream; this proves the
+    /// *pipeline* feeds it correctly. It walks the same path a recording does - the VAD
+    /// processor's 48 kHz resampler, the step accumulator, the provider - and differs
+    /// only in that the audio comes from a file instead of a device. That makes it the
+    /// thing to run after touching any of them, instead of launching the app.
+    ///
+    /// Needs the Nemotron model and the staged sidecar, so it is ignored by default:
+    ///
+    ///   $env:MEETILY_STREAM_CASE="tests/fixtures/watchshop_60s_48k.f32"
+    ///   $env:MEETILY_STREAM_REFERENCE="tests/fixtures/watchshop_60s_reference.txt"
+    ///   cargo test --features cuda --lib streams_a_real_recording -- --ignored --nocapture
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "needs MEETILY_STREAM_CASE plus the Nemotron model"]
+    async fn streams_a_real_recording_without_losing_words() {
+        use crate::audio::transcription::nemotron_provider::{
+            NemotronProvider, DEFAULT_NEMOTRON_MODEL,
+        };
+        use crate::audio::transcription::provider::TranscriptionProvider;
+        use std::path::PathBuf;
+
+        let case = std::env::var("MEETILY_STREAM_CASE")
+            .expect("set MEETILY_STREAM_CASE to a raw f32le 48 kHz mono file");
+        let bytes = std::fs::read(&case).unwrap_or_else(|e| panic!("{case}: {e}"));
+        let samples: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        let audio_seconds = samples.len() as f64 / 48_000.0;
+
+        std::env::set_var(
+            "MEETILY_NEMOTRON_HELPER",
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("binaries")
+                .join("nemotron-helper-x86_64-pc-windows-msvc.exe"),
+        );
+        let model_dir = PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.meetily.ai")
+            .join("models")
+            .join("nemotron")
+            .join(DEFAULT_NEMOTRON_MODEL);
+        let provider = NemotronProvider::new(model_dir, None);
+        provider.ensure_started().await.expect("sidecar should start");
+
+        let mut vad = ContinuousVadProcessor::new(48_000, PIPELINE_VAD_REDEMPTION_MS)
+            .expect("VAD processor");
+        let mut accumulator: Vec<f32> = Vec::new();
+        let mut position = 0usize;
+
+        let mut transcript = String::new();
+        let mut first_word_at: Option<f64> = None;
+        let mut last_word_at = 0.0f64;
+        let mut worst_gap = 0.0f64;
+        let began = std::time::Instant::now();
+
+        // 100 ms windows, the size the mixer hands over during a real recording.
+        for window in samples.chunks(4_800) {
+            let _ = vad.process_audio(window);
+            accumulator.extend_from_slice(&vad.drain_resampled_16k());
+
+            for step in take_whole_steps(&mut accumulator) {
+                let at = (position + step.len()) as f64 / 16_000.0;
+                position += step.len();
+
+                let piece = provider
+                    .transcribe_step(step)
+                    .await
+                    .expect("a whole step must be accepted");
+
+                if !piece.trim().is_empty() {
+                    transcript.push_str(&piece);
+                    first_word_at.get_or_insert(at);
+                    worst_gap = worst_gap.max(at - last_word_at);
+                    last_word_at = at;
+                }
+            }
+        }
+        worst_gap = worst_gap.max(audio_seconds - last_word_at);
+
+        let compute_seconds = began.elapsed().as_secs_f64();
+        let rtf = compute_seconds / audio_seconds;
+        let first = first_word_at.expect("the stream committed no text at all");
+
+        println!("transcript: {}", transcript.trim());
+        println!(
+            "audio {audio_seconds:.1}s  rtf {rtf:.2}  first word {first:.1}s  worst gap {worst_gap:.1}s"
+        );
+
+        // Thresholds from the design document. They are deliberately a little looser
+        // than the measured values so ordinary variation does not fail the build, but
+        // tight enough that the failure this change fixes cannot come back unnoticed:
+        // before it, the first commit landed after Stop and the worst gap was the whole
+        // recording.
+        assert!(first <= 2.0, "first committed word took {first:.1}s");
+        assert!(worst_gap <= 6.0, "went {worst_gap:.1}s without committing text");
+        assert!(rtf <= 0.5, "real-time factor {rtf:.2} leaves no headroom");
+
+        if let Ok(path) = std::env::var("MEETILY_STREAM_REFERENCE") {
+            let reference = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+            let wer = word_error_rate(&reference, &transcript);
+            println!("wer {:.1}%", wer * 100.0);
+            assert!(wer <= 0.065, "word error rate {:.1}%", wer * 100.0);
+        }
     }
 }

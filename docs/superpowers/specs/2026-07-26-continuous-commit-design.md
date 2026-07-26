@@ -201,8 +201,40 @@ Concretely:
 
 ### Implementation, file by file
 
-Not yet applied. Nothing below has been written; the harness, the sidecar's
-`transcribe_stream` and this document are all that landed.
+Applied. Measured end to end through the real components — the VAD processor's
+48 kHz resampler, the step accumulator, the provider, the sidecar — by
+`streams_a_real_recording_without_losing_words` in `pipeline.rs`:
+
+| metric | target | measured |
+|---|---|---|
+| WER on the 60 s case | ≤ 6.5% | **5.9%** |
+| first committed word | ≤ 2.0 s | **1.1 s** |
+| worst gap between commits | ≤ 6.0 s | **5.6 s** |
+| RTF | ≤ 0.5 | **0.28** |
+
+5.9% is the one-shot ceiling exactly, so routing the audio through mixing,
+resampling and 107 separate decode calls costs nothing at all.
+
+```bash
+cd frontend/src-tauri
+$env:MEETILY_STREAM_CASE="tests/fixtures/watchshop_60s_48k.f32"
+$env:MEETILY_STREAM_REFERENCE="tests/fixtures/watchshop_60s_reference.txt"
+cargo test --features cuda --lib streams_a_real_recording -- --ignored --nocapture
+```
+
+Two deliberate departures from the plan below:
+
+- **The pipeline sends both lanes; the worker picks one.** The plan assumed the
+  pipeline could know whether a streaming engine was loaded. It cannot — it
+  starts first. Rather than a process-global flag with a startup race, every
+  window goes out as both VAD segments and stream steps, and
+  `TranscriptionEngine::supports_streaming` decides which the worker reads. This
+  also turns the VAD segment into something useful on the streaming path: its
+  arrival *is* the "speaker paused here" signal that closes a paragraph.
+- **`emit_partial_if_due` was kept, not deleted.** It is the only live text a
+  Whisper user gets, and Whisper genuinely cannot stream. On the streaming path
+  the worker discards its output, so the 15 s cliff is gone where it mattered.
+  The cost is a buffer clone every 2 s that nobody reads when Nemotron is active.
 
 1. `audio/transcription/provider.rs:50` — add two methods to
    `TranscriptionProvider`, both defaulted so Whisper and Parakeet need no edit:

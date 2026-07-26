@@ -145,6 +145,33 @@ impl TranscriptionEngine {
             Self::Provider(provider) => provider.provider_name(),
         }
     }
+
+    /// Whether this engine decodes a continuous stream one step at a time.
+    ///
+    /// The pipeline sends both VAD segments and stream steps without knowing which
+    /// engine is running - it starts before the engine finishes loading, so it
+    /// cannot know. This is what the worker uses to pick a lane and discard the
+    /// other. Whisper and Parakeet answer `false`: both need whole utterances.
+    pub fn supports_streaming(&self) -> bool {
+        match self {
+            Self::Whisper(_) | Self::Parakeet(_) => false,
+            Self::Provider(provider) => provider.supports_streaming(),
+        }
+    }
+
+    /// Decode one streaming step. Only meaningful when [`Self::supports_streaming`].
+    pub async fn transcribe_step(
+        &self,
+        audio: Vec<f32>,
+    ) -> std::result::Result<String, super::provider::TranscriptionError> {
+        match self {
+            Self::Provider(provider) => provider.transcribe_step(audio).await,
+            _ => Err(super::provider::TranscriptionError::EngineFailed(format!(
+                "{} does not decode streams a step at a time",
+                self.provider_name()
+            ))),
+        }
+    }
 }
 
 // ============================================================================

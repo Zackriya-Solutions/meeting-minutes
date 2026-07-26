@@ -70,4 +70,45 @@ pub trait TranscriptionProvider: Send + Sync {
 
     /// Get the provider name (for logging/debugging)
     fn provider_name(&self) -> &'static str;
+
+    /// Whether this provider decodes a continuous stream one step at a time.
+    ///
+    /// A streaming provider carries encoder state across steps, so the pipeline can
+    /// hand it every sample as it arrives and get text back without waiting for the
+    /// speaker to pause. A provider that answers `false` needs whole utterances,
+    /// which is why VAD segmentation still exists.
+    fn supports_streaming(&self) -> bool {
+        false
+    }
+
+    /// Decode exactly one step of a continuous stream.
+    ///
+    /// `audio` must be exactly [`STREAM_STEP_SAMPLES`] long. This is a hard
+    /// requirement, not a hint: the underlying encoder advances its cursor by one
+    /// step per call and buffers anything beyond that without ever catching up, so
+    /// a longer buffer loses audio silently. Measured cost of getting this wrong:
+    /// 62.6% word error rate against 5.9% when the size is right.
+    ///
+    /// The returned piece is **verbatim** - leading and trailing spaces are
+    /// significant, because they are what marks the start of a word. Callers
+    /// concatenate pieces with nothing between them and trim once at the end.
+    /// An empty piece is normal and means the step decoded to nothing, which is
+    /// what silence produces.
+    async fn transcribe_step(
+        &self,
+        audio: Vec<f32>,
+    ) -> std::result::Result<String, TranscriptionError> {
+        let _ = audio;
+        Err(TranscriptionError::EngineFailed(format!(
+            "{} does not decode streams a step at a time",
+            self.provider_name()
+        )))
+    }
 }
+
+/// Samples in one streaming step: 560 ms at 16 kHz.
+///
+/// Fixed by the model, not chosen: Nemotron's cache-aware encoder consumes 56 mel
+/// frames per step at a 160-sample hop. Feeding a different amount is the audio
+/// loss described on [`TranscriptionProvider::transcribe_step`].
+pub const STREAM_STEP_SAMPLES: usize = 8_960;

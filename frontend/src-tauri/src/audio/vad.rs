@@ -84,6 +84,14 @@ pub struct ContinuousVadProcessor {
     /// Smoothed detector gain, so the level presented to Silero does not jump.
     detector_gain: f32,
 
+    /// Resampled 16 kHz audio not yet handed to a streaming transcriber.
+    ///
+    /// The stream has to be resampled exactly once. Resampling it a second time
+    /// elsewhere would mean a second filter with its own state, and resampling each
+    /// 560 ms step independently would put a boundary artefact at every step. This
+    /// carries the output of the resampler that already ran.
+    resampled_out: Vec<f32>,
+
     // State tracking for smart logging
     last_logged_state: bool,
 }
@@ -176,6 +184,7 @@ impl ContinuousVadProcessor {
             covered_through_sample: 0,
             noise_floor: 0.005,
             detector_gain: 1.0,
+            resampled_out: Vec::new(),
             last_logged_state: false,
         })
     }
@@ -364,6 +373,7 @@ impl ContinuousVadProcessor {
 
         self.history.extend_from_slice(&resampled_audio);
         self.buffer.extend_from_slice(&resampled_audio);
+        self.resampled_out.extend_from_slice(&resampled_audio);
         let mut completed_segments = Vec::new();
 
         // Process complete 30ms chunks (480 samples at 16kHz)
@@ -550,6 +560,16 @@ impl ContinuousVadProcessor {
     /// Speech accumulated since the current utterance began, while the speaker is still
     /// going. `None` once they pause, because the utterance is then delivered as a
     /// completed segment instead.
+    /// Take the 16 kHz audio resampled since the last call.
+    ///
+    /// This is the whole mixed stream, speech and silence alike - deliberately not
+    /// the VAD's opinion of it. VAD forwarded roughly two thirds of the audio, and a
+    /// streaming model does not need the other third withheld: silence decodes to an
+    /// empty piece on its own.
+    pub fn drain_resampled_16k(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.resampled_out)
+    }
+
     pub fn speech_in_progress(&self) -> Option<&[f32]> {
         if self.in_speech && !self.current_speech.is_empty() {
             Some(&self.current_speech)

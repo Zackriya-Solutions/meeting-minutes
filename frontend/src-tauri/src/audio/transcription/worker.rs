@@ -21,7 +21,86 @@ static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
+    // The counter is process-global, so without this the first segment of the second
+    // recording in a session is numbered wherever the first one stopped. Cosmetic, but
+    // it makes transcript ids look like audio went missing when none did.
+    SEQUENCE_COUNTER.store(0, Ordering::SeqCst);
     info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+}
+
+/// Text accumulated from streaming steps that has not been closed into a segment yet.
+///
+/// Every step's piece is added the instant it arrives and goes straight to screen -
+/// that is what puts words up while someone is still talking. What this defers is only
+/// *closing the paragraph*, because a segment per 560 ms step would be 92 bubbles a
+/// minute. The growing text goes out on `transcript-partial` on every step and becomes
+/// a `transcript-update` when the speaker pauses.
+#[derive(Default)]
+struct StreamingSegment {
+    /// Pieces concatenated verbatim. Nemotron marks a word start with a leading
+    /// space, so a separator here would split words and dropping one would fuse them.
+    text: String,
+    started_at: Option<f64>,
+    ends_at: f64,
+    /// Consecutive steps that decoded to nothing, i.e. how long the room has been quiet.
+    silent_steps: u32,
+}
+
+impl StreamingSegment {
+    /// Steps of silence that end a segment. Three steps is ~1.7 s - longer than a
+    /// pause inside a sentence, short enough to feel immediate.
+    const SILENT_STEPS_TO_CLOSE: u32 = 3;
+
+    /// Close a segment that has run this long even without a pause, so a speaker who
+    /// never stops still gets readable paragraphs. Only the *bubble* is cut here; the
+    /// audio was never cut, so no words are at risk.
+    const MAX_SEGMENT_SECONDS: f64 = 30.0;
+
+    fn has_text(&self) -> bool {
+        !self.text.trim().is_empty()
+    }
+
+    fn is_overdue(&self) -> bool {
+        match self.started_at {
+            Some(start) => self.ends_at - start >= Self::MAX_SEGMENT_SECONDS,
+            None => false,
+        }
+    }
+}
+
+/// Emit the accumulated streaming text as a finalised transcript segment.
+fn commit_streaming_segment<R: Runtime>(app: &AppHandle<R>, segment: &mut StreamingSegment) {
+    if !segment.has_text() {
+        *segment = StreamingSegment::default();
+        return;
+    }
+
+    let started_at = segment.started_at.unwrap_or(0.0);
+    let update = TranscriptUpdate {
+        text: segment.text.trim().to_string(),
+        timestamp: format_current_timestamp(),
+        source: "Audio".to_string(),
+        sequence_id: SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst),
+        chunk_start_time: started_at,
+        is_partial: false,
+        // The sidecar does not surface token probabilities, so there is no confidence
+        // to report. This matches what the utterance path already sends for Nemotron.
+        confidence: 0.85,
+        audio_start_time: started_at,
+        audio_end_time: segment.ends_at,
+        duration: (segment.ends_at - started_at).max(0.0),
+    };
+
+    info!(
+        "✅ Committing streamed segment [{:.1}s-{:.1}s]: {}",
+        update.audio_start_time, update.audio_end_time, update.text
+    );
+
+    if let Err(e) = app.emit("transcript-update", &update) {
+        error!("Failed to emit streamed transcript segment: {}", e);
+    }
+
+    *segment = StreamingSegment::default();
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -102,6 +181,18 @@ pub fn start_transcription_task<R: Runtime>(
 
                 let engine_name = engine_clone.provider_name();
 
+                // The pipeline sends both lanes because it starts before the engine is
+                // known. Picking one here is what keeps the same words from arriving
+                // twice.
+                let streaming = engine_clone.supports_streaming();
+                let mut segment = StreamingSegment::default();
+                if streaming {
+                    info!(
+                        "🌊 Worker {} decoding a continuous stream with {} - VAD segments are pause hints only",
+                        worker_id, engine_name
+                    );
+                }
+
                 if initial_model_loaded {
                     info!(
                         "✅ Worker {} pre-validation: {} model '{}' is loaded and ready",
@@ -119,7 +210,7 @@ pub fn start_transcription_task<R: Runtime>(
                     };
 
                     match chunk {
-                        Some(chunk) => {
+                        Some(mut chunk) => {
                             // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
                             // Only log every 10th chunk per worker to reduce I/O overhead
                             let should_log_this_chunk = chunk.chunk_id % 10 == 0;
@@ -145,6 +236,97 @@ pub fn start_transcription_task<R: Runtime>(
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
                             let chunk_is_partial = chunk.is_partial;
                             let chunk_utterance_id = chunk.utterance_id;
+
+                            if chunk.is_stream_step {
+                                if !streaming {
+                                    // Whisper and Parakeet need whole utterances; their
+                                    // text comes from the VAD lane.
+                                    chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                    continue;
+                                }
+
+                                let step = std::mem::take(&mut chunk.data);
+                                match engine_clone.transcribe_step(step).await {
+                                    Ok(piece) => {
+                                        if piece.trim().is_empty() {
+                                            // Silence, or a step the encoder had nothing
+                                            // to say about. Either way it is how a pause
+                                            // is detected without a separate detector.
+                                            if segment.has_text() {
+                                                segment.silent_steps += 1;
+                                                if segment.silent_steps
+                                                    >= StreamingSegment::SILENT_STEPS_TO_CLOSE
+                                                {
+                                                    commit_streaming_segment(
+                                                        &app_clone,
+                                                        &mut segment,
+                                                    );
+                                                }
+                                            }
+                                        } else {
+                                            if segment.started_at.is_none() {
+                                                segment.started_at = Some(chunk_timestamp);
+                                            }
+                                            segment.silent_steps = 0;
+                                            segment.text.push_str(&piece);
+                                            segment.ends_at = chunk_timestamp + chunk_duration;
+
+                                            // Straight to screen, every 560 ms, without
+                                            // waiting for the speaker to stop.
+                                            let _ = app_clone.emit(
+                                                "transcript-partial",
+                                                serde_json::json!({
+                                                    "text": segment.text.trim(),
+                                                    "utterance_id": chunk_utterance_id,
+                                                }),
+                                            );
+
+                                            if !SPEECH_DETECTED_EMITTED
+                                                .swap(true, Ordering::SeqCst)
+                                            {
+                                                let _ = app_clone.emit(
+                                                    "speech-detected",
+                                                    serde_json::json!({
+                                                        "message": "Speech activity detected"
+                                                    }),
+                                                );
+                                            }
+
+                                            if segment.is_overdue() {
+                                                commit_streaming_segment(
+                                                    &app_clone,
+                                                    &mut segment,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        // One lost step is ~560 ms of audio. Say so rather
+                                        // than letting the transcript quietly shorten.
+                                        warn!(
+                                            "Worker {}: streaming step at {:.1}s failed: {}",
+                                            worker_id, chunk_timestamp, e
+                                        );
+                                        let _ = app_clone
+                                            .emit("transcription-warning", e.to_string());
+                                    }
+                                }
+
+                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                continue;
+                            }
+
+                            if streaming {
+                                // A VAD segment on a streaming engine is not audio to
+                                // decode - the stream already carried it. Its arrival
+                                // means the speaker paused here, which is the best place
+                                // to close the paragraph.
+                                if !chunk_is_partial {
+                                    commit_streaming_segment(&app_clone, &mut segment);
+                                }
+                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                continue;
+                            }
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -323,6 +505,10 @@ pub fn start_transcription_task<R: Runtime>(
                                         "👷 Worker {} finishing - all {}/{} chunks processed",
                                         worker_id, final_completed, final_queued
                                     );
+                                    // Whatever was still accumulating when the recording
+                                    // stopped. Without this the last sentence is decoded
+                                    // and then thrown away on the way out.
+                                    commit_streaming_segment(&app_clone, &mut segment);
                                     break;
                                 } else {
                                     warn!("👷 Worker {} detected potential chunk loss: {}/{} completed, waiting...", worker_id, final_completed, final_queued);

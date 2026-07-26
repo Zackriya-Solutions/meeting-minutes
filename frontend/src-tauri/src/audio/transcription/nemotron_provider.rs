@@ -28,6 +28,9 @@ const MIN_SAMPLES: usize = 1600;
 enum Request<'a> {
     Load { model_dir: &'a str, language: Option<&'a str> },
     Transcribe { audio_b64: String },
+    /// One step of a continuous stream. The reply is not trimmed - see
+    /// `TranscriptionProvider::transcribe_step`.
+    TranscribeStream { audio_b64: String },
     Shutdown,
 }
 
@@ -36,6 +39,7 @@ enum Request<'a> {
 enum Response {
     Loaded { provider: String },
     Transcript { text: String },
+    Piece { text: String },
     Pong,
     Goodbye,
     Error { message: String },
@@ -284,6 +288,60 @@ impl TranscriptionProvider for NemotronProvider {
     fn provider_name(&self) -> &'static str {
         "Nemotron 3.5 ASR"
     }
+
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
+    async fn transcribe_step(
+        &self,
+        audio: Vec<f32>,
+    ) -> std::result::Result<String, TranscriptionError> {
+        if audio.len() != super::provider::STREAM_STEP_SAMPLES {
+            // Refused rather than truncated or padded. The encoder advances one step
+            // per call whatever it is handed, so a wrong size does not fail loudly -
+            // it quietly leaves audio behind and every later step inherits the drift.
+            return Err(TranscriptionError::EngineFailed(format!(
+                "a streaming step must be exactly {} samples, got {}",
+                super::provider::STREAM_STEP_SAMPLES,
+                audio.len()
+            )));
+        }
+
+        let mut bytes = Vec::with_capacity(audio.len() * 4);
+        for sample in &audio {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        let mut guard = self.sidecar.lock().await;
+        if guard.is_none() {
+            *guard = Some(self.spawn().map_err(TranscriptionError::EngineFailed)?);
+        }
+
+        let request = Request::TranscribeStream { audio_b64 };
+        let result = {
+            let sidecar = guard.as_mut().expect("sidecar was just created");
+            Self::exchange(sidecar, &request)
+        };
+
+        match result {
+            // Returned untouched: trimming here would erase the leading space that
+            // separates this piece's first word from the previous piece's last.
+            Ok(Response::Piece { text }) => Ok(text),
+            Ok(Response::Error { message }) => Err(TranscriptionError::EngineFailed(message)),
+            Ok(_) => Err(TranscriptionError::EngineFailed(
+                "unexpected reply to a streaming step".to_string(),
+            )),
+            Err(e) => {
+                // The encoder cache dies with the process, so the stream restarts
+                // from scratch rather than resuming mid-sentence.
+                warn!("nemotron-helper streaming call failed, restarting it next time: {}", e);
+                *guard = None;
+                Err(TranscriptionError::EngineFailed(e))
+            }
+        }
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -339,6 +397,42 @@ mod tests {
             provider.is_model_loaded().await,
             "worker.rs gates chunk dispatch on this being true before any transcribe call"
         );
+    }
+
+    /// Feeding the encoder a buffer that is not exactly one step is silent audio loss,
+    /// not a visible failure: it advances by one step per call and buries the rest. So
+    /// the wrong size has to be refused, and refused *before* any I/O - which is why
+    /// this test needs neither the model nor the sidecar.
+    #[tokio::test]
+    async fn a_streaming_step_must_be_exactly_one_step() {
+        let provider = NemotronProvider::new(PathBuf::from("no-such-model"), None);
+
+        for wrong in [
+            super::super::provider::STREAM_STEP_SAMPLES - 1,
+            super::super::provider::STREAM_STEP_SAMPLES + 1,
+            super::super::provider::STREAM_STEP_SAMPLES * 2,
+            0,
+        ] {
+            let error = provider
+                .transcribe_step(vec![0.0; wrong])
+                .await
+                .expect_err("a step of the wrong length must be refused");
+
+            assert!(
+                error.to_string().contains("must be exactly"),
+                "{} samples was rejected for the wrong reason: {}",
+                wrong,
+                error
+            );
+        }
+    }
+
+    /// The pipeline sends steps whatever engine is loaded, so this is what tells the
+    /// worker it may use them.
+    #[test]
+    fn the_provider_advertises_streaming() {
+        let provider = NemotronProvider::new(PathBuf::from("no-such-model"), None);
+        assert!(provider.supports_streaming());
     }
 
     /// A debug build drops nemotron-helper.pdb and nemotron-helper.d beside the binary,
