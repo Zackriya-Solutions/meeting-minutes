@@ -94,16 +94,9 @@ async fn valid(base: &str, token: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Return a valid install JWT and the gateway host that accepted it.
-pub async fn install_token() -> Result<(String, String), String> {
-    let item = entry("install-token")?;
-    if let Ok(token) = item.get_password() {
-        for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
-            if valid(base, &token).await {
-                return Ok((token, base.to_string()));
-            }
-        }
-    }
+/// Register with each gateway in turn, saving the first token that succeeds to the
+/// credential vault (overwriting any token already stored).
+async fn register_and_store(item: &keyring::Entry) -> Result<(String, String), String> {
     let mut last = String::new();
     for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
         match register(base).await {
@@ -115,7 +108,48 @@ pub async fn install_token() -> Result<(String, String), String> {
             Err(e) => last = e,
         }
     }
-    Err(last)
+    Err(if last.is_empty() {
+        "gateway registration failed".to_string()
+    } else {
+        last
+    })
+}
+
+/// Return a valid install JWT and the gateway host that accepted it. Reuses the stored
+/// token while it still validates against `/me`; otherwise mints a fresh one.
+pub async fn install_token() -> Result<(String, String), String> {
+    let item = entry("install-token")?;
+    if let Ok(token) = item.get_password() {
+        for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
+            if valid(base, &token).await {
+                return Ok((token, base.to_string()));
+            }
+        }
+    }
+    register_and_store(&item).await
+}
+
+/// Force a brand-new install JWT, discarding the stored one first. [`install_token`]
+/// self-heals only when the gateway's `/me` check rejects the cached token; a token that
+/// `/me` still accepts but the upstream provider proxy rejects with "invalid or expired
+/// token" leaves summary/chat generation stuck. This gives the Settings screen a manual
+/// recovery path that always re-registers.
+pub async fn force_refresh_token() -> Result<(String, String), String> {
+    let item = entry("install-token")?;
+    register_and_store(&item).await
+}
+
+/// Settings action: mint a fresh managed-gateway token, replacing the stored one. Used to
+/// recover an install that hits "invalid or expired token" when generating a summary
+/// through the managed DeepSeek path. Fails with a clear message on builds that can't use
+/// the managed gateway, or when re-registration fails, rather than the opaque
+/// provider-side error.
+#[tauri::command]
+pub async fn refresh_managed_gateway_token() -> Result<(), String> {
+    if !managed_gateway_supported() {
+        return Err("This build is not configured to use the managed cloud gateway.".to_string());
+    }
+    force_refresh_token().await.map(|_| ())
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ use sqlx::{Error as SqlxError, SqlitePool};
 
 /// Total pipeline stages, mirrored into the row so the UI can render a progress bar
 /// without hard-coding the count. Kept in sync with `report::pipeline::STAGE_META`.
-pub const TOTAL_STAGES: i64 = 12;
+pub const TOTAL_STAGES: i64 = 13;
 
 pub struct AnalyticsReportsRepository;
 
@@ -60,7 +60,7 @@ impl AnalyticsReportsRepository {
     ) -> Result<Option<AnalyticsReportMeta>, SqlxError> {
         sqlx::query_as::<_, AnalyticsReportMeta>(
             "SELECT id, meeting_id, status, stage, stage_index, total_stages, \
-                    html_path, error, created_at, completed_at, questions \
+                    html_path, error, created_at, completed_at, questions, speaker_suggestions \
              FROM analytics_reports WHERE meeting_id = ? \
              ORDER BY created_at DESC LIMIT 1",
         )
@@ -99,6 +99,41 @@ impl AnalyticsReportsRepository {
             "UPDATE analytics_reports SET status = 'waiting_input', questions = ? WHERE id = ?",
         )
         .bind(questions_json)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The speakers stage produced suggestions: park the run in `waiting_input` and store
+    /// the suggestions JSON so the frontend can render (and later restore) the confirm
+    /// screen. Which pause the UI shows is disambiguated by the `stage` column.
+    pub async fn set_speakers_waiting(
+        pool: &SqlitePool,
+        id: &str,
+        suggestions_json: &str,
+    ) -> Result<(), SqlxError> {
+        sqlx::query(
+            "UPDATE analytics_reports SET status = 'waiting_input', speaker_suggestions = ? \
+             WHERE id = ?",
+        )
+        .bind(suggestions_json)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Speaker decisions arrived (or the wait timed out): resume `running` and persist them.
+    pub async fn set_speakers_running(
+        pool: &SqlitePool,
+        id: &str,
+        decisions_json: &str,
+    ) -> Result<(), SqlxError> {
+        sqlx::query(
+            "UPDATE analytics_reports SET status = 'running', speaker_decisions = ? WHERE id = ?",
+        )
+        .bind(decisions_json)
         .bind(id)
         .execute(pool)
         .await?;

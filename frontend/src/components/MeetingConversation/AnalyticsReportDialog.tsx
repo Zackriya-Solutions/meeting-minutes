@@ -6,7 +6,12 @@ import { Button } from '@/components/ui/button';
 import { AlertCircle, Check, CheckCircle, Circle, FolderOpen, Loader2, RefreshCw } from '@/components/memento/LucideCompat';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import type { AnalyticsAnswer, UseAnalyticsReportResult } from '@/hooks/meeting-details/useAnalyticsReport';
+import { localizeSpeakerLabel } from '@/types';
+import type {
+  AnalyticsAnswer,
+  AnalyticsSpeakerDecision,
+  UseAnalyticsReportResult,
+} from '@/hooks/meeting-details/useAnalyticsReport';
 
 /**
  * Hosts the whole "Аналитический отчёт" build experience in a modal. The report
@@ -18,12 +23,13 @@ import type { AnalyticsAnswer, UseAnalyticsReportResult } from '@/hooks/meeting-
  * (running checklist / clarify questions / completed) from the shared hook state.
  */
 
-// Fallback Russian stage names (12 stages; clarify runs 3rd). Live labels from the
-// progress events override these per stage — see the accumulation below. Kept in
-// Russian to match the backend-provided stage labels regardless of UI language.
-// Mirror of STAGE_META in src-tauri/src/report/pipeline.rs (same order and
-// wording), so pending rows show the same name the stage will carry once live.
+// Fallback Russian stage names (13 stages; speakers runs 1st, clarify 4th). Live
+// labels from the progress events override these per stage — see the accumulation
+// below. Kept in Russian to match the backend-provided stage labels regardless of
+// UI language. Mirror of STAGE_META in src-tauri/src/report/pipeline.rs (same order
+// and wording), so pending rows show the same name the stage will carry once live.
 const FALLBACK_STAGE_LABELS = [
+  'Определение спикеров',
   'Анализ динамики разговора',
   'Классификация встречи',
   'Уточняющие вопросы',
@@ -45,13 +51,13 @@ interface AnalyticsReportDialogProps {
 }
 
 export function AnalyticsReportDialog({ open, onOpenChange, report }: AnalyticsReportDialogProps) {
-  const { status, stageLabel, stageIndex, totalStages, error, questions } = report;
+  const { status, stageLabel, stageIndex, totalStages, error, waitingKind } = report;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         {status === 'waiting_input' ? (
-          <QuestionsView report={report} />
+          waitingKind === 'speakers' ? <SpeakersView report={report} /> : <QuestionsView report={report} />
         ) : status === 'completed' ? (
           <CompletedView report={report} />
         ) : status === 'failed' ? (
@@ -128,6 +134,158 @@ function RunningView({
       <DialogDescription className="text-xs text-[var(--fg3)]">
         {t('Generation continues in background')}
       </DialogDescription>
+    </>
+  );
+}
+
+function SpeakersView({ report }: { report: UseAnalyticsReportResult }) {
+  const t = useT();
+  const { speakers, submitSpeakers } = report;
+
+  // Draft name + merge target per speaker id, seeded from the LLM suggestions.
+  const [names, setNames] = useState<Record<number, string>>({});
+  const [merges, setMerges] = useState<Record<number, number | null>>({});
+
+  const speakersKey = speakers.map((s) => s.speaker_id).join('|');
+  useEffect(() => {
+    const seededNames: Record<number, string> = {};
+    const seededMerges: Record<number, number | null> = {};
+    for (const s of speakers) {
+      seededNames[s.speaker_id] = s.suggested_name ?? s.current_name;
+      seededMerges[s.speaker_id] = s.merge_into;
+    }
+    setNames(seededNames);
+    setMerges(seededMerges);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speakersKey]);
+
+  const localized = (name: string) => localizeSpeakerLabel(name, t) ?? name;
+  const draftLabel = (id: number) => {
+    const s = speakers.find((x) => x.speaker_id === id);
+    const draft = (names[id] ?? '').trim();
+    return draft || (s ? localized(s.current_name) : String(id));
+  };
+
+  // Changing a merge keeps groups flat: anyone previously pointing at `id` follows
+  // it to the new target (the backend drops chained merges).
+  const setMerge = (id: number, target: number | null) => {
+    setMerges((prev) => {
+      const next = { ...prev, [id]: target };
+      for (const s of speakers) {
+        if (s.speaker_id !== id && next[s.speaker_id] === id) {
+          next[s.speaker_id] = target;
+        }
+      }
+      return next;
+    });
+  };
+
+  const buildDecisions = (): AnalyticsSpeakerDecision[] =>
+    speakers.map((s) => {
+      const target = merges[s.speaker_id] ?? null;
+      if (target != null) {
+        return { speaker_id: s.speaker_id, display_name: null, merge_into: target };
+      }
+      const name = (names[s.speaker_id] ?? '').trim();
+      return {
+        speaker_id: s.speaker_id,
+        display_name: name && name !== s.current_name ? name : null,
+        merge_into: null,
+      };
+    });
+
+  return (
+    <>
+      <DialogTitle>{t('Meeting speakers')}</DialogTitle>
+      <DialogDescription>{t('Names and merges apply to the meeting and the report')}</DialogDescription>
+
+      <div className="flex max-h-[52vh] flex-col gap-4 overflow-y-auto pr-1">
+        {speakers.map((s) => {
+          const merged = (merges[s.speaker_id] ?? null) != null;
+          const targets = speakers.filter(
+            (o) => o.speaker_id !== s.speaker_id && (merges[o.speaker_id] ?? null) == null,
+          );
+          return (
+            <div
+              key={s.speaker_id}
+              className={cn(
+                'flex flex-col gap-2.5 rounded-[14px] border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5',
+                merged && 'opacity-70',
+              )}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-semibold text-[var(--fg1)]">
+                  {localized(s.current_name)}
+                  <span className="ml-2 text-[11px] font-normal text-[var(--fg3)]">
+                    {t('replies')}: {s.segment_count}
+                  </span>
+                </p>
+                {s.suggested_name && (
+                  <span className="shrink-0 rounded-full bg-[var(--gold-soft)] px-2 py-0.5 text-[11px] text-[var(--fg2)]">
+                    {t('confidence')} {Math.round((s.confidence ?? 0) * 100)}%
+                  </span>
+                )}
+              </div>
+
+              {s.evidence && (
+                <blockquote className="border-l-2 border-[var(--border-strong)] pl-3 text-[13px] italic text-[var(--fg2)]">
+                  {s.evidence}
+                </blockquote>
+              )}
+
+              {!merged && (
+                <input
+                  type="text"
+                  value={names[s.speaker_id] ?? ''}
+                  onChange={(e) =>
+                    setNames((prev) => ({ ...prev, [s.speaker_id]: e.target.value }))
+                  }
+                  placeholder={t('Name')}
+                  className="w-full rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-sm text-[var(--fg1)] outline-none focus:border-[var(--gold-border)]"
+                />
+              )}
+
+              {speakers.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <label className="shrink-0 text-[11px] text-[var(--fg3)]">{t('Merge with')}</label>
+                  <select
+                    value={merges[s.speaker_id] ?? ''}
+                    onChange={(e) =>
+                      setMerge(s.speaker_id, e.target.value === '' ? null : Number(e.target.value))
+                    }
+                    className="w-full rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2 py-1 text-[13px] text-[var(--fg1)] outline-none focus:border-[var(--gold-border)]"
+                  >
+                    <option value="">{t('Keep separate')}</option>
+                    {targets.map((o) => (
+                      <option key={o.speaker_id} value={o.speaker_id}>
+                        {draftLabel(o.speaker_id)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {merged && s.merge_reason && (
+                <p className="text-[11px] text-[var(--fg3)]">{s.merge_reason}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="ghost" size="sm" onClick={() => void submitSpeakers([])}>
+          {t('Skip')}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-[var(--gold-border)] bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
+          onClick={() => void submitSpeakers(buildDecisions())}
+        >
+          {t('Confirm and continue')}
+        </Button>
+      </div>
     </>
   );
 }
