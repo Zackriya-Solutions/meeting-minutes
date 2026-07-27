@@ -200,4 +200,23 @@ impl AnalyticsReportsRepository {
         .await?;
         Ok(())
     }
+
+    /// Fail every report left in a non-terminal state (`queued`/`running`/`waiting_input`).
+    ///
+    /// The pipeline (and its interactive-input wait) lives only in memory, so any such
+    /// row is orphaned after an app restart — reopening it re-shows the persisted
+    /// clarify/speaker questions, but submitting answers no-ops because no pipeline is
+    /// waiting. Marking these failed makes them terminal so the meeting is restartable.
+    /// Returns the number of rows reconciled.
+    pub async fn fail_interrupted(pool: &SqlitePool, error: &str) -> Result<u64, SqlxError> {
+        let result = sqlx::query(
+            "UPDATE analytics_reports \
+             SET status = 'failed', error = ?, completed_at = datetime('now') \
+             WHERE status IN ('queued', 'running', 'waiting_input')",
+        )
+        .bind(error)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }

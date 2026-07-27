@@ -186,6 +186,25 @@ pub async fn resolve_model(pool: &SqlitePool) -> String {
         .unwrap_or_else(|| deepseek::DEFAULT_MODEL.to_string())
 }
 
+/// Reconcile reports orphaned by an app restart. The pipeline and its interactive
+/// input waits (clarify / speakers) live only in memory, so any row still
+/// `queued`/`running`/`waiting_input` after a restart can never resume: reopening it
+/// re-shows the persisted questions, but submitting answers no-ops because no pipeline
+/// is listening. Mark those failed so the meeting can be regenerated. Idempotent; call
+/// once at startup before serving report commands.
+pub async fn recover_interrupted_reports(pool: &SqlitePool) {
+    match AnalyticsReportsRepository::fail_interrupted(
+        pool,
+        "Генерация отчёта была прервана перезапуском приложения. Запустите её заново.",
+    )
+    .await
+    {
+        Ok(0) => {}
+        Ok(n) => log::info!("[report] reset {n} interrupted report(s) to failed after restart"),
+        Err(e) => log::warn!("[report] could not reconcile interrupted reports: {e}"),
+    }
+}
+
 // ---- speaker identity helpers (contract-defined fallback order) ----
 
 fn speaker_label(seg: &TranscriptSpeakerSegment) -> String {
