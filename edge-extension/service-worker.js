@@ -10,37 +10,72 @@ async function ensureOffscreenDocument() {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT,
       reasons: ['USER_MEDIA'],
-      justification: 'Record the exact tab selected by the user for a Meetily meeting',
+      justification: 'Record the exact tab selected by the user for Meetily',
     });
   }
 }
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) return;
+async function armCurrentTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('No active tab is available');
 
-  try {
-    await ensureOffscreenDocument();
-    const streamId = await chrome.tabCapture.getMediaStreamId({
-      targetTabId: tab.id,
-    });
-    await chrome.runtime.sendMessage({
-      target: 'offscreen',
-      type: 'arm',
-      streamId,
-      title: tab.title || 'Selected tab',
-    });
-    await chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
-    await chrome.action.setBadgeText({ text: 'ARM' });
-    await chrome.action.setTitle({ title: `Armed for Meetily: ${tab.title || 'Selected tab'}` });
-  } catch (error) {
-    console.error('Unable to arm tab capture', error);
-    await chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
-    await chrome.action.setBadgeText({ text: 'ERR' });
+  await ensureOffscreenDocument();
+  const releaseResult = await chrome.runtime.sendMessage({
+    target: 'offscreen',
+    type: 'release',
+  });
+  if (!releaseResult?.ok) {
+    throw new Error(releaseResult?.error || 'Unable to release the previous tab capture');
   }
-});
+  const streamId = await chrome.tabCapture.getMediaStreamId({
+    targetTabId: tab.id,
+  });
+  const armResult = await chrome.runtime.sendMessage({
+    target: 'offscreen',
+    type: 'arm',
+    streamId,
+    title: tab.title || 'Selected tab',
+  });
+  if (!armResult?.ok) {
+    throw new Error(armResult?.error || 'Unable to select this tab');
+  }
 
-chrome.runtime.onMessage.addListener((message) => {
+  await chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
+  await chrome.action.setBadgeText({ text: 'ARM' });
+  await chrome.action.setTitle({ title: `Selected for Meetily: ${tab.title || 'Selected tab'}` });
+  return armResult.status;
+}
+
+async function sendOffscreen(type) {
+  await ensureOffscreenDocument();
+  const result = await chrome.runtime.sendMessage({ target: 'offscreen', type });
+  if (!result?.ok) throw new Error(result?.error || 'Capture command failed');
+  return result.status;
+}
+
+async function handlePopupMessage(message) {
+  if (message.type === 'arm_current') return armCurrentTab();
+  if (message.type === 'status') return sendOffscreen('status');
+  if (message.type === 'manual_start') return sendOffscreen('manual_start');
+  if (message.type === 'stop_user') return sendOffscreen('stop_user');
+  if (message.type === 'delete_user') return sendOffscreen('delete_user');
+  throw new Error('Unknown capture command');
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.target === 'popup') {
+    handlePopupMessage(message)
+      .then((status) => sendResponse({ ok: true, status }))
+      .catch(async (error) => {
+        console.error('Meetily capture command failed', error);
+        await chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+        await chrome.action.setBadgeText({ text: 'ERR' });
+        sendResponse({ ok: false, error: error.message });
+      });
+    return true;
+  }
   if (message.target !== 'service-worker') return;
+
   if (message.type === 'recording') {
     chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
     chrome.action.setBadgeText({ text: 'REC' });
@@ -49,6 +84,6 @@ chrome.runtime.onMessage.addListener((message) => {
     chrome.action.setBadgeText({ text: 'ARM' });
   } else if (message.type === 'disarmed') {
     chrome.action.setBadgeText({ text: '' });
-    chrome.action.setTitle({ title: 'Arm this tab for Meetily' });
+    chrome.action.setTitle({ title: 'Open Meetily tab capture controls' });
   }
 });

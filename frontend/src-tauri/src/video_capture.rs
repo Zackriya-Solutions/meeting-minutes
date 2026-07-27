@@ -9,7 +9,7 @@ use std::{
     },
 };
 use tokio::{
-    fs::File,
+    fs::{self, File},
     io::{AsyncWriteExt, BufWriter},
     net::{TcpListener, TcpStream},
     process::{Child, Command},
@@ -53,8 +53,14 @@ pub struct CaptureWindow {
 }
 
 enum ActiveCapture {
-    Screen { child: Child, output_path: PathBuf },
-    BrowserTab { output_path: PathBuf },
+    Screen {
+        child: Child,
+        output_path: PathBuf,
+    },
+    BrowserTab {
+        output_path: PathBuf,
+        standalone: bool,
+    },
 }
 
 struct BridgeState {
@@ -64,6 +70,7 @@ struct BridgeState {
     tab_title: Mutex<Option<String>>,
     window_id: Mutex<Option<u32>>,
     active: Mutex<Option<ActiveCapture>>,
+    last_saved: Mutex<Option<PathBuf>>,
     writer: Mutex<Option<BufWriter<File>>>,
     commands: broadcast::Sender<String>,
     completed: Notify,
@@ -78,6 +85,7 @@ static STATE: LazyLock<Arc<BridgeState>> = LazyLock::new(|| {
         tab_title: Mutex::new(None),
         window_id: Mutex::new(None),
         active: Mutex::new(None),
+        last_saved: Mutex::new(None),
         writer: Mutex::new(None),
         commands,
         completed: Notify::new(),
@@ -195,6 +203,76 @@ async fn handle_extension_message(text: &str) {
                     log::error!("Failed flushing browser video: {error}");
                 }
             }
+            let standalone_output = {
+                let mut active = STATE.active.lock().await;
+                match active.as_ref() {
+                    Some(ActiveCapture::BrowserTab {
+                        output_path,
+                        standalone: true,
+                    }) => {
+                        let output_path = output_path.clone();
+                        active.take();
+                        Some(output_path)
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(output_path) = standalone_output {
+                match validate_video(&output_path) {
+                    Ok(()) => {
+                        *STATE.last_saved.lock().await = Some(output_path.clone());
+                        let filename = output_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("Meetily tab recording.webm");
+                        let _ = STATE.commands.send(
+                            serde_json::json!({
+                                "type": "saved",
+                                "filename": filename,
+                            })
+                            .to_string(),
+                        );
+                    }
+                    Err(error) => {
+                        let _ = fs::remove_file(&output_path).await;
+                        let _ = STATE.commands.send(
+                            serde_json::json!({
+                                "type": "error",
+                                "message": error,
+                            })
+                            .to_string(),
+                        );
+                    }
+                }
+            }
+            STATE.completed.notify_one();
+        }
+        Some("manual_start") => {
+            if let Err(error) = start_standalone_browser_capture().await {
+                let _ = STATE.commands.send(
+                    serde_json::json!({
+                        "type": "error",
+                        "message": error,
+                    })
+                    .to_string(),
+                );
+            }
+        }
+        Some("discard") => {
+            match discard_browser_capture().await {
+                Ok(()) => {
+                    let _ = STATE.commands.send(r#"{"type":"discarded"}"#.to_string());
+                }
+                Err(error) => {
+                    let _ = STATE.commands.send(
+                        serde_json::json!({
+                            "type": "error",
+                            "message": error,
+                        })
+                        .to_string(),
+                    );
+                }
+            }
             STATE.completed.notify_one();
         }
         Some("error") => {
@@ -256,16 +334,11 @@ pub fn get_meeting_video_path(folder_path: String) -> Option<String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn list_capture_windows() -> Vec<CaptureWindow> {
-    use core_foundation::{
-        base::TCFType,
-        number::CFNumber,
-        string::CFString,
-    };
+    use core_foundation::{base::TCFType, number::CFNumber, string::CFString};
     use core_graphics::window::{
-        create_description_from_array, create_window_list, kCGNullWindowID,
-        kCGWindowLayer, kCGWindowListExcludeDesktopElements,
-        kCGWindowListOptionOnScreenOnly, kCGWindowName, kCGWindowNumber,
-        kCGWindowOwnerName,
+        create_description_from_array, create_window_list, kCGNullWindowID, kCGWindowLayer,
+        kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowName,
+        kCGWindowNumber, kCGWindowOwnerName,
     };
 
     let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
@@ -340,8 +413,8 @@ async fn start_screen_capture(meeting_folder: &Path) -> Result<(), String> {
 }
 
 async fn start_window_capture(meeting_folder: &Path) -> Result<(), String> {
-    let window_id = (*STATE.window_id.lock().await)
-        .ok_or_else(|| "Choose a window to record".to_string())?;
+    let window_id =
+        (*STATE.window_id.lock().await).ok_or_else(|| "Choose a window to record".to_string())?;
     let output_path = meeting_folder.join("video.mov");
     let child = Command::new("/usr/sbin/screencapture")
         .args(["-v", "-l", &window_id.to_string(), "-x"])
@@ -356,6 +429,9 @@ async fn start_window_capture(meeting_folder: &Path) -> Result<(), String> {
 }
 
 async fn start_browser_capture(meeting_folder: &Path) -> Result<(), String> {
+    if STATE.active.lock().await.is_some() {
+        return Err("Stop the current tab recording before starting a meeting".to_string());
+    }
     if !STATE.connected.load(Ordering::SeqCst) {
         return Err("Browser capture extension is not connected".to_string());
     }
@@ -370,14 +446,88 @@ async fn start_browser_capture(meeting_folder: &Path) -> Result<(), String> {
     *STATE.writer.lock().await = Some(BufWriter::new(file));
     *STATE.active.lock().await = Some(ActiveCapture::BrowserTab {
         output_path: output_path.clone(),
+        standalone: false,
     });
     STATE
         .commands
-        .send(r#"{"type":"start"}"#.to_string())
+        .send(r#"{"type":"start","origin":"meeting"}"#.to_string())
         .map_err(|_| {
             "Browser capture extension disconnected before recording started".to_string()
         })?;
     Ok(())
+}
+
+async fn start_standalone_browser_capture() -> Result<(), String> {
+    if STATE.active.lock().await.is_some() {
+        return Err("A Meetily video capture is already active".to_string());
+    }
+    if !STATE.connected.load(Ordering::SeqCst) {
+        return Err("Meetily is not running".to_string());
+    }
+    if !STATE.tab_armed.load(Ordering::SeqCst) {
+        return Err("Select a tab before starting".to_string());
+    }
+
+    let capture_dir = dirs::video_dir()
+        .or_else(dirs::document_dir)
+        .ok_or_else(|| "Could not locate a local video folder".to_string())?
+        .join("Meetily Captures");
+    fs::create_dir_all(&capture_dir)
+        .await
+        .map_err(|error| format!("Failed creating Meetily Captures: {error}"))?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("System clock error: {error}"))?
+        .as_secs();
+    let output_path = capture_dir.join(format!("meetily-tab-{timestamp}.webm"));
+    let file = File::create(&output_path)
+        .await
+        .map_err(|error| format!("Failed creating browser video: {error}"))?;
+
+    *STATE.writer.lock().await = Some(BufWriter::new(file));
+    *STATE.active.lock().await = Some(ActiveCapture::BrowserTab {
+        output_path,
+        standalone: true,
+    });
+    STATE
+        .commands
+        .send(r#"{"type":"start","origin":"standalone"}"#.to_string())
+        .map_err(|_| {
+            "Browser capture extension disconnected before recording started".to_string()
+        })?;
+    Ok(())
+}
+
+async fn discard_browser_capture() -> Result<(), String> {
+    if let Some(mut writer) = STATE.writer.lock().await.take() {
+        writer
+            .flush()
+            .await
+            .map_err(|error| format!("Failed closing browser video: {error}"))?;
+    }
+
+    let output_path = {
+        let mut active = STATE.active.lock().await;
+        match active.as_ref() {
+            Some(ActiveCapture::BrowserTab { output_path, .. }) => {
+                let output_path = output_path.clone();
+                active.take();
+                Some(output_path)
+            }
+            Some(ActiveCapture::Screen { .. }) => {
+                return Err("The extension cannot delete a macOS screen recording".to_string());
+            }
+            None => STATE.last_saved.lock().await.take(),
+        }
+    };
+    let Some(output_path) = output_path else {
+        return Err("There is no tab recording to delete".to_string());
+    };
+    match fs::remove_file(&output_path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Failed deleting tab recording: {error}")),
+    }
 }
 
 pub async fn stop_active_capture() -> Result<Option<PathBuf>, String> {
@@ -411,7 +561,7 @@ pub async fn stop_active_capture() -> Result<Option<PathBuf>, String> {
             validate_video(&output_path)?;
             Ok(Some(output_path))
         }
-        Some(ActiveCapture::BrowserTab { output_path }) => {
+        Some(ActiveCapture::BrowserTab { output_path, .. }) => {
             let completed = STATE.completed.notified();
             STATE
                 .commands

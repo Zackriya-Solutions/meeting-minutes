@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Meetily Tab Capture</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Meetily Tab Capture</h1>
+          <p id="connection">Checking Meetily…</p>
+        </div>
+        <span id="status-dot" aria-hidden="true"></span>
+      </header>
+
+      <section class="tab-card" aria-label="Selected tab">
+        <span class="eyebrow">Selected tab</span>
+        <strong id="tab-title">None</strong>
+        <button id="select-tab" type="button">Select this tab</button>
+      </section>
+
+      <section class="controls" aria-label="Recording controls">
+        <button id="start" class="primary" type="button">Start</button>
+        <button id="stop" type="button">Stop &amp; save</button>
+        <button id="delete" class="danger" type="button">Delete recording</button>
+      </section>
+
+      <p id="result" role="status">Select a tab to begin.</p>
+      <p class="footnote">
+        Standalone captures save to Movies/Meetily Captures. Meeting captures
+        save with the meeting and stop automatically.
+      </p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

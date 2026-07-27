@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Meetily Tab Capture",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Records the Chrome or Edge tab you select while Meetily is recording.",
   "permissions": [
+    "activeTab",
     "tabCapture",
     "offscreen"
   ],
@@ -11,7 +12,8 @@
     "ws://127.0.0.1:8179/*"
   ],
   "action": {
-    "default_title": "Select a browser tab for Meetily"
+    "default_title": "Open Meetily tab capture controls",
+    "default_popup": "popup.html"
   },
   "background": {
     "service_worker": "service-worker.js"
