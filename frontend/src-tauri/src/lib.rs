@@ -546,6 +546,10 @@ pub fn run() {
                         Ok(_) => {}
                         Err(error) => log::warn!("Could not enforce auto-capture audio retention: {error}"),
                     }
+                    // Reports parked mid-run (e.g. at the clarify/speaker prompt) cannot
+                    // survive a restart — their pipeline lives only in memory — so mark
+                    // any orphaned rows failed to make the meeting restartable.
+                    report::pipeline::recover_interrupted_reports(&pool).await;
                 });
             }
 

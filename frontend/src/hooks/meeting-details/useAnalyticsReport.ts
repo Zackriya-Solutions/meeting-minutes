@@ -40,9 +40,22 @@ export interface AnalyticsAnswer {
   answer: string | null;
 }
 
+/** One transcript line quoted inside the speaker-confirmation dialog. */
+export interface AnalyticsSpeakerLine {
+  seg: number;
+  /** mm:ss offset from the recording start. */
+  time: string;
+  speaker_id: number | null;
+  label: string;
+  text: string;
+  /** The line an excerpt was built around (e.g. the name evidence). */
+  highlight: boolean;
+}
+
 /**
  * One speaker row of the speaker-confirmation pause (status `waiting_input`,
- * stage `speakers`): the meeting's speaker plus the LLM's name/merge suggestion.
+ * stage `speakers`): the meeting's speaker, the LLM's name/merge suggestion, and
+ * the transcript excerpts needed to judge both.
  */
 export interface AnalyticsSpeakerSuggestion {
   speaker_id: number;
@@ -55,6 +68,16 @@ export interface AnalyticsSpeakerSuggestion {
   /** The LLM believes this speaker is the same person as this other speaker id. */
   merge_into: number | null;
   merge_reason: string | null;
+  /** Share of total speech time, 0..1. */
+  talk_share: number;
+  /** mm:ss of this speaker's first line. */
+  first_seen: string;
+  /** Representative lines spread across the meeting (who this speaker is). */
+  samples: AnalyticsSpeakerLine[];
+  /** Dialogue around the line the name guess came from. */
+  evidence_context: AnalyticsSpeakerLine[];
+  /** Excerpt where this speaker and the proposed merge target both talk. */
+  merge_context: AnalyticsSpeakerLine[];
 }
 
 /** One speaker decision submitted back (snake_case keys per the contract). */
@@ -185,6 +208,22 @@ function toUiStatus(status: BackendStatus): AnalyticsReportStatus {
   }
 }
 
+/**
+ * Backfill fields a suggestion persisted by an older build won't have. A report parked
+ * in `waiting_input` across an app upgrade is restored from that older JSON, so the
+ * excerpt arrays can be missing entirely.
+ */
+function normalizeSpeakers(list: AnalyticsSpeakerSuggestion[]): AnalyticsSpeakerSuggestion[] {
+  return list.map((s) => ({
+    ...s,
+    talk_share: s.talk_share ?? 0,
+    first_seen: s.first_seen ?? '',
+    samples: s.samples ?? [],
+    evidence_context: s.evidence_context ?? [],
+    merge_context: s.merge_context ?? [],
+  }));
+}
+
 /** Parse a raw JSON array string from meta; tolerant of null / malformed. */
 function parseJsonArray<T>(raw: string | null | undefined, what: string): T[] {
   if (!raw) return [];
@@ -247,7 +286,9 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     setQuestions(kind === 'clarify' ? parseJsonArray<AnalyticsQuestion>(meta.questions, 'questions') : []);
     setSpeakers(
       kind === 'speakers'
-        ? parseJsonArray<AnalyticsSpeakerSuggestion>(meta.speaker_suggestions, 'speaker suggestions')
+        ? normalizeSpeakers(
+            parseJsonArray<AnalyticsSpeakerSuggestion>(meta.speaker_suggestions, 'speaker suggestions'),
+          )
         : [],
     );
   }, [reset]);
@@ -316,7 +357,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
         reportIdRef.current = p.report_id;
         setStatus('waiting_input');
         setWaitingKind('speakers');
-        setSpeakers(Array.isArray(p.speakers) ? p.speakers : []);
+        setSpeakers(normalizeSpeakers(Array.isArray(p.speakers) ? p.speakers : []));
         setError(null);
       });
     };

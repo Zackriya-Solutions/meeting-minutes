@@ -104,9 +104,31 @@ pub struct SpeakerGuesses {
     pub merges: Vec<SpeakerMergeGuess>,
 }
 
+/// One transcript line rendered inside the speaker-confirmation dialog. Carries the
+/// speaker id so the UI can colour lines per participant when comparing two speakers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpeakerLine {
+    #[serde(default)]
+    pub seg: i64,
+    /// mm:ss offset from the recording start.
+    #[serde(default)]
+    pub time: String,
+    #[serde(default)]
+    pub speaker_id: Option<i64>,
+    /// Display name of the speaker of THIS line at suggestion time.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub text: String,
+    /// The line the surrounding excerpt was built around (e.g. the name evidence).
+    #[serde(default)]
+    pub highlight: bool,
+}
+
 /// One speaker row shown in the confirmation dialog: current state + the LLM's
-/// suggestions for it. Persisted (JSON array) in `analytics_reports.speaker_suggestions`
-/// and emitted in the `analytics-report-speakers` event. snake_case on the wire.
+/// suggestions for it + enough transcript to judge both. Persisted (JSON array) in
+/// `analytics_reports.speaker_suggestions` and emitted in the
+/// `analytics-report-speakers` event. snake_case on the wire.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpeakerSuggestion {
     #[serde(default)]
@@ -128,6 +150,24 @@ pub struct SpeakerSuggestion {
     pub merge_into: Option<i64>,
     #[serde(default)]
     pub merge_reason: Option<String>,
+    /// Share of total speech time, 0..1.
+    #[serde(default)]
+    pub talk_share: f32,
+    /// mm:ss of this speaker's first line.
+    #[serde(default)]
+    pub first_seen: String,
+    /// Representative lines spread across the meeting — how the user recognises who
+    /// this speaker is.
+    #[serde(default)]
+    pub samples: Vec<SpeakerLine>,
+    /// The dialogue around the line the name guess was drawn from (the guess is only
+    /// checkable in context: «Паша, что думаешь?» → who answers next).
+    #[serde(default)]
+    pub evidence_context: Vec<SpeakerLine>,
+    /// Excerpt where this speaker and the proposed merge target both talk, so the user
+    /// can judge same-person vs different-person. Empty when they never speak close by.
+    #[serde(default)]
+    pub merge_context: Vec<SpeakerLine>,
 }
 
 /// One user decision per speaker, sent by the frontend as
@@ -376,7 +416,7 @@ pub struct Insights {
 
 // ============================ Transcript formatting ============================
 
-fn fmt_mmss(secs: f64) -> String {
+pub fn fmt_mmss(secs: f64) -> String {
     let s = secs.max(0.0).round() as i64;
     format!("{:02}:{:02}", s / 60, s % 60)
 }

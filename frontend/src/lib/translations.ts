@@ -34,6 +34,13 @@ export const RU: Record<string, string> = {
   "Confirm and continue": "Подтвердить и продолжить",
   "Skip": "Пропустить",
   "Name": "Имя",
+  "of talk time": "времени",
+  "start": "начало",
+  "More replies": "Больше реплик",
+  "Collapse": "Свернуть",
+  "Where the name comes from": "Откуда имя",
+  "Show in context": "Показать в контексте",
+  "Compare the replies": "Сравните реплики",
 
   // Meeting conversation (variant 2a/3a)
   "Today": "Сегодня",

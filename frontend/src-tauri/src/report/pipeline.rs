@@ -33,7 +33,7 @@ use crate::report::dynamics::{self, DynSegment, Dynamics};
 use crate::report::prompts::{
     self, Clarify, ClarifyAnswer, ClarifyQuestion, Classification, Commitments,
     DisagreementsConcepts, Insights, Numbers, Roles, SpeakerDecision, SpeakerGuesses,
-    SpeakerSuggestion, ThreadsRisks, Topics,
+    SpeakerLine, SpeakerSuggestion, ThreadsRisks, Topics,
 };
 use crate::report::render::{compute_score, render_report, RenderInput};
 
@@ -186,6 +186,25 @@ pub async fn resolve_model(pool: &SqlitePool) -> String {
         .unwrap_or_else(|| deepseek::DEFAULT_MODEL.to_string())
 }
 
+/// Reconcile reports orphaned by an app restart. The pipeline and its interactive
+/// input waits (clarify / speakers) live only in memory, so any row still
+/// `queued`/`running`/`waiting_input` after a restart can never resume: reopening it
+/// re-shows the persisted questions, but submitting answers no-ops because no pipeline
+/// is listening. Mark those failed so the meeting can be regenerated. Idempotent; call
+/// once at startup before serving report commands.
+pub async fn recover_interrupted_reports(pool: &SqlitePool) {
+    match AnalyticsReportsRepository::fail_interrupted(
+        pool,
+        "Генерация отчёта была прервана перезапуском приложения. Запустите её заново.",
+    )
+    .await
+    {
+        Ok(0) => {}
+        Ok(n) => log::info!("[report] reset {n} interrupted report(s) to failed after restart"),
+        Err(e) => log::warn!("[report] could not reconcile interrupted reports: {e}"),
+    }
+}
+
 // ---- speaker identity helpers (contract-defined fallback order) ----
 
 fn speaker_label(seg: &TranscriptSpeakerSegment) -> String {
@@ -228,6 +247,210 @@ fn build_segment_views(
     let seg_labels: Vec<String> = dyn_segments.iter().map(|d| d.speaker_label.clone()).collect();
     let seg_texts: Vec<String> = dyn_segments.iter().map(|d| d.text.clone()).collect();
     (dyn_segments, seg_labels, seg_texts)
+}
+
+// ---- speakers stage: transcript excerpts for the confirmation dialog ----
+
+/// Max characters kept per quoted line (keeps the persisted payload bounded).
+const LINE_CHARS: usize = 220;
+/// Lines shorter than this are poor recognition samples ("да", "угу") and are only used
+/// when a speaker has nothing longer.
+const MIN_SAMPLE_CHARS: usize = 15;
+/// Representative lines per speaker.
+const SAMPLES_PER_SPEAKER: usize = 4;
+/// Lines kept in the excerpt around the name evidence (before + line + after).
+const EVIDENCE_BEFORE: usize = 2;
+const EVIDENCE_AFTER: usize = 2;
+/// Cap on the two-speaker comparison excerpt.
+const PAIR_LINES: usize = 6;
+
+/// Trim a transcript line to `max_chars` on a char boundary.
+fn clip(text: &str, max_chars: usize) -> String {
+    let t = text.trim();
+    let mut out: String = t.chars().take(max_chars).collect();
+    if t.chars().count() > max_chars {
+        out.push('…');
+    }
+    out
+}
+
+/// Parallel views of the meeting transcript, used to build the excerpts shown in the
+/// speaker-confirmation dialog. `segments`, `timed` and `labels` are index-aligned.
+struct SpeakerContext<'a> {
+    segments: &'a [TranscriptSpeakerSegment],
+    timed: &'a [dynamics::TimedSegment],
+    labels: &'a [String],
+}
+
+impl SpeakerContext<'_> {
+    fn line(&self, i: usize, highlight: bool) -> SpeakerLine {
+        let start = self.timed.get(i).map(|t| t.start).unwrap_or(0.0);
+        SpeakerLine {
+            seg: i as i64,
+            time: prompts::fmt_mmss(start),
+            speaker_id: self.segments[i].speaker_id,
+            label: self.labels.get(i).cloned().unwrap_or_default(),
+            text: clip(&self.segments[i].text, LINE_CHARS),
+            highlight,
+        }
+    }
+
+    fn indices_of(&self, speaker_id: i64) -> Vec<usize> {
+        (0..self.segments.len())
+            .filter(|&i| self.segments[i].speaker_id == Some(speaker_id))
+            .collect()
+    }
+
+    fn char_len(&self, i: usize) -> usize {
+        self.segments[i].text.trim().chars().count()
+    }
+
+    /// Share of total speech time and mm:ss of the first line, for one speaker.
+    fn stats(&self, speaker_id: i64) -> (f32, String) {
+        let idx = self.indices_of(speaker_id);
+        let dur = |i: usize| {
+            self.timed
+                .get(i)
+                .map(|t| (t.end - t.start).max(0.0))
+                .unwrap_or(0.0)
+        };
+        let total: f64 = (0..self.segments.len()).map(dur).sum();
+        let mine: f64 = idx.iter().copied().map(dur).sum();
+        let share = if total > 0.0 { (mine / total) as f32 } else { 0.0 };
+        let first = idx
+            .first()
+            .map(|&i| prompts::fmt_mmss(self.timed.get(i).map(|t| t.start).unwrap_or(0.0)))
+            .unwrap_or_default();
+        (share, first)
+    }
+
+    /// Representative lines: the transcript is split into `limit` equal buckets of this
+    /// speaker's turns and the longest line of each bucket is taken, so the samples span
+    /// the whole meeting instead of clustering at the start. Short filler lines are
+    /// skipped unless the speaker said nothing longer.
+    fn samples(&self, speaker_id: i64, limit: usize) -> Vec<SpeakerLine> {
+        let all = self.indices_of(speaker_id);
+        let substantive: Vec<usize> = all
+            .iter()
+            .copied()
+            .filter(|&i| self.char_len(i) >= MIN_SAMPLE_CHARS)
+            .collect();
+        let pool = if substantive.is_empty() { &all } else { &substantive };
+        let n = pool.len();
+        if n == 0 || limit == 0 {
+            return Vec::new();
+        }
+        let k = limit.min(n);
+        (0..k)
+            .filter_map(|b| {
+                let lo = b * n / k;
+                let hi = (((b + 1) * n / k).max(lo + 1)).min(n);
+                pool[lo..hi]
+                    .iter()
+                    .copied()
+                    .max_by_key(|&i| self.char_len(i))
+            })
+            .map(|i| self.line(i, false))
+            .collect()
+    }
+
+    /// The dialogue around one line, with that line highlighted.
+    fn window(&self, center: usize, before: usize, after: usize) -> Vec<SpeakerLine> {
+        if center >= self.segments.len() {
+            return Vec::new();
+        }
+        let lo = center.saturating_sub(before);
+        let hi = (center + after).min(self.segments.len() - 1);
+        (lo..=hi).map(|i| self.line(i, i == center)).collect()
+    }
+
+    /// Find the line the LLM quoted as name evidence. Prefers the `seg` index it
+    /// reported, falling back to a text search for the quote (models often get the
+    /// index slightly wrong while quoting accurately).
+    fn locate_evidence(&self, seg: i64, quote: &str, speaker_id: i64) -> Option<usize> {
+        let n = self.segments.len();
+        let reported = (seg >= 0 && (seg as usize) < n).then_some(seg as usize);
+        let needle = quote.trim().to_lowercase();
+        if needle.is_empty() {
+            return reported;
+        }
+        // Trust the reported index only if the quote is really there.
+        if let Some(i) = reported {
+            if self.segments[i].text.to_lowercase().contains(&needle) {
+                return Some(i);
+            }
+        }
+        // Otherwise search: this speaker's own lines first, then anywhere. If the model
+        // paraphrased the quote, fall back to whatever index it reported.
+        let hit = |ids: Vec<usize>| {
+            ids.into_iter()
+                .find(|&i| self.segments[i].text.to_lowercase().contains(&needle))
+        };
+        hit(self.indices_of(speaker_id))
+            .or_else(|| hit((0..n).collect()))
+            .or(reported)
+    }
+
+    /// Excerpt where two speakers talk closest together — the "who is who" comparison.
+    /// Returns an empty vec when they never speak near each other.
+    fn pair(&self, a: i64, b: i64, max_lines: usize) -> Vec<SpeakerLine> {
+        let mut best: Option<(usize, usize, usize)> = None; // (gap, from, to)
+        let mut consider = |lo: usize, hi: usize| {
+            let gap = hi - lo;
+            let better = match best {
+                Some((g, ..)) => gap < g,
+                None => true,
+            };
+            if better {
+                best = Some((gap, lo, hi));
+            }
+        };
+        let (mut last_a, mut last_b): (Option<usize>, Option<usize>) = (None, None);
+        for i in 0..self.segments.len() {
+            match self.segments[i].speaker_id {
+                Some(id) if id == a => {
+                    if let Some(j) = last_b {
+                        consider(j, i);
+                    }
+                    last_a = Some(i);
+                }
+                Some(id) if id == b => {
+                    if let Some(j) = last_a {
+                        consider(j, i);
+                    }
+                    last_b = Some(i);
+                }
+                _ => {}
+            }
+        }
+        let Some((_, from, to)) = best else {
+            return Vec::new();
+        };
+        let n = self.segments.len();
+        let budget = max_lines.max(2);
+        // Always include BOTH turns. When they are close enough to fit the budget, show
+        // one contiguous excerpt (padded for context); when they are far apart — common
+        // for merge candidates, which is exactly why they were flagged — show a small
+        // window around each turn so the second speaker is never truncated away.
+        let indices: Vec<usize> = if to - from + 1 <= budget {
+            let extra = budget - (to - from + 1);
+            let lo = from.saturating_sub(extra / 2);
+            let hi = (to + (extra - extra / 2)).min(n - 1);
+            (lo..=hi).collect()
+        } else {
+            let per = (budget / 2).max(1);
+            let window = |center: usize| -> Vec<usize> {
+                let lo = center.saturating_sub((per - 1) / 2);
+                (lo..=(lo + per - 1).min(n - 1)).collect()
+            };
+            let mut idx = window(from);
+            idx.extend(window(to));
+            idx.sort_unstable();
+            idx.dedup();
+            idx
+        };
+        indices.into_iter().map(|i| self.line(i, false)).collect()
+    }
 }
 
 // ---- speakers stage: sanitize LLM guesses, apply confirmed decisions ----
@@ -304,9 +527,52 @@ fn build_speaker_suggestions(
                     .filter(|e| !e.is_empty()),
                 merge_into: merge.map(|(t, _)| *t),
                 merge_reason: merge.map(|(_, r)| r.clone()).filter(|r| !r.is_empty()),
+                // Filled by `enrich_suggestions` once the transcript context is built.
+                ..Default::default()
             }
         })
         .collect()
+}
+
+/// Fill in the transcript excerpts the confirmation dialog renders: recognition samples,
+/// the dialogue around each name guess, and a two-speaker comparison for every proposed
+/// merge. Presentation data only — nothing here changes what gets applied.
+fn enrich_suggestions(
+    suggestions: &mut [SpeakerSuggestion],
+    ctx: &SpeakerContext<'_>,
+    guesses: Option<&SpeakerGuesses>,
+) {
+    // First non-empty-name guess per speaker. This MUST match the first-wins selection
+    // in `build_speaker_suggestions` (which used `entry().or_insert_with`): a plain
+    // `collect()` keeps the LAST guess for a repeated speaker_id, so the located evidence
+    // line could come from a different guess than the displayed name/quote.
+    let mut evidence_seg: HashMap<i64, i64> = HashMap::new();
+    if let Some(g) = guesses {
+        for n in &g.names {
+            if n.name.trim().is_empty() {
+                continue;
+            }
+            evidence_seg.entry(n.speaker_id).or_insert(n.seg);
+        }
+    }
+
+    for s in suggestions.iter_mut() {
+        let (share, first_seen) = ctx.stats(s.speaker_id);
+        s.talk_share = share;
+        s.first_seen = first_seen;
+        s.samples = ctx.samples(s.speaker_id, SAMPLES_PER_SPEAKER);
+
+        if s.suggested_name.is_some() {
+            let seg = evidence_seg.get(&s.speaker_id).copied().unwrap_or(-1);
+            let quote = s.evidence.clone().unwrap_or_default();
+            if let Some(i) = ctx.locate_evidence(seg, &quote, s.speaker_id) {
+                s.evidence_context = ctx.window(i, EVIDENCE_BEFORE, EVIDENCE_AFTER);
+            }
+        }
+        if let Some(target) = s.merge_into {
+            s.merge_context = ctx.pair(s.speaker_id, target, PAIR_LINES);
+        }
+    }
 }
 
 /// Apply the user's confirmed decisions: reattribute merged speakers' segments (this
@@ -640,7 +906,7 @@ pub async fn run_report_pipeline<R: Runtime>(
     if !roster.is_empty() {
         // Transcript labeled with stable speaker ids so guesses reference `id N`, not
         // display names (which may collide or be renumbered).
-        let (dyn_now, _, texts_now) = build_segment_views(&segments);
+        let (dyn_now, labels_now, texts_now) = build_segment_views(&segments);
         let timed_now = dynamics::timeline(&dyn_now);
         let id_labels: Vec<String> = segments
             .iter()
@@ -666,8 +932,17 @@ pub async fn run_report_pipeline<R: Runtime>(
         }
 
         // Pause for confirmation even without usable guesses — the user can still
-        // rename and merge manually in the same dialog.
+        // rename and merge manually in the same dialog, using the excerpts below.
         speaker_suggestions = build_speaker_suggestions(&roster, guesses.as_ref());
+        enrich_suggestions(
+            &mut speaker_suggestions,
+            &SpeakerContext {
+                segments: &segments,
+                timed: &timed_now,
+                labels: &labels_now,
+            },
+            guesses.as_ref(),
+        );
         let suggestions_json =
             serde_json::to_string(&speaker_suggestions).unwrap_or_else(|_| "[]".to_string());
         if let Err(e) =
@@ -1155,6 +1430,257 @@ mod tests {
         assert!(s.iter().all(|x| x.suggested_name.is_none() && x.merge_into.is_none()));
         assert_eq!(s[2].current_name, "Аня");
         assert!(s[2].is_confirmed);
+    }
+
+    fn seg(text: &str, speaker_id: Option<i64>) -> TranscriptSpeakerSegment {
+        TranscriptSpeakerSegment {
+            text: text.to_string(),
+            timestamp: String::new(),
+            audio_start_time: None,
+            speaker: None,
+            speaker_id,
+            display_name: speaker_id.map(|id| format!("Speaker {id}")),
+        }
+    }
+
+    /// A 10-line conversation: speaker 1 and 2 alternate, 3 chimes in twice late.
+    fn convo() -> Vec<TranscriptSpeakerSegment> {
+        vec![
+            seg("Всем привет, меня зовут Андрей, я сегодня веду встречу", Some(1)),
+            seg("Привет, Андрей, я готова начинать обсуждение", Some(2)),
+            seg("Отлично, тогда давайте по первому пункту повестки", Some(1)),
+            seg("Да", Some(2)),
+            seg("Нам нужно посчитать бюджет на следующий квартал внимательно", Some(1)),
+            seg("Я подготовлю смету к пятнице и пришлю всем участникам", Some(2)),
+            seg("Коллеги, извините что вклиниваюсь, у меня есть вопрос", Some(3)),
+            seg("Конечно, спрашивайте, мы как раз обсуждаем бюджет", Some(1)),
+            seg("Спасибо, вопрос про сроки поставки оборудования в регионы", Some(3)),
+            seg("Хорошо, зафиксировали, обсудим это отдельно на следующей встрече", Some(1)),
+        ]
+    }
+
+    fn ctx_for(segments: &[TranscriptSpeakerSegment]) -> (Vec<dynamics::TimedSegment>, Vec<String>) {
+        let (dyn_segs, labels, _) = build_segment_views(segments);
+        (dynamics::timeline(&dyn_segs), labels)
+    }
+
+    #[test]
+    fn samples_spread_across_the_meeting_and_skip_filler() {
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        let s1 = ctx.samples(1, 4);
+        assert_eq!(s1.len(), 4);
+        // Chronological, spanning the first and last line of speaker 1.
+        assert_eq!(s1[0].seg, 0);
+        assert_eq!(s1[3].seg, 9);
+        assert!(s1.iter().all(|l| l.speaker_id == Some(1)));
+
+        // Speaker 2's "Да" is filler and must lose to the substantive lines.
+        let s2 = ctx.samples(2, 4);
+        assert_eq!(s2.len(), 2, "only two substantive lines exist");
+        assert!(!s2.iter().any(|l| l.text == "Да"));
+
+        // Fewer turns than requested samples is fine.
+        assert_eq!(ctx.samples(3, 4).len(), 2);
+        assert!(ctx.samples(99, 4).is_empty());
+    }
+
+    #[test]
+    fn samples_fall_back_to_filler_when_nothing_longer_exists() {
+        let segments = vec![seg("Да", Some(7)), seg("Угу", Some(7))];
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let s = ctx.samples(7, 4);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].text, "Да");
+    }
+
+    #[test]
+    fn evidence_window_highlights_the_quoted_line_with_context() {
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        let i = ctx
+            .locate_evidence(0, "меня зовут Андрей", 1)
+            .expect("quote is in segment 0");
+        assert_eq!(i, 0);
+        let w = ctx.window(i, 2, 2);
+        // Clamped at the start; highlight lands on the evidence line.
+        assert_eq!(w.len(), 3);
+        assert!(w[0].highlight);
+        assert_eq!(w[2].seg, 2);
+        assert_eq!(w[1].label, "Speaker 2");
+    }
+
+    #[test]
+    fn evidence_lookup_survives_a_wrong_reported_index() {
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        // Model reported the wrong line but quoted accurately -> text search wins.
+        assert_eq!(ctx.locate_evidence(5, "меня зовут Андрей", 1), Some(0));
+        // Out-of-range index, quote present -> found by search.
+        assert_eq!(ctx.locate_evidence(999, "меня зовут Андрей", 1), Some(0));
+        // Paraphrased quote -> falls back to the reported (in-range) index.
+        assert_eq!(ctx.locate_evidence(4, "этого текста тут нет", 1), Some(4));
+        // Nothing usable at all.
+        assert_eq!(ctx.locate_evidence(-1, "этого текста тут нет", 1), None);
+    }
+
+    #[test]
+    fn pair_excerpt_picks_where_both_speakers_are_closest() {
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        // Speakers 1 and 3 are adjacent at segments 6-7.
+        let p = ctx.pair(1, 3, 6);
+        assert!(!p.is_empty());
+        let segs: Vec<i64> = p.iter().map(|l| l.seg).collect();
+        assert!(segs.contains(&6) && segs.contains(&7), "got {segs:?}");
+        assert!(p.len() <= 6);
+
+        // A speaker that never appears has no comparison excerpt.
+        assert!(ctx.pair(1, 42, 6).is_empty());
+    }
+
+    #[test]
+    fn enrichment_fills_stats_samples_and_contexts() {
+        use crate::report::prompts::{SpeakerMergeGuess, SpeakerNameGuess};
+
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        let roster = vec![
+            MeetingSpeaker { id: 1, display_name: "Speaker 1".into(), is_confirmed: false, segment_count: 5 },
+            MeetingSpeaker { id: 2, display_name: "Speaker 2".into(), is_confirmed: false, segment_count: 3 },
+            MeetingSpeaker { id: 3, display_name: "Speaker 3".into(), is_confirmed: false, segment_count: 2 },
+        ];
+        let guesses = SpeakerGuesses {
+            names: vec![SpeakerNameGuess {
+                speaker_id: 1,
+                name: "Андрей".into(),
+                confidence: 0.95,
+                evidence: "меня зовут Андрей".into(),
+                seg: 0,
+            }],
+            merges: vec![SpeakerMergeGuess {
+                keep_id: 1,
+                merge_ids: vec![3],
+                reason: "одна манера речи".into(),
+            }],
+        };
+
+        let mut suggestions = build_speaker_suggestions(&roster, Some(&guesses));
+        enrich_suggestions(&mut suggestions, &ctx, Some(&guesses));
+
+        // Every speaker gets recognition samples and stats.
+        assert!(suggestions.iter().all(|s| !s.samples.is_empty()));
+        assert!(suggestions.iter().all(|s| !s.first_seen.is_empty()));
+        let total: f32 = suggestions.iter().map(|s| s.talk_share).sum();
+        assert!((total - 1.0).abs() < 0.01, "talk shares sum to {total}");
+        assert!(suggestions[0].talk_share > suggestions[2].talk_share);
+
+        // The named speaker gets the dialogue around the evidence; others don't.
+        assert!(!suggestions[0].evidence_context.is_empty());
+        assert!(suggestions[0].evidence_context.iter().any(|l| l.highlight));
+        assert!(suggestions[1].evidence_context.is_empty());
+
+        // The merge candidate (speaker 3 -> 1) gets the two-speaker comparison.
+        assert_eq!(suggestions[2].merge_into, Some(1));
+        let ctx_ids: Vec<Option<i64>> = suggestions[2]
+            .merge_context
+            .iter()
+            .map(|l| l.speaker_id)
+            .collect();
+        assert!(ctx_ids.contains(&Some(1)) && ctx_ids.contains(&Some(3)), "got {ctx_ids:?}");
+        assert!(suggestions[0].merge_context.is_empty(), "the kept speaker has no merge excerpt");
+    }
+
+    #[test]
+    fn long_lines_are_clipped_on_char_boundaries() {
+        let long = "я".repeat(LINE_CHARS + 50);
+        let segments = vec![seg(&long, Some(1))];
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let line = ctx.line(0, false);
+        assert_eq!(line.text.chars().count(), LINE_CHARS + 1); // + ellipsis
+        assert!(line.text.ends_with('…'));
+        assert_eq!(clip("коротко", LINE_CHARS), "коротко");
+    }
+
+    #[test]
+    fn pair_excerpt_includes_both_turns_even_when_far_apart() {
+        // Speaker 1 speaks once at the start, speaker 2 once at the end, with speaker 3
+        // filling the long middle — the merge-candidate case where the two never speak
+        // near each other. The old clamp truncated the excerpt before the second turn.
+        let mut segments = vec![seg("Здравствуйте, начнём совещание прямо сейчас", Some(1))];
+        for _ in 0..10 {
+            segments.push(seg("Довольно длинная реплика третьего участника встречи", Some(3)));
+        }
+        segments.push(seg("Спасибо, у меня короткое дополнение по срокам", Some(2)));
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        let last = (segments.len() - 1) as i64;
+        let p = ctx.pair(1, 2, PAIR_LINES);
+        let segs: Vec<i64> = p.iter().map(|l| l.seg).collect();
+        assert!(segs.contains(&0), "first speaker's turn missing: {segs:?}");
+        assert!(segs.contains(&last), "second speaker's turn missing: {segs:?}");
+        assert!(p.len() <= PAIR_LINES, "excerpt exceeds budget: {segs:?}");
+        assert!(p.iter().any(|l| l.speaker_id == Some(1)), "speaker 1 absent");
+        assert!(p.iter().any(|l| l.speaker_id == Some(2)), "speaker 2 absent");
+    }
+
+    #[test]
+    fn evidence_seg_matches_the_first_guess_used_for_the_name() {
+        use crate::report::prompts::SpeakerNameGuess;
+
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        // The model emitted TWO guesses for speaker 1. The FIRST drives the displayed
+        // name, so the evidence line must come from the FIRST guess's seg too. The first
+        // guess's quote is paraphrased (not verbatim), so `locate_evidence` cannot rescue
+        // a wrong seg via text search — it falls back to the reported seg, exposing any
+        // first/last-wins mismatch between the name and the evidence index.
+        let guesses = SpeakerGuesses {
+            names: vec![
+                SpeakerNameGuess {
+                    speaker_id: 1,
+                    name: "Андрей".into(),
+                    confidence: 0.9,
+                    evidence: "он назвал своё имя в начале".into(), // paraphrase
+                    seg: 0,
+                },
+                SpeakerNameGuess {
+                    speaker_id: 1,
+                    name: "Борис".into(),
+                    confidence: 0.8,
+                    evidence: "что-то другое".into(),
+                    seg: 5,
+                },
+            ],
+            merges: vec![],
+        };
+
+        let mut s = build_speaker_suggestions(&roster3(), Some(&guesses));
+        assert_eq!(s[0].suggested_name.as_deref(), Some("Андрей"));
+        enrich_suggestions(&mut s, &ctx, Some(&guesses));
+
+        let highlighted = s[0].evidence_context.iter().find(|l| l.highlight).map(|l| l.seg);
+        assert_eq!(
+            highlighted,
+            Some(0),
+            "evidence must anchor on the first guess's seg (0), not the last guess's (5)"
+        );
+        assert!(s[0].evidence_context.iter().all(|l| l.seg != 5));
     }
 
     /// In-memory pool with the schema subset the apply path touches (same shape as the
