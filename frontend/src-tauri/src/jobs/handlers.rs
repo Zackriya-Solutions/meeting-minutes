@@ -20,10 +20,13 @@ use crate::pipeline::chunker::{approx_token_count, chunk_segments, ChunkConfig, 
 pub struct ChunkEmbedHandler;
 
 async fn enqueue_analysis_jobs(ctx: &JobContext, meeting_id: &str) -> anyhow::Result<()> {
-    let empty = serde_json::json!({});
-    ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &empty)
+    let payload = serde_json::json!({
+        "run_analysis": true,
+        "source": "post_meeting",
+    });
+    ctx.enqueue_unique(kind::DIARIZE, Some(meeting_id), &payload)
         .await?;
-    ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &empty)
+    ctx.enqueue_unique(kind::EXTRACT, Some(meeting_id), &payload)
         .await?;
     Ok(())
 }
@@ -38,11 +41,24 @@ impl JobHandler for ChunkEmbedHandler {
         &self,
         ctx: &JobContext,
         meeting_id: Option<&str>,
-        _payload: &serde_json::Value,
+        payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
         let meeting_id =
             meeting_id.ok_or_else(|| anyhow::anyhow!("chunk_embed requires a meeting_id"))?;
         let pool = &ctx.pool;
+        // Archive repair must only build the search index. Diarization and LLM
+        // extraction read whole recordings/transcripts and are appropriate only for
+        // the explicit post-meeting pipeline. Defaulting old/untagged jobs to false
+        // also makes queues created by earlier auto-backfill builds safe after upgrade.
+        let run_analysis = payload
+            .get("run_analysis")
+            .and_then(serde_json::Value::as_bool)
+            // Pre-upgrade post-meeting jobs used `{}`. Preserve their historical
+            // behavior; archive work created by this build is explicitly tagged false.
+            .unwrap_or(true);
+        let source = payload
+            .get("source")
+            .and_then(serde_json::Value::as_str);
 
         let indexing_allowed: Option<i64> = sqlx::query_scalar(
             "SELECT indexing_allowed FROM meetings WHERE id = ?",
@@ -66,7 +82,11 @@ impl JobHandler for ChunkEmbedHandler {
                 .execute(pool)
                 .await?;
             log::info!("[chunk_embed] meeting {meeting_id}: indexing disabled by memory privacy policy");
-            return enqueue_analysis_jobs(ctx, meeting_id).await;
+            return if run_analysis {
+                enqueue_analysis_jobs(ctx, meeting_id).await
+            } else {
+                Ok(())
+            };
         }
 
         // Load segments (ordered). Timing is seconds (REAL) -> ms; NULLs degrade to 0.
@@ -210,14 +230,28 @@ impl JobHandler for ChunkEmbedHandler {
             ctx.enqueue_unique(
                 kind::EMBEDDING_REPAIR,
                 Some(meeting_id),
-                &serde_json::json!({ "reason": "chunk_embed_partial_failure" }),
+                &serde_json::json!({
+                    "reason": "chunk_embed_partial_failure",
+                    "source": source.unwrap_or(if run_analysis {
+                        "post_meeting"
+                    } else {
+                        "archive_backfill"
+                    }),
+                }),
             )
             .await?;
         }
 
-        // Chain: diarization and extraction run after chunking, in parallel. A diarize
-        // failure must not block extraction (Phase 2 degradation rule).
-        enqueue_analysis_jobs(ctx, meeting_id).await
+        if run_analysis {
+            // The explicit post-meeting path chains optional analysis after search
+            // indexing. Archive backfills intentionally stop here.
+            enqueue_analysis_jobs(ctx, meeting_id).await
+        } else {
+            log::info!(
+                "[chunk_embed] meeting {meeting_id}: index-only job complete; optional analysis skipped"
+            );
+            Ok(())
+        }
     }
 }
 
@@ -331,7 +365,7 @@ impl JobHandler for DiarizeHandler {
         &self,
         ctx: &JobContext,
         meeting_id: Option<&str>,
-        _payload: &serde_json::Value,
+        payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
         use crate::pipeline::diarization_commands::{
             app_handle, run_diarization_core, DiarizeError,
@@ -339,6 +373,16 @@ impl JobHandler for DiarizeHandler {
 
         let meeting_id =
             meeting_id.ok_or_else(|| anyhow::anyhow!("diarize requires a meeting_id"))?;
+        if payload
+            .get("run_analysis")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+        {
+            log::info!(
+                "[diarize] meeting {meeting_id}: skipped stale/untagged background analysis job"
+            );
+            return Ok(());
+        }
 
         // Per-meeting opt-out (in-meeting control pill): diarization_enabled = 0 skips the
         // automatic job. The manual `diarize_meeting` command bypasses this — an explicit
@@ -412,12 +456,22 @@ impl JobHandler for ExtractHandler {
         &self,
         ctx: &JobContext,
         meeting_id: Option<&str>,
-        _payload: &serde_json::Value,
+        payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
         use crate::llm::{complete_routed, prompts, router::Scope, LlmError, Purpose};
         use crate::pipeline::extraction;
 
         let meeting_id = meeting_id.unwrap_or("<none>");
+        if payload
+            .get("run_analysis")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+        {
+            log::info!(
+                "[extract] meeting {meeting_id}: skipped stale/untagged background analysis job"
+            );
+            return Ok(());
+        }
         let pool = &ctx.pool;
 
         let cloud_processing_allowed: Option<i64> = sqlx::query_scalar(
@@ -600,8 +654,18 @@ impl JobHandler for BackfillHandler {
         &self,
         ctx: &JobContext,
         _meeting_id: Option<&str>,
-        _payload: &serde_json::Value,
+        payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
+        if payload
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            == Some("startup")
+        {
+            // Builds before this policy change may have persisted an automatic startup
+            // backfill. Mark it done without fanning out work across an imported archive.
+            log::info!("[backfill] skipped legacy automatic startup archive repair");
+            return Ok(());
+        }
         // Only meetings with transcript content are indexable. Empty recordings remain
         // intentionally absent instead of being enqueued on every repair pass.
         let meeting_ids: Vec<String> = sqlx::query_scalar(
@@ -616,9 +680,21 @@ impl JobHandler for BackfillHandler {
         .await?;
 
         let mut chunk_jobs = 0usize;
+        let reason = payload
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("manual_repair");
         for id in meeting_ids {
             if ctx
-                .enqueue_unique(kind::CHUNK_EMBED, Some(&id), &serde_json::json!({}))
+                .enqueue_unique(
+                    kind::CHUNK_EMBED,
+                    Some(&id),
+                    &serde_json::json!({
+                        "run_analysis": false,
+                        "source": "archive_backfill",
+                        "reason": reason,
+                    }),
+                )
                 .await?
                 .created
             {
@@ -663,7 +739,14 @@ impl JobHandler for BackfillHandler {
             .await?;
             for id in repair_ids {
                 if ctx
-                    .enqueue_unique(kind::EMBEDDING_REPAIR, Some(&id), &serde_json::json!({}))
+                    .enqueue_unique(
+                        kind::EMBEDDING_REPAIR,
+                        Some(&id),
+                        &serde_json::json!({
+                            "source": "archive_backfill",
+                            "reason": reason,
+                        }),
+                    )
                     .await?
                     .created
                 {

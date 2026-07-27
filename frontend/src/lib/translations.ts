@@ -761,6 +761,8 @@ export const RU: Record<string, string> = {
   "Please wait for the transcription model to finish downloading before recording.": "Дождитесь окончания загрузки модели, затем начните запись.",
   "Transcription model not ready": "Модель расшифровки не готова",
   "Please download a transcription model before recording.": "Загрузите модель расшифровки в открывшемся окне, затем начните запись.",
+  "No transcription model is available for import": "Нет доступной модели для расшифровки импорта",
+  "Download GigaAM in Settings → Transcription before importing audio.": "Перед импортом аудио загрузите GigaAM в «Настройки → Расшифровка».",
   "Managed transcription is unavailable": "Управляемая расшифровка недоступна",
   "SaluteSpeech does not need a local model. Check internet access and the managed gateway, or switch to GigaAM in Settings → Transcription.": "Для SaluteSpeech не нужна локальная модель. Проверьте интернет и управляемый шлюз либо переключитесь на GigaAM в «Настройки → Расшифровка».",
   "Transcription model setup required": "Нужно настроить модель расшифровки",

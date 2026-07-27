@@ -128,6 +128,50 @@ pub async fn recover_running(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
     Ok(res.rows_affected())
 }
 
+/// Retire only the fan-out created by the removed automatic startup backfill.
+///
+/// Pre-tagging builds used `{}` for both normal post-meeting jobs and archive jobs, so
+/// payload alone cannot distinguish them. Queue ordering supplies the missing origin:
+/// legitimate work already queued before startup has a lower id than the startup
+/// backfill, while its archive fan-out has a higher id and points at meetings created
+/// before that startup. Meetings recorded after startup are preserved as well.
+pub async fn retire_legacy_startup_backfill_fanout(
+    pool: &SqlitePool,
+) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let fanout = sqlx::query(
+        "UPDATE jobs AS j \
+         SET status='done', last_error=NULL, updated_at=datetime('now') \
+         WHERE j.status IN ('queued','running') \
+           AND trim(j.payload)='{}' \
+           AND j.meeting_id IS NOT NULL \
+           AND j.kind IN ('chunk_embed','embedding_repair','diarize','extract') \
+           AND EXISTS ( \
+             SELECT 1 FROM jobs AS startup \
+             JOIN meetings AS m ON m.id=j.meeting_id \
+             WHERE startup.kind='backfill' \
+               AND json_extract(startup.payload, '$.reason')='startup' \
+               AND startup.id < j.id \
+               AND datetime(m.created_at) <= datetime(startup.created_at) \
+           )",
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    let roots = sqlx::query(
+        "UPDATE jobs \
+         SET status='done', last_error=NULL, updated_at=datetime('now') \
+         WHERE status IN ('queued','running') \
+           AND kind='backfill' \
+           AND json_extract(payload, '$.reason')='startup'",
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    tx.commit().await?;
+    Ok(fanout + roots)
+}
+
 /// Fetch up to `limit` jobs eligible to run now (queued and past their backoff).
 /// Search-critical chunking/embedding work runs before optional extraction and
 /// diarization, so a model switch cannot sit behind hours of archive audio processing.

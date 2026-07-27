@@ -309,11 +309,33 @@ pub fn render_report(input: &RenderInput) -> String {
         ("/*DATA:TALK*/", talk_json),
     ];
 
-    let mut html = TEMPLATE.to_string();
-    for (token, value) in replacements {
-        html = html.replace(token, &value);
+    apply_template(TEMPLATE, &replacements)
+}
+
+/// Substitute every `(token, value)` pair in one left-to-right pass over the template.
+/// Unlike chained whole-string `String::replace`, substituted values are never
+/// rescanned, so a value that happens to contain another token's literal text (e.g. a
+/// transcript segment where someone read `/*DATA:TURNS*/` aloud) is left intact.
+fn apply_template(template: &str, replacements: &[(&str, String)]) -> String {
+    let mut out = String::with_capacity(template.len() * 2);
+    let mut rest = template;
+    loop {
+        let hit = replacements
+            .iter()
+            .filter_map(|(token, value)| rest.find(token).map(|pos| (pos, *token, value)))
+            .min_by_key(|(pos, _, _)| *pos);
+        match hit {
+            Some((pos, token, value)) => {
+                out.push_str(&rest[..pos]);
+                out.push_str(value);
+                rest = &rest[pos + token.len()..];
+            }
+            None => {
+                out.push_str(rest);
+                return out;
+            }
+        }
     }
-    html
 }
 
 // ============================ Section builders ============================
@@ -899,6 +921,11 @@ fn build_footer(input: &RenderInput) -> String {
 
 /// Encode a serde_json Value as a JS literal safe to embed inside `<script>`:
 /// neutralise `<` (so `</script>` can't appear) and the JS line separators.
+///
+/// This is script-boundary escaping only — `<` decodes back to a literal
+/// `<` once the script runs, so the values are NOT html-safe. Every innerHTML /
+/// template-literal sink in `template.html` must wrap these strings in `escH()`
+/// (textContent sinks need no escaping, which is why we don't escape here).
 fn js_data(v: &serde_json::Value) -> String {
     serde_json::to_string(v)
         .unwrap_or_else(|_| "null".to_string())
@@ -1095,6 +1122,40 @@ mod tests {
         let out = js_data(&v);
         assert!(!out.contains("</script>"));
         assert!(out.contains("\\u003c/script>"));
+    }
+
+    #[test]
+    fn apply_template_does_not_rescan_inserted_values() {
+        let replacements = [
+            (
+                "<!--SECTION:A-->",
+                "transcript quoting /*DATA:B*/ literally".to_string(),
+            ),
+            ("/*DATA:B*/", "[1,2]".to_string()),
+        ];
+        let out = apply_template("x <!--SECTION:A--> y /*DATA:B*/ z", &replacements);
+        assert_eq!(out, "x transcript quoting /*DATA:B*/ literally y [1,2] z");
+    }
+
+    /// js_data values are not html-safe (see its doc), so every string the
+    /// template's script interpolates into innerHTML / tooltip HTML must go
+    /// through escH. Guards against reintroducing the raw interpolations.
+    #[test]
+    fn template_escapes_data_strings_at_html_sinks() {
+        assert!(TEMPLATE.contains("const escH="));
+        for raw in [
+            "${p.name}",
+            "${p.side||\"\"}",
+            "${name}",
+            "${label}",
+            "${txt}",
+            "${SPK[s].name}",
+        ] {
+            assert!(
+                !TEMPLATE.contains(raw),
+                "unescaped data interpolation `{raw}` in template.html — wrap it in escH()"
+            );
+        }
     }
 
     #[test]

@@ -582,6 +582,11 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    sqlx::query("DELETE FROM analytics_reports WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
@@ -944,6 +949,7 @@ mod tests {
             "CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT)",
             "CREATE TABLE transcript_chunks(id INTEGER PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE summary_processes(id INTEGER PRIMARY KEY, meeting_id TEXT)",
+            "CREATE TABLE analytics_reports(id TEXT PRIMARY KEY, meeting_id TEXT)",
             "CREATE TABLE transcripts(id INTEGER PRIMARY KEY, meeting_id TEXT)",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
@@ -973,6 +979,7 @@ mod tests {
             "INSERT INTO app_settings_kv(key, value) VALUES('summary.content_window.m1', 'primary:0:1000:2000:1')",
             "INSERT INTO transcript_chunks(meeting_id) VALUES('m1')",
             "INSERT INTO summary_processes(meeting_id) VALUES('m1')",
+            "INSERT INTO analytics_reports(id, meeting_id) VALUES('r1', 'm1')",
             "INSERT INTO transcripts(meeting_id) VALUES('m1')",
         ] {
             sqlx::query(statement).execute(&pool).await.unwrap();
@@ -1003,6 +1010,7 @@ mod tests {
             "app_settings_kv",
             "transcript_chunks",
             "summary_processes",
+            "analytics_reports",
             "transcripts",
         ] {
             let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))

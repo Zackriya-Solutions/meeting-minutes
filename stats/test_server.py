@@ -6,6 +6,7 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -116,7 +117,37 @@ class StatsModuleTests(unittest.TestCase):
         self.assertIn("dau", payload)
         self.assertIn("events", payload)
         self.assertIn("errors", payload)
+        self.assertEqual(
+            set(payload["overview"]), {"ever_used", "dau", "wau", "mau"}
+        )
+        self.assertNotIn("sessions_per_dau", payload["overview"])
+        self.assertNotIn("tools_per_dau", payload["overview"])
         self.assertEqual(response.headers["cache-control"], "no-store")
+
+    def test_overview_uses_moscow_day_iso_week_and_calendar_month(self) -> None:
+        now = datetime(2026, 7, 8, 12, 0, tzinfo=timezone.utc).timestamp()
+        events = [
+            {"ts": datetime(2026, 7, 7, 21, 1, tzinfo=timezone.utc).timestamp(),
+             "device_id": "today", "name": "meeting_ended",
+             "properties": {"event_id": "today"}},
+            {"ts": datetime(2026, 7, 6, 8, 0, tzinfo=timezone.utc).timestamp(),
+             "device_id": "week", "name": "meeting_ended",
+             "properties": {"event_id": "week"}},
+            {"ts": datetime(2026, 7, 5, 8, 0, tzinfo=timezone.utc).timestamp(),
+             "device_id": "month", "name": "meeting_ended",
+             "properties": {"event_id": "month"}},
+            {"ts": datetime(2026, 6, 30, 20, 59, tzinfo=timezone.utc).timestamp(),
+             "device_id": "old", "name": "meeting_ended",
+             "properties": {"event_id": "old"}},
+        ]
+        insert_events(server._db, events)
+
+        with patch("server.time.time", return_value=now):
+            growth = server.compute_product(1)["growth"]
+
+        self.assertEqual(growth["dau"], 1)
+        self.assertEqual(growth["wau"], 2)
+        self.assertEqual(growth["mau"], 3)
 
     def test_ingest_fails_closed_without_server_configuration(self) -> None:
         response = asyncio.run(server.ingest(None))

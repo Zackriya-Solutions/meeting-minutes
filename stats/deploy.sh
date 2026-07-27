@@ -20,11 +20,10 @@ DRY_RUN="${DRY_RUN:-0}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 VERSION="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo nogit)_$(date +%Y%m%d_%H%M%S)"
-echo "$VERSION" > "$HERE/VERSION"
 echo "[deploy] version $VERSION"
 
 FLAGS=(-az --exclude=.venv --exclude=.DS_Store --exclude=__pycache__ --exclude='*.pyc'
-  --exclude=data --exclude=.gitignore --exclude=deploy.sh)
+  --exclude=data --exclude=.gitignore --exclude=deploy.sh --exclude=VERSION)
 [ "$DRY_RUN" = "1" ] && FLAGS+=(--dry-run -v)
 
 echo "[deploy] $HERE -> $REMOTE:$REMOTE_DIR"
@@ -34,6 +33,11 @@ if [ "$DRY_RUN" = "1" ]; then
   echo "[deploy] dry-run done; remote untouched"
   exit 0
 fi
+
+TMP_VERSION="$(mktemp)"
+printf '%s\n' "$VERSION" > "$TMP_VERSION"
+rsync -az --rsync-path="sudo rsync" "$TMP_VERSION" "$REMOTE:$REMOTE_DIR/VERSION"
+rm -f "$TMP_VERSION"
 
 ssh "$REMOTE" "cd $REMOTE_DIR \
   && { [ -x .venv/bin/python ] || sudo python3 -m venv .venv; } \

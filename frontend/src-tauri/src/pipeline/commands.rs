@@ -454,20 +454,14 @@ pub async fn init_embedder_at_startup<R: Runtime>(app: &AppHandle<R>) {
         }
         embedder::install_global(candidate);
         drop(switch_guard);
-        match crate::jobs::store::enqueue_unique(
-            state.db_manager.pool(),
-            crate::jobs::kind::BACKFILL,
-            None,
-            &serde_json::json!({ "reason": "startup", "model": kind.id() }),
-        )
-        .await
-        {
-            Ok(outcome) if outcome.created => {
-                log::info!("queued archive index repair after embedder startup")
-            }
-            Ok(_) => {}
-            Err(e) => log::warn!("failed to queue startup archive repair: {e}"),
-        }
+        // Do not traverse the user's entire archive merely because the app started.
+        // Large imported databases can contain gigabytes of transcript text. Existing
+        // chunks remain searchable, and missing index data can be rebuilt explicitly
+        // from Settings → Search.
+        log::info!(
+            "embedding model {} loaded; archive repair remains user-initiated",
+            kind.id()
+        );
     } else {
         log::info!("embedding model not present; search/RAG run FTS-only until it is downloaded");
     }

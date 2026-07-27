@@ -1,8 +1,10 @@
 //! Tauri commands for the Deep Analytics report feature. Contract is frozen — the
 //! frontend depends on the exact command names, argument names, and payload field names.
 
+use once_cell::sync::Lazy;
 use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::database::models::AnalyticsReportMeta;
@@ -16,6 +18,12 @@ pub struct GenerateAnalyticsReportResponse {
     pub report_id: String,
 }
 
+// The active-report check and the insert below are not atomic in SQLite, so two
+// near-simultaneous invocations (e.g. a double-click racing the first invoke's
+// round-trip) could both pass the check and spawn duplicate pipelines. All writers
+// live in this process, so serialising the check+insert here is sufficient.
+static GENERATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 /// Start (or re-attach to) a Deep Analytics report for a meeting. If a report for this
 /// meeting is already `queued`/`running`, its id is returned instead of starting a
 /// duplicate. Otherwise a new row is inserted and the pipeline is spawned; returns
@@ -27,6 +35,8 @@ pub async fn generate_analytics_report<R: Runtime>(
     meeting_id: String,
 ) -> Result<GenerateAnalyticsReportResponse, String> {
     let pool = state.db_manager.pool().clone();
+
+    let _generate_guard = GENERATE_LOCK.lock().await;
 
     if let Some(existing) =
         AnalyticsReportsRepository::active_report_id_for_meeting(&pool, &meeting_id)

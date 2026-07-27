@@ -241,6 +241,12 @@ export function ImportAudioDialog({
   };
 
   const handleStartImport = async () => {
+    if (loadingModels || !selectedModel) {
+      toast.error(t('No transcription model is available for import'), {
+        description: t('Download GigaAM in Settings → Transcription before importing audio.'),
+      });
+      return;
+    }
     if (batchFiles.length > 0) {
       await startBatchImport(
         importableBatchFiles.map((file) => ({
@@ -542,6 +548,17 @@ export function ImportAudioDialog({
                   )}
                 </div>
               )}
+
+              {(fileInfo || batchFiles.length > 0) && !loadingModels && !selectedModel && (
+                <div className="rounded-lg border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] p-3">
+                  <p className="text-sm font-medium text-[var(--danger)]">
+                    {t('No transcription model is available for import')}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--fg2)]">
+                    {t('Download GigaAM in Settings → Transcription before importing audio.')}
+                  </p>
+                </div>
+              )}
             </>
           )}
 
@@ -591,6 +608,8 @@ export function ImportAudioDialog({
                   (!fileInfo && batchFiles.length === 0)
                   || Boolean(fileInfo?.existing_meeting)
                   || (batchFiles.length > 0 && importableBatchFiles.length === 0)
+                  || loadingModels
+                  || !selectedModel
                 }
               >
                 <Upload className="h-4 w-4 mr-2" />
