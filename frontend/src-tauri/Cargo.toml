@@ -134,6 +134,11 @@ dirs = "5.0.1"
 
 # Additional dependencies for notification system
 url = "2.5.0"
+# keyring 3.x ships NO credential store by default: with no store feature selected it
+# resolves to the in-memory `mock` backend (see its `src/lib.rs`:
+# `#[cfg(all(target_os = "macos", not(feature = "apple-native")))] pub use mock as default;`).
+# Nothing persists, every `Entry` starts empty, and the gateway install token is
+# re-minted on every call. The real store is selected per target below.
 keyring = "3.6"
 
 
@@ -204,6 +209,8 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
 core-graphics = "0.23"
+# Keychain Services, so the install token actually survives a restart.
+keyring = { version = "3.6", features = ["apple-native"] }
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 dasp = "0.11.0"
 futures-channel = "0.3.31"
@@ -221,6 +228,8 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+# Windows Credential Manager.
+keyring = { version = "3.6", features = ["windows-native"] }
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)
@@ -232,6 +241,11 @@ futures-channel = "0.3.31"
 [target.'cfg(target_os = "linux")'.dependencies]
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+# Kernel keyutils rather than the Secret Service: it needs no D-Bus at build or run
+# time, so the documented Linux prerequisites (cmake, llvm, libomp) stay as they are.
+# The trade-off is session-scoped storage — the token is re-minted after a reboot,
+# which is still strictly better than the mock store's re-mint on every call.
+keyring = { version = "3.6", features = ["linux-native"] }
 
 [dev-dependencies]
 tempfile = "3.3.0"

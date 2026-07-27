@@ -379,7 +379,7 @@ impl SummaryService {
             }
         } else if provider == LLMProvider::DeepSeek {
             match crate::llm::providers::resolve_deepseek_transport(&pool).await {
-                Some(transport) => {
+                Ok(transport) => {
                     // The summary picker is the source of truth for this request.
                     // Transport-level configuration supplies only a fallback for
                     // older/empty settings rows.
@@ -393,9 +393,12 @@ impl SummaryService {
                     deepseek_max_tokens = Some(transport.max_tokens);
                     (transport.api_key, Some(transport.base_url))
                 }
-                None => {
-                    let err_msg = "Managed DeepSeek gateway is unavailable.".to_string();
-                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                Err(reason) => {
+                    // The reason carries the actual cause (a filter block page, a rejected
+                    // registration, an unreadable credential vault). The old fixed string
+                    // said only "unavailable", which is also what a healthy gateway looks
+                    // like from behind a corporate URL filter.
+                    Self::update_process_failed(&pool, &meeting_id, &reason).await;
                     return;
                 }
             }

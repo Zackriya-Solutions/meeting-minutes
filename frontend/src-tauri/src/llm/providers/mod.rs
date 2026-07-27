@@ -49,11 +49,15 @@ fn deepseek_max_tokens(value: Option<String>) -> u32 {
         .unwrap_or(deepseek::DEFAULT_MAX_TOKENS)
 }
 
-/// Build a DeepSeek client if an API key is configured (settings `deepseek.api_key`
-/// or env `DEEPSEEK_API_KEY`).
-pub async fn resolve_deepseek(pool: &SqlitePool) -> Option<DeepSeekClient> {
+/// Build a DeepSeek client, or explain why it cannot be built.
+///
+/// The error is user-facing: callers previously collapsed every failure into `None` and
+/// printed "add an API key", which is wrong for the managed path — it has no key to add,
+/// and the actual causes (gateway blocked by a network filter, registration rejected)
+/// were invisible. Keep the reason attached all the way to the UI.
+pub async fn resolve_deepseek(pool: &SqlitePool) -> Result<DeepSeekClient, String> {
     let transport = resolve_deepseek_transport(pool).await?;
-    Some(DeepSeekClient::new(
+    Ok(DeepSeekClient::new(
         transport.api_key,
         Some(transport.model),
         Some(transport.base_url),
@@ -64,7 +68,7 @@ pub async fn resolve_deepseek(pool: &SqlitePool) -> Option<DeepSeekClient> {
 /// Resolve the complete DeepSeek transport, including the gateway-selected base URL.
 /// The summary pipeline previously kept only the token and then hard-coded the production
 /// gateway, which broke local/server-backed bootstrap configurations.
-pub async fn resolve_deepseek_transport(pool: &SqlitePool) -> Option<DeepSeekTransport> {
+pub async fn resolve_deepseek_transport(pool: &SqlitePool) -> Result<DeepSeekTransport, String> {
     let configured_key = setting_or_env(pool, "deepseek.api_key", "DEEPSEEK_API_KEY").await;
     let configured_base = kv(pool, "deepseek.base_url").await;
     let model = kv(pool, "deepseek.model")
@@ -80,7 +84,9 @@ pub async fn resolve_deepseek_transport(pool: &SqlitePool) -> Option<DeepSeekTra
             configured_base.unwrap_or_else(|| deepseek::DEFAULT_BASE_URL.to_string()),
         ),
         None => {
-            let (token, gateway_base) = crate::gateway_identity::install_token().await.ok()?;
+            let (token, gateway_base) = crate::gateway_identity::install_token()
+                .await
+                .map_err(|e| format!("Управляемый шлюз Memento недоступен: {e}"))?;
             (
                 token,
                 configured_base.unwrap_or_else(|| managed_deepseek_base_url(&gateway_base)),
@@ -88,7 +94,7 @@ pub async fn resolve_deepseek_transport(pool: &SqlitePool) -> Option<DeepSeekTra
         }
     };
 
-    Some(DeepSeekTransport {
+    Ok(DeepSeekTransport {
         api_key,
         base_url,
         model,
@@ -192,6 +198,7 @@ pub async fn resolve_deepseek_api_key(pool: &SqlitePool) -> Option<String> {
     resolve_deepseek_transport(pool)
         .await
         .map(|transport| transport.api_key)
+        .ok()
 }
 
 // NOTE: SaluteSpeech config resolution lives in `crate::salutespeech` (it needs several
@@ -201,6 +208,6 @@ pub async fn resolve_deepseek_api_key(pool: &SqlitePool) -> Option<String> {
 pub async fn configured(pool: &SqlitePool) -> (bool, bool) {
     (
         resolve_gigachat(pool).await.is_some(),
-        resolve_deepseek(pool).await.is_some(),
+        resolve_deepseek(pool).await.is_ok(),
     )
 }

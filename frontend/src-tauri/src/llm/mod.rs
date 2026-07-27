@@ -172,12 +172,12 @@ pub async fn complete_routed(
             if let Some(g) = &giga {
                 return guarded_complete(&privacy, purpose, g.complete(system, user)).await;
             }
-            if let Some(d) = &deep {
+            if let Ok(d) = &deep {
                 return guarded_complete(&privacy, purpose, d.complete(system, user)).await;
             }
         }
         RouteTarget::Synthesis => {
-            if let Some(d) = &deep {
+            if let Ok(d) = &deep {
                 return guarded_complete(&privacy, purpose, d.complete(system, user)).await;
             }
             if let Some(g) = &giga {
@@ -185,9 +185,12 @@ pub async fn complete_routed(
             }
         }
     }
-    Err(LlmError::Provider(
-        "no LLM provider configured — set GigaChat or DeepSeek credentials in settings".into(),
-    ))
+    // Reaching here means GigaChat is unconfigured *and* DeepSeek failed to resolve, so
+    // DeepSeek's reason is the only actionable thing we have. On the managed path there
+    // is no key for the user to add, and the generic advice below buried the real cause.
+    Err(LlmError::Provider(deep.err().unwrap_or_else(|| {
+        "no LLM provider configured — set GigaChat or DeepSeek credentials in settings".into()
+    })))
 }
 
 #[cfg(test)]

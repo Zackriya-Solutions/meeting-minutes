@@ -876,16 +876,9 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
     let client = match resolve_deepseek(&pool).await {
-        Some(c) => c,
-        None => {
-            fail(
-                &app,
-                &pool,
-                &report_id,
-                &meeting_id,
-                "DeepSeek не настроен — добавьте ключ в настройках",
-            )
-            .await;
+        Ok(c) => c,
+        Err(reason) => {
+            fail(&app, &pool, &report_id, &meeting_id, &reason).await;
             return;
         }
     };
