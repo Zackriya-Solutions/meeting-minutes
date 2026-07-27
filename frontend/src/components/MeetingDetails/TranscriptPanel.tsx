@@ -79,7 +79,10 @@ export function TranscriptPanel({
         />
       </div>
 
-      <MeetingVideo folderPath={meetingFolderPath} />
+      <MeetingVideo
+        folderPath={meetingFolderPath}
+        onOpenFolder={onOpenMeetingFolder}
+      />
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
