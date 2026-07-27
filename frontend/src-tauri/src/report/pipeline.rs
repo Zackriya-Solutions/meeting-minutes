@@ -426,12 +426,30 @@ impl SpeakerContext<'_> {
         let Some((_, from, to)) = best else {
             return Vec::new();
         };
-        // One line of lead-in/lead-out for context, then clamp to the line budget.
-        let lo = from.saturating_sub(1);
-        let hi = (to + 1)
-            .min(self.segments.len() - 1)
-            .min(lo + max_lines.saturating_sub(1));
-        (lo..=hi).map(|i| self.line(i, false)).collect()
+        let n = self.segments.len();
+        let budget = max_lines.max(2);
+        // Always include BOTH turns. When they are close enough to fit the budget, show
+        // one contiguous excerpt (padded for context); when they are far apart — common
+        // for merge candidates, which is exactly why they were flagged — show a small
+        // window around each turn so the second speaker is never truncated away.
+        let indices: Vec<usize> = if to - from + 1 <= budget {
+            let extra = budget - (to - from + 1);
+            let lo = from.saturating_sub(extra / 2);
+            let hi = (to + (extra - extra / 2)).min(n - 1);
+            (lo..=hi).collect()
+        } else {
+            let per = (budget / 2).max(1);
+            let window = |center: usize| -> Vec<usize> {
+                let lo = center.saturating_sub((per - 1) / 2);
+                (lo..=(lo + per - 1).min(n - 1)).collect()
+            };
+            let mut idx = window(from);
+            idx.extend(window(to));
+            idx.sort_unstable();
+            idx.dedup();
+            idx
+        };
+        indices.into_iter().map(|i| self.line(i, false)).collect()
     }
 }
 
@@ -524,9 +542,19 @@ fn enrich_suggestions(
     ctx: &SpeakerContext<'_>,
     guesses: Option<&SpeakerGuesses>,
 ) {
-    let evidence_seg: HashMap<i64, i64> = guesses
-        .map(|g| g.names.iter().map(|n| (n.speaker_id, n.seg)).collect())
-        .unwrap_or_default();
+    // First non-empty-name guess per speaker. This MUST match the first-wins selection
+    // in `build_speaker_suggestions` (which used `entry().or_insert_with`): a plain
+    // `collect()` keeps the LAST guess for a repeated speaker_id, so the located evidence
+    // line could come from a different guess than the displayed name/quote.
+    let mut evidence_seg: HashMap<i64, i64> = HashMap::new();
+    if let Some(g) = guesses {
+        for n in &g.names {
+            if n.name.trim().is_empty() {
+                continue;
+            }
+            evidence_seg.entry(n.speaker_id).or_insert(n.seg);
+        }
+    }
 
     for s in suggestions.iter_mut() {
         let (share, first_seen) = ctx.stats(s.speaker_id);
@@ -1584,6 +1612,75 @@ mod tests {
         assert_eq!(line.text.chars().count(), LINE_CHARS + 1); // + ellipsis
         assert!(line.text.ends_with('…'));
         assert_eq!(clip("коротко", LINE_CHARS), "коротко");
+    }
+
+    #[test]
+    fn pair_excerpt_includes_both_turns_even_when_far_apart() {
+        // Speaker 1 speaks once at the start, speaker 2 once at the end, with speaker 3
+        // filling the long middle — the merge-candidate case where the two never speak
+        // near each other. The old clamp truncated the excerpt before the second turn.
+        let mut segments = vec![seg("Здравствуйте, начнём совещание прямо сейчас", Some(1))];
+        for _ in 0..10 {
+            segments.push(seg("Довольно длинная реплика третьего участника встречи", Some(3)));
+        }
+        segments.push(seg("Спасибо, у меня короткое дополнение по срокам", Some(2)));
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        let last = (segments.len() - 1) as i64;
+        let p = ctx.pair(1, 2, PAIR_LINES);
+        let segs: Vec<i64> = p.iter().map(|l| l.seg).collect();
+        assert!(segs.contains(&0), "first speaker's turn missing: {segs:?}");
+        assert!(segs.contains(&last), "second speaker's turn missing: {segs:?}");
+        assert!(p.len() <= PAIR_LINES, "excerpt exceeds budget: {segs:?}");
+        assert!(p.iter().any(|l| l.speaker_id == Some(1)), "speaker 1 absent");
+        assert!(p.iter().any(|l| l.speaker_id == Some(2)), "speaker 2 absent");
+    }
+
+    #[test]
+    fn evidence_seg_matches_the_first_guess_used_for_the_name() {
+        use crate::report::prompts::SpeakerNameGuess;
+
+        let segments = convo();
+        let (timed, labels) = ctx_for(&segments);
+        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+
+        // The model emitted TWO guesses for speaker 1. The FIRST drives the displayed
+        // name, so the evidence line must come from the FIRST guess's seg too. The first
+        // guess's quote is paraphrased (not verbatim), so `locate_evidence` cannot rescue
+        // a wrong seg via text search — it falls back to the reported seg, exposing any
+        // first/last-wins mismatch between the name and the evidence index.
+        let guesses = SpeakerGuesses {
+            names: vec![
+                SpeakerNameGuess {
+                    speaker_id: 1,
+                    name: "Андрей".into(),
+                    confidence: 0.9,
+                    evidence: "он назвал своё имя в начале".into(), // paraphrase
+                    seg: 0,
+                },
+                SpeakerNameGuess {
+                    speaker_id: 1,
+                    name: "Борис".into(),
+                    confidence: 0.8,
+                    evidence: "что-то другое".into(),
+                    seg: 5,
+                },
+            ],
+            merges: vec![],
+        };
+
+        let mut s = build_speaker_suggestions(&roster3(), Some(&guesses));
+        assert_eq!(s[0].suggested_name.as_deref(), Some("Андрей"));
+        enrich_suggestions(&mut s, &ctx, Some(&guesses));
+
+        let highlighted = s[0].evidence_context.iter().find(|l| l.highlight).map(|l| l.seg);
+        assert_eq!(
+            highlighted,
+            Some(0),
+            "evidence must anchor on the first guess's seg (0), not the last guess's (5)"
+        );
+        assert!(s[0].evidence_context.iter().all(|l| l.seg != 5));
     }
 
     /// In-memory pool with the schema subset the apply path touches (same shape as the
