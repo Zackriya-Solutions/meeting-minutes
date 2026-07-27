@@ -35,8 +35,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 #   ./build-gpu.sh (Unix/macOS)
 #   .\build-gpu.ps1 (Windows PowerShell)
 #
+# Dev-only measurement harness for speaker identification quality.
+# Gated behind `dev-eval` so ordinary and release builds never compile it:
+#   cargo run --features dev-eval --bin speaker_eval -- --help
+[[bin]]
+name = "speaker_eval"
+path = "src/bin/speaker_eval.rs"
+required-features = ["dev-eval"]
+
 [features]
 default = ["platform-default"]  # Automatically enables best backend per platform
+
+# Builds the speaker_eval measurement harness (see src/bin/speaker_eval.rs).
+dev-eval = []
 
 # Platform-appropriate defaults - see target-specific dependencies below
 platform-default = []
