@@ -344,9 +344,108 @@ pub async fn get_video_capture_status() -> VideoCaptureStatus {
 
 #[tauri::command]
 pub fn get_meeting_video_path(folder_path: String) -> Option<String> {
+    find_preferred_video(Path::new(&folder_path)).map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn trim_meeting_video(
+    folder_path: String,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Result<String, String> {
+    validate_trim_range(start_seconds, end_seconds)?;
+
+    let folder = PathBuf::from(folder_path);
+    let input_path = find_preferred_video(&folder)
+        .ok_or_else(|| "The meeting video could not be found".to_string())?;
+    let output_path = folder.join("video-trimmed.mp4");
+    let temporary_path = folder.join("video-trimmed.tmp.mp4");
+    let ffmpeg_path = crate::audio::ffmpeg::find_ffmpeg_path()
+        .ok_or_else(|| "FFmpeg is required to trim meeting videos".to_string())?;
+    let duration = end_seconds - start_seconds;
+    let start_arg = format!("{start_seconds:.3}");
+    let duration_arg = format!("{duration:.3}");
+
+    let output = Command::new(ffmpeg_path)
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(&input_path)
+        .args([
+            "-ss",
+            &start_arg,
+            "-t",
+            &duration_arg,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+        ])
+        .arg(&temporary_path)
+        .output()
+        .await
+        .map_err(|error| format!("Failed to start FFmpeg: {error}"))?;
+
+    if !output.status.success() {
+        let _ = fs::remove_file(&temporary_path).await;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "FFmpeg could not trim the video: {}",
+            stderr.trim()
+        ));
+    }
+    if let Err(error) = validate_video(&temporary_path) {
+        let _ = fs::remove_file(&temporary_path).await;
+        return Err(error);
+    }
+    if output_path.exists() {
+        fs::remove_file(&output_path)
+            .await
+            .map_err(|error| format!("Failed replacing the previous trim: {error}"))?;
+    }
+    fs::rename(&temporary_path, &output_path)
+        .await
+        .map_err(|error| format!("Failed saving the trimmed video: {error}"))?;
+    Ok(output_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn restore_original_meeting_video(folder_path: String) -> Result<String, String> {
+    let folder = PathBuf::from(folder_path);
+    let trimmed_path = folder.join("video-trimmed.mp4");
+    match fs::remove_file(&trimmed_path).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Failed removing the trimmed video: {error}")),
+    }
+    find_original_video(&folder)
+        .map(|path| path.to_string_lossy().to_string())
+        .ok_or_else(|| "The original meeting video could not be found".to_string())
+}
+
+fn find_original_video(folder: &Path) -> Option<PathBuf> {
+    [folder.join("video.mov"), folder.join("video.webm")]
+        .into_iter()
+        .find(|path| {
+            std::fs::metadata(path)
+                .map(|metadata| metadata.is_file() && metadata.len() >= 1024)
+                .unwrap_or(false)
+        })
+}
+
+fn find_preferred_video(folder: &Path) -> Option<PathBuf> {
     [
-        Path::new(&folder_path).join("video.mov"),
-        Path::new(&folder_path).join("video.webm"),
+        folder.join("video-trimmed.mp4"),
+        folder.join("video.mov"),
+        folder.join("video.webm"),
     ]
     .into_iter()
     .find(|path| {
@@ -354,7 +453,19 @@ pub fn get_meeting_video_path(folder_path: String) -> Option<String> {
             .map(|metadata| metadata.is_file() && metadata.len() >= 1024)
             .unwrap_or(false)
     })
-    .map(|path| path.to_string_lossy().to_string())
+}
+
+fn validate_trim_range(start_seconds: f64, end_seconds: f64) -> Result<(), String> {
+    if !start_seconds.is_finite() || !end_seconds.is_finite() {
+        return Err("Trim points must be finite numbers".to_string());
+    }
+    if start_seconds < 0.0 || end_seconds <= start_seconds {
+        return Err("The trim end must be after the trim start".to_string());
+    }
+    if end_seconds - start_seconds < 0.1 {
+        return Err("Keep at least 0.1 seconds of video".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -654,5 +765,13 @@ mod tests {
         )));
         assert!(!is_allowed_extension_origin(Some("https://example.com")));
         assert!(!is_allowed_extension_origin(None));
+    }
+
+    #[test]
+    fn trim_ranges_require_positive_finite_duration() {
+        assert!(validate_trim_range(1.0, 5.0).is_ok());
+        assert!(validate_trim_range(-1.0, 5.0).is_err());
+        assert!(validate_trim_range(5.0, 5.0).is_err());
+        assert!(validate_trim_range(0.0, f64::INFINITY).is_err());
     }
 }

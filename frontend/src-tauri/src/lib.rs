@@ -558,6 +558,8 @@ pub fn run() {
             video_capture::get_video_capture_status,
             video_capture::get_meeting_video_path,
             video_capture::list_capture_windows,
+            video_capture::trim_meeting_video,
+            video_capture::restore_original_meeting_video,
             read_audio_file,
             save_transcript,
             analytics::commands::init_analytics,
