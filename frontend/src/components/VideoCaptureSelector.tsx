@@ -24,6 +24,9 @@ interface VideoCaptureStatus {
 
 const STORAGE_KEY = 'meetily-video-capture-mode';
 const WINDOW_STORAGE_KEY = 'meetily-video-capture-window';
+const WINDOW_LABEL_STORAGE_KEY = 'meetily-video-capture-window-label';
+
+const windowLabel = (window: CaptureWindow) => `${window.app}\u0000${window.title}`;
 
 export function VideoCaptureSelector({ disabled }: { disabled: boolean }) {
   const [mode, setMode] = useState<VideoCaptureMode>('off');
@@ -32,21 +35,40 @@ export function VideoCaptureSelector({ disabled }: { disabled: boolean }) {
   const [windowId, setWindowId] = useState<number | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as VideoCaptureMode | null;
-    const storedWindowId = Number(localStorage.getItem(WINDOW_STORAGE_KEY)) || null;
-    const initial = stored && ['off', 'screen', 'window', 'browser_tab'].includes(stored)
-      ? stored
-      : 'off';
-    const validInitial = initial === 'window' && !storedWindowId ? 'off' : initial;
-    setMode(validInitial);
-    setWindowId(storedWindowId);
-    invoke('set_video_capture_mode', {
-      mode: validInitial,
-      windowId: validInitial === 'window' ? storedWindowId : null,
-    }).catch(console.error);
-    invoke<CaptureWindow[]>('list_capture_windows')
-      .then(setWindows)
-      .catch((error) => console.error('Failed to list capture windows', error));
+    let active = true;
+    const initialize = async () => {
+      try {
+        const availableWindows = await invoke<CaptureWindow[]>('list_capture_windows');
+        if (!active) return;
+
+        setWindows(availableWindows);
+        const stored = localStorage.getItem(STORAGE_KEY) as VideoCaptureMode | null;
+        const storedWindowId = Number(localStorage.getItem(WINDOW_STORAGE_KEY)) || null;
+        const storedWindowLabel = localStorage.getItem(WINDOW_LABEL_STORAGE_KEY);
+        const selectedWindow = availableWindows.find(
+          (window) => storedWindowLabel && windowLabel(window) === storedWindowLabel,
+        ) || availableWindows.find((window) => window.id === storedWindowId)
+          || availableWindows[0]
+          || null;
+        const initial = stored && ['off', 'screen', 'window', 'browser_tab'].includes(stored)
+          ? stored
+          : 'off';
+        const validInitial = initial === 'window' && !selectedWindow ? 'off' : initial;
+
+        setMode(validInitial);
+        setWindowId(selectedWindow?.id || null);
+        await invoke('set_video_capture_mode', {
+          mode: validInitial,
+          windowId: validInitial === 'window' ? selectedWindow?.id || null : null,
+        });
+      } catch (error) {
+        console.error('Failed to initialize video capture', error);
+      }
+    };
+    initialize();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -89,15 +111,12 @@ export function VideoCaptureSelector({ disabled }: { disabled: boolean }) {
       if (selectedWindowId) {
         setWindowId(selectedWindowId);
         localStorage.setItem(WINDOW_STORAGE_KEY, String(selectedWindowId));
+        const selectedWindow = windows.find((window) => window.id === selectedWindowId);
+        if (selectedWindow) {
+          localStorage.setItem(WINDOW_LABEL_STORAGE_KEY, windowLabel(selectedWindow));
+        }
       }
       localStorage.setItem(STORAGE_KEY, next);
-      if (next === 'screen') {
-        toast.info('The macOS display or area picker will open when recording starts');
-      } else if (next === 'window') {
-        toast.info('The selected window will be recorded for the whole meeting');
-      } else if (next === 'browser_tab') {
-        toast.info('Focus a tab and click the Meetily Tab Capture extension to arm it');
-      }
     } catch (error) {
       toast.error('Could not change video source', { description: String(error) });
     }
@@ -108,6 +127,10 @@ export function VideoCaptureSelector({ disabled }: { disabled: boolean }) {
       await invoke('set_video_capture_mode', { mode: 'window', windowId: nextWindowId });
       setWindowId(nextWindowId);
       localStorage.setItem(WINDOW_STORAGE_KEY, String(nextWindowId));
+      const selectedWindow = windows.find((window) => window.id === nextWindowId);
+      if (selectedWindow) {
+        localStorage.setItem(WINDOW_LABEL_STORAGE_KEY, windowLabel(selectedWindow));
+      }
     } catch (error) {
       toast.error('Could not select that window', { description: String(error) });
     }
@@ -158,6 +181,11 @@ export function VideoCaptureSelector({ disabled }: { disabled: boolean }) {
             title={status?.tab_title || undefined}
           >
             {browserReady ? status?.tab_title || 'Tab armed' : 'Click extension to arm'}
+          </span>
+        )}
+        {mode === 'screen' && (
+          <span className="max-w-[150px] truncate text-[10px] text-blue-600">
+            Picker opens when recording starts
           </span>
         )}
       </div>
