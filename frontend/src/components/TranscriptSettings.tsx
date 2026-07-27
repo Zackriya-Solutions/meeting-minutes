@@ -8,10 +8,11 @@ import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 import { QwenAsrModelManager } from './QwenAsrModelManager';
+import { SenseVoiceModelManager } from './SenseVoiceModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'qwen3Asr' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'qwen3Asr' | 'senseVoice' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
@@ -35,7 +36,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     }, [transcriptModelConfig.provider]);
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet' || transcriptModelConfig.provider === 'qwen3Asr') {
+        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet' || transcriptModelConfig.provider === 'qwen3Asr' || transcriptModelConfig.provider === 'senseVoice') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -55,6 +56,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
         qwen3Asr: [], // Model selection handled by QwenAsrModelManager component
+        senseVoice: [], // Model selection handled by SenseVoiceModelManager component
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -106,6 +108,15 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         onModelSelect?.();
     };
 
+    const handleSenseVoiceModelSelect = (modelName: string) => {
+        setTranscriptModelConfig({
+            ...transcriptModelConfig,
+            provider: 'senseVoice',
+            model: modelName
+        });
+        onModelSelect?.();
+    };
+
     return (
         <div>
             <div>
@@ -123,7 +134,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'qwen3Asr') {
+                                    if (provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'qwen3Asr' && provider !== 'senseVoice') {
                                         fetchApiKey(provider);
                                     }
                                 }}
@@ -134,6 +145,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="qwen3Asr">🌐 Qwen3-ASR (Multilingual / Chinese Dialects)</SelectItem>
+                                    <SelectItem value="senseVoice">🗣️ SenseVoice (Fast / East Asian Multilingual)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
@@ -142,7 +154,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'qwen3Asr' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'qwen3Asr' && uiProvider !== 'senseVoice' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -189,6 +201,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             <QwenAsrModelManager
                                 selectedModel={transcriptModelConfig.provider === 'qwen3Asr' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleQwenModelSelect}
+                                autoSave={true}
+                            />
+                        </div>
+                    )}
+
+                    {uiProvider === 'senseVoice' && (
+                        <div className="mt-6">
+                            <SenseVoiceModelManager
+                                selectedModel={transcriptModelConfig.provider === 'senseVoice' ? transcriptModelConfig.model : undefined}
+                                onModelSelect={handleSenseVoiceModelSelect}
                                 autoSave={true}
                             />
                         </div>
@@ -246,7 +268,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
 
 
 

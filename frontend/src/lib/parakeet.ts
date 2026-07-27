@@ -51,6 +51,8 @@ export const QWEN3_ASR_LANGUAGE_CODES = [
   'cs', 'fil', 'fa', 'el', 'hu', 'mk', 'ro',
 ] as const;
 
+export const SENSE_VOICE_LANGUAGE_CODES = ['auto', 'zh', 'yue', 'en', 'ja', 'ko'] as const;
+
 export function supportsTranscriptionLanguage(
   capability: TranscriptionLanguageCapability,
   languageCode: string
@@ -140,6 +142,16 @@ export function getTranscriptionLanguageCapability(
       description: 'Choose Chinese or another supported language to improve accuracy, or keep automatic detection for multilingual speech.',
       analyticsLanguage: 'selected',
       supportedLanguageCodes: QWEN3_ASR_LANGUAGE_CODES,
+    };
+  }
+
+  if (provider === 'senseVoice') {
+    return {
+      allowsLanguageSelection: false,
+      displayName: 'Automatic (Mandarin, Cantonese, English, Japanese, Korean)',
+      description: 'SenseVoice automatically detects Mandarin, Cantonese, English, Japanese, and Korean. Translation is not available.',
+      analyticsLanguage: 'auto',
+      supportedLanguageCodes: SENSE_VOICE_LANGUAGE_CODES,
     };
   }
 

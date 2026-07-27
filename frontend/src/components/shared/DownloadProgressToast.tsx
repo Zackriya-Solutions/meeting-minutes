@@ -359,6 +359,67 @@ export function useDownloadProgressToast() {
     };
   }, [updateDownload, cleanupDownload]);
 
+  // Listen to SenseVoice download events so progress survives closing Settings.
+  useEffect(() => {
+    const displayName = 'SenseVoice Small Int8';
+    const totalMiB = 228.5;
+    const unlistenProgress = listen<{
+      modelName: string;
+      progress: number;
+      downloaded_mb: number;
+      total_mb: number;
+      speed_mbps: number;
+    }>('sense-voice-model-download-progress', ({ payload }) => {
+      updateDownload(payload.modelName, {
+        modelName: payload.modelName,
+        displayName,
+        progress: payload.progress,
+        downloadedMb: payload.downloaded_mb,
+        totalMb: payload.total_mb,
+        speedMbps: payload.speed_mbps,
+        unitLabel: 'MiB',
+        status: payload.progress >= 100 ? 'completed' : 'downloading',
+      });
+    });
+
+    const unlistenComplete = listen<{ modelName: string }>(
+      'sense-voice-model-download-complete',
+      ({ payload }) => {
+        updateDownload(payload.modelName, {
+          modelName: payload.modelName,
+          displayName,
+          progress: 100,
+          downloadedMb: totalMiB,
+          totalMb: totalMiB,
+          speedMbps: 0,
+          unitLabel: 'MiB',
+          status: 'completed',
+        });
+        cleanupDownload(payload.modelName, 4000);
+      }
+    );
+
+    const unlistenError = listen<{ modelName: string; error: string }>(
+      'sense-voice-model-download-error',
+      ({ payload }) => {
+        const cancelled = payload.error.toLowerCase().includes('cancelled');
+        updateDownload(payload.modelName, {
+          modelName: payload.modelName,
+          displayName,
+          status: cancelled ? 'cancelled' : 'error',
+          error: cancelled ? undefined : categorizeError(payload.error),
+        });
+        cleanupDownload(payload.modelName, cancelled ? 6000 : 11000);
+      }
+    );
+
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenComplete.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, [updateDownload, cleanupDownload]);
+
   // Listen to Built-in AI summary model download events
   useEffect(() => {
     const unlisten = listen<{

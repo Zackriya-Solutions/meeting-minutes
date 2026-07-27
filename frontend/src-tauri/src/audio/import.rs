@@ -6,6 +6,7 @@ use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::qwen_asr_engine::QwenAsrEngine;
+use crate::sense_voice_engine::SenseVoiceEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
 use anyhow::{anyhow, Result};
@@ -332,6 +333,7 @@ async fn run_import<R: Runtime>(
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
     let use_qwen = provider.as_deref() == Some("qwen3Asr");
+    let use_sense_voice = provider.as_deref() == Some("senseVoice");
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -510,7 +512,7 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
-    let whisper_engine = if !use_parakeet && !use_qwen && total_segments > 0 {
+    let whisper_engine = if !use_parakeet && !use_qwen && !use_sense_voice && total_segments > 0 {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -522,6 +524,11 @@ async fn run_import<R: Runtime>(
     };
     let qwen_engine = if use_qwen && total_segments > 0 {
         Some(get_or_init_qwen(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    let sense_voice_engine = if use_sense_voice && total_segments > 0 {
+        Some(get_or_init_sense_voice(&app, model.as_deref()).await?)
     } else {
         None
     };
@@ -604,6 +611,14 @@ async fn run_import<R: Runtime>(
                 .transcribe_audio(segment.samples.clone(), language.clone())
                 .await
                 .map_err(|e| anyhow!("Qwen3-ASR transcription failed on segment {}: {}", i, e))?;
+            (text, 0.0f32)
+        } else if use_sense_voice {
+            let text = sense_voice_engine
+                .as_ref()
+                .unwrap()
+                .transcribe_audio(segment.samples.clone())
+                .await
+                .map_err(|e| anyhow!("SenseVoice transcription failed on segment {}: {}", i, e))?;
             (text, 0.0f32)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
@@ -873,6 +888,28 @@ async fn get_or_init_qwen<R: Runtime>(
         guard.as_ref().cloned()
     }
     .ok_or_else(|| anyhow!("Qwen3-ASR engine not initialized"))?;
+
+    if engine.get_current_model().await.as_deref() != Some(target_model) {
+        engine.load_model(target_model).await?;
+    }
+    Ok(engine)
+}
+
+async fn get_or_init_sense_voice<R: Runtime>(
+    _app: &AppHandle<R>,
+    requested_model: Option<&str>,
+) -> Result<Arc<SenseVoiceEngine>> {
+    let target_model = requested_model.unwrap_or(crate::sense_voice_engine::SENSE_VOICE_MODEL);
+    if target_model != crate::sense_voice_engine::SENSE_VOICE_MODEL {
+        return Err(anyhow!("Unsupported SenseVoice model: {}", target_model));
+    }
+    let engine = {
+        let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().cloned()
+    }
+    .ok_or_else(|| anyhow!("SenseVoice engine not initialized"))?;
 
     if engine.get_current_model().await.as_deref() != Some(target_model) {
         engine.load_model(target_model).await?;

@@ -211,7 +211,7 @@ impl SettingsRepository {
     ) -> std::result::Result<Option<String>, sqlx::Error> {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
-            "parakeet" | "qwen3Asr" => return Ok(None), // Embedded providers don't need an API key
+            "parakeet" | "qwen3Asr" | "senseVoice" => return Ok(None), // Embedded providers don't need an API key
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",

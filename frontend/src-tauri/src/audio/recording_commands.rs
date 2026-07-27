@@ -707,6 +707,24 @@ pub async fn stop_recording<R: Runtime>(
                 }
             }
         }
+        Some("senseVoice") => {
+            info!("Unloading SenseVoice model...");
+            let engine = {
+                let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                    .lock()
+                    .unwrap();
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                if engine.unload_model().await {
+                    info!("SenseVoice model '{}' unloaded successfully", current_model);
+                }
+            }
+        }
         _ => {
             // Default to Whisper
             info!("🎤 Unloading Whisper model...");

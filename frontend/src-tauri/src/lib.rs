@@ -50,6 +50,7 @@ pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod qwen_asr_engine;
+pub mod sense_voice_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -479,6 +480,13 @@ pub fn run() {
                 }
             });
 
+            sense_voice_engine::commands::set_models_directory(&_app.handle());
+            tauri::async_runtime::spawn(async {
+                if let Err(e) = sense_voice_engine::commands::sense_voice_init().await {
+                    log::error!("Failed to initialize SenseVoice engine on startup: {}", e);
+                }
+            });
+
             // Initialize ModelManager for summary engine (async, non-blocking)
             let app_handle_for_model_manager = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -602,6 +610,18 @@ pub fn run() {
             qwen_asr_engine::commands::qwen_asr_cancel_download,
             qwen_asr_engine::commands::qwen_asr_delete_model,
             qwen_asr_engine::commands::open_qwen_asr_models_folder,
+            // SenseVoice engine commands
+            sense_voice_engine::commands::sense_voice_init,
+            sense_voice_engine::commands::sense_voice_get_available_models,
+            sense_voice_engine::commands::sense_voice_load_model,
+            sense_voice_engine::commands::sense_voice_get_current_model,
+            sense_voice_engine::commands::sense_voice_is_model_loaded,
+            sense_voice_engine::commands::sense_voice_validate_model_ready,
+            sense_voice_engine::commands::sense_voice_transcribe_audio,
+            sense_voice_engine::commands::sense_voice_download_model,
+            sense_voice_engine::commands::sense_voice_cancel_download,
+            sense_voice_engine::commands::sense_voice_delete_model,
+            sense_voice_engine::commands::open_sense_voice_models_folder,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,

@@ -27,4 +27,16 @@ describe('Parakeet model metadata', () => {
     expect(supportsTranscriptionLanguage(capability, 'uk')).toBe(false);
     expect(capability.description).toContain('Choose Chinese');
   });
+
+  test('describes SenseVoice as automatic detection for its five supported languages', () => {
+    const capability = getTranscriptionLanguageCapability(
+      'senseVoice',
+      'sense-voice-small-int8'
+    );
+    expect(capability.allowsLanguageSelection).toBe(false);
+    expect(capability.analyticsLanguage).toBe('auto');
+    expect(capability.displayName).toContain('Mandarin');
+    expect(capability.description).toContain('Cantonese');
+    expect(capability.description).toContain('Korean');
+  });
 });

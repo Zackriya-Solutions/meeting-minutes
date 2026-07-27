@@ -48,6 +48,17 @@ pub(crate) async fn unload_engine_after_batch(provider: &str) {
                 engine.unload_model().await;
             }
         }
+        "senseVoice" => {
+            let engine = {
+                let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                engine.unload_model().await;
+            }
+        }
         _ => {
             let engine = {
                 let guard = crate::whisper_engine::commands::WHISPER_ENGINE

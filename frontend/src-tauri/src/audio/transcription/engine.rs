@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 const QWEN3_ASR_AUTO_LIVE_SEGMENT_DURATION_MS: u32 = 4_000;
 const QWEN3_ASR_HINTED_LIVE_SEGMENT_DURATION_MS: u32 = 3_000;
+const SENSE_VOICE_LIVE_SEGMENT_DURATION_MS: u32 = 5_000;
 
 fn max_live_segment_duration_ms(
     provider: &str,
@@ -28,6 +29,10 @@ fn max_live_segment_duration_ms(
             }
             _ => Some(QWEN3_ASR_AUTO_LIVE_SEGMENT_DURATION_MS),
         }
+    } else if provider == "senseVoice"
+        && model == crate::sense_voice_engine::SENSE_VOICE_MODEL
+    {
+        Some(SENSE_VOICE_LIVE_SEGMENT_DURATION_MS)
     } else {
         None
     }
@@ -183,10 +188,28 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
                 language.as_deref(),
             ))
         }
+        "senseVoice" => {
+            info!("Validating SenseVoice model...");
+            crate::sense_voice_engine::commands::sense_voice_init().await?;
+            let model_name =
+                crate::sense_voice_engine::commands::sense_voice_validate_model_ready().await?;
+            if model_name != config.model {
+                return Err(format!(
+                    "Configured SenseVoice model '{}' is not supported; expected '{}'",
+                    config.model,
+                    crate::sense_voice_engine::SENSE_VOICE_MODEL
+                ));
+            }
+            Ok(max_live_segment_duration_ms(
+                "senseVoice",
+                &model_name,
+                None,
+            ))
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select Local Whisper, Parakeet, or Qwen3-ASR.",
+                "Provider '{}' is not supported for local transcription. Please select Local Whisper, Parakeet, Qwen3-ASR, or SenseVoice.",
                 other
             ))
         }
@@ -226,6 +249,14 @@ mod tests {
                 Some("zh"),
             ),
             Some(3_000),
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "senseVoice",
+                crate::sense_voice_engine::SENSE_VOICE_MODEL,
+                None,
+            ),
+            Some(5_000),
         );
     }
 }
@@ -316,6 +347,30 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             if loaded_model != config.model {
                 return Err(format!(
                     "Loaded Qwen3-ASR model '{}' does not match configured model '{}'",
+                    loaded_model, config.model
+                ));
+            }
+            Ok(TranscriptionEngine::Provider(engine))
+        }
+        "senseVoice" => {
+            let engine = {
+                let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                    .lock()
+                    .unwrap();
+                guard.as_ref().cloned()
+            }
+            .ok_or_else(|| "SenseVoice engine is not initialized".to_string())?;
+
+            if !engine.is_model_loaded().await {
+                return Err("SenseVoice engine is initialized but no model is loaded".to_string());
+            }
+            let loaded_model = engine
+                .get_current_model()
+                .await
+                .ok_or_else(|| "SenseVoice loaded model name is unavailable".to_string())?;
+            if loaded_model != config.model {
+                return Err(format!(
+                    "Loaded SenseVoice model '{}' does not match configured model '{}'",
                     loaded_model, config.model
                 ));
             }
