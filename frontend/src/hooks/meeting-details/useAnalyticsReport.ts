@@ -40,6 +40,35 @@ export interface AnalyticsAnswer {
   answer: string | null;
 }
 
+/**
+ * One speaker row of the speaker-confirmation pause (status `waiting_input`,
+ * stage `speakers`): the meeting's speaker plus the LLM's name/merge suggestion.
+ */
+export interface AnalyticsSpeakerSuggestion {
+  speaker_id: number;
+  current_name: string;
+  segment_count: number;
+  is_confirmed: boolean;
+  suggested_name: string | null;
+  confidence: number;
+  evidence: string | null;
+  /** The LLM believes this speaker is the same person as this other speaker id. */
+  merge_into: number | null;
+  merge_reason: string | null;
+}
+
+/** One speaker decision submitted back (snake_case keys per the contract). */
+export interface AnalyticsSpeakerDecision {
+  speaker_id: number;
+  /** Final display name; null = keep the current one. */
+  display_name: string | null;
+  /** Fold this speaker into another speaker id; null = stays separate. */
+  merge_into: number | null;
+}
+
+/** Which interactive pause the pipeline is parked on while `waiting_input`. */
+export type AnalyticsWaitingKind = 'speakers' | 'clarify';
+
 /** Persisted report metadata returned by `get_analytics_report`. */
 export interface AnalyticsReportMeta {
   id: string;
@@ -54,6 +83,8 @@ export interface AnalyticsReportMeta {
   completed_at: string | null;
   /** Raw JSON string of the questions array; present when status is `waiting_input`. */
   questions: string | null;
+  /** Raw JSON string of the speaker suggestions array (speakers-stage pause). */
+  speaker_suggestions: string | null;
 }
 
 interface AnalyticsProgressEvent {
@@ -83,6 +114,12 @@ interface AnalyticsQuestionsEvent {
   questions: AnalyticsQuestion[];
 }
 
+interface AnalyticsSpeakersEvent {
+  report_id: string;
+  meeting_id: string;
+  speakers: AnalyticsSpeakerSuggestion[];
+}
+
 export interface UseAnalyticsReportResult {
   status: AnalyticsReportStatus;
   stageLabel: string;
@@ -92,24 +129,31 @@ export interface UseAnalyticsReportResult {
   error: string | null;
   /** Clarifying questions to answer while status is `waiting_input`. */
   questions: AnalyticsQuestion[];
+  /** Speaker suggestions to confirm while status is `waiting_input` (speakers stage). */
+  speakers: AnalyticsSpeakerSuggestion[];
+  /** Which pause screen `waiting_input` refers to (null when not waiting). */
+  waitingKind: AnalyticsWaitingKind | null;
   /** Start (or regenerate) the report. Optimistically enters the running state. */
   generate: () => Promise<void>;
   /** Cancel the in-flight report (no-op if nothing is running). */
   cancel: () => Promise<void>;
   /** Submit answers to the clarifying questions (empty array = skip all). */
   submitAnswers: (answers: AnalyticsAnswer[]) => Promise<void>;
+  /** Submit speaker decisions (empty array = skip, change nothing). */
+  submitSpeakers: (decisions: AnalyticsSpeakerDecision[]) => Promise<void>;
   /** Open the meeting folder in Finder/Explorer with the report file selected. */
   revealReport: () => Promise<void>;
 }
 
-// The pipeline has 12 stages; used as the optimistic default before the first
+// The pipeline has 13 stages; used as the optimistic default before the first
 // progress event (and as a fallback if the backend omits a stage total).
-const DEFAULT_TOTAL_STAGES = 12;
+const DEFAULT_TOTAL_STAGES = 13;
 
 // The DB row stores the machine stage id (English); progress events carry the
 // Russian label. Mirror of STAGE_META in src-tauri/src/report/pipeline.rs so
 // polled/restored state displays the same Russian names as live events.
 const STAGE_LABELS_RU: Record<string, string> = {
+  speakers: 'Определение спикеров',
   dynamics: 'Анализ динамики разговора',
   classify: 'Классификация встречи',
   clarify: 'Уточняющие вопросы',
@@ -141,14 +185,14 @@ function toUiStatus(status: BackendStatus): AnalyticsReportStatus {
   }
 }
 
-/** Parse the raw JSON questions string from meta; tolerant of null / malformed. */
-function parseQuestions(raw: string | null | undefined): AnalyticsQuestion[] {
+/** Parse a raw JSON array string from meta; tolerant of null / malformed. */
+function parseJsonArray<T>(raw: string | null | undefined, what: string): T[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as AnalyticsQuestion[]) : [];
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch (e) {
-    console.warn('Failed to parse analytics report questions:', e);
+    console.warn(`Failed to parse analytics report ${what}:`, e);
     return [];
   }
 }
@@ -162,6 +206,8 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
   const [htmlPath, setHtmlPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [questions, setQuestions] = useState<AnalyticsQuestion[]>([]);
+  const [speakers, setSpeakers] = useState<AnalyticsSpeakerSuggestion[]>([]);
+  const [waitingKind, setWaitingKind] = useState<AnalyticsWaitingKind | null>(null);
 
   // Tracked for commands that need the report id (not the meeting id), e.g.
   // cancel / submit answers. Kept in a ref so those callbacks stay stable.
@@ -176,6 +222,8 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     setHtmlPath(null);
     setError(null);
     setQuestions([]);
+    setSpeakers([]);
+    setWaitingKind(null);
   }, []);
 
   const applyMeta = useCallback((meta: AnalyticsReportMeta | null) => {
@@ -191,9 +239,17 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     setTotalStages(meta.total_stages || DEFAULT_TOTAL_STAGES);
     setHtmlPath(meta.html_path ?? null);
     setError(meta.error ?? null);
-    // Restore the clarify screen after a reload: parse the raw JSON questions
-    // whenever the pipeline is paused for input; clear them otherwise.
-    setQuestions(uiStatus === 'waiting_input' ? parseQuestions(meta.questions) : []);
+    // Restore the pause screen after a reload. The `stage` column disambiguates
+    // which pause `waiting_input` refers to: the speakers confirmation or clarify.
+    const kind: AnalyticsWaitingKind | null =
+      uiStatus === 'waiting_input' ? (meta.stage === 'speakers' ? 'speakers' : 'clarify') : null;
+    setWaitingKind(kind);
+    setQuestions(kind === 'clarify' ? parseJsonArray<AnalyticsQuestion>(meta.questions, 'questions') : []);
+    setSpeakers(
+      kind === 'speakers'
+        ? parseJsonArray<AnalyticsSpeakerSuggestion>(meta.speaker_suggestions, 'speaker suggestions')
+        : [],
+    );
   }, [reset]);
 
   // Restore persisted state whenever the meeting changes: reset first so a stale
@@ -216,6 +272,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     let unlistenComplete: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
     let unlistenQuestions: (() => void) | undefined;
+    let unlistenSpeakers: (() => void) | undefined;
 
     const setup = async () => {
       unlistenProgress = await listen<AnalyticsProgressEvent>('analytics-report-progress', (event) => {
@@ -223,6 +280,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
         if (p.meeting_id !== meetingId) return;
         reportIdRef.current = p.report_id;
         setStatus('running');
+        setWaitingKind(null);
         setStageLabel(p.label ?? '');
         setStageIndex(p.stage_index ?? 0);
         setTotalStages(p.total_stages || DEFAULT_TOTAL_STAGES);
@@ -248,7 +306,17 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
         if (p.meeting_id !== meetingId) return;
         reportIdRef.current = p.report_id;
         setStatus('waiting_input');
+        setWaitingKind('clarify');
         setQuestions(Array.isArray(p.questions) ? p.questions : []);
+        setError(null);
+      });
+      unlistenSpeakers = await listen<AnalyticsSpeakersEvent>('analytics-report-speakers', (event) => {
+        const p = event.payload;
+        if (p.meeting_id !== meetingId) return;
+        reportIdRef.current = p.report_id;
+        setStatus('waiting_input');
+        setWaitingKind('speakers');
+        setSpeakers(Array.isArray(p.speakers) ? p.speakers : []);
         setError(null);
       });
     };
@@ -260,6 +328,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
       unlistenComplete?.();
       unlistenError?.();
       unlistenQuestions?.();
+      unlistenSpeakers?.();
     };
   }, [meetingId]);
 
@@ -327,10 +396,31 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     // next progress events (or the poll) drive the stages forward.
     setStatus('running');
     setQuestions([]);
+    setWaitingKind(null);
     try {
       await invoke('submit_analytics_answers', { reportId, answers });
     } catch (e) {
       console.error('Failed to submit analytics answers:', e);
+      setStatus('failed');
+      setError(e instanceof Error ? e.message : String(e));
+      toast.error(t('Report failed'));
+    }
+  }, [t]);
+
+  const submitSpeakers = useCallback(async (decisions: AnalyticsSpeakerDecision[]) => {
+    const reportId = reportIdRef.current;
+    if (!reportId) return;
+    Analytics.trackButtonClick(
+      decisions.length === 0 ? 'skip_analytics_speakers' : 'submit_analytics_speakers',
+      'meeting_details',
+    );
+    setStatus('running');
+    setSpeakers([]);
+    setWaitingKind(null);
+    try {
+      await invoke('submit_analytics_speakers', { reportId, decisions });
+    } catch (e) {
+      console.error('Failed to submit analytics speaker decisions:', e);
       setStatus('failed');
       setError(e instanceof Error ? e.message : String(e));
       toast.error(t('Report failed'));
@@ -355,9 +445,12 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     htmlPath,
     error,
     questions,
+    speakers,
+    waitingKind,
     generate,
     cancel,
     submitAnswers,
+    submitSpeakers,
     revealReport,
   };
 }

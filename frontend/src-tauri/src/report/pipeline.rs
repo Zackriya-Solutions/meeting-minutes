@@ -1,11 +1,13 @@
 //! Deep Analytics multi-stage pipeline (background task).
 //!
-//! Orchestrates: deterministic dynamics -> 8 DeepSeek extraction stages -> synthesis ->
-//! local score + HTML render. Progress is streamed to the frontend via Tauri events and
-//! mirrored into the `analytics_reports` row. The whole report fails ONLY on: no
-//! transcript, privacy block, missing DeepSeek credentials, or cancellation. Every other
-//! per-stage failure is soft — the stage is recorded as failed and its section renders a
-//! "не удалось построить" placeholder while the pipeline continues.
+//! Orchestrates: interactive speaker confirmation (LLM name guesses + merge proposals,
+//! applied to the speakers DB on user confirm) -> deterministic dynamics -> 8 DeepSeek
+//! extraction stages -> synthesis -> local score + HTML render. Progress is streamed to
+//! the frontend via Tauri events and mirrored into the `analytics_reports` row. The whole
+//! report fails ONLY on: no transcript, privacy block, missing DeepSeek credentials, or
+//! cancellation. Every other per-stage failure is soft — the stage is recorded as failed
+//! and its section renders a "не удалось построить" placeholder while the pipeline
+//! continues.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -22,19 +24,23 @@ use tokio_util::sync::CancellationToken;
 
 use crate::database::repositories::analytics_report::{AnalyticsReportsRepository, TOTAL_STAGES};
 use crate::database::repositories::meeting::MeetingsRepository;
-use crate::database::repositories::speaker::{SpeakersRepository, TranscriptSpeakerSegment};
+use crate::database::repositories::speaker::{
+    MeetingSpeaker, SpeakersRepository, TranscriptSpeakerSegment,
+};
 use crate::llm::providers::{deepseek, resolve_deepseek};
 use crate::llm::{ensure_outbound_allowed, Purpose};
 use crate::report::dynamics::{self, DynSegment, Dynamics};
 use crate::report::prompts::{
     self, Clarify, ClarifyAnswer, ClarifyQuestion, Classification, Commitments,
-    DisagreementsConcepts, Insights, Numbers, Roles, ThreadsRisks, Topics,
+    DisagreementsConcepts, Insights, Numbers, Roles, SpeakerDecision, SpeakerGuesses,
+    SpeakerSuggestion, ThreadsRisks, Topics,
 };
 use crate::report::render::{compute_score, render_report, RenderInput};
 
 /// Stage id + short Russian progress label, in pipeline order. `stage_index` emitted to
 /// the frontend is 1-based (position + 1); `total_stages` is [`TOTAL_STAGES`].
 const STAGE_META: [(&str, &str); TOTAL_STAGES as usize] = [
+    ("speakers", "Определение спикеров"),
     ("dynamics", "Анализ динамики разговора"),
     ("classify", "Классификация встречи"),
     ("clarify", "Уточняющие вопросы"),
@@ -49,9 +55,9 @@ const STAGE_META: [(&str, &str); TOTAL_STAGES as usize] = [
     ("render", "Сборка отчёта"),
 ];
 
-/// How long the pipeline waits for the user to answer clarify questions before it gives
-/// up and proceeds with no answers.
-const CLARIFY_WAIT: Duration = Duration::from_secs(600);
+/// How long the pipeline waits at an interactive pause (speaker confirmation, clarify
+/// answers) before it gives up and proceeds with no input.
+const INPUT_WAIT: Duration = Duration::from_secs(600);
 
 /// Sampling temperature for all structured extraction calls.
 const STAGE_TEMPERATURE: f32 = 0.2;
@@ -62,6 +68,11 @@ static CANCELLATION_REGISTRY: Lazy<Arc<Mutex<HashMap<String, CancellationToken>>
 
 // One-shot channels delivering user answers to a report parked in `waiting_input`.
 static ANSWER_REGISTRY: Lazy<Arc<Mutex<HashMap<String, oneshot::Sender<Vec<ClarifyAnswer>>>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+// One-shot channels delivering speaker decisions to a report parked in `waiting_input`
+// at the speakers stage.
+static SPEAKER_REGISTRY: Lazy<Arc<Mutex<HashMap<String, oneshot::Sender<Vec<SpeakerDecision>>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 fn register_token(report_id: &str) -> CancellationToken {
@@ -77,10 +88,17 @@ fn cleanup_token(report_id: &str) {
         reg.remove(report_id);
     }
     cleanup_answer_sender(report_id);
+    cleanup_speaker_sender(report_id);
 }
 
 fn cleanup_answer_sender(report_id: &str) {
     if let Ok(mut reg) = ANSWER_REGISTRY.lock() {
+        reg.remove(report_id);
+    }
+}
+
+fn cleanup_speaker_sender(report_id: &str) {
+    if let Ok(mut reg) = SPEAKER_REGISTRY.lock() {
         reg.remove(report_id);
     }
 }
@@ -108,9 +126,40 @@ async fn wait_for_answers(report_id: &str, token: &CancellationToken) -> Option<
     let outcome = tokio::select! {
         received = rx => Some(received.unwrap_or_default()),
         _ = token.cancelled() => None,
-        _ = tokio::time::sleep(CLARIFY_WAIT) => Some(Vec::new()),
+        _ = tokio::time::sleep(INPUT_WAIT) => Some(Vec::new()),
     };
     cleanup_answer_sender(report_id);
+    outcome
+}
+
+/// Deliver speaker decisions to a report currently waiting at the speakers stage.
+/// Idempotent: if nothing is waiting for `report_id`, this is a no-op.
+pub fn submit_speakers(report_id: &str, decisions: Vec<SpeakerDecision>) {
+    let sender = SPEAKER_REGISTRY
+        .lock()
+        .ok()
+        .and_then(|mut reg| reg.remove(report_id));
+    if let Some(tx) = sender {
+        let _ = tx.send(decisions);
+    }
+}
+
+/// Same contract as [`wait_for_answers`] but for the speakers pause: `None` only on
+/// cancellation; an empty vec (timeout / explicit skip) means "change nothing".
+async fn wait_for_speakers(
+    report_id: &str,
+    token: &CancellationToken,
+) -> Option<Vec<SpeakerDecision>> {
+    let (tx, rx) = oneshot::channel::<Vec<SpeakerDecision>>();
+    if let Ok(mut reg) = SPEAKER_REGISTRY.lock() {
+        reg.insert(report_id.to_string(), tx);
+    }
+    let outcome = tokio::select! {
+        received = rx => Some(received.unwrap_or_default()),
+        _ = token.cancelled() => None,
+        _ = tokio::time::sleep(INPUT_WAIT) => Some(Vec::new()),
+    };
+    cleanup_speaker_sender(report_id);
     outcome
 }
 
@@ -160,6 +209,186 @@ fn speaker_key(seg: &TranscriptSpeakerSegment) -> String {
         return format!("ch:{sp}");
     }
     format!("lbl:{}", speaker_label(seg))
+}
+
+/// Per-segment views the pipeline stages consume, rebuilt after the speakers stage may
+/// have changed names/attributions.
+fn build_segment_views(
+    segments: &[TranscriptSpeakerSegment],
+) -> (Vec<DynSegment>, Vec<String>, Vec<String>) {
+    let dyn_segments: Vec<DynSegment> = segments
+        .iter()
+        .map(|s| DynSegment {
+            start: s.audio_start_time,
+            text: s.text.clone(),
+            speaker_key: speaker_key(s),
+            speaker_label: speaker_label(s),
+        })
+        .collect();
+    let seg_labels: Vec<String> = dyn_segments.iter().map(|d| d.speaker_label.clone()).collect();
+    let seg_texts: Vec<String> = dyn_segments.iter().map(|d| d.text.clone()).collect();
+    (dyn_segments, seg_labels, seg_texts)
+}
+
+// ---- speakers stage: sanitize LLM guesses, apply confirmed decisions ----
+
+/// Combine the meeting's speaker roster with the (possibly absent) LLM guesses into the
+/// suggestion rows shown in the dialog. Sanitizes the guesses against the roster:
+/// unknown ids are dropped, each speaker joins at most one merge group, a merge target
+/// never appears as merged itself, self-merges are ignored, confidence is clamped.
+fn build_speaker_suggestions(
+    roster: &[MeetingSpeaker],
+    guesses: Option<&SpeakerGuesses>,
+) -> Vec<SpeakerSuggestion> {
+    use std::collections::HashSet;
+
+    let known: HashSet<i64> = roster.iter().map(|s| s.id).collect();
+
+    // First valid name guess per speaker id.
+    let mut names: HashMap<i64, (String, f32, String, i64)> = HashMap::new();
+    // speaker id -> (merge target, reason)
+    let mut merged_into: HashMap<i64, (i64, String)> = HashMap::new();
+    let mut keeps: HashSet<i64> = HashSet::new();
+
+    if let Some(g) = guesses {
+        for n in &g.names {
+            let name = n.name.trim();
+            if name.is_empty() || !known.contains(&n.speaker_id) {
+                continue;
+            }
+            names.entry(n.speaker_id).or_insert_with(|| {
+                (
+                    name.to_string(),
+                    n.confidence.clamp(0.0, 1.0),
+                    n.evidence.trim().to_string(),
+                    n.seg,
+                )
+            });
+        }
+        for m in &g.merges {
+            if !known.contains(&m.keep_id) || merged_into.contains_key(&m.keep_id) {
+                continue;
+            }
+            let mut inserted = false;
+            for id in &m.merge_ids {
+                if *id == m.keep_id
+                    || !known.contains(id)
+                    || merged_into.contains_key(id)
+                    || keeps.contains(id)
+                {
+                    continue;
+                }
+                merged_into.insert(*id, (m.keep_id, m.reason.trim().to_string()));
+                inserted = true;
+            }
+            if inserted {
+                keeps.insert(m.keep_id);
+            }
+        }
+    }
+
+    roster
+        .iter()
+        .map(|s| {
+            let guess = names.get(&s.id);
+            let merge = merged_into.get(&s.id);
+            SpeakerSuggestion {
+                speaker_id: s.id,
+                current_name: s.display_name.clone(),
+                segment_count: s.segment_count,
+                is_confirmed: s.is_confirmed,
+                suggested_name: guess.map(|(n, ..)| n.clone()),
+                confidence: guess.map(|(_, c, ..)| *c).unwrap_or(0.0),
+                evidence: guess
+                    .map(|(_, _, e, _)| e.clone())
+                    .filter(|e| !e.is_empty()),
+                merge_into: merge.map(|(t, _)| *t),
+                merge_reason: merge.map(|(_, r)| r.clone()).filter(|r| !r.is_empty()),
+            }
+        })
+        .collect()
+}
+
+/// Apply the user's confirmed decisions: reattribute merged speakers' segments (this
+/// meeting only), then rename kept speakers whose final name differs from the current
+/// one. Invalid decisions (unknown ids, merge chains, merges into a merged speaker) are
+/// dropped with a warning rather than failing the report. Returns true if anything in
+/// the speakers DB actually changed.
+async fn apply_speaker_decisions(
+    pool: &SqlitePool,
+    meeting_id: &str,
+    roster: &[MeetingSpeaker],
+    decisions: &[SpeakerDecision],
+) -> bool {
+    use std::collections::HashSet;
+
+    let current: HashMap<i64, &str> = roster
+        .iter()
+        .map(|s| (s.id, s.display_name.as_str()))
+        .collect();
+
+    // A merge target is only valid if it is itself kept (no chains).
+    let merged_ids: HashSet<i64> = decisions
+        .iter()
+        .filter(|d| d.merge_into.is_some())
+        .map(|d| d.speaker_id)
+        .collect();
+
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut groups: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut renames: Vec<(i64, String)> = Vec::new();
+
+    for d in decisions {
+        if !current.contains_key(&d.speaker_id) || !seen.insert(d.speaker_id) {
+            continue;
+        }
+        if let Some(target) = d.merge_into {
+            if target == d.speaker_id || !current.contains_key(&target) || merged_ids.contains(&target)
+            {
+                log::warn!(
+                    "[report] dropping invalid merge decision {} -> {target} for meeting {meeting_id}",
+                    d.speaker_id
+                );
+                continue;
+            }
+            groups.entry(target).or_default().push(d.speaker_id);
+            continue;
+        }
+        if let Some(name) = d.display_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if current.get(&d.speaker_id).copied() != Some(name) {
+                renames.push((d.speaker_id, name.to_string()));
+            }
+        }
+    }
+
+    let mut changed = false;
+    for (keep, ids) in &groups {
+        match SpeakersRepository::merge_meeting_speakers(pool, meeting_id, *keep, ids).await {
+            Ok(n) => {
+                changed |= n > 0;
+                log::info!(
+                    "[report] merged speakers {ids:?} into {keep} for meeting {meeting_id} ({n} segment(s))"
+                );
+            }
+            Err(e) => log::warn!("[report] merge {ids:?} -> {keep} failed: {e}"),
+        }
+    }
+    for (id, name) in &renames {
+        match SpeakersRepository::rename(pool, *id, name).await {
+            Ok(n) => changed |= n > 0,
+            Err(e) => log::warn!("[report] rename speaker {id} failed: {e}"),
+        }
+    }
+
+    if changed {
+        // Merged-away profiles may now be unreferenced; collect them (best-effort).
+        match SpeakersRepository::delete_orphaned_unconfirmed(pool).await {
+            Ok(0) => {}
+            Ok(n) => log::info!("[report] GC removed {n} orphaned speaker profile(s) after merge"),
+            Err(e) => log::warn!("[report] orphaned-speaker GC failed (non-fatal): {e}"),
+        }
+    }
+    changed
 }
 
 // ---- event / db helpers ----
@@ -361,7 +590,7 @@ pub async fn run_report_pipeline<R: Runtime>(
     let start = Instant::now();
 
     // ---- transcript (hard requirement) ----
-    let segments = match SpeakersRepository::meeting_transcript_segments(&pool, &meeting_id).await {
+    let mut segments = match SpeakersRepository::meeting_transcript_segments(&pool, &meeting_id).await {
         Ok(s) => s,
         Err(e) => {
             fail(&app, &pool, &report_id, &meeting_id, &format!("Не удалось прочитать транскрипт: {e}")).await;
@@ -374,28 +603,6 @@ pub async fn run_report_pipeline<R: Runtime>(
     }
 
     let (meeting_title, date_str, folder_path) = load_meeting(&pool, &meeting_id).await;
-
-    let dyn_segments: Vec<DynSegment> = segments
-        .iter()
-        .map(|s| DynSegment {
-            start: s.audio_start_time,
-            text: s.text.clone(),
-            speaker_key: speaker_key(s),
-            speaker_label: speaker_label(s),
-        })
-        .collect();
-    let seg_labels: Vec<String> = dyn_segments.iter().map(|d| d.speaker_label.clone()).collect();
-    let seg_texts: Vec<String> = dyn_segments.iter().map(|d| d.text.clone()).collect();
-
-    // ---- stage 1: dynamics (local) ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 0).await;
-    let timed = dynamics::timeline(&dyn_segments);
-    let dyn_metrics = Dynamics::from_timed(&dyn_segments, &timed);
-
-    if token.is_cancelled() {
-        finish_cancelled(&pool, &report_id).await;
-        return;
-    }
 
     // ---- privacy gate + credentials (hard requirements, before first network call) ----
     if let Err(e) = ensure_outbound_allowed(&pool, Purpose::Extract).await {
@@ -417,16 +624,130 @@ pub async fn run_report_pipeline<R: Runtime>(
         }
     };
 
+    let mut failed: Vec<String> = Vec::new();
+
+    // ---- stage 1: speakers (LLM + interactive; skipped when nothing is diarized) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 0).await;
+    let roster = match SpeakersRepository::meeting_speakers(&pool, &meeting_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("[report] failed to load meeting speakers: {e}");
+            Vec::new()
+        }
+    };
+    let mut speaker_suggestions: Vec<SpeakerSuggestion> = Vec::new();
+    let mut speaker_decisions: Vec<SpeakerDecision> = Vec::new();
+    if !roster.is_empty() {
+        // Transcript labeled with stable speaker ids so guesses reference `id N`, not
+        // display names (which may collide or be renumbered).
+        let (dyn_now, _, texts_now) = build_segment_views(&segments);
+        let timed_now = dynamics::timeline(&dyn_now);
+        let id_labels: Vec<String> = segments
+            .iter()
+            .map(|s| match s.speaker_id {
+                Some(id) => format!("{} [id {id}]", speaker_label(s)),
+                None => speaker_label(s),
+            })
+            .collect();
+        let spk_transcript = prompts::truncate_transcript(&prompts::format_transcript(
+            &timed_now, &id_labels, &texts_now,
+        ));
+        let roster_entries: Vec<(i64, String, i64)> = roster
+            .iter()
+            .map(|s| (s.id, s.display_name.clone(), s.segment_count))
+            .collect();
+        let (sys, usr) =
+            prompts::speakers(&spk_transcript, &prompts::speaker_roster(&roster_entries));
+        let guesses: Option<SpeakerGuesses> =
+            run_stage(&client, &sys, &usr, "speakers", &mut failed).await;
+        if token.is_cancelled() {
+            finish_cancelled(&pool, &report_id).await;
+            return;
+        }
+
+        // Pause for confirmation even without usable guesses — the user can still
+        // rename and merge manually in the same dialog.
+        speaker_suggestions = build_speaker_suggestions(&roster, guesses.as_ref());
+        let suggestions_json =
+            serde_json::to_string(&speaker_suggestions).unwrap_or_else(|_| "[]".to_string());
+        if let Err(e) =
+            AnalyticsReportsRepository::set_speakers_waiting(&pool, &report_id, &suggestions_json)
+                .await
+        {
+            log::warn!("[report] failed to persist speaker suggestions for {report_id}: {e}");
+        }
+        let _ = app.emit(
+            "analytics-report-speakers",
+            json!({
+                "report_id": report_id,
+                "meeting_id": meeting_id,
+                "speakers": speaker_suggestions,
+            }),
+        );
+
+        match wait_for_speakers(&report_id, &token).await {
+            Some(decisions) => speaker_decisions = decisions,
+            None => {
+                finish_cancelled(&pool, &report_id).await;
+                return;
+            }
+        }
+        let decisions_json =
+            serde_json::to_string(&speaker_decisions).unwrap_or_else(|_| "[]".to_string());
+        if let Err(e) =
+            AnalyticsReportsRepository::set_speakers_running(&pool, &report_id, &decisions_json)
+                .await
+        {
+            log::warn!("[report] failed to persist speaker decisions for {report_id}: {e}");
+        }
+
+        if !speaker_decisions.is_empty()
+            && apply_speaker_decisions(&pool, &meeting_id, &roster, &speaker_decisions).await
+        {
+            // Refresh the transcript/speaker UI outside the report dialog (same event +
+            // payload shape the diarization run emits).
+            let speaker_count = SpeakersRepository::meeting_speakers(&pool, &meeting_id)
+                .await
+                .map(|s| s.len() as i64)
+                .unwrap_or(0);
+            let assigned = segments.iter().filter(|s| s.speaker_id.is_some()).count() as i64;
+            let _ = app.emit(
+                "diarization-complete",
+                json!({
+                    "meeting_id": meeting_id,
+                    "speaker_count": speaker_count,
+                    "assigned_segments": assigned,
+                }),
+            );
+            // Downstream stages must see the confirmed names and attributions.
+            match SpeakersRepository::meeting_transcript_segments(&pool, &meeting_id).await {
+                Ok(fresh) if !fresh.is_empty() => segments = fresh,
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("[report] failed to reload segments after speaker apply: {e}")
+                }
+            }
+        }
+    }
+    if token.is_cancelled() {
+        finish_cancelled(&pool, &report_id).await;
+        return;
+    }
+
+    // ---- stage 2: dynamics (local) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 1).await;
+    let (dyn_segments, seg_labels, seg_texts) = build_segment_views(&segments);
+    let timed = dynamics::timeline(&dyn_segments);
+    let dyn_metrics = Dynamics::from_timed(&dyn_segments, &timed);
+
     let transcript = prompts::truncate_transcript(&prompts::format_transcript(
         &timed,
         &seg_labels,
         &seg_texts,
     ));
 
-    let mut failed: Vec<String> = Vec::new();
-
-    // ---- stage 2: classify ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 1).await;
+    // ---- stage 3: classify ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 2).await;
     let (sys, usr) = prompts::classify(&transcript);
     let classification: Option<Classification> =
         run_stage(&client, &sys, &usr, "classify", &mut failed).await;
@@ -439,8 +760,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         .map(|c| c.meeting_type.clone())
         .unwrap_or_default();
 
-    // ---- stage 3: clarify (interactive) ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 2).await;
+    // ---- stage 4: clarify (interactive) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 3).await;
     let classification_json =
         serde_json::to_string(&classification).unwrap_or_else(|_| "null".to_string());
     let (sys, usr) = prompts::clarify(&transcript, &classification_json);
@@ -501,8 +822,8 @@ pub async fn run_report_pipeline<R: Runtime>(
     // Confirmed clarifications are appended to every downstream extraction prompt.
     let answers_block = prompts::build_answers_block(&clarify_questions, &clarify_answers);
 
-    // ---- stage 4: topics ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 3).await;
+    // ---- stage 5: topics ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 4).await;
     let (sys, usr) = prompts::topics(&transcript, &meeting_type);
     let topics: Option<Topics> =
         run_stage(&client, &sys, &prompts::with_context(&usr, &answers_block), "topics", &mut failed)
@@ -512,8 +833,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 5: decisions ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 4).await;
+    // ---- stage 6: decisions ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 5).await;
     let (sys, usr) = prompts::decisions(&transcript);
     let decisions: Option<prompts::Decisions> = run_stage(
         &client,
@@ -528,8 +849,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 6: commitments ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 5).await;
+    // ---- stage 7: commitments ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 6).await;
     let (sys, usr) = prompts::commitments(&transcript);
     let commitments: Option<Commitments> = run_stage(
         &client,
@@ -544,8 +865,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 7: threads + risks ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 6).await;
+    // ---- stage 8: threads + risks ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 7).await;
     let (sys, usr) = prompts::threads_risks(&transcript);
     let threads_risks: Option<ThreadsRisks> = run_stage(
         &client,
@@ -560,8 +881,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 8: disagreements + concepts ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 7).await;
+    // ---- stage 9: disagreements + concepts ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 8).await;
     let (sys, usr) = prompts::disagreements_concepts(&transcript);
     let disagreements_concepts: Option<DisagreementsConcepts> = run_stage(
         &client,
@@ -576,8 +897,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 9: numbers ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 8).await;
+    // ---- stage 10: numbers ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 9).await;
     let (sys, usr) = prompts::numbers(&transcript);
     let numbers: Option<Numbers> = run_stage(
         &client,
@@ -592,8 +913,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 10: roles ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 9).await;
+    // ---- stage 11: roles ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 10).await;
     let (sys, usr) = prompts::roles(&transcript);
     let roles: Option<Roles> = run_stage(
         &client,
@@ -608,8 +929,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 11: insights (over artifacts + fast facts, NOT the transcript) ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 10).await;
+    // ---- stage 12: insights (over artifacts + fast facts, NOT the transcript) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 11).await;
     let artifacts_for_insights = json!({
         "classification": classification,
         "topics": topics,
@@ -636,8 +957,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 12: score + render (local) ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 11).await;
+    // ---- stage 13: score + render (local) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 12).await;
     let empty_agenda = Vec::new();
     let agenda = topics.as_ref().map(|t| &t.agenda).unwrap_or(&empty_agenda);
     let empty_commitments = Vec::new();
@@ -687,6 +1008,8 @@ pub async fn run_report_pipeline<R: Runtime>(
     let artifacts_store = json!({
         "dynamics": dyn_metrics,
         "score": score,
+        "speaker_suggestions": speaker_suggestions,
+        "speaker_decisions": speaker_decisions,
         "classification": classification,
         "clarify_questions": clarify_questions,
         "clarify_answers": clarify_answers,
@@ -747,5 +1070,212 @@ mod tests {
     fn sanitize_component_strips_path_separators() {
         assert_eq!(sanitize_component("meeting-abc_123"), "meeting-abc_123");
         assert_eq!(sanitize_component("../../etc/passwd"), "______etc_passwd");
+    }
+
+    fn roster3() -> Vec<MeetingSpeaker> {
+        vec![
+            MeetingSpeaker {
+                id: 1,
+                display_name: "Speaker 1".into(),
+                is_confirmed: false,
+                segment_count: 40,
+            },
+            MeetingSpeaker {
+                id: 2,
+                display_name: "Speaker 2".into(),
+                is_confirmed: false,
+                segment_count: 10,
+            },
+            MeetingSpeaker {
+                id: 3,
+                display_name: "Аня".into(),
+                is_confirmed: true,
+                segment_count: 5,
+            },
+        ]
+    }
+
+    #[test]
+    fn speaker_suggestions_sanitize_llm_guesses() {
+        use crate::report::prompts::{SpeakerMergeGuess, SpeakerNameGuess};
+
+        let guesses = SpeakerGuesses {
+            names: vec![
+                SpeakerNameGuess {
+                    speaker_id: 1,
+                    name: "Андрей".into(),
+                    confidence: 1.7, // clamped
+                    evidence: "меня зовут Андрей".into(),
+                    seg: 3,
+                },
+                // Unknown id — dropped.
+                SpeakerNameGuess {
+                    speaker_id: 99,
+                    name: "Призрак".into(),
+                    ..Default::default()
+                },
+                // Blank name — dropped.
+                SpeakerNameGuess {
+                    speaker_id: 2,
+                    name: "  ".into(),
+                    ..Default::default()
+                },
+            ],
+            merges: vec![
+                // Self-merge and unknown ids inside the list are skipped, 2 -> 1 stays.
+                SpeakerMergeGuess {
+                    keep_id: 1,
+                    merge_ids: vec![2, 1, 99],
+                    reason: "одна манера речи".into(),
+                },
+                // keep_id 2 is already merged away — the whole group is dropped (no chains).
+                SpeakerMergeGuess {
+                    keep_id: 2,
+                    merge_ids: vec![3],
+                    reason: "цепочка".into(),
+                },
+            ],
+        };
+
+        let s = build_speaker_suggestions(&roster3(), Some(&guesses));
+        assert_eq!(s.len(), 3);
+        assert_eq!(s[0].suggested_name.as_deref(), Some("Андрей"));
+        assert_eq!(s[0].confidence, 1.0);
+        assert!(s[0].merge_into.is_none());
+        assert!(s[1].suggested_name.is_none());
+        assert_eq!(s[1].merge_into, Some(1));
+        assert_eq!(s[1].merge_reason.as_deref(), Some("одна манера речи"));
+        assert!(s[2].merge_into.is_none(), "chained merge group must be dropped");
+    }
+
+    #[test]
+    fn speaker_suggestions_without_guesses_list_the_whole_roster() {
+        let s = build_speaker_suggestions(&roster3(), None);
+        assert_eq!(s.len(), 3);
+        assert!(s.iter().all(|x| x.suggested_name.is_none() && x.merge_into.is_none()));
+        assert_eq!(s[2].current_name, "Аня");
+        assert!(s[2].is_confirmed);
+    }
+
+    /// In-memory pool with the schema subset the apply path touches (same shape as the
+    /// speaker repository's GC tests).
+    async fn apply_test_pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db");
+        sqlx::query(
+            "CREATE TABLE speakers (
+                id INTEGER PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                voice_embedding BLOB,
+                is_confirmed INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                speaker_id INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (id, name, confirmed) in [(1, "Speaker 1", 0), (2, "Speaker 2", 0), (3, "Аня", 1)] {
+            sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(name)
+                .bind(confirmed)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for (tid, sid) in [("a", 1), ("b", 2), ("c", 3)] {
+            sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES (?, 'm1', ?)")
+                .bind(tid)
+                .bind(sid)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool
+    }
+
+    #[tokio::test]
+    async fn apply_decisions_merges_renames_and_drops_invalid() {
+        let pool = apply_test_pool().await;
+        let decisions = vec![
+            // Valid merge: 2 -> 1.
+            SpeakerDecision {
+                speaker_id: 2,
+                display_name: None,
+                merge_into: Some(1),
+            },
+            // Valid rename.
+            SpeakerDecision {
+                speaker_id: 1,
+                display_name: Some("Андрей".into()),
+                merge_into: None,
+            },
+            // Invalid: merge into a speaker that is itself merged (chain) — dropped.
+            SpeakerDecision {
+                speaker_id: 3,
+                display_name: None,
+                merge_into: Some(2),
+            },
+            // Invalid: unknown speaker — dropped.
+            SpeakerDecision {
+                speaker_id: 99,
+                display_name: Some("Призрак".into()),
+                merge_into: None,
+            },
+        ];
+
+        let changed = apply_speaker_decisions(&pool, "m1", &roster3(), &decisions).await;
+        assert!(changed);
+
+        let attributions: Vec<(String, i64)> =
+            sqlx::query_as("SELECT id, speaker_id FROM transcripts ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            attributions,
+            vec![("a".into(), 1), ("b".into(), 1), ("c".into(), 3)]
+        );
+
+        let speakers: Vec<(i64, String, i64)> =
+            sqlx::query_as("SELECT id, display_name, is_confirmed FROM speakers ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        // Speaker 2 was merged away and GC'd; speaker 1 renamed + confirmed; 3 untouched.
+        assert_eq!(
+            speakers,
+            vec![(1, "Андрей".into(), 1), (3, "Аня".into(), 1)]
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_decisions_with_unchanged_names_changes_nothing() {
+        let pool = apply_test_pool().await;
+        let decisions = vec![SpeakerDecision {
+            speaker_id: 1,
+            display_name: Some("Speaker 1".into()), // equals current -> no rename
+            merge_into: None,
+        }];
+        let changed = apply_speaker_decisions(&pool, "m1", &roster3(), &decisions).await;
+        assert!(!changed);
+        let confirmed: i64 =
+            sqlx::query_scalar("SELECT is_confirmed FROM speakers WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(confirmed, 0, "untouched speaker must stay unconfirmed");
     }
 }

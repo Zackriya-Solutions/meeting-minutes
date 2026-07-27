@@ -70,6 +70,80 @@ pub struct ClarifyAnswer {
     pub answer: Option<String>,
 }
 
+/// LLM guess for one diarized speaker's real name (speakers stage).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpeakerNameGuess {
+    #[serde(default)]
+    pub speaker_id: i64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub confidence: f32,
+    #[serde(default)]
+    pub evidence: String,
+    #[serde(default)]
+    pub seg: i64,
+}
+
+/// LLM proposal to fold several diarized speaker ids into one person.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpeakerMergeGuess {
+    #[serde(default)]
+    pub keep_id: i64,
+    #[serde(default)]
+    pub merge_ids: Vec<i64>,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpeakerGuesses {
+    #[serde(default)]
+    pub names: Vec<SpeakerNameGuess>,
+    #[serde(default)]
+    pub merges: Vec<SpeakerMergeGuess>,
+}
+
+/// One speaker row shown in the confirmation dialog: current state + the LLM's
+/// suggestions for it. Persisted (JSON array) in `analytics_reports.speaker_suggestions`
+/// and emitted in the `analytics-report-speakers` event. snake_case on the wire.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpeakerSuggestion {
+    #[serde(default)]
+    pub speaker_id: i64,
+    #[serde(default)]
+    pub current_name: String,
+    #[serde(default)]
+    pub segment_count: i64,
+    #[serde(default)]
+    pub is_confirmed: bool,
+    #[serde(default)]
+    pub suggested_name: Option<String>,
+    #[serde(default)]
+    pub confidence: f32,
+    #[serde(default)]
+    pub evidence: Option<String>,
+    /// The LLM believes this speaker is the same person as `merge_into` (a speaker id).
+    #[serde(default)]
+    pub merge_into: Option<i64>,
+    #[serde(default)]
+    pub merge_reason: Option<String>,
+}
+
+/// One user decision per speaker, sent by the frontend as
+/// `{ "speaker_id": ..., "display_name": ..., "merge_into": ... }`.
+/// `display_name` null = keep the current name; `merge_into` null = stays separate.
+/// An empty decisions array means "skip — change nothing".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpeakerDecision {
+    #[serde(default)]
+    pub speaker_id: i64,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub merge_into: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Topic {
     #[serde(default)]
@@ -409,6 +483,42 @@ pub fn clarify(transcript: &str, classification_json: &str) -> (String, String) 
     (stage_system(schema), user)
 }
 
+/// Roster block for the speakers stage: `(id, current display name, segment count)`.
+pub fn speaker_roster(entries: &[(i64, String, i64)]) -> String {
+    entries
+        .iter()
+        .map(|(id, name, count)| format!("- id {id}: «{name}», реплик: {count}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Speakers stage: guess real names for diarized speakers and propose merging ids that
+/// belong to the same person. Fed the roster + the speaker-labeled transcript.
+pub fn speakers(transcript: &str, roster: &str) -> (String, String) {
+    let schema = "{ \"names\": [ { \"speaker_id\": id спикера из списка (число), \
+\"name\": предполагаемое реальное имя (как звучит в стенограмме, напр. \"Андрей\"), \
+\"confidence\": число 0..1, \
+\"evidence\": короткая цитата из стенограммы, из которой следует имя, \
+\"seg\": номер сегмента цитаты } ], \
+\"merges\": [ { \"keep_id\": id спикера, которого оставить (с бОльшим числом реплик), \
+\"merge_ids\": [id спикеров, которые на самом деле ТОТ ЖЕ человек], \
+\"reason\": краткое обоснование } ] }";
+    let user = format!(
+        "Определи реальные имена спикеров и найди дубликаты среди них.\n\n\
+Имена (names): угадывай ТОЛЬКО по стенограмме — представления («меня зовут…», «это Аня»), \
+прямые обращения («Паша, а ты…» — имя относится к тому, кто отвечает следом), подписи и контекст. \
+Не выдумывай имена: если уверенного кандидата нет — не включай спикера в names. \
+Указывай confidence честно: 0.9+ только при явном представлении.\n\n\
+Дубликаты (merges): автоматическое разделение по голосу иногда ошибочно делит ОДНОГО человека на несколько id. \
+Признаки: реплики продолжают друг друга на полуслове, одинаковая манера и роль в разговоре, \
+к обоим id обращаются одним именем, id почти не «разговаривают» друг с другом. \
+Предлагай объединение только при высокой уверенности; в keep_id ставь id с бОльшим числом реплик. \
+Каждый id может входить не более чем в одну группу. Если дубликатов нет — верни пустой список merges.\n\n\
+Спикеры встречи (id → текущее имя, число реплик):\n{roster}\n\nСтенограмма:\n{transcript}"
+    );
+    (stage_system(schema), user)
+}
+
 /// Build the "user clarifications (treat as established facts)" block appended to every
 /// downstream stage prompt. Only non-empty answers are included; returns "" if none.
 pub fn build_answers_block(questions: &[ClarifyQuestion], answers: &[ClarifyAnswer]) -> String {
@@ -656,6 +766,41 @@ mod tests {
         }];
         assert!(build_answers_block(&questions, &answers).is_empty());
         assert_eq!(with_context("prompt", ""), "prompt");
+    }
+
+    #[test]
+    fn speakers_prompt_contains_roster_and_schema() {
+        let roster = speaker_roster(&[(12, "Speaker 1".to_string(), 42), (15, "Аня".to_string(), 7)]);
+        assert!(roster.contains("- id 12: «Speaker 1», реплик: 42"));
+        assert!(roster.contains("- id 15: «Аня», реплик: 7"));
+        let (system, user) = speakers("[0|00:00] Speaker 1: тест\n", &roster);
+        assert!(system.contains("keep_id"));
+        assert!(system.contains("speaker_id"));
+        assert!(user.contains("id 12"));
+        assert!(user.contains("[0|00:00] Speaker 1: тест"));
+    }
+
+    #[test]
+    fn speaker_guesses_parse_with_defaults() {
+        let raw = r#"{"names":[{"speaker_id":12,"name":"Андрей"}]}"#;
+        let g: SpeakerGuesses = serde_json::from_str(raw).unwrap();
+        assert_eq!(g.names.len(), 1);
+        assert_eq!(g.names[0].speaker_id, 12);
+        assert_eq!(g.names[0].confidence, 0.0);
+        assert!(g.merges.is_empty());
+    }
+
+    #[test]
+    fn speaker_decision_wire_format_is_snake_case_with_defaults() {
+        let raw = r#"{"speaker_id":3,"display_name":"Аня","merge_into":null}"#;
+        let d: SpeakerDecision = serde_json::from_str(raw).unwrap();
+        assert_eq!(d.speaker_id, 3);
+        assert_eq!(d.display_name.as_deref(), Some("Аня"));
+        assert!(d.merge_into.is_none());
+        // merge-only decision omits display_name entirely
+        let d2: SpeakerDecision = serde_json::from_str(r#"{"speaker_id":5,"merge_into":3}"#).unwrap();
+        assert!(d2.display_name.is_none());
+        assert_eq!(d2.merge_into, Some(3));
     }
 
     #[test]

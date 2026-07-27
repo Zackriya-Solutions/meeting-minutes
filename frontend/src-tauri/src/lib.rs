@@ -907,6 +907,7 @@ pub fn run() {
             report::commands::get_analytics_report,
             report::commands::cancel_analytics_report,
             report::commands::submit_analytics_answers,
+            report::commands::submit_analytics_speakers,
             report::commands::reveal_report_in_folder,
             summary::content_window::get_meeting_content_window_suggestion,
             summary::content_window::set_meeting_content_window_preference,

@@ -26,6 +26,14 @@ export const RU: Record<string, string> = {
   "Other": "Другое",
   "Affects": "влияет на",
   "Generation continues in background": "Сборка продолжится в фоне, окно можно закрыть",
+  "Meeting speakers": "Спикеры встречи",
+  "Names and merges apply to the meeting and the report": "Имена и объединения применятся к встрече и войдут в отчёт",
+  "Speakers — tap to confirm": "Спикеры · подтвердить",
+  "Merge with": "Объединить с",
+  "Keep separate": "Не объединять",
+  "Confirm and continue": "Подтвердить и продолжить",
+  "Skip": "Пропустить",
+  "Name": "Имя",
 
   // Meeting conversation (variant 2a/3a)
   "Today": "Сегодня",
