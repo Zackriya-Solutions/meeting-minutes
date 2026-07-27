@@ -1,0 +1,54 @@
+[package]
+name = "meeting-detector"
+version = "0.1.0"
+description = "Tiny tray auto-recorder that detects meetings and saves mic audio into Memento"
+edition = "2021"
+rust-version = "1.77"
+
+# A small, tray-only companion binary. Kept intentionally lean: no webview, no
+# whisper, no async runtime. It reuses the main app's meeting-detection heuristic
+# (self-contained copy) and drops recordings into the main app's recordings
+# folder + database so they show up in Memento's meeting list.
+[[bin]]
+name = "memento-detector"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+chrono = { version = "0.4.31", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0.1"
+uuid = { version = "1.0", features = ["v4"] }
+
+# Mic capture + WAV writing (versions pinned to the workspace lock so they unify).
+cpal = "0.15.3"
+hound = "3.5.1"
+
+# Process enumeration for meeting-app detection.
+sysinfo = "0.32"
+
+# Direct SQLite insert into the main app's meeting_minutes.sqlite. rusqlite 0.32
+# resolves libsqlite3-sys 0.30 (same as sqlx-sqlite in the main app), so the
+# bundled amalgamation unifies instead of building twice.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Native "Recording started" notification bubble (uses mac-notification-sys on macOS).
+notify-rust = "4.17"
+
+# macOS: tray icon + menu (same crates Tauri uses, pinned to the workspace lock)
+# and the CoreAudio per-process microphone-session signal via cidre.
+[target.'cfg(target_os = "macos")'.dependencies]
+tao = "0.35"
+tray-icon = "0.23"
+muda = "0.19"
+image = { version = "0.25", default-features = false, features = ["png"] }
+cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
+# System-audio capture (CoreAudio process tap) copied from the main app's
+# core_audio.rs; needs a lock-free ring buffer and the futures Stream trait.
+ringbuf = "0.4.8"
+futures-util = "0.3"
+# Drains the CoreAudio futures::Stream on a worker thread without a full async runtime.
+futures-executor = "0.3"
