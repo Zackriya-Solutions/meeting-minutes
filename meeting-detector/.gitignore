@@ -1,0 +1,4 @@
+# Built app bundle + any archive of it (produced by build.sh / manual zipping)
+/MementoDetector.app/
+/MementoDetector.zip
+*.zip

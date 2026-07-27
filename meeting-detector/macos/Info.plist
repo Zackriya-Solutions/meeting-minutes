@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Memento Detector</string>
+    <key>CFBundleDisplayName</key>
+    <string>Memento Detector</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.meetily.detector</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>memento-detector</string>
+    <key>CFBundleIconFile</key>
+    <string>app</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <!-- Menu-bar-only agent: no Dock icon, no main window. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Memento records your microphone during meetings it detects, so you can transcribe them later.</string>
+    <!-- Required for the CoreAudio system-audio tap on macOS 14.4+. -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Memento records system audio during meetings it detects, so both sides of the call are captured.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
