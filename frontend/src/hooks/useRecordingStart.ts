@@ -14,6 +14,9 @@ interface UseRecordingStartReturn {
   isAutoStarting: boolean;
 }
 
+/** Analytics call-site label for the three recording entry points. */
+type RecordingStartSource = 'home_page' | 'sidebar_auto' | 'sidebar_direct';
+
 /**
  * Custom hook for managing recording start lifecycle.
  * Handles both manual start (button click) and auto-start (from sidebar navigation).
@@ -143,9 +146,12 @@ export function useRecordingStart(
   /** Shared handler for a failed transcription-provider readiness check.
    *  Shows a toast with a context-sensitive message based on `tr.reason`,
    *  optionally triggers the model-selector modal, and resets status to IDLE.
+   *  `source` is the analytics call-site label, preserved per entry point so
+   *  the shared guard doesn't collapse the three start paths into one bucket.
    *  Returns `true` if the guard blocked recording (caller should return early). */
   const guardTranscriptionModel = useCallback(async (
     tr: { ok: boolean; reason?: string; provider: string },
+    source: RecordingStartSource,
     showModal?: (name: 'modelSelector', message?: string) => void,
   ): Promise<boolean> => {
     if (tr.ok) return false;
@@ -156,7 +162,7 @@ export function useRecordingStart(
         description: 'Please wait for the transcription model to finish downloading before recording.',
         duration: 5000,
       });
-      Analytics.trackButtonClick('start_recording_blocked_downloading', '_doctor_replaced_');
+      Analytics.trackButtonClick('start_recording_blocked_downloading', source);
     } else {
       const reasonText =
         tr.reason === 'whisper-model-missing' ? 'Whisper model not downloaded — open Settings → Transcription to download one'
@@ -170,7 +176,7 @@ export function useRecordingStart(
         duration: 5000,
       });
       showModal?.('modelSelector', 'Transcription model setup required');
-      Analytics.trackButtonClick('start_recording_blocked_missing', '_doctor_replaced_');
+      Analytics.trackButtonClick('start_recording_blocked_missing', source);
     }
     setStatus(RecordingStatus.IDLE);
     return true;
@@ -183,7 +189,7 @@ export function useRecordingStart(
 
       // Check if transcription provider is ready before starting
       const tr = await checkTranscriptProviderReady();
-      if (await guardTranscriptionModel(tr, showModal)) return;
+      if (await guardTranscriptionModel(tr, 'home_page', showModal)) return;
 
       console.log('Provider ready - setting up meeting title and state');
 
@@ -234,7 +240,7 @@ export function useRecordingStart(
 
           // Check if transcription provider is ready before starting
           const tr = await checkTranscriptProviderReady();
-          if (await guardTranscriptionModel(tr, showModal)) {
+          if (await guardTranscriptionModel(tr, 'sidebar_auto', showModal)) {
             setIsAutoStarting(false);
             return;
           }
@@ -306,7 +312,7 @@ export function useRecordingStart(
 
       // Check if transcription provider is ready before starting
       const tr = await checkTranscriptProviderReady();
-      if (await guardTranscriptionModel(tr, showModal)) {
+      if (await guardTranscriptionModel(tr, 'sidebar_direct', showModal)) {
         setIsAutoStarting(false);
         return;
       }
