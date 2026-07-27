@@ -744,6 +744,7 @@ pub fn run() {
             collections::commands::set_app_setting,
             collections::commands::get_app_settings,
             database::managed_defaults::resolve_managed_defaults_migration,
+            gateway_identity::refresh_managed_gateway_token,
             start_recording,
             stop_recording,
             is_recording,
