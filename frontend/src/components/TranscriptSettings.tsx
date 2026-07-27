@@ -7,10 +7,11 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { toast } from 'sonner';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'disabled';
     model: string;
     apiKey?: string | null;
 }
@@ -34,7 +35,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     }, [transcriptModelConfig.provider]);
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
+        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet' || transcriptModelConfig.provider === 'disabled') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -81,6 +82,26 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
+    /** #338 / #519: "Disabled" has no model to choose, so picking it in the dropdown
+     *  is the entire interaction — persist it immediately, the same way the model
+     *  managers persist a model selection. */
+    const handleDisabledSelect = async () => {
+        try {
+            await invoke('api_save_transcript_config', {
+                provider: 'disabled',
+                model: '',
+                apiKey: null,
+            });
+            setTranscriptModelConfig({ ...transcriptModelConfig, provider: 'disabled', model: '' });
+        } catch (error) {
+            console.error('Failed to disable transcription:', error);
+            toast.error('Could not disable transcription', {
+                description: 'The setting was not saved — please try again.',
+            });
+            setUiProvider(transcriptModelConfig.provider);
+        }
+    };
+
     const handleParakeetModelSelect = (modelName: string) => {
         // Always update config when model is selected, regardless of current provider
         // This ensures the model is set when user switches back
@@ -112,6 +133,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
+                                    if (provider === 'disabled') {
+                                        handleDisabledSelect();
+                                        return;
+                                    }
                                     if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
                                     }
@@ -123,6 +148,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="disabled">⏸ Disabled (Recording Only — Low CPU/RAM)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +156,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'disabled' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -159,6 +185,20 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleWhisperModelSelect}
                                 autoSave={true}
                             />
+                        </div>
+                    )}
+
+                    {uiProvider === 'disabled' && (
+                        <div className="mt-6 mx-1 rounded-md border border-amber-200 bg-amber-50 p-3">
+                            <p className="text-sm text-amber-900">
+                                Live transcription is off. Meetings are still recorded and the audio is
+                                saved to disk — no transcription model is loaded, so CPU and memory stay free
+                                during the meeting.
+                            </p>
+                            <p className="mt-2 text-sm text-amber-900">
+                                The transcript panel stays empty while recording. Switch back to Parakeet or
+                                Local Whisper at any time to re-enable live transcription.
+                            </p>
                         </div>
                     )}
 
