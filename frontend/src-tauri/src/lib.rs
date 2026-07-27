@@ -53,13 +53,14 @@ pub mod state;
 pub mod summary;
 pub mod tray;
 pub mod utils;
+pub mod video_capture;
 pub mod whisper_engine;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
@@ -114,6 +115,24 @@ async fn start_recording<R: Runtime>(
 
             log_info!("Recording started successfully");
 
+            if let Ok(Some(folder)) =
+                audio::recording_commands::get_meeting_folder_path().await
+            {
+                if let Err(error) =
+                    video_capture::start_for_meeting(std::path::Path::new(&folder)).await
+                {
+                    let _ = audio::recording_commands::stop_recording(
+                        app.clone(),
+                        audio::recording_commands::RecordingArgs {
+                            save_path: String::new(),
+                        },
+                    )
+                    .await;
+                    RECORDING_FLAG.store(false, Ordering::SeqCst);
+                    return Err(format!("Failed to start video capture: {error}"));
+                }
+            }
+
             // Show recording started notification through NotificationManager
             // This respects user's notification preferences
             let notification_manager_state = app.state::<NotificationManagerState<R>>();
@@ -144,6 +163,12 @@ async fn start_recording<R: Runtime>(
 #[tauri::command]
 async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> Result<(), String> {
     log_info!("Attempting to stop recording...");
+
+    let video_result = video_capture::stop_active_capture().await;
+    if let Err(error) = &video_result {
+        log_error!("Video capture could not be finalized: {}", error);
+        let _ = app.emit("video-capture-error", error.clone());
+    }
 
     // Check the actual audio recording system state instead of the flag
     if !audio::recording_commands::is_recording().await {
@@ -418,6 +443,7 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
+            video_capture::start_bridge();
             log::info!("Application setup complete");
 
             // Initialize system tray
@@ -528,6 +554,10 @@ pub fn run() {
             stop_recording,
             is_recording,
             get_transcription_status,
+            video_capture::set_video_capture_mode,
+            video_capture::get_video_capture_status,
+            video_capture::get_meeting_video_path,
+            video_capture::list_capture_windows,
             read_audio_file,
             save_transcript,
             analytics::commands::init_analytics,
