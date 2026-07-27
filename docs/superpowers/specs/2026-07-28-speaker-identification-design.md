@@ -179,10 +179,23 @@ recorded. Migration adds `source_meeting_id` and `source_label` to
   different name; surface it as a conflict rather than storing silently.
 - **Review-gated cleanup** — a command listing cross-profile duplicate exemplars for
   confirmation before removal. Never deletes without confirmation.
-- **Flagging statistic** — replace max-linkage with **mean-linkage** (mean over all
-  exemplar pairs) so warnings stop inflating with usage. Mean-linkage is the default
-  choice because it flagged 1 pair where max-linkage flagged 4 on the live store; Phase 0
-  confirms the threshold that goes with it before this ships.
+- **Flagging statistic** — split one overloaded signal into two, each using the statistic
+  that suits it.
+
+  An earlier draft of this spec proposed simply replacing max-linkage with mean-linkage.
+  That is wrong on its own: averaging dilutes a single contaminated exemplar, so plain
+  mean-linkage misses *both* real corruptions (Alice/Camilia, Nick/Ralf) and catches only
+  the genuinely-similar Ciaran/Felix pair. It would have hidden the actual problem.
+
+  Instead:
+  - **Confusability** (`flag_confusable_profiles`) uses **mean-linkage**, so the warning
+    means the same thing regardless of how many meetings a profile has accumulated.
+  - **Corruption** (`SpeakerProfilesRepository::duplicate_exemplars`) compares individual
+    exemplars against a near-1.0 bar, naming the offending row so it can be removed.
+
+  Verified on the live store: the settings pane drops from 7 flagged profiles to 2
+  (Felix/Ciaran North, genuinely similar), while Alice/Camilia and Nick/Ralf move to a
+  precise duplicates list for review.
 
 **Done when:** the two known corrupt exemplars are detected and listed; a rename that
 reassigns a speaker leaves no residue; unit tests cover all four behaviours.

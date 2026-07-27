@@ -4,7 +4,10 @@
 // (persisted in the diarization_settings table), model status, and
 // model download.
 
-use crate::database::repositories::speaker_profile::{SpeakerProfilesRepository, DEFAULT_MAX_EXEMPLARS};
+use crate::database::repositories::speaker_profile::{
+    ExemplarSource, SpeakerProfilesRepository, DEFAULT_MAX_EXEMPLARS,
+    DUPLICATE_EXEMPLAR_THRESHOLD,
+};
 use crate::state::AppState;
 use sqlx::SqlitePool;
 use tauri::{command, AppHandle, Manager, Runtime};
@@ -230,36 +233,92 @@ pub async fn diarization_rename_speaker(
         .flatten();
 
     let mut profile_saved = false;
+    let mut withdrawn: Vec<String> = Vec::new();
+    let mut conflict: Option<(String, f32)> = None;
     if save_profile {
         if let Some(centroid) = folder_path
             .as_deref()
             .and_then(|f| load_centroid_from_folder(f, &old_label))
         {
+            // Un-enroll first. If this speaker was already saved under a
+            // different name from this same meeting, that earlier contribution
+            // has to be withdrawn — otherwise correcting a mislabel leaves the
+            // abandoned profile holding this person's voice permanently.
+            withdrawn = SpeakerProfilesRepository::withdraw_source(
+                pool,
+                &ExemplarSource {
+                    meeting_id: meeting_id.clone(),
+                    label: old_label.clone(),
+                },
+            )
+            .await
+            .map_err(|e| format!("Failed to withdraw the previous voice exemplar: {}", e))?;
+            for name in &withdrawn {
+                if name != new_name {
+                    log::info!(
+                        "Withdrew the voice exemplar '{}' had received for '{}' in meeting {}",
+                        name,
+                        old_label,
+                        meeting_id
+                    );
+                }
+            }
+
             let profiles = SpeakerProfilesRepository::list(pool)
                 .await
                 .map_err(|e| format!("Failed to load voice profiles: {}", e))?;
             let existing = profiles.into_iter().find(|p| p.name == new_name);
 
-            if let Some(existing) = existing {
-                // Already have a profile for this name - append this cluster as a
-                // new voice exemplar (capped, most-redundant evicted) instead of
-                // blending it into one drifting centroid or inserting a dup row.
-                SpeakerProfilesRepository::add_exemplar(
-                    pool,
-                    &existing.id,
-                    &centroid,
-                    DEFAULT_MAX_EXEMPLARS,
-                )
-                .await
-                .map_err(|e| format!("Failed to update voice profile: {}", e))?;
-                log::info!("Added a voice exemplar to '{}' from meeting {}", new_name, meeting_id);
+            // Refuse to store one recording under two names. Distinct people
+            // never reach this similarity; an exact match means the same
+            // cluster is being enrolled twice.
+            conflict = SpeakerProfilesRepository::conflicting_profile(
+                pool,
+                &centroid,
+                existing.as_ref().map(|p| p.id.as_str()),
+                DUPLICATE_EXEMPLAR_THRESHOLD,
+            )
+            .await
+            .map_err(|e| format!("Failed to check for duplicate voice exemplars: {}", e))?;
+
+            if let Some((other, score)) = &conflict {
+                log::warn!(
+                    "Not saving a voice profile for '{}': this recording is already saved as '{}' (score {:.4})",
+                    new_name,
+                    other,
+                    score
+                );
             } else {
-                SpeakerProfilesRepository::create(pool, new_name, &centroid)
+                // Provenance is the label as it stands AFTER this rename,
+                // because speakers.json is rewritten below — so a later rename
+                // of the same speaker arrives with this name as its old_label.
+                let source = ExemplarSource {
+                    meeting_id: meeting_id.clone(),
+                    label: new_name.to_string(),
+                };
+
+                if let Some(existing) = existing {
+                    // Already have a profile for this name - append this cluster as a
+                    // new voice exemplar (capped, most-redundant evicted) instead of
+                    // blending it into one drifting centroid or inserting a dup row.
+                    SpeakerProfilesRepository::add_exemplar(
+                        pool,
+                        &existing.id,
+                        &centroid,
+                        DEFAULT_MAX_EXEMPLARS,
+                        Some(&source),
+                    )
                     .await
-                    .map_err(|e| format!("Failed to save voice profile: {}", e))?;
-                log::info!("Saved voice profile '{}' from meeting {}", new_name, meeting_id);
+                    .map_err(|e| format!("Failed to update voice profile: {}", e))?;
+                    log::info!("Added a voice exemplar to '{}' from meeting {}", new_name, meeting_id);
+                } else {
+                    SpeakerProfilesRepository::create(pool, new_name, &centroid, Some(&source))
+                        .await
+                        .map_err(|e| format!("Failed to save voice profile: {}", e))?;
+                    log::info!("Saved voice profile '{}' from meeting {}", new_name, meeting_id);
+                }
+                profile_saved = true;
             }
-            profile_saved = true;
         } else {
             log::warn!(
                 "No voice centroid found for '{}' in meeting {} - profile not saved",
@@ -278,7 +337,60 @@ pub async fn diarization_rename_speaker(
     Ok(serde_json::json!({
         "updated_segments": updated,
         "profile_saved": profile_saved,
+        // Names that lost the exemplar this speaker had previously donated —
+        // shown so a correction visibly undoes the earlier mistake.
+        "withdrawn_from": withdrawn.iter().filter(|n| *n != new_name).collect::<Vec<_>>(),
+        // Set when enrollment was refused because the recording is already
+        // saved under another name.
+        "duplicate_of": conflict.as_ref().map(|(n, _)| n.clone()),
+        "duplicate_score": conflict.as_ref().map(|(_, s)| *s),
     }))
+}
+
+/// Exemplars held by two profiles under different names — one recording saved
+/// twice, rather than two people who sound alike.
+///
+/// Reported for review only; nothing is deleted until the user picks a row and
+/// calls `diarization_delete_exemplar`. Returns
+/// `[{ exemplarId, profileId, profileName, otherProfileName, score, identical }]`.
+#[command]
+pub async fn diarization_list_duplicate_exemplars(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let dupes = SpeakerProfilesRepository::duplicate_exemplars(
+        state.db_manager.pool(),
+        DUPLICATE_EXEMPLAR_THRESHOLD,
+    )
+    .await
+    .map_err(|e| format!("Failed to scan for duplicate voice exemplars: {}", e))?;
+
+    Ok(dupes
+        .into_iter()
+        .map(|d| {
+            serde_json::json!({
+                "exemplarId": d.exemplar_id,
+                "profileId": d.profile_id,
+                "profileName": d.profile_name,
+                "otherProfileName": d.other_profile_name,
+                "score": d.score,
+                "identical": d.identical,
+            })
+        })
+        .collect())
+}
+
+/// Remove one voice exemplar by id and refresh its profile's summary.
+/// Intended for confirmed cleanup of a duplicate surfaced above.
+#[command]
+pub async fn diarization_delete_exemplar(
+    state: tauri::State<'_, AppState>,
+    exemplar_id: String,
+) -> Result<(), String> {
+    SpeakerProfilesRepository::delete_exemplar(state.db_manager.pool(), &exemplar_id)
+        .await
+        .map_err(|e| format!("Failed to delete voice exemplar: {}", e))?;
+    log::info!("Deleted voice exemplar {}", exemplar_id);
+    Ok(())
 }
 
 #[command]

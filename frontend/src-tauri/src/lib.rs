@@ -715,6 +715,8 @@ pub fn run() {
             diarization::commands::diarization_rename_speaker,
             diarization::commands::diarization_list_profiles,
             diarization::commands::diarization_flag_confusable_profiles,
+            diarization::commands::diarization_list_duplicate_exemplars,
+            diarization::commands::diarization_delete_exemplar,
             diarization::commands::diarization_rename_profile,
             diarization::commands::diarization_delete_profile,
             diarization::commands::diarization_get_suggestions,
