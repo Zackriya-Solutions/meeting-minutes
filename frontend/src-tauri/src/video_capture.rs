@@ -16,7 +16,14 @@ use tokio::{
     sync::{broadcast, Mutex, Notify},
     time::{timeout, Duration},
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{
+    accept_hdr_async,
+    tungstenite::{
+        handshake::server::{ErrorResponse, Request, Response},
+        http::StatusCode,
+        Message,
+    },
+};
 
 const BRIDGE_ADDRESS: &str = "127.0.0.1:8179";
 const BRIDGE_TOKEN: &str = "meetily-local-capture-v1-7d4f2c9a6e31b805";
@@ -114,7 +121,22 @@ pub fn start_bridge() {
 }
 
 async fn handle_extension(stream: TcpStream) {
-    let websocket = match accept_async(stream).await {
+    let websocket = match accept_hdr_async(stream, |request: &Request, response: Response| {
+        let origin = request
+            .headers()
+            .get("origin")
+            .and_then(|value| value.to_str().ok());
+        if is_allowed_extension_origin(origin) {
+            Ok(response)
+        } else {
+            Err(ErrorResponse::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(Some("Browser extension origin required".to_string()))
+                .expect("valid WebSocket rejection response"))
+        }
+    })
+    .await
+    {
         Ok(socket) => socket,
         Err(error) => {
             log::warn!("Rejected browser capture bridge connection: {error}");
@@ -167,6 +189,10 @@ async fn handle_extension(stream: TcpStream) {
     STATE.connected.store(false, Ordering::SeqCst);
     STATE.tab_armed.store(false, Ordering::SeqCst);
     *STATE.tab_title.lock().await = None;
+}
+
+fn is_allowed_extension_origin(origin: Option<&str>) -> bool {
+    origin.is_some_and(|value| value.starts_with("chrome-extension://"))
 }
 
 fn is_authorized_message(text: &str) -> bool {
@@ -619,5 +645,14 @@ mod tests {
         assert!(is_authorized_message(&format!(
             r#"{{"type":"hello","token":"{BRIDGE_TOKEN}"}}"#
         )));
+    }
+
+    #[test]
+    fn browser_bridge_only_accepts_chromium_extension_origins() {
+        assert!(is_allowed_extension_origin(Some(
+            "chrome-extension://abcdefghijklmnop"
+        )));
+        assert!(!is_allowed_extension_origin(Some("https://example.com")));
+        assert!(!is_allowed_extension_origin(None));
     }
 }
