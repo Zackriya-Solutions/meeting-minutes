@@ -63,6 +63,26 @@ pub fn start_transcription_task<R: Runtime>(
             }
         };
 
+        // #338 / #519 — record-only mode. Drain chunks without transcribing so the
+        // recording path still produces a WAV (written upstream by the audio saver);
+        // we never load a model and never emit transcript updates. Returning here is
+        // what actually frees the CPU/RAM: without it the worker pool below still
+        // spins up and every chunk walks the pipeline only to be skipped.
+        if transcription_engine.is_disabled() {
+            info!("🎙️ Transcription disabled — draining audio chunks without ASR");
+            let _ = app.emit("transcription-disabled", serde_json::json!({
+                "message": "Transcription is disabled; recording audio only"
+            }));
+            // Drain the channel so the recorder-side sender never blocks.
+            let mut receiver = transcription_receiver;
+            let mut drained: u64 = 0;
+            while let Some(_chunk) = receiver.recv().await {
+                drained += 1;
+            }
+            info!("🎙️ Drained {} audio chunks (transcription disabled)", drained);
+            return;
+        }
+
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
