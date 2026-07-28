@@ -9,6 +9,14 @@ later.
 It is intentionally lean: no webview, no Whisper, no async runtime. The release
 binary is ~5 MB (the bundle is larger only because it ships an ffmpeg sidecar).
 
+> **The main app now does this too.** Settings → **Фоновая автозапись** (background
+> auto-recording) runs the same detect → capture → register flow inside Memento
+> (`frontend/src-tauri/src/background_capture/`), reusing the app's own audio
+> streams, mixer, and database instead of a self-contained copy. Prefer that switch
+> when Memento is open. This tray app remains the option that keeps recording when
+> the main app is **closed** — that is the one thing the in-app version cannot do,
+> since it only runs while Memento is running.
+
 ## How it works
 
 1. **Detect** — every 2 s it asks CoreAudio which processes are actively using the

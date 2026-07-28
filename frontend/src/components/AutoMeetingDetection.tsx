@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useT } from '@/lib/i18n';
 
 type MeetingApp =
@@ -29,6 +30,14 @@ interface AutoListeningStopEvent {
   session_id: string;
 }
 
+interface BackgroundCaptureSavedEvent {
+  meeting_id: string;
+  title: string;
+  duration_seconds: number;
+  /** False when the audio was written but the meeting row could not be inserted. */
+  registered: boolean;
+}
+
 const TOAST_ID = 'auto-meeting-detected';
 const AUTO_LISTENING_SESSION_KEY = 'autoListeningSessionId';
 const AUTO_LISTENING_REPORTED_KEY = 'autoListeningStartReported';
@@ -38,6 +47,7 @@ export function AutoMeetingDetection() {
   const pathname = usePathname();
   const router = useRouter();
   const recordingState = useRecordingState();
+  const { refetchMeetings } = useSidebar();
   const t = useT();
 
   useEffect(() => {
@@ -134,6 +144,27 @@ export function AutoMeetingDetection() {
       console.error('Failed to subscribe to auto-listening start events:', error);
     });
 
+    // Background auto-recording runs entirely in Rust, so the webview only learns
+    // about it when a capture lands: pull the new meeting into the sidebar list.
+    listen<BackgroundCaptureSavedEvent>('background-capture-saved', (event) => {
+      const { title, registered } = event.payload;
+      if (registered) {
+        refetchMeetings();
+        toast.success(t('Meeting recorded in the background'), {
+          description: `${title}. ${t('Open it and press Enhance to transcribe.')}`,
+        });
+      } else {
+        toast.warning(t('Background recording saved to disk only'), {
+          description: `${title}. ${t('Import it from your recordings folder to transcribe.')}`,
+        });
+      }
+    }).then((unsubscribe) => {
+      if (disposed) unsubscribe();
+      else unlisteners.push(unsubscribe);
+    }).catch((error) => {
+      console.error('Failed to subscribe to background capture events:', error);
+    });
+
     listen<AutoListeningStopEvent>('auto-listening-stop-requested', (event) => {
       const sessionId = event.payload.session_id;
       if (sessionStorage.getItem(AUTO_LISTENING_SESSION_KEY) !== sessionId) return;
@@ -154,7 +185,7 @@ export function AutoMeetingDetection() {
       disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [pathname, recordingState.isRecording, router, t]);
+  }, [pathname, recordingState.isRecording, refetchMeetings, router, t]);
 
   return null;
 }

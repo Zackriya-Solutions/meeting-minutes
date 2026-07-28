@@ -17,6 +17,13 @@ pub struct NotificationSettings {
     #[serde(default = "default_auto_listening")]
     pub auto_listening: bool,
 
+    /// Capture a detected call in the background instead of driving the interactive
+    /// recorder: mic + system audio are mixed straight to a meeting folder with no
+    /// live transcription, and the meeting is registered when the call ends. Opt-in,
+    /// and ignored while auto-listening is handling the same call.
+    #[serde(default)]
+    pub background_auto_recording: bool,
+
     /// Enable recording lifecycle notifications (start/stop/pause/resume)
     pub recording_notifications: bool,
 
@@ -77,6 +84,7 @@ impl Default for NotificationSettings {
         Self {
             auto_meeting_detection: true,
             auto_listening: true,
+            background_auto_recording: false,
             recording_notifications: true,
             time_based_reminders: true,
             meeting_reminders: true,
@@ -289,6 +297,7 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
     NotificationSettings {
         auto_meeting_detection: partial.auto_meeting_detection,
         auto_listening: partial.auto_listening,
+        background_auto_recording: partial.background_auto_recording,
         recording_notifications: partial.recording_notifications,
         time_based_reminders: partial.time_based_reminders,
         meeting_reminders: partial.meeting_reminders,
@@ -322,6 +331,9 @@ mod tests {
         let settings: NotificationSettings = serde_json::from_value(legacy).unwrap();
         assert!(settings.auto_meeting_detection);
         assert!(settings.auto_listening);
+        // Background capture writes recordings on its own; it must never be turned
+        // on by upgrading, only by an explicit opt-in.
+        assert!(!settings.background_auto_recording);
     }
 
     #[test]
@@ -329,6 +341,7 @@ mod tests {
         let settings = NotificationSettings::default();
         assert!(settings.auto_meeting_detection);
         assert!(settings.auto_listening);
+        assert!(!settings.background_auto_recording);
         assert!(settings.notification_preferences.show_recording_started);
         assert!(settings.notification_preferences.show_recording_stopped);
     }
