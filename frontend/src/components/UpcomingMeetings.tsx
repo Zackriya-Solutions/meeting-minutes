@@ -50,7 +50,11 @@ export function UpcomingMeetings({ disabled, onStartMeeting }: UpcomingMeetingsP
       if (!preference) return;
       const status = await getLocalOutlookCalendarStatus();
       if (!status.installed) {
-        setError(t('Classic Outlook is not available.'));
+        setError(t('Outlook is not available.'));
+        return;
+      }
+      if (status.provider === 'macos-outlook-accessibility' && !status.accessibility_granted) {
+        setError(t('Accessibility permission is required'));
         return;
       }
       const events = await getUpcomingLocalOutlookMeetings(7);

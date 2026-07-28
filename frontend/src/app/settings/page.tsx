@@ -65,9 +65,9 @@ const TABS = [
   {
     value: 'calendar',
     label: 'Calendar',
-    description: 'Local classic Outlook calendars and upcoming meetings',
+    description: 'Local Outlook calendars and upcoming meetings',
     icon: 'calendar',
-    keywords: 'календарь outlook встречи локальный classic',
+    keywords: 'календарь outlook встречи локальный classic accessibility macos',
   },
   {
     value: 'search',

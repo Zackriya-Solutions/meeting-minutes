@@ -208,6 +208,10 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
 core-graphics = "0.23"
+# Native macOS Accessibility (AXUIElement) traversal for the local Outlook
+# calendar connector. This reads the visible Outlook UI only after explicit
+# user approval in Privacy & Security → Accessibility.
+core-foundation-sys = "0.8"
 # Keychain Services, so the install token actually survives a restart.
 keyring = { version = "3.6", features = ["apple-native"] }
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }

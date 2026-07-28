@@ -11,6 +11,7 @@ import {
   isLocalOutlookCalendarEnabled,
   LocalOutlookCalendarStatus,
   LocalOutlookMeeting,
+  requestOutlookAccessibilityPermission,
   setLocalOutlookCalendarEnabled,
 } from '@/lib/localOutlookCalendar';
 
@@ -33,6 +34,7 @@ export function CalendarSettings() {
   const [preview, setPreview] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [requestingPermission, setRequestingPermission] = useState(false);
 
   const refreshPreview = useCallback(async () => {
     setRefreshing(true);
@@ -46,6 +48,15 @@ export function CalendarSettings() {
 
   useEffect(() => {
     let active = true;
+    const refreshStatusOnFocus = () => {
+      void getLocalOutlookCalendarStatus()
+        .then((nextStatus) => {
+          if (active) setStatus(nextStatus);
+        })
+        .catch(() => {
+          // The explicit refresh/enable actions surface actionable errors.
+        });
+    };
     Promise.all([
       getLocalOutlookCalendarStatus(),
       isLocalOutlookCalendarEnabled(),
@@ -68,8 +79,10 @@ export function CalendarSettings() {
       .finally(() => {
         if (active) setLoading(false);
       });
+    window.addEventListener('focus', refreshStatusOnFocus);
     return () => {
       active = false;
+      window.removeEventListener('focus', refreshStatusOnFocus);
     };
   }, [refreshPreview, t]);
 
@@ -98,7 +111,19 @@ export function CalendarSettings() {
     return <div className="p-6 text-sm text-[var(--fg3)]">{t('Loading…')}</div>;
   }
 
-  const canEnable = Boolean(status?.supported && status.installed);
+  const isMacAccessibility = status?.provider === 'macos-outlook-accessibility';
+  const canEnable = Boolean(
+    status?.supported
+      && status.installed
+      && (!isMacAccessibility || status.accessibility_granted),
+  );
+  const statusTitle = canEnable
+    ? isMacAccessibility
+      ? t('Outlook Accessibility is ready')
+      : t(status?.running ? 'Classic Outlook is running' : 'Classic Outlook is installed')
+    : isMacAccessibility && status?.installed && !status.accessibility_granted
+      ? t('Accessibility permission is required')
+      : t('Local Outlook is unavailable');
 
   return (
     <div className="space-y-6">
@@ -112,7 +137,7 @@ export function CalendarSettings() {
               </h2>
             </div>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--fg2)]">
-              {t('Read upcoming meetings from the classic Outlook profile on this computer. No Microsoft Graph, OAuth, or external calendar service is used.')}
+              {t('Read upcoming meetings from Outlook on this computer. No Microsoft Graph, OAuth, or external calendar service is used.')}
             </p>
           </div>
           <Switch
@@ -132,24 +157,49 @@ export function CalendarSettings() {
             />
             <div>
               <p className="text-sm font-medium text-[var(--fg1)]">
-                {canEnable
-                  ? t(status?.running ? 'Classic Outlook is running' : 'Classic Outlook is installed')
-                  : t('Local Outlook is unavailable')}
+                {statusTitle}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-[var(--fg3)]">
-                {status?.supported
-                  ? t(status.detail)
-                  : t('This integration is available only on Windows with classic Outlook. New Outlook does not support the local Outlook Object Model or MAPI.')}
+                {status?.detail ? t(status.detail) : t('Local Outlook is unavailable')}
               </p>
+              {isMacAccessibility && status?.installed && !status.accessibility_granted && (
+                <button
+                  type="button"
+                  disabled={requestingPermission}
+                  onClick={async () => {
+                    setRequestingPermission(true);
+                    try {
+                      const nextStatus = await requestOutlookAccessibilityPermission();
+                      setStatus(nextStatus);
+                      toast.info(t('Allow Memento in Accessibility settings, then return and refresh.'));
+                    } catch (error) {
+                      toast.error(t('Could not request Accessibility permission'), {
+                        description: String(error),
+                      });
+                    } finally {
+                      setRequestingPermission(false);
+                    }
+                  }}
+                  className="mm-button mm-button-secondary mt-3 px-3 py-2 text-xs disabled:opacity-50"
+                >
+                  {t(requestingPermission ? 'Opening settings…' : 'Allow Accessibility')}
+                </button>
+              )}
             </div>
           </div>
         </div>
+
+        {isMacAccessibility && (
+          <div className="mt-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4 text-xs leading-relaxed text-[var(--fg3)]">
+            {t('When you refresh, Memento opens Outlook Calendar, switches to today and attempts to select Week view. It reads only the visible accessibility labels.')}
+          </div>
+        )}
 
         <div className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-[var(--fg3)]">
           <Icon name="lock" size={15} className="mt-0.5 shrink-0" />
           <div className="space-y-2">
             <p>
-              {t('Memento reads only the meeting title, time, calendar, location, and response status. Bodies, attachments, participant addresses, and credentials are not read. Events stay in memory and are not saved to the Memento database.')}
+              {t('Memento reads only the meeting title, time, calendar, and visible location. Bodies, attachments, participant addresses, and credentials are not read. Events stay in memory and are not saved to the Memento database.')}
             </p>
             <p>
               {t('Experimental compatibility mode. Your organization may block local Outlook automation. Memento reports the error and never attempts to bypass corporate security policy.')}

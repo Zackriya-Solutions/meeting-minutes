@@ -459,6 +459,7 @@ pub fn status() -> Result<LocalOutlookCalendarStatus, String> {
                 supported: true,
                 installed: false,
                 running: false,
+                accessibility_granted: true,
                 provider: "local-classic-outlook",
                 detail: "Classic Outlook is not installed. New Outlook does not provide local calendar access."
                     .to_string(),
@@ -470,6 +471,7 @@ pub fn status() -> Result<LocalOutlookCalendarStatus, String> {
         supported: true,
         installed: true,
         running,
+        accessibility_granted: true,
         provider: "local-classic-outlook",
         detail: if running {
             "Classic Outlook is running; Memento can read its local calendar.".to_string()

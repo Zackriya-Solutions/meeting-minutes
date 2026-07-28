@@ -6,7 +6,8 @@ export interface LocalOutlookCalendarStatus {
   supported: boolean;
   installed: boolean;
   running: boolean;
-  provider: 'local-classic-outlook';
+  accessibility_granted: boolean;
+  provider: 'local-classic-outlook' | 'macos-outlook-accessibility';
   detail: string;
 }
 
@@ -27,6 +28,10 @@ export interface LocalOutlookMeeting {
 
 export async function getLocalOutlookCalendarStatus(): Promise<LocalOutlookCalendarStatus> {
   return invoke<LocalOutlookCalendarStatus>('local_outlook_calendar_status');
+}
+
+export async function requestOutlookAccessibilityPermission(): Promise<LocalOutlookCalendarStatus> {
+  return invoke<LocalOutlookCalendarStatus>('request_outlook_accessibility_permission');
 }
 
 export async function getUpcomingLocalOutlookMeetings(days = 7): Promise<LocalOutlookMeeting[]> {
