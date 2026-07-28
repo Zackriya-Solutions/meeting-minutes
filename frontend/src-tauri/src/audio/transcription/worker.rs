@@ -63,6 +63,26 @@ pub fn start_transcription_task<R: Runtime>(
             }
         };
 
+        // #338 / #519 — record-only mode. Drain chunks without transcribing so the
+        // recording path still produces a WAV (written upstream by the audio saver);
+        // we never load a model and never emit transcript updates. Returning here is
+        // what actually frees the CPU/RAM: without it the worker pool below still
+        // spins up and every chunk walks the pipeline only to be skipped.
+        if transcription_engine.is_disabled() {
+            info!("🎙️ Transcription disabled — draining audio chunks without ASR");
+            let _ = app.emit("transcription-disabled", serde_json::json!({
+                "message": "Transcription is disabled; recording audio only"
+            }));
+            // Drain the channel so the recorder-side sender never blocks.
+            let mut receiver = transcription_receiver;
+            let mut drained: u64 = 0;
+            while let Some(_chunk) = receiver.recv().await {
+                drained += 1;
+            }
+            info!("🎙️ Drained {} audio chunks (transcription disabled)", drained);
+            return;
+        }
+
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
@@ -79,10 +99,11 @@ pub fn start_transcription_task<R: Runtime>(
         let mut worker_handles = Vec::new();
         for worker_id in 0..NUM_WORKERS {
             let engine_clone = match &transcription_engine {
-                TranscriptionEngine::Whisper(e) => TranscriptionEngine::Whisper(e.clone()),
-                TranscriptionEngine::Parakeet(e) => TranscriptionEngine::Parakeet(e.clone()),
-                TranscriptionEngine::Provider(p) => TranscriptionEngine::Provider(p.clone()),
-            };
+                            TranscriptionEngine::Whisper(e) => TranscriptionEngine::Whisper(e.clone()),
+                            TranscriptionEngine::Parakeet(e) => TranscriptionEngine::Parakeet(e.clone()),
+                            TranscriptionEngine::Provider(p) => TranscriptionEngine::Provider(p.clone()),
+                            TranscriptionEngine::Disabled => TranscriptionEngine::Disabled,
+                        };
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
             let chunks_completed_clone = chunks_completed.clone();
@@ -154,9 +175,10 @@ pub fn start_transcription_task<R: Runtime>(
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold
                                     let confidence_threshold = match &engine_clone {
-                                        TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
-                                        TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
-                                    };
+                                                                            TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
+                                                                            TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
+                                                                            TranscriptionEngine::Disabled => 0.0, // Disabled = no transcription
+                                                                        };
 
                                     let confidence_str = match confidence_opt {
                                         Some(c) => format!("{:.2}", c),
@@ -568,6 +590,10 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                     Err(e)
                 }
             }
+        }
+        TranscriptionEngine::Disabled => {
+            warn!("transcribe_chunk_with_provider called with Disabled engine — skipping chunk {}", chunk.chunk_id);
+            Ok((String::new(), Some(1.0), false))
         }
     }
 }

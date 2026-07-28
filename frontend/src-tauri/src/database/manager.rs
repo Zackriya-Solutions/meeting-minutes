@@ -32,7 +32,20 @@ impl DatabaseManager {
 
         let pool = SqlitePool::connect(tauri_db_path).await?;
 
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        // Tolerate migrations recorded in the database that this build does not
+        // ship. Without this, a database that has seen a newer or feature-branch
+        // build refuses to open at all: sqlx aborts with "migration <version> was
+        // previously applied but is missing in the resolved migrations" and the app
+        // panics on startup with no way back short of deleting the database.
+        //
+        // This is not hypothetical — testing this PR against a database created by
+        // a build of #610 does exactly that, because #610 adds a migration this
+        // branch does not have. Downgrades and branch switches are routine during
+        // review, and the migrations here are additive, so a recorded-but-unknown
+        // migration should not make the app unusable.
+        let mut migrator = sqlx::migrate!("./migrations");
+        migrator.set_ignore_missing(true);
+        migrator.run(&pool).await?;
 
         Ok(DatabaseManager { pool })
     }

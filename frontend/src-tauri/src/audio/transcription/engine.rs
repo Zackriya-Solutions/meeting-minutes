@@ -16,6 +16,9 @@ pub enum TranscriptionEngine {
     Whisper(Arc<crate::whisper_engine::WhisperEngine>),  // Direct access (backward compat)
     Parakeet(Arc<crate::parakeet_engine::ParakeetEngine>), // Direct access (backward compat)
     Provider(Arc<dyn TranscriptionProvider>),  // Trait-based (preferred for new code)
+    /// #338 — transcription intentionally disabled (record-only mode).
+    /// No model is loaded; the worker drains audio chunks without transcribing.
+    Disabled,
 }
 
 impl TranscriptionEngine {
@@ -25,6 +28,9 @@ impl TranscriptionEngine {
             Self::Whisper(engine) => engine.is_model_loaded().await,
             Self::Parakeet(engine) => engine.is_model_loaded().await,
             Self::Provider(provider) => provider.is_model_loaded().await,
+            // ponytail: Disabled is by construction "nothing running" — return
+            // false so the worker takes its no-model path without panicking.
+            Self::Disabled => false,
         }
     }
 
@@ -34,6 +40,7 @@ impl TranscriptionEngine {
             Self::Whisper(engine) => engine.get_current_model().await,
             Self::Parakeet(engine) => engine.get_current_model().await,
             Self::Provider(provider) => provider.get_current_model().await,
+            Self::Disabled => None,
         }
     }
 
@@ -43,7 +50,13 @@ impl TranscriptionEngine {
             Self::Whisper(_) => "Whisper (direct)",
             Self::Parakeet(_) => "Parakeet (direct)",
             Self::Provider(provider) => provider.provider_name(),
+            Self::Disabled => "Disabled (record-only)",
         }
+    }
+
+    /// True when the user picked "Disable transcription" in Settings (#338).
+    pub fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
     }
 }
 
@@ -87,63 +100,70 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
     };
 
     // Validate based on provider
-    match config.provider.as_str() {
-        "localWhisper" => {
-            info!("🔍 Validating Whisper model...");
-            // Ensure whisper engine is initialized first
-            if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
-                warn!("❌ Failed to initialize Whisper engine: {}", init_error);
-                return Err(format!(
-                    "Failed to initialize speech recognition: {}",
-                    init_error
-                ));
+        match config.provider.as_str() {
+            "disabled" | "none" | "" => {
+                // ponytail: #338 record-only mode. No model needed; recording
+                // proceeds and saves the raw WAV. The worker drains chunks but
+                // does not transcribe.
+                info!("🎙️ Transcription disabled — record-only mode");
+                Ok(())
             }
+            "localWhisper" => {
+                info!("🔍 Validating Whisper model...");
+                // Ensure whisper engine is initialized first
+                if let Err(init_error) = crate::whisper_engine::commands::whisper_init().await {
+                    warn!("❌ Failed to initialize Whisper engine: {}", init_error);
+                    return Err(format!(
+                        "Failed to initialize speech recognition: {}",
+                        init_error
+                    ));
+                }
 
-            // Call the whisper validation command with config support
-            match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
-                Ok(model_name) => {
-                    info!("✅ Whisper model validation successful: {} is ready", model_name);
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("❌ Whisper model validation failed: {}", e);
-                    Err(e)
+                // Call the whisper validation command with config support
+                match crate::whisper_engine::commands::whisper_validate_model_ready_with_config(app).await {
+                    Ok(model_name) => {
+                        info!("✅ Whisper model validation successful: {} is ready", model_name);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("❌ Whisper model validation failed: {}", e);
+                        Err(e)
+                    }
                 }
             }
-        }
-        "parakeet" => {
-            info!("🔍 Validating Parakeet model...");
-            // Ensure parakeet engine is initialized first
-            if let Err(init_error) = crate::parakeet_engine::commands::parakeet_init().await {
-                warn!("❌ Failed to initialize Parakeet engine: {}", init_error);
-                return Err(format!(
-                    "Failed to initialize Parakeet speech recognition: {}",
-                    init_error
-                ));
-            }
+            "parakeet" => {
+                info!("🔍 Validating Parakeet model...");
+                // Ensure parakeet engine is initialized first
+                if let Err(init_error) = crate::parakeet_engine::commands::parakeet_init().await {
+                    warn!("❌ Failed to initialize Parakeet engine: {}", init_error);
+                    return Err(format!(
+                        "Failed to initialize Parakeet speech recognition: {}",
+                        init_error
+                    ));
+                }
 
-            // Use the validation command that includes auto-discovery and loading
-            // This matches the Whisper behavior for consistency
-            match crate::parakeet_engine::commands::parakeet_validate_model_ready_with_config(app).await {
-                Ok(model_name) => {
-                    info!("✅ Parakeet model validation successful: {} is ready", model_name);
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("❌ Parakeet model validation failed: {}", e);
-                    Err(e)
+                // Use the validation command that includes auto-discovery and loading
+                // This matches the Whisper behavior for consistency
+                match crate::parakeet_engine::commands::parakeet_validate_model_ready_with_config(app).await {
+                    Ok(model_name) => {
+                        info!("✅ Parakeet model validation successful: {} is ready", model_name);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("❌ Parakeet model validation failed: {}", e);
+                        Err(e)
+                    }
                 }
             }
-        }
-        other => {
-            warn!("❌ Unsupported transcription provider for local recording: {}", other);
-            Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
-                other
-            ))
+            other => {
+                warn!("❌ Unsupported transcription provider for local recording: {}", other);
+                Err(format!(
+                    "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                    other
+                ))
+            }
         }
     }
-}
 
 /// Get or initialize the appropriate transcription engine based on provider configuration
 pub async fn get_or_init_transcription_engine<R: Runtime>(
@@ -183,42 +203,51 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
     };
 
     // Initialize the appropriate engine based on provider
-    match config.provider.as_str() {
-        "parakeet" => {
-            info!("🦜 Initializing Parakeet transcription engine");
+        match config.provider.as_str() {
+            "parakeet" => {
+                info!("🦜 Initializing Parakeet transcription engine");
 
-            // Get Parakeet engine
-            let engine = {
-                let guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
-                    .lock()
-                    .unwrap();
-                guard.as_ref().cloned()
-            };
+                // Get Parakeet engine
+                let engine = {
+                    let guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
+                        .lock()
+                        .unwrap();
+                    guard.as_ref().cloned()
+                };
 
-            match engine {
-                Some(engine) => {
-                    // Check if model is loaded
-                    if engine.is_model_loaded().await {
-                        let model_name = engine.get_current_model().await
-                            .unwrap_or_else(|| "unknown".to_string());
-                        info!("✅ Parakeet model '{}' already loaded", model_name);
-                        Ok(TranscriptionEngine::Parakeet(engine))
-                    } else {
-                        Err("Parakeet engine initialized but no model loaded. This should not happen after validation.".to_string())
+                match engine {
+                    Some(engine) => {
+                        // Check if model is loaded
+                        if engine.is_model_loaded().await {
+                            let model_name = engine.get_current_model().await
+                                .unwrap_or_else(|| "unknown".to_string());
+                            info!("✅ Parakeet model '{}' already loaded", model_name);
+                            Ok(TranscriptionEngine::Parakeet(engine))
+                        } else {
+                            Err("Parakeet engine initialized but no model loaded. This should not happen after validation.".to_string())
+                        }
+                    }
+                    None => {
+                        Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                     }
                 }
-                None => {
-                    Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
-                }
+            }
+            "localWhisper" => {
+                info!("🎤 Initializing Whisper transcription engine");
+                let whisper_engine = get_or_init_whisper(app).await?;
+                Ok(TranscriptionEngine::Whisper(whisper_engine))
+            }
+            "disabled" | "none" | "" => {
+                info!("🎙️ Transcription disabled — returning Disabled engine");
+                Ok(TranscriptionEngine::Disabled)
+            }
+            _ => {
+                Err(format!("Unsupported transcription provider: '{}'", config.provider))
             }
         }
-        "localWhisper" | _ => {
-            info!("🎤 Initializing Whisper transcription engine");
-            let whisper_engine = get_or_init_whisper(app).await?;
-            Ok(TranscriptionEngine::Whisper(whisper_engine))
-        }
     }
-}
+
+    /// Get or initialize transcription engine using API configuration
 
 /// Get or initialize transcription engine using API configuration
 /// Returns Whisper engine if provider is localWhisper, otherwise returns error for non-Whisper providers
