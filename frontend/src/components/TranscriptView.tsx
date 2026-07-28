@@ -6,6 +6,7 @@ import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { RecordingStatusBar } from './RecordingStatusBar';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranscriptEmptyState } from '@/hooks/useTranscriptEmptyState';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -106,6 +107,7 @@ function cleanStopWords(text: string): string {
 
 export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
   const [speechDetected, setSpeechDetected] = useState(false);
+  const emptyState = useTranscriptEmptyState(isPaused);
 
   // Debug: Log the props to understand what's happening
   console.log('TranscriptView render:', {
@@ -357,16 +359,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           {isRecording ? (
             <>
               <div className="flex items-center justify-center mb-3">
-                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
+                <div className={`w-3 h-3 rounded-full ${emptyState.dotClassName}`}></div>
               </div>
-              <p className="text-sm text-gray-600">
-                {isPaused ? 'Recording paused' : 'Listening for speech...'}
-              </p>
-              <p className="text-xs mt-1 text-gray-400">
-                {isPaused
-                  ? 'Click resume to continue recording'
-                  : 'Speak to see live transcription'}
-              </p>
+              <p className="text-sm text-gray-600">{emptyState.title}</p>
+              <p className="text-xs mt-1 text-gray-400">{emptyState.subtitle}</p>
             </>
           ) : (
             <>
