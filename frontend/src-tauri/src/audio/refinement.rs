@@ -263,12 +263,18 @@ pub fn plan_turn_asr_segments(
         let mut start = t.start_ms.max(prev_end);
         // Interruption take-over: a different-cluster turn overlapping the previous
         // span's tail claims the overlap from its midpoint, so the interrupter's first
-        // words aren't transcribed into the interrupted speaker's reply.
+        // words aren't transcribed into the interrupted speaker's reply. The split only
+        // happens when BOTH resulting pieces keep at least `min_ms` — shrinking the
+        // previous span below the floor would break this function's contract just as
+        // much as emitting a too-short new span.
         if t.start_ms < prev_end && t.end_ms > prev_end {
             if let Some(last) = spans.last_mut() {
                 if last.2 != t.cluster_id {
                     let boundary = (t.start_ms + prev_end) / 2;
-                    if t.end_ms - boundary >= min_ms && boundary > last.0 {
+                    if t.end_ms - boundary >= min_ms
+                        && boundary - last.0 >= min_ms
+                        && boundary > last.0
+                    {
                         last.1 = boundary;
                         start = boundary;
                     }
@@ -840,6 +846,16 @@ mod tests {
         let turns = vec![turn(0, 10_000, 0), turn(8_000, 14_000, 1)];
         let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
         assert_eq!(spans, vec![(0, 9_000), (9_000, 14_000)]);
+    }
+
+    #[test]
+    fn takeover_split_never_shrinks_the_previous_span_below_min() {
+        // The midpoint boundary (150+400)/2 = 275 would leave the previous span at
+        // 275 ms < min_ms(350). The split must not happen: the previous span keeps its
+        // full extent and the new turn clips at prev_end, as before the midpoint rule.
+        let turns = vec![turn(0, 400, 0), turn(150, 5_000, 1)];
+        let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
+        assert_eq!(spans, vec![(0, 400), (400, 5_000)]);
     }
 
     #[test]
