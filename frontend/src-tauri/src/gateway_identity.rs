@@ -2,7 +2,7 @@
 //! The gateway JWT is stored in the operating-system credential vault; upstream
 //! provider credentials never ship in the application.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub const PRIMARY_GATEWAY_HOST: &str = "gw.multitool.works";
 pub const FALLBACK_GATEWAY_HOST: &str = "gw2.multitool.works";
@@ -39,11 +39,6 @@ struct Registration<'a> {
     product: &'a str,
 }
 
-#[derive(Deserialize)]
-struct RegistrationResponse {
-    token: String,
-}
-
 fn entry(name: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, name).map_err(|e| format!("credential vault unavailable: {e}"))
 }
@@ -61,58 +56,169 @@ fn device_id() -> Result<String, String> {
     Ok(value)
 }
 
+/// True when a reply body is an HTML document rather than the gateway's JSON.
+///
+/// Corporate URL filters and captive portals answer on the gateway's own hostname
+/// with an HTML block page, terminating TLS themselves. The client sees a perfectly
+/// valid certificate (the proxy's root is in the OS trust store) and an HTTP status
+/// that says nothing useful — the observed Sber filter returns **503 with an HTML
+/// meta-refresh**. Only the body distinguishes "the gateway is down" from "the
+/// request never left the network".
+fn looks_like_a_block_page(content_type: &str, body: &str) -> bool {
+    content_type.to_ascii_lowercase().contains("html") || body.trim_start().starts_with('<')
+}
+
+/// Pull the interceptor's hostname out of a block page, for an error the user can act on.
+/// Handles the `<meta http-equiv="refresh" content="0; url=https://host/...">` form.
+fn interceptor_host(body: &str) -> Option<String> {
+    let rest = body.split("url=https://").nth(1)?;
+    let host: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
+        .collect();
+    (host.len() > 3 && host.contains('.')).then_some(host)
+}
+
+/// Decide what a `/register` reply means.
+///
+/// Split out from the request so every branch is testable without a network, and
+/// because the gateway's own failure mode is easy to misread: it answers an invalid
+/// registration key with **HTTP 200** and an `{"error": ...}` body, so a status-only
+/// check reports the eventual missing-`token` parse failure instead of the rejection.
+fn interpret_registration(status: u16, content_type: &str, body: &str) -> Result<String, String> {
+    // Checked before the status, because the filter's block page arrives as 503.
+    if looks_like_a_block_page(content_type, body) {
+        return Err(match interceptor_host(body) {
+            Some(host) => format!(
+                "запрос к шлюзу Memento перехвачен сетевым фильтром ({host}), \
+                 ответ HTTP {status}. Домен шлюза нужно разблокировать в корпоративной сети."
+            ),
+            None => format!(
+                "вместо ответа шлюза Memento пришла HTML-страница (HTTP {status}) — \
+                 запрос перехвачен прокси или сетевым фильтром."
+            ),
+        });
+    }
+
+    let parsed: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| format!("шлюз вернул неразбираемый ответ (HTTP {status}): {e}"))?;
+
+    if let Some(error) = parsed.get("error").and_then(serde_json::Value::as_str) {
+        return Err(format!("шлюз отклонил регистрацию (HTTP {status}): {error}"));
+    }
+    if status < 200 || status >= 300 {
+        return Err(format!("шлюз ответил ошибкой HTTP {status}"));
+    }
+    match parsed.get("token").and_then(serde_json::Value::as_str) {
+        Some(token) if !token.is_empty() => Ok(token.to_string()),
+        _ => Err(format!(
+            "ответ шлюза не содержит токена (HTTP {status})"
+        )),
+    }
+}
+
 async fn register(base: &str) -> Result<String, String> {
+    let key = registration_key()?;
+    let device = device_id()?;
+    log::info!("[gateway] registering with {base}");
+
     let response = reqwest::Client::new()
         .post(format!("{}/register", base.trim_end_matches('/')))
-        .header("x-memento-registration-key", registration_key()?)
+        .header("x-memento-registration-key", key)
         .json(&Registration {
-            device_id: &device_id()?,
+            device_id: &device,
             platform: std::env::consts::OS,
             version: env!("CARGO_PKG_VERSION"),
             product: "memento",
         })
         .send()
         .await
-        .map_err(|e| format!("gateway registration failed: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!("gateway registration error {}", response.status()));
-    }
-    response
-        .json::<RegistrationResponse>()
+        .map_err(|e| format!("нет связи со шлюзом: {e}"))?;
+
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = response
+        .text()
         .await
-        .map(|v| v.token)
-        .map_err(|e| format!("invalid gateway registration response: {e}"))
+        .map_err(|e| format!("не удалось прочитать ответ шлюза: {e}"))?;
+
+    // The caller prefixes the gateway URL, so every failure from here reads
+    // "{base}: {reason}" and two gateways failing identically can be collapsed.
+    interpret_registration(status, &content_type, &body)
 }
 
+/// Whether `/me` still accepts this token. A block page must not read as "valid":
+/// a filter that answers 200 with HTML would otherwise keep a dead token in use.
 async fn valid(base: &str, token: &str) -> bool {
-    reqwest::Client::new()
+    let response = match reqwest::Client::new()
         .get(format!("{}/me", base.trim_end_matches('/')))
         .bearer_auth(token)
         .send()
         .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+    {
+        Ok(response) => response,
+        Err(e) => {
+            log::debug!("[gateway] {base}/me unreachable: {e}");
+            return false;
+        }
+    };
+    if !response.status().is_success() {
+        log::debug!("[gateway] {base}/me rejected the stored token: {}", response.status());
+        return false;
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = response.text().await.unwrap_or_default();
+    if looks_like_a_block_page(&content_type, &body) {
+        log::warn!("[gateway] {base}/me answered with a block page, not the gateway");
+        return false;
+    }
+    true
 }
 
 /// Register with each gateway in turn, saving the first token that succeeds to the
 /// credential vault (overwriting any token already stored).
 async fn register_and_store(item: &keyring::Entry) -> Result<(String, String), String> {
-    let mut last = String::new();
+    let mut failures: Vec<String> = Vec::new();
     for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
         match register(base).await {
             Ok(token) => {
                 item.set_password(&token)
-                    .map_err(|e| format!("cannot save gateway token: {e}"))?;
+                    .map_err(|e| format!("не удалось сохранить токен доступа: {e}"))?;
+                log::info!("[gateway] registered with {base}");
                 return Ok((token, base.to_string()));
             }
-            Err(e) => last = e,
+            Err(e) => {
+                log::warn!("[gateway] {base}: {e}");
+                failures.push(format!("{base}: {e}"));
+            }
         }
     }
-    Err(if last.is_empty() {
-        "gateway registration failed".to_string()
+    // Both gateways answered the same way in every failure observed so far (they sit
+    // behind the same DNS and the same corporate filter), so a single line reads
+    // better than two near-identical ones.
+    failures.dedup_by(|a, b| after_host(a) == after_host(b));
+    Err(if failures.is_empty() {
+        "не удалось зарегистрироваться на шлюзе Memento".to_string()
     } else {
-        last
+        failures.join("; ")
     })
+}
+
+/// The part of a failure message after the `"{base}: "` prefix added above. The gateway
+/// URLs carry no `": "` of their own (`https://` has no space), so the first one is the
+/// separator.
+fn after_host(message: &str) -> &str {
+    message.split_once(": ").map_or(message, |(_, rest)| rest)
 }
 
 /// Return a valid install JWT and the gateway host that accepted it. Reuses the stored
@@ -122,9 +228,13 @@ pub async fn install_token() -> Result<(String, String), String> {
     if let Ok(token) = item.get_password() {
         for base in [PRIMARY_GATEWAY, FALLBACK_GATEWAY] {
             if valid(base, &token).await {
+                log::debug!("[gateway] reusing the stored install token against {base}");
                 return Ok((token, base.to_string()));
             }
         }
+        log::info!("[gateway] the stored install token is no longer accepted, re-registering");
+    } else {
+        log::debug!("[gateway] no install token stored yet, registering");
     }
     register_and_store(&item).await
 }
@@ -172,6 +282,82 @@ mod tests {
         assert_managed_https_url(PRIMARY_GATEWAY, PRIMARY_GATEWAY_HOST);
         assert_managed_https_url(FALLBACK_GATEWAY, FALLBACK_GATEWAY_HOST);
         assert_ne!(PRIMARY_GATEWAY, FALLBACK_GATEWAY);
+    }
+
+    /// Verbatim from a Sber-managed workstation: the corporate URL filter answers on the
+    /// gateway's own hostname, over TLS the client accepts, with HTTP 503 and this body.
+    const CORPORATE_BLOCK_PAGE: &str = concat!(
+        "<html>\n<head>\n<meta http-equiv=\"refresh\" content=\"0; ",
+        "url=https://scs-response.sberbank.ru/url_category?cat=parked",
+        "&username=sigma\\19539654&url=gw.multitool.works:443/register\">\n</head>\n</html>\n"
+    );
+
+    #[test]
+    fn a_filter_block_page_names_the_interceptor_instead_of_blaming_the_gateway() {
+        let error = interpret_registration(503, "text/html", CORPORATE_BLOCK_PAGE)
+            .expect_err("a block page is not a registration");
+        assert!(error.contains("scs-response.sberbank.ru"), "{error}");
+        assert!(error.contains("перехвачен"), "{error}");
+        // The status alone would read as "the gateway is down", which sends people
+        // looking at a gateway that is in fact healthy.
+        assert!(!error.contains("недоступен"), "{error}");
+    }
+
+    #[test]
+    fn html_without_a_recognisable_redirect_still_reads_as_interception() {
+        let error = interpret_registration(200, "text/html; charset=utf-8", "<html>nope</html>")
+            .expect_err("HTML is never a valid registration");
+        assert!(error.contains("HTML"), "{error}");
+    }
+
+    #[test]
+    fn a_rejected_key_is_a_rejection_even_though_the_gateway_answers_200() {
+        // The gateway returns 200 with an error body, so a status-only check reports the
+        // downstream "missing field `token`" parse failure instead of the real cause.
+        let error = interpret_registration(200, "application/json", r#"{"error":"invalid memento registration key"}"#)
+            .expect_err("an error body is not a token");
+        assert!(error.contains("invalid memento registration key"), "{error}");
+        assert!(error.contains("отклонил"), "{error}");
+    }
+
+    #[test]
+    fn a_token_is_returned_on_the_normal_path() {
+        assert_eq!(
+            interpret_registration(200, "application/json", r#"{"token":"jwt-value"}"#).unwrap(),
+            "jwt-value"
+        );
+    }
+
+    #[test]
+    fn an_empty_or_absent_token_is_not_accepted() {
+        for body in [r#"{"token":""}"#, r#"{"ok":true}"#] {
+            let error = interpret_registration(200, "application/json", body).expect_err(body);
+            assert!(error.contains("не содержит токена"), "{body} -> {error}");
+        }
+    }
+
+    #[test]
+    fn a_plain_error_status_keeps_its_code() {
+        let error = interpret_registration(502, "application/json", r#"{"detail":"upstream"}"#)
+            .expect_err("502 is not a registration");
+        assert!(error.contains("502"), "{error}");
+    }
+
+    #[test]
+    fn identical_failures_from_both_gateways_collapse_to_one_line() {
+        let a = "https://gw.multitool.works: шлюз ответил ошибкой HTTP 503";
+        let b = "https://gw2.multitool.works: шлюз ответил ошибкой HTTP 503";
+        assert_eq!(after_host(a), after_host(b));
+        assert_eq!(after_host(a), "шлюз ответил ошибкой HTTP 503");
+    }
+
+    #[test]
+    fn interceptor_host_ignores_bodies_without_a_redirect() {
+        assert_eq!(interceptor_host("<html>blocked</html>"), None);
+        assert_eq!(
+            interceptor_host(CORPORATE_BLOCK_PAGE).as_deref(),
+            Some("scs-response.sberbank.ru")
+        );
     }
 
     #[test]
