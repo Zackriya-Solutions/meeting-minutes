@@ -212,6 +212,11 @@ impl SettingsRepository {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(None), // Parakeet doesn't need an API key
+            // #338 / #519: the disabled provider has no API-key column, so the
+            // catch-all below would return Err and make api_get_transcript_config
+            // fail for the entire config. The frontend reads that as "provider
+            // unreadable" and blocks Record with a false "model not ready".
+            "disabled" | "none" | "" => return Ok(None),
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
