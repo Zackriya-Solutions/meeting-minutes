@@ -24,9 +24,13 @@ There is no Microsoft Graph client, OAuth flow, calendar token, or external
 calendar endpoint in this path.
 
 The user must explicitly enable the integration in **Settings → Calendar**.
-Until then, Memento only checks whether classic Outlook is registered; it does
-not launch Outlook or read the profile. After enabling it, the home screen reads
-the next seven days while visible and refreshes every five minutes.
+Until then, Memento checks only whether the required Outlook application is
+installed; it does not launch Outlook or read the calendar. After enabling it,
+the home screen and Calendar settings read the next seven days when opened,
+refresh when Memento returns to the foreground, and refresh every five minutes
+while visible. When the calendar is empty or a read fails, Memento retries every
+minute. Manual refresh remains available, and concurrent reads are coalesced so
+the two screens cannot trigger duplicate Outlook automation.
 
 On macOS, the user must additionally approve Memento under **System Settings →
 Privacy & Security → Accessibility**. Memento then opens Outlook, navigates to

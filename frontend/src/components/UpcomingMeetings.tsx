@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/memento/Icon';
 import { useLanguage } from '@/lib/i18n';
@@ -9,6 +9,8 @@ import {
   getUpcomingLocalOutlookMeetings,
   isLocalOutlookCalendarEnabled,
   LocalOutlookMeeting,
+  OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS,
+  OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS,
 } from '@/lib/localOutlookCalendar';
 
 interface UpcomingMeetingsProps {
@@ -40,45 +42,75 @@ export function UpcomingMeetings({ disabled, onStartMeeting }: UpcomingMeetingsP
   const [enabled, setEnabled] = useState(false);
   const [meetings, setMeetings] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
+  const loadRequestRef = useRef<Promise<void> | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const preference = await isLocalOutlookCalendarEnabled();
-      setEnabled(preference);
-      if (!preference) return;
-      const status = await getLocalOutlookCalendarStatus();
-      if (!status.installed) {
-        setError(t('Outlook is not available.'));
-        return;
+  const load = useCallback((force = false): Promise<void> => {
+    if (loadRequestRef.current) return loadRequestRef.current;
+
+    setRefreshing(true);
+    const request = (async () => {
+      try {
+        const preference = await isLocalOutlookCalendarEnabled();
+        setEnabled(preference);
+        if (!preference) {
+          setMeetings([]);
+          setError(null);
+          return;
+        }
+        const status = await getLocalOutlookCalendarStatus();
+        if (!status.installed) {
+          setError(t('Outlook is not available.'));
+          return;
+        }
+        if (status.provider === 'macos-outlook-accessibility' && !status.accessibility_granted) {
+          setError(t('Accessibility permission is required'));
+          return;
+        }
+        const events = await getUpcomingLocalOutlookMeetings(7, { force });
+        setMeetings(events.slice(0, 5));
+        setLastUpdated(new Date());
+        setError(null);
+      } catch (loadError) {
+        setError(String(loadError));
+      } finally {
+        setLoading(false);
       }
-      if (status.provider === 'macos-outlook-accessibility' && !status.accessibility_granted) {
-        setError(t('Accessibility permission is required'));
-        return;
+    })().finally(() => {
+      if (loadRequestRef.current === request) {
+        loadRequestRef.current = null;
+        setRefreshing(false);
       }
-      const events = await getUpcomingLocalOutlookMeetings(7);
-      setMeetings(events.slice(0, 5));
-      setError(null);
-    } catch (loadError) {
-      setError(String(loadError));
-    } finally {
-      setLoading(false);
-    }
+    });
+    loadRequestRef.current = request;
+    return request;
   }, [t]);
 
   useEffect(() => {
     void load();
-    const interval = window.setInterval(() => {
+    const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void load();
-    }, 5 * 60 * 1000);
-    const onFocus = () => void load();
-    window.addEventListener('focus', onFocus);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshWhenVisible();
+    };
+    const retryDelay = meetings.length > 0 && !error
+      ? OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS
+      : OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS;
+    const interval = window.setInterval(() => {
+      refreshWhenVisible();
+    }, retryDelay);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [load]);
+  }, [error, load, meetings.length]);
 
   if (loading || !enabled) return null;
 
@@ -87,15 +119,28 @@ export function UpcomingMeetings({ disabled, onStartMeeting }: UpcomingMeetingsP
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="calendar" size={17} className="shrink-0 text-[var(--gold)]" />
-          <h2 className="truncate text-sm font-semibold text-[var(--fg1)]">{t('Upcoming in Outlook')}</h2>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-[var(--fg1)]">{t('Upcoming in Outlook')}</h2>
+            <p className="truncate text-[10px] text-[var(--fg3)]">
+              {refreshing
+                ? t('Refreshing…')
+                : lastUpdated
+                  ? `${t('Updated')} ${new Intl.DateTimeFormat(locale, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }).format(lastUpdated)}`
+                  : t('Automatic refresh is on')}
+            </p>
+          </div>
         </div>
         <button
           type="button"
-          onClick={() => void load()}
+          disabled={refreshing}
+          onClick={() => void load(true)}
           className="mm-icon-button mm-hover h-8 w-8"
           aria-label={t('Refresh')}
         >
-          <Icon name="refresh" size={15} />
+          <Icon name="refresh" size={15} className={refreshing ? 'animate-spin' : ''} />
         </button>
       </div>
 
@@ -111,7 +156,9 @@ export function UpcomingMeetings({ disabled, onStartMeeting }: UpcomingMeetingsP
           </button>
         </div>
       ) : meetings.length === 0 ? (
-        <p className="mt-3 text-xs text-[var(--fg3)]">{t('No meetings in the next 7 days.')}</p>
+        <p className="mt-3 text-xs text-[var(--fg3)]">
+          {t('No upcoming meetings yet. Memento will check again automatically.')}
+        </p>
       ) : (
         <div className="mt-3 divide-y divide-[var(--border-subtle)]">
           {meetings.map((meeting) => {

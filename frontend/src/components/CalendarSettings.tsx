@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Icon } from '@/components/memento/Icon';
 import { Switch } from '@/components/ui/switch';
@@ -11,6 +11,8 @@ import {
   isLocalOutlookCalendarEnabled,
   LocalOutlookCalendarStatus,
   LocalOutlookMeeting,
+  OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS,
+  OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS,
   requestOutlookAccessibilityPermission,
   setLocalOutlookCalendarEnabled,
 } from '@/lib/localOutlookCalendar';
@@ -34,16 +36,36 @@ export function CalendarSettings() {
   const [preview, setPreview] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [requestingPermission, setRequestingPermission] = useState(false);
+  const refreshRequestRef = useRef<Promise<void> | null>(null);
 
-  const refreshPreview = useCallback(async () => {
+  const refreshPreview = useCallback((force = false): Promise<void> => {
+    if (refreshRequestRef.current) return refreshRequestRef.current;
+
     setRefreshing(true);
-    try {
-      const meetings = await getUpcomingLocalOutlookMeetings(7);
-      setPreview(meetings.slice(0, 3));
-    } finally {
-      setRefreshing(false);
-    }
+    setPreviewError(null);
+    const request = getUpcomingLocalOutlookMeetings(7, { force })
+      .then((meetings) => {
+        setPreview(meetings.slice(0, 3));
+        setPreviewLoaded(true);
+        setLastUpdated(new Date());
+      })
+      .catch((error) => {
+        setPreviewLoaded(true);
+        setPreviewError(String(error));
+        throw error;
+      })
+      .finally(() => {
+        if (refreshRequestRef.current === request) {
+          refreshRequestRef.current = null;
+          setRefreshing(false);
+        }
+      });
+    refreshRequestRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
@@ -66,7 +88,9 @@ export function CalendarSettings() {
         setStatus(nextStatus);
         setEnabled(nextEnabled);
         if (nextEnabled && nextStatus.installed) {
-          await refreshPreview();
+          await refreshPreview().catch(() => {
+            // The preview shows the error and retries automatically.
+          });
         }
       })
       .catch((error) => {
@@ -86,16 +110,54 @@ export function CalendarSettings() {
     };
   }, [refreshPreview, t]);
 
+  const isMacAccessibility = status?.provider === 'macos-outlook-accessibility';
+  const canEnable = Boolean(
+    status?.supported
+      && status.installed
+      && (!isMacAccessibility || status.accessibility_granted),
+  );
+  const calendarReady = enabled && canEnable;
+
+  useEffect(() => {
+    if (!calendarReady) return;
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshPreview().catch(() => {
+          // The preview shows the error and retries automatically.
+        });
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshWhenVisible();
+    };
+    const retryDelay = previewLoaded && preview.length > 0 && !previewError
+      ? OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS
+      : OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS;
+    const interval = window.setInterval(refreshWhenVisible, retryDelay);
+
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [calendarReady, preview.length, previewError, previewLoaded, refreshPreview]);
+
   const toggleEnabled = async (next: boolean) => {
     const previous = enabled;
     setEnabled(next);
     try {
       if (next) {
-        await refreshPreview();
+        await refreshPreview(true);
         const nextStatus = await getLocalOutlookCalendarStatus();
         setStatus(nextStatus);
       } else {
         setPreview([]);
+        setPreviewLoaded(false);
+        setPreviewError(null);
+        setLastUpdated(null);
       }
       await setLocalOutlookCalendarEnabled(next);
       toast.success(t(next ? 'Local Outlook calendar enabled' : 'Local Outlook calendar disabled'));
@@ -111,12 +173,6 @@ export function CalendarSettings() {
     return <div className="p-6 text-sm text-[var(--fg3)]">{t('Loading…')}</div>;
   }
 
-  const isMacAccessibility = status?.provider === 'macos-outlook-accessibility';
-  const canEnable = Boolean(
-    status?.supported
-      && status.installed
-      && (!isMacAccessibility || status.accessibility_granted),
-  );
   const statusTitle = canEnable
     ? isMacAccessibility
       ? t('Outlook Accessibility is ready')
@@ -213,12 +269,20 @@ export function CalendarSettings() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Next meetings')}</h3>
-              <p className="mt-1 text-xs text-[var(--fg3)]">{t('Preview for the next 7 days')}</p>
+              <p className="mt-1 text-xs text-[var(--fg3)]">
+                {t('Updates automatically while Memento is open')}
+                {lastUpdated
+                  ? ` · ${t('Updated')} ${new Intl.DateTimeFormat(locale, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }).format(lastUpdated)}`
+                  : ''}
+              </p>
             </div>
             <button
               type="button"
               onClick={() => {
-                void refreshPreview().catch((error) => {
+                void refreshPreview(true).catch((error) => {
                   toast.error(t('Could not read the local Outlook calendar'), {
                     description: String(error),
                   });
@@ -232,10 +296,19 @@ export function CalendarSettings() {
             </button>
           </div>
 
-          <div className="mt-4 space-y-2">
-            {preview.length === 0 ? (
+          <div className="mt-4 space-y-2" aria-live="polite">
+            {refreshing && !previewLoaded ? (
               <p className="rounded-xl border border-dashed border-[var(--border-subtle)] p-4 text-sm text-[var(--fg3)]">
-                {t('No upcoming meetings in the local Outlook calendars.')}
+                {t('Checking Outlook for meetings…')}
+              </p>
+            ) : previewError ? (
+              <div className="rounded-xl border border-dashed border-[var(--border-subtle)] p-4 text-sm text-[var(--fg3)]">
+                <p>{t('Could not refresh Outlook. Memento will retry automatically.')}</p>
+                <p className="mt-1 break-words text-xs">{previewError}</p>
+              </div>
+            ) : preview.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[var(--border-subtle)] p-4 text-sm text-[var(--fg3)]">
+                {t('No upcoming meetings yet. Memento will check again automatically.')}
               </p>
             ) : (
               preview.map((meeting) => (

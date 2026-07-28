@@ -589,7 +589,12 @@ fn clean_subject(prefix: &str) -> String {
         let suffix = suffix.trim().to_lowercase();
         if matches!(
             suffix.as_str(),
-            "monday"
+            "start"
+                | "starts"
+                | "begin"
+                | "begins"
+                | "начало"
+                | "monday"
                 | "tuesday"
                 | "wednesday"
                 | "thursday"
@@ -705,6 +710,23 @@ mod tests {
         assert_eq!(event.subject, "Project review");
         assert!(event.start_at.contains("T14:00:00"));
         assert!(event.end_at.contains("T15:30:00"));
+    }
+
+    #[test]
+    fn removes_accessibility_start_marker_from_subject() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let event = parse_event_label(
+            "Демо Дататеки, Новинки. Копия, начало, 29 июля 2026 г. в 11:00, заканчивается в 11:30",
+            range_start,
+            range_end,
+        )
+        .unwrap();
+
+        assert_eq!(event.subject, "Демо Дататеки, Новинки. Копия");
     }
 
     #[test]

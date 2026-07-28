@@ -1,6 +1,18 @@
 import { invoke } from '@tauri-apps/api/core';
 
 const ENABLED_SETTING = 'calendar.local_outlook_enabled';
+const CACHE_TTL_MS = 30 * 1000;
+
+export const OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+export const OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS = 60 * 1000;
+
+interface MeetingCacheEntry {
+  fetchedAt: number;
+  meetings: LocalOutlookMeeting[];
+}
+
+const meetingCache = new Map<number, MeetingCacheEntry>();
+const inFlightRequests = new Map<number, Promise<LocalOutlookMeeting[]>>();
 
 export interface LocalOutlookCalendarStatus {
   supported: boolean;
@@ -34,8 +46,34 @@ export async function requestOutlookAccessibilityPermission(): Promise<LocalOutl
   return invoke<LocalOutlookCalendarStatus>('request_outlook_accessibility_permission');
 }
 
-export async function getUpcomingLocalOutlookMeetings(days = 7): Promise<LocalOutlookMeeting[]> {
-  return invoke<LocalOutlookMeeting[]>('get_upcoming_local_outlook_meetings', { days });
+export async function getUpcomingLocalOutlookMeetings(
+  days = 7,
+  options: { force?: boolean } = {},
+): Promise<LocalOutlookMeeting[]> {
+  const cached = meetingCache.get(days);
+  if (!options.force && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached.meetings;
+  }
+
+  const existingRequest = inFlightRequests.get(days);
+  if (existingRequest) return existingRequest;
+
+  const request = invoke<LocalOutlookMeeting[]>('get_upcoming_local_outlook_meetings', { days })
+    .then((meetings) => {
+      meetingCache.set(days, {
+        fetchedAt: Date.now(),
+        meetings,
+      });
+      return meetings;
+    })
+    .finally(() => {
+      if (inFlightRequests.get(days) === request) {
+        inFlightRequests.delete(days);
+      }
+    });
+
+  inFlightRequests.set(days, request);
+  return request;
 }
 
 export async function isLocalOutlookCalendarEnabled(): Promise<boolean> {
@@ -48,4 +86,5 @@ export async function setLocalOutlookCalendarEnabled(enabled: boolean): Promise<
     key: ENABLED_SETTING,
     value: enabled ? 'true' : 'false',
   });
+  if (!enabled) meetingCache.clear();
 }
