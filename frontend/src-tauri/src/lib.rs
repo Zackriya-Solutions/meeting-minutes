@@ -41,6 +41,7 @@ pub mod analytics;
 pub mod anthropic;
 pub mod api;
 pub mod audio;
+pub mod background_capture;
 pub mod collections;
 pub mod config;
 pub mod console_utils;
@@ -413,6 +414,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(meeting_detection::AutoMeetingDetectionState::default())
+        .manage(background_capture::BackgroundCaptureState::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
@@ -754,6 +756,7 @@ pub fn run() {
             is_recording,
             get_transcription_status,
             meeting_detection::get_auto_meeting_detection_status,
+            background_capture::get_background_capture_status,
             meeting_detection::report_auto_listening_start,
             meeting_detection::link_auto_listening_meeting,
             meeting_detection::get_capture_retention_policy,
@@ -1059,6 +1062,15 @@ pub fn run() {
                         .state::<meeting_detection::AutoMeetingDetectionState>()
                         .stop();
                     tauri::async_runtime::block_on(async {
+                        // Finalize an in-progress background capture BEFORE the database
+                        // is closed, so quitting mid-call still saves and registers it.
+                        let background_capture =
+                            _app_handle.state::<background_capture::BackgroundCaptureState>();
+                        if background_capture.is_capturing() {
+                            log::info!("Finalizing in-progress background capture before exit");
+                            background_capture.stop_and_finalize(_app_handle).await;
+                        }
+
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
                             log::info!("Starting database cleanup...");
