@@ -230,6 +230,15 @@ whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
 # Windows Credential Manager.
 keyring = { version = "3.6", features = ["windows-native"] }
+# Local classic-Outlook calendar access through the Outlook Object Model
+# (COM/MAPI). No Microsoft Graph or external calendar service is involved.
+windows = { version = "0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)

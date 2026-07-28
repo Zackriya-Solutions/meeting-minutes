@@ -11,6 +11,7 @@ import { BetaSettings } from '@/components/BetaSettings';
 import { EmbeddingModelSettings } from '@/components/EmbeddingModelSettings';
 import { ProviderSettings } from '@/components/ProviderSettings';
 import { PrivacySettings } from '@/components/PrivacySettings';
+import { CalendarSettings } from '@/components/CalendarSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Icon, MementoIconName } from '@/components/memento/Icon';
@@ -60,6 +61,13 @@ const TABS = [
     description: 'Local-only mode, extraction, and knowledge-base chat access',
     icon: 'lock',
     keywords: 'приватность конфиденциальность локальный режим чат база знаний rag',
+  },
+  {
+    value: 'calendar',
+    label: 'Calendar',
+    description: 'Local classic Outlook calendars and upcoming meetings',
+    icon: 'calendar',
+    keywords: 'календарь outlook встречи локальный classic',
   },
   {
     value: 'search',
@@ -263,6 +271,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="privacy" className="min-w-0">
               <PrivacySettings />
+            </TabsContent>
+            <TabsContent value="calendar" className="min-w-0">
+              <CalendarSettings />
             </TabsContent>
             <TabsContent value="search" className="min-w-0">
               <EmbeddingModelSettings />

@@ -41,6 +41,7 @@ pub mod analytics;
 pub mod anthropic;
 pub mod api;
 pub mod audio;
+pub mod calendar;
 pub mod collections;
 pub mod config;
 pub mod console_utils;
@@ -732,6 +733,8 @@ pub fn run() {
             gigaam_engine::commands::gigaam_transcribe_audio,
             salutespeech::salutespeech_is_configured,
             salutespeech::salutespeech_can_be_selected,
+            calendar::local_outlook::local_outlook_calendar_status,
+            calendar::local_outlook::get_upcoming_local_outlook_meetings,
             collections::commands::create_collection,
             collections::commands::rename_collection,
             collections::commands::delete_collection,
