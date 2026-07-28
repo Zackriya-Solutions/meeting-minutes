@@ -590,8 +590,20 @@ mod tests {
     use super::should_emit_transcript;
 
     #[test]
-    fn accepts_short_nonempty_transcript_regardless_of_confidence() {
-        assert!(should_emit_transcript("да", Some(0.14)));
+    fn accepts_short_nonempty_transcripts_regardless_of_confidence() {
+        for (transcript, confidence) in [
+            ("OK", 0.12),
+            ("Yes", 0.13),
+            ("No", 0.12),
+            ("Sure", 0.14),
+            ("Got it", 0.16),
+            ("Thanks", 0.16),
+        ] {
+            assert!(
+                should_emit_transcript(transcript, Some(confidence)),
+                "expected short transcript '{transcript}' to be emitted"
+            );
+        }
     }
 
     #[test]
