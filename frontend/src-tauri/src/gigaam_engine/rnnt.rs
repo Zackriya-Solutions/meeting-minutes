@@ -29,6 +29,55 @@ const PRED_HIDDEN: usize = 320;
 /// (GigaAM's `max_tokens_per_step` default).
 const MAX_TOKENS_PER_STEP: usize = 3;
 
+/// One decoded word with timing derived from the encoder frame each BPE piece was
+/// emitted at, relative to the start of the transcribed waveform. Transducer emissions
+/// lag the audio slightly (the joiner fires once enough acoustic evidence accumulated),
+/// so treat boundaries as ~±1 frame (40 ms) soft.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedWord {
+    pub text: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+/// Group BPE pieces + their emission frames into [`TimedWord`]s. A piece starting with
+/// the sentencepiece word marker `▁` (U+2581) opens a new word; everything else
+/// (continuation pieces, punctuation) appends to the current word. `frame_ms` is the
+/// duration of one encoder frame.
+pub(super) fn tokens_to_timed_words(
+    vocab: &[String],
+    tokens: &[usize],
+    frames: &[usize],
+    frame_ms: f64,
+) -> Vec<TimedWord> {
+    let mut words: Vec<TimedWord> = Vec::new();
+    for (&id, &frame) in tokens.iter().zip(frames) {
+        let Some(piece) = vocab.get(id) else { continue };
+        let start_ms = (frame as f64 * frame_ms).round() as i64;
+        let end_ms = ((frame + 1) as f64 * frame_ms).round() as i64;
+        let is_word_start = piece.starts_with('\u{2581}');
+        let text = piece.replace('\u{2581}', "");
+        match words.last_mut() {
+            Some(last) if !is_word_start => {
+                last.text.push_str(&text);
+                last.end_ms = last.end_ms.max(end_ms);
+            }
+            _ => {
+                if text.is_empty() {
+                    continue; // a bare "▁" piece carries no word content
+                }
+                words.push(TimedWord {
+                    text,
+                    start_ms,
+                    end_ms,
+                });
+            }
+        }
+    }
+    words.retain(|w| !w.text.is_empty());
+    words
+}
+
 pub struct RnntModel {
     encoder: ort::session::Session,
     decoder: ort::session::Session,
@@ -60,9 +109,24 @@ impl RnntModel {
 
     /// Transcribe a 16 kHz mono waveform to punctuated Russian text.
     pub fn transcribe(&mut self, waveform: &[f32]) -> Result<String> {
+        let (tokens, _, _) = self.decode_greedy(waveform)?;
+        Ok(ids_to_text(&self.vocab, &tokens))
+    }
+
+    /// Transcribe a 16 kHz mono waveform into words with per-word timing (see
+    /// [`TimedWord`]). Same greedy decode as [`Self::transcribe`] — identical text,
+    /// plus the encoder frame each piece was emitted at.
+    pub fn transcribe_with_words(&mut self, waveform: &[f32]) -> Result<Vec<TimedWord>> {
+        let (tokens, frames, frame_ms) = self.decode_greedy(waveform)?;
+        Ok(tokens_to_timed_words(&self.vocab, &tokens, &frames, frame_ms))
+    }
+
+    /// Greedy transducer decode → (token ids, emission encoder-frame per token, ms per
+    /// encoder frame).
+    fn decode_greedy(&mut self, waveform: &[f32]) -> Result<(Vec<usize>, Vec<usize>, f64)> {
         let (feats, t) = self.featurizer.compute(waveform);
         if t == 0 {
-            return Ok(String::new());
+            return Ok((Vec::new(), Vec::new(), 0.0));
         }
         let features = Array3::from_shape_vec((1, N_MELS, t), feats)
             .map_err(|e| anyhow!("feature reshape: {e}"))?;
@@ -70,11 +134,21 @@ impl RnntModel {
 
         // Encoder → owned `encoded` [1,D,T'] (row-major), dims, and valid length.
         let (encoded, enc_dim, enc_tp, enc_len) = self.encode(&features, &length)?;
+        // Feature frames are HOP samples (10 ms) apart; the encoder subsamples T → T',
+        // so one encoder frame spans t/T' feature frames (4× ⇒ 40 ms for GigaAM v3).
+        let feature_frame_ms =
+            super::featurizer::HOP as f64 / super::featurizer::SAMPLE_RATE as f64 * 1000.0;
+        let frame_ms = if enc_tp > 0 {
+            t as f64 * feature_frame_ms / enc_tp as f64
+        } else {
+            feature_frame_ms
+        };
 
         // Greedy transducer decode.
         let mut h: ArrayD<f32> = ArrayD::zeros(IxDyn(&[1, 1, PRED_HIDDEN]));
         let mut c: ArrayD<f32> = ArrayD::zeros(IxDyn(&[1, 1, PRED_HIDDEN]));
         let mut tokens: Vec<usize> = Vec::new();
+        let mut frames: Vec<usize> = Vec::new();
         let mut t_idx = 0usize;
         let mut emitted = 0usize;
 
@@ -91,6 +165,7 @@ impl RnntModel {
                 h = h_new;
                 c = c_new;
                 tokens.push(token);
+                frames.push(t_idx);
                 emitted += 1;
             }
             if token == self.blank || emitted >= MAX_TOKENS_PER_STEP {
@@ -98,7 +173,7 @@ impl RnntModel {
                 emitted = 0;
             }
         }
-        Ok(ids_to_text(&self.vocab, &tokens))
+        Ok((tokens, frames, frame_ms))
     }
 
     /// Run the encoder. Returns owned `encoded` [1,D,T'] flattened row-major, D, T', and
@@ -222,6 +297,96 @@ fn argmax(v: &[f32]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn vocab(pieces: &[&str]) -> Vec<String> {
+        pieces.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn pieces_group_into_words_with_frame_timing() {
+        // "▁при вет ▁мир ." at frames 3,4,10,11 with 40 ms frames.
+        let v = vocab(&["▁при", "вет", "▁мир", "."]);
+        let words = tokens_to_timed_words(&v, &[0, 1, 2, 3], &[3, 4, 10, 11], 40.0);
+        assert_eq!(
+            words,
+            vec![
+                TimedWord {
+                    text: "привет".into(),
+                    start_ms: 120,
+                    end_ms: 200
+                },
+                TimedWord {
+                    text: "мир.".into(),
+                    start_ms: 400,
+                    end_ms: 480
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn leading_continuation_piece_still_forms_a_word() {
+        // Audio cut mid-word: first piece has no ▁ marker.
+        let v = vocab(&["вет", "▁мир"]);
+        let words = tokens_to_timed_words(&v, &[0, 1], &[0, 5], 40.0);
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "вет");
+        assert_eq!(words[1].text, "мир");
+    }
+
+    #[test]
+    fn bare_marker_and_unknown_ids_are_skipped() {
+        let v = vocab(&["\u{2581}", "▁да"]);
+        let words = tokens_to_timed_words(&v, &[0, 99, 1], &[0, 1, 2], 40.0);
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "да");
+    }
+
+    // Research harness: word-level timestamps on a real clip. Env-gated:
+    //   GIGAAM_RNNT_DIR=<model dir>  GIGAAM_TEST_WAV=<wav/mp4>  WINDOW_MS=<start,end>
+    //   cargo test -p meetily --lib gigaam_engine::rnnt::tests::research_word_timestamps -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn research_word_timestamps() {
+        let dir = match std::env::var("GIGAAM_RNNT_DIR") {
+            Ok(d) => std::path::PathBuf::from(d),
+            Err(_) => return,
+        };
+        let wav = std::env::var("GIGAAM_TEST_WAV").expect("set GIGAAM_TEST_WAV");
+        let window = std::env::var("WINDOW_MS").unwrap_or_default();
+        let (w_start, w_end) = match window.split_once(',') {
+            Some((a, b)) => (
+                a.trim().parse::<usize>().unwrap(),
+                b.trim().parse::<usize>().unwrap(),
+            ),
+            None => (0, usize::MAX),
+        };
+
+        let mut model = RnntModel::load(
+            &dir.join("v3_e2e_rnnt_encoder.onnx"),
+            &dir.join("v3_e2e_rnnt_decoder.onnx"),
+            &dir.join("v3_e2e_rnnt_joint.onnx"),
+            &dir.join("v3_e2e_rnnt_vocab.txt"),
+        )
+        .expect("load RNN-T model");
+
+        let decoded =
+            crate::audio::decoder::decode_audio_file(std::path::Path::new(&wav)).expect("decode");
+        let samples = decoded.to_whisper_format();
+        let s = (w_start * 16).min(samples.len());
+        let e = (w_end.saturating_mul(16)).min(samples.len());
+        let words = model
+            .transcribe_with_words(&samples[s..e])
+            .expect("transcribe");
+        for w in &words {
+            eprintln!(
+                "{:8.2}-{:8.2}s  {}",
+                (w_start as f64 + w.start_ms as f64) / 1000.0,
+                (w_start as f64 + w.end_ms as f64) / 1000.0,
+                w.text
+            );
+        }
+    }
 
     /// End-to-end check against the real RNN-T ONNX files. Ignored by default; run with:
     ///   GIGAAM_RNNT_DIR=<dir with v3_e2e_rnnt_{encoder.int8,decoder.int8,joint.int8}.onnx + vocab>
