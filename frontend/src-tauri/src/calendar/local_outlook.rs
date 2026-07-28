@@ -7,6 +7,7 @@
 
 use serde::Serialize;
 
+#[cfg(not(target_os = "windows"))]
 const UNSUPPORTED_MESSAGE: &str = "Local Outlook Calendar requires classic Outlook for Windows. \
      Microsoft does not expose the Outlook Object Model in new Outlook.";
 
