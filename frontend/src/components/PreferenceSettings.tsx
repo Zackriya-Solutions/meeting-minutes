@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { TELEGRAM_AUTO_SHARE_KEY } from "@/hooks/meeting-details/useTelegramShare"
 import {
   type AutoCaptureMode,
   flagsForMode,
@@ -66,6 +67,7 @@ export function PreferenceSettings() {
     local_only: boolean;
   } | null>(null);
   const [identityAutoAssign, setIdentityAutoAssign] = useState(false);
+  const [telegramAutoShare, setTelegramAutoShare] = useState(false);
   const [backgroundCapture, setBackgroundCapture] = useState<{
     supported: boolean;
     capturing: boolean;
@@ -92,6 +94,7 @@ export function PreferenceSettings() {
     ]).then(([policy, settings, capture]) => {
       setCapturePolicy(policy);
       setIdentityAutoAssign(settings['identity.auto_assign_enabled'] === 'true');
+      setTelegramAutoShare(settings[TELEGRAM_AUTO_SHARE_KEY] === 'true');
       setBackgroundCapture({ supported: capture.supported, capturing: capture.capturing });
     }).catch((error) => {
       console.warn('Failed to load local learning policy:', error);
@@ -244,6 +247,19 @@ export function PreferenceSettings() {
     }
   };
 
+  const handleTelegramAutoShare = async (enabled: boolean) => {
+    setTelegramAutoShare(enabled);
+    try {
+      await invoke('set_app_setting', {
+        key: TELEGRAM_AUTO_SHARE_KEY,
+        value: enabled ? 'true' : 'false',
+      });
+    } catch (error) {
+      setTelegramAutoShare(!enabled);
+      console.error('Failed to save Telegram auto-share setting:', error);
+    }
+  };
+
   const handleIdentityAutoAssign = async (enabled: boolean) => {
     setIdentityAutoAssign(enabled);
     try {
@@ -325,6 +341,25 @@ export function PreferenceSettings() {
           <p className="mt-3 text-xs text-[var(--fg3)]">{t('Recording a call in the background right now.')}</p>
         )}
       </div>
+
+      {/* Hidden in local-only mode: handing a summary to Telegram takes it off this machine. */}
+      {!capturePolicy?.local_only && (
+        <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+          <div className="flex items-start justify-between gap-4 sm:gap-6">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Open Telegram after a summary is generated')}</h3>
+              <p className="text-sm text-[var(--fg2)]">
+                {t('Telegram opens its chat picker with the meeting title in the draft and the summary on the clipboard, ready to paste. You choose the chat and press send — the app never sends anything by itself.')}
+              </p>
+            </div>
+            <Switch
+              className="shrink-0"
+              checked={telegramAutoShare}
+              onCheckedChange={handleTelegramAutoShare}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Local learning and retention')}</h3>

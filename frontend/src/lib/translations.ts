@@ -54,6 +54,22 @@ export const RU: Record<string, string> = {
   "Collapse details": "Свернуть подробности",
   "Copy summary": "Копировать саммари",
   "Save to note": "Сохранить в заметку",
+
+  // Sharing a summary to Telegram. The app opens Telegram's chat picker — it never
+  // sends on its own, and the copy must not imply that it does.
+  "Send to Telegram": "Отправить в Telegram",
+  "No summary content available to share": "Нет содержимого суммаризации для отправки",
+  "Telegram opened — pick a chat and paste the summary": "Telegram открыт — выберите чат и вставьте суммаризацию",
+  "<paste the text from the clipboard>": "<вставьте текст из буфера обмена>",
+  "Replace the placeholder line in the draft with the clipboard contents. The link on the first line is required by Telegram; delete it if you do not need it.": "Замените строку-подсказку в черновике текстом из буфера обмена. Ссылку в первой строке требует Telegram: удалите её, если она не нужна",
+  "Telegram opened, but the summary could not be copied": "Telegram открыт, но скопировать суммаризацию не удалось",
+  "Use the Copy action and paste it into the chat manually.": "Скопируйте её кнопкой «Копировать» и вставьте в чат",
+  "Summary is longer than one Telegram message": "Суммаризация длиннее одного сообщения Telegram",
+  "Pick a chat, then drag in the file revealed in the folder. The text is also on the clipboard.": "Выберите чат и перетащите файл, показанный в папке. Текст также в буфере обмена",
+  "Failed to open Telegram": "Не удалось открыть Telegram",
+  "Open Telegram after a summary is generated": "Открывать Telegram после суммаризации",
+  "Telegram opens its chat picker with the meeting title in the draft and the summary on the clipboard, ready to paste. You choose the chat and press send — the app never sends anything by itself.": "Telegram откроется с выбором чата: в черновике будет название встречи, а суммаризация — в буфере обмена, останется вставить. Чат выбираете вы — приложение ничего не отправляет само.",
+
   "Delete this meeting? This cannot be undone.": "Удалить эту встречу? Действие необратимо.",
   "Meeting deleted": "Встреча удалена",
   "Regenerate": "Пересобрать",

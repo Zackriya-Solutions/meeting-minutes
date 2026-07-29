@@ -4,7 +4,7 @@ import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Copy, Loader2, RefreshCw, Save } from '@/components/memento/LucideCompat';
+import { Copy, Loader2, RefreshCw, Save, Send } from '@/components/memento/LucideCompat';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { summaryToMarkdown, splitSummaryLead } from '@/lib/summaryToMarkdown';
 import { useT } from '@/lib/i18n';
@@ -137,6 +137,14 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
           <div className="mt-[18px] flex gap-4">
             <QuietAction icon={<RefreshCw size={14} />} label={t('Regenerate')} onClick={() => void p.onRegenerateSummary()} />
             <QuietAction icon={<Copy size={14} />} label={t('Copy')} onClick={() => void p.onCopySummary()} />
+            {p.canShareToTelegram && p.onShareSummaryToTelegram && (
+              <QuietAction
+                icon={p.isSharingToTelegram ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                label={t('Telegram')}
+                disabled={p.isSharingToTelegram}
+                onClick={() => void p.onShareSummaryToTelegram?.()}
+              />
+            )}
             <QuietAction icon={<Save size={14} />} label={t('Save to note')} onClick={() => void p.onSaveAll()} />
           </div>
         </>
@@ -159,12 +167,23 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
   );
 }
 
-function QuietAction({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+function QuietAction({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--fg3)] transition-colors hover:text-[var(--fg1)]"
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--fg3)] transition-colors hover:text-[var(--fg1)] disabled:opacity-50"
     >
       {icon}
       {label}
