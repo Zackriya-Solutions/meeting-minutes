@@ -14,6 +14,7 @@ use std::sync::Mutex;
 
 use model::CtcModel;
 use rnnt::RnntModel;
+pub use rnnt::TimedWord;
 use variant::{DecodeKind, GigaamVariant};
 
 /// The loaded model, dispatched by decode kind.
@@ -27,6 +28,15 @@ impl LoadedModel {
         match self {
             LoadedModel::Ctc(m) => m.transcribe(waveform),
             LoadedModel::Rnnt(m) => m.transcribe(waveform),
+        }
+    }
+
+    /// Word-level transcription. `Ok(None)` when the loaded variant doesn't expose
+    /// per-token timing (CTC — derivable from frame argmax, just not implemented).
+    fn transcribe_with_words(&mut self, waveform: &[f32]) -> anyhow::Result<Option<Vec<TimedWord>>> {
+        match self {
+            LoadedModel::Ctc(_) => Ok(None),
+            LoadedModel::Rnnt(m) => m.transcribe_with_words(waveform).map(Some),
         }
     }
 }
@@ -103,6 +113,26 @@ pub async fn transcribe(waveform: Vec<f32>) -> Option<Result<String, String>> {
         guard
             .as_mut()
             .map(|m| m.transcribe(&waveform).map_err(|e| e.to_string()))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Word-level transcription on a blocking thread. Outer `None` = no model loaded;
+/// inner `Ok(None)` = the loaded variant has no per-word timing (caller should fall
+/// back to [`transcribe`]).
+pub async fn transcribe_with_words(
+    waveform: Vec<f32>,
+) -> Option<Result<Option<Vec<TimedWord>>, String>> {
+    if !is_loaded() {
+        return None;
+    }
+    tokio::task::spawn_blocking(move || {
+        let mut guard = ENGINE.lock().unwrap();
+        guard
+            .as_mut()
+            .map(|m| m.transcribe_with_words(&waveform).map_err(|e| e.to_string()))
     })
     .await
     .ok()

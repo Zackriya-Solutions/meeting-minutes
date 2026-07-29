@@ -235,9 +235,11 @@ async fn diarize_and_export<R: Runtime>(
 /// reference splits exactly at speaker changes.)
 ///
 /// Rules, in order:
-/// - turns are linearized (sorted; a turn overlapping its predecessor is clipped to
-///   start where the predecessor ended — overlapped speech can't be duplicated in a
-///   linear transcript);
+/// - turns are linearized (sorted; a different-cluster turn overlapping its
+///   predecessor's tail — an interruption take-over — splits at the midpoint of the
+///   overlap, so neither reply swallows the whole crosstalk region; a turn fully
+///   inside its predecessor is skipped, since the diarizer already carves meaningful
+///   interjections out of their containers);
 /// - adjacent same-cluster turns merge while the silence between them is at most
 ///   `merge_gap_ms` and the merged span stays within `max_ms`;
 /// - spans shorter than `min_ms` after clipping fold into the previous same-cluster
@@ -258,7 +260,27 @@ pub fn plan_turn_asr_segments(
     let mut spans: Vec<(i64, i64, i64)> = Vec::new();
     for t in &sorted {
         let prev_end = spans.last().map(|s| s.1).unwrap_or(i64::MIN);
-        let start = t.start_ms.max(prev_end);
+        let mut start = t.start_ms.max(prev_end);
+        // Interruption take-over: a different-cluster turn overlapping the previous
+        // span's tail claims the overlap from its midpoint, so the interrupter's first
+        // words aren't transcribed into the interrupted speaker's reply. The split only
+        // happens when BOTH resulting pieces keep at least `min_ms` — shrinking the
+        // previous span below the floor would break this function's contract just as
+        // much as emitting a too-short new span.
+        if t.start_ms < prev_end && t.end_ms > prev_end {
+            if let Some(last) = spans.last_mut() {
+                if last.2 != t.cluster_id {
+                    let boundary = (t.start_ms + prev_end) / 2;
+                    if t.end_ms - boundary >= min_ms
+                        && boundary - last.0 >= min_ms
+                        && boundary > last.0
+                    {
+                        last.1 = boundary;
+                        start = boundary;
+                    }
+                }
+            }
+        }
         if t.end_ms - start < min_ms {
             // Too short after clipping: extend a contiguous same-cluster predecessor.
             if let Some(last) = spans.last_mut() {
@@ -299,9 +321,14 @@ async fn turn_aligned_retranscribe<R: Runtime>(
 ) -> anyhow::Result<crate::pipeline::diarization_commands::DiarizeOutcome> {
     use crate::pipeline::diarization_commands::{compute_speaker_turns, DiarizeError};
 
-    // Serialize with manual retranscription — both replace this meeting's rows.
-    let _guard = crate::audio::retranscription::RetranscriptionGuard::acquire()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    // This pass runs in the background, so patience is free — bailing here degrades the
+    // meeting to silence-cut rows (25 s multi-speaker blocks, many unattributed), which
+    // is exactly what this pass exists to prevent. Wait out transient blockers (model
+    // still loading at app start, another meeting's refinement holding the guard)
+    // instead of instantly falling back.
+    const POLL: std::time::Duration = std::time::Duration::from_secs(3);
+    const MODEL_LOAD_WAIT: std::time::Duration = std::time::Duration::from_secs(180);
+    const GUARD_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
     let (provider, _model): (String, String) =
         sqlx::query_as("SELECT provider, model FROM transcript_settings WHERE id='1'")
@@ -313,9 +340,26 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     if provider != "gigaam" {
         anyhow::bail!("turn-aligned pass supports the gigaam provider (configured: {provider})");
     }
-    if !crate::gigaam_engine::is_loaded() {
-        anyhow::bail!("GigaAM model is not loaded");
+
+    let model_deadline = std::time::Instant::now() + MODEL_LOAD_WAIT;
+    while !crate::gigaam_engine::is_loaded() {
+        if std::time::Instant::now() >= model_deadline {
+            anyhow::bail!("GigaAM model is not loaded");
+        }
+        tokio::time::sleep(POLL).await;
     }
+
+    // Serialize with manual retranscription — both replace this meeting's rows.
+    let guard_deadline = std::time::Instant::now() + GUARD_WAIT;
+    let _guard = loop {
+        match crate::audio::retranscription::RetranscriptionGuard::acquire() {
+            Ok(guard) => break guard,
+            Err(e) if std::time::Instant::now() >= guard_deadline => {
+                anyhow::bail!(e)
+            }
+            Err(_) => tokio::time::sleep(POLL).await,
+        }
+    };
 
     // 1) Diarize (identity resolution included; transcript rows untouched).
     let plan = match compute_speaker_turns(app, pool, meeting_id).await {
@@ -353,11 +397,40 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     );
 
     let mut transcripts: Vec<(String, f64, f64)> = Vec::new(); // (text, start_ms, end_ms)
-    for (start_ms, end_ms) in spans {
+    for (i, &(start_ms, end_ms)) in spans.iter().enumerate() {
         let s = ((start_ms as f64 / 1000.0) * SAMPLE_RATE) as usize;
         let e = (((end_ms as f64 / 1000.0) * SAMPLE_RATE) as usize).min(total);
         if e <= s || e - s < 1_600 {
             continue; // under 100 ms of audio
+        }
+        // Short replies transcribe with surrounding context, cut back to their own
+        // words by timestamp — an isolated sub-second snippet hallucinates.
+        if end_ms - start_ms < SHORT_SPAN_MS {
+            let prev_end = i.checked_sub(1).map(|p| spans[p].1);
+            let next_start = spans.get(i + 1).map(|s| s.0);
+            match transcribe_short_span_with_context(
+                &samples, start_ms, end_ms, prev_end, next_start,
+            )
+            .await
+            {
+                Ok(Some(text)) => {
+                    if !text.trim().is_empty() {
+                        transcripts.push((text, start_ms as f64, end_ms as f64));
+                    }
+                    continue;
+                }
+                Ok(None) => {} // engine variant lacks word timing → plain path below
+                Err(e) => {
+                    if !crate::gigaam_engine::is_loaded() {
+                        anyhow::bail!("GigaAM model unloaded mid-pass");
+                    }
+                    warn!(
+                        "[refinement] meeting {meeting_id}: short reply at {:.1}s failed to transcribe: {e}",
+                        start_ms as f64 / 1000.0
+                    );
+                    continue;
+                }
+            }
         }
         let piece = crate::audio::vad::SpeechSegment {
             samples: samples[s..e].to_vec(),
@@ -387,6 +460,9 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     if transcripts.is_empty() {
         anyhow::bail!("turn-aligned transcription produced no text");
     }
+    // Rejoin sentences that phantom boundary micro-spans split across rows.
+    let transcripts =
+        rejoin_sentence_fragments(transcripts, &plan.turns, FRAGMENT_JOIN_MAX_GAP_MS);
 
     // 4) Replace the meeting's rows atomically.
     let segments = crate::audio::common::create_transcript_segments(&transcripts);
@@ -430,6 +506,192 @@ async fn turn_aligned_retranscribe<R: Runtime>(
                 anyhow::anyhow!("attribution failed: no recording")
             }
         })
+}
+
+/// Spans shorter than this are transcribed WITH surrounding audio context and cut back
+/// to the span's own words by timestamp. An RNN-T given a bare sub-second reply ("Нет",
+/// "Ага") has no acoustic context and routinely hallucinates unrelated words; measured on
+/// a real meeting, isolated <3 s snippets produced one-word nonsense rows ("Дочь.", "Я.",
+/// "Нес.") where the padded transcription reads correctly.
+pub(crate) const SHORT_SPAN_MS: i64 = 3_000;
+/// Audio added on each side of a short span before transcription (clamped to the file).
+pub(crate) const SPAN_CONTEXT_MS: i64 = 2_000;
+
+/// How far into an *uncovered* gap (audio no planned span owns) a short span may reach
+/// to claim words. Diarizer boundaries run ~±0.3 s soft and transducer emissions lag the
+/// audio, so a reply's first/last word often lands just outside the span — without
+/// rescue it would belong to no row and vanish (observed: «Будем смотреть.» losing
+/// «Будем» to a 2 s gap before the span).
+pub(crate) const GAP_RESCUE_MS: i64 = 700;
+
+/// Word-acceptance bounds for a short span: the span itself plus up to
+/// [`GAP_RESCUE_MS`] of the adjacent gaps, never crossing a neighboring span and
+/// splitting a shared gap at its midpoint (so two rescuing spans can never both claim
+/// the same word).
+pub(crate) fn span_word_bounds(
+    span_start_ms: i64,
+    span_end_ms: i64,
+    prev_end_ms: Option<i64>,
+    next_start_ms: Option<i64>,
+) -> (i64, i64) {
+    let lo = match prev_end_ms {
+        Some(p) => (span_start_ms - GAP_RESCUE_MS).max((p + span_start_ms + 1) / 2),
+        None => span_start_ms - GAP_RESCUE_MS,
+    };
+    let hi = match next_start_ms {
+        Some(n) => (span_end_ms + GAP_RESCUE_MS).min((span_end_ms + n) / 2),
+        None => span_end_ms + GAP_RESCUE_MS,
+    };
+    (lo.min(span_start_ms), hi.max(span_end_ms))
+}
+
+/// Keep only the words whose midpoint falls inside `[lo_ms, hi_ms)` (times relative to
+/// the transcribed window) and join them. Words emitted for the surrounding context —
+/// the neighbor speakers' replies — are cut away. Standalone dialogue dashes are
+/// dropped: the model emits them when it hears a voice change inside the padded window,
+/// but a per-speaker row is single-voice by construction.
+pub(crate) fn cut_words_to_span(
+    words: &[crate::gigaam_engine::TimedWord],
+    lo_ms: i64,
+    hi_ms: i64,
+) -> String {
+    words
+        .iter()
+        .filter(|w| {
+            let mid = (w.start_ms + w.end_ms) / 2;
+            mid >= lo_ms && mid < hi_ms && !matches!(w.text.as_str(), "—" | "–" | "-")
+        })
+        .map(|w| w.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Transcribe a short ASR span with [`SPAN_CONTEXT_MS`] of surrounding audio on each
+/// side, then cut the result back to the span's own words (plus adjacent-gap rescue —
+/// see [`span_word_bounds`]; `prev_end_ms`/`next_start_ms` are the neighboring spans'
+/// edges). Returns `Ok(None)` when the loaded engine variant has no word timing (caller
+/// falls back to the plain snippet path); `Ok(Some(""))` when the span's audio produced
+/// no in-span words (caller should emit no row — this is what suppresses hallucinated
+/// one-word replies).
+pub(crate) async fn transcribe_short_span_with_context(
+    samples: &[f32],
+    span_start_ms: i64,
+    span_end_ms: i64,
+    prev_end_ms: Option<i64>,
+    next_start_ms: Option<i64>,
+) -> anyhow::Result<Option<String>> {
+    const SR: i64 = 16_000;
+    let total_ms = samples.len() as i64 * 1000 / SR;
+    let (lo_ms, hi_ms) = span_word_bounds(span_start_ms, span_end_ms, prev_end_ms, next_start_ms);
+    let win_start_ms = (lo_ms - SPAN_CONTEXT_MS).max(0);
+    let win_end_ms = (hi_ms + SPAN_CONTEXT_MS).min(total_ms);
+    let s = (win_start_ms * SR / 1000) as usize;
+    let e = ((win_end_ms * SR / 1000) as usize).min(samples.len());
+    if e <= s {
+        return Ok(Some(String::new()));
+    }
+    match crate::gigaam_engine::transcribe_with_words(samples[s..e].to_vec()).await {
+        Some(Ok(Some(words))) => Ok(Some(cut_words_to_span(
+            &words,
+            lo_ms - win_start_ms,
+            hi_ms - win_start_ms,
+        ))),
+        Some(Ok(None)) => Ok(None),
+        Some(Err(error)) => Err(anyhow::anyhow!(error)),
+        None => Err(anyhow::anyhow!("GigaAM model unloaded mid-pass")),
+    }
+}
+
+/// Maximum silence between two rows for them to still be one split sentence.
+pub(crate) const FRAGMENT_JOIN_MAX_GAP_MS: f64 = 2_500.0;
+
+/// The diarization cluster owning most of `[start_ms, end_ms]`, by summed turn overlap.
+/// `None` when no turn overlaps the range at all.
+pub(crate) fn majority_cluster(
+    start_ms: i64,
+    end_ms: i64,
+    turns: &[crate::pipeline::diarization::SpeakerTurn],
+) -> Option<i64> {
+    let mut overlap: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for t in turns {
+        let ov = (end_ms.min(t.end_ms) - start_ms.max(t.start_ms)).max(0);
+        if ov > 0 {
+            *overlap.entry(t.cluster_id).or_insert(0) += ov;
+        }
+    }
+    overlap
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+        .map(|(c, _)| c)
+}
+
+/// Rejoin sentence fragments that phantom boundary micro-spans split across rows.
+///
+/// The two segmentation grids disagree by a few hundred ms about where a speaker change
+/// happens; the disagreement sliver becomes a micro-span whose cluster attachment is a
+/// coin flip, splitting the first word(s) of a reply onto a phantom speaker (observed:
+/// «Понять,» / «Нужно ли мне здесь ставить…» as two rows, «Он ещё» / «не готов.»).
+/// GigaAM's punctuation+capitalization marks the seam. A row ending without
+/// sentence-final punctuation merges into the next row when:
+/// - both rows belong to the SAME diarization cluster (per `turns` majority overlap):
+///   it is a ≤2-word fragment, or the next row starts lowercase — same voice, so the
+///   merge can never re-fuse two speakers;
+/// - the rows belong to DIFFERENT (or unknown) clusters: only on explicit mid-sentence
+///   evidence — the row ends with a comma, or the next row starts lowercase. A bare
+///   unpunctuated fragment before a capitalized row does NOT merge across clusters:
+///   that is the shape of a genuine short reply («Да» that the model left unpunctuated)
+///   followed by another speaker's new sentence, and merging it would re-fuse two
+///   speakers into one row — the defect this PR exists to fix.
+///
+/// Merged rows span both time ranges, so speaker attribution resolves to whoever
+/// dominates the combined audio — the real speaker, since the phantom sliver is the
+/// smaller piece.
+pub(crate) fn rejoin_sentence_fragments(
+    rows: Vec<(String, f64, f64)>,
+    turns: &[crate::pipeline::diarization::SpeakerTurn],
+    max_gap_ms: f64,
+) -> Vec<(String, f64, f64)> {
+    fn ends_terminal(text: &str) -> bool {
+        matches!(
+            text.trim_end().chars().last(),
+            Some('.' | '!' | '?' | '…') | None
+        )
+    }
+    fn ends_mid_sentence(text: &str) -> bool {
+        matches!(text.trim_end().chars().last(), Some(',' | ':' | ';'))
+    }
+    fn starts_lowercase(text: &str) -> bool {
+        text.trim_start()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_lowercase())
+    }
+    // (text, start_ms, end_ms, majority cluster)
+    let mut out: Vec<(String, f64, f64, Option<i64>)> = Vec::new();
+    for (text, start_ms, end_ms) in rows {
+        let cluster = majority_cluster(start_ms as i64, end_ms as i64, turns);
+        if let Some(last) = out.last_mut() {
+            let unterminated = !ends_terminal(&last.0);
+            let last_is_fragment = unterminated && last.0.split_whitespace().count() <= 2;
+            let next_continues = starts_lowercase(&text);
+            let same_cluster = last.3.is_some() && last.3 == cluster;
+            let should_merge = if same_cluster {
+                last_is_fragment || (unterminated && next_continues)
+            } else {
+                unterminated && (ends_mid_sentence(&last.0) || next_continues)
+            };
+            if start_ms - last.2 <= max_gap_ms && should_merge {
+                last.0 = format!("{} {}", last.0.trim_end(), text.trim_start());
+                last.2 = last.2.max(end_ms);
+                // The merged row's voice is whichever cluster dominates the combined
+                // span — recompute so chained merges keep comparing against reality.
+                last.3 = majority_cluster(last.1 as i64, last.2 as i64, turns);
+                continue;
+            }
+        }
+        out.push((text, start_ms, end_ms, cluster));
+    }
+    out.into_iter().map(|(t, s, e, _)| (t, s, e)).collect()
 }
 
 /// One transcript row as needed for turn assembly.
@@ -621,12 +883,45 @@ mod tests {
     }
 
     #[test]
-    fn planner_linearizes_overlapping_turns() {
-        // Overlapped speech: the second turn starts before the first ends. The overlap
-        // region belongs to the first span; the second is clipped, never duplicated.
+    fn planner_splits_takeover_overlap_at_midpoint() {
+        // Overlapped speech: the second turn starts before the first ends. Neither reply
+        // swallows the whole crosstalk region — the boundary is the overlap midpoint.
         let turns = vec![turn(0, 10_000, 0), turn(8_000, 14_000, 1)];
         let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
-        assert_eq!(spans, vec![(0, 10_000), (10_000, 14_000)]);
+        assert_eq!(spans, vec![(0, 9_000), (9_000, 14_000)]);
+    }
+
+    #[test]
+    fn takeover_split_never_shrinks_the_previous_span_below_min() {
+        // The midpoint boundary (150+400)/2 = 275 would leave the previous span at
+        // 275 ms < min_ms(350). The split must not happen: the previous span keeps its
+        // full extent and the new turn clips at prev_end, as before the midpoint rule.
+        let turns = vec![turn(0, 400, 0), turn(150, 5_000, 1)];
+        let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
+        assert_eq!(spans, vec![(0, 400), (400, 5_000)]);
+    }
+
+    #[test]
+    fn planner_keeps_carved_interjection_as_own_segment() {
+        // The diarizer carves an overlapped interjection out of its containing turn
+        // (split_turns_at_interjections), yielding A / B / A. Each piece must stay its
+        // own ASR segment — the two A pieces must NOT re-merge across B.
+        let turns = vec![
+            turn(0, 3_209, 1),
+            turn(3_209, 4_109, 0),
+            turn(4_109, 4_720, 1),
+        ];
+        let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
+        assert_eq!(spans, vec![(0, 3_209), (3_209, 4_109), (4_109, 4_720)]);
+    }
+
+    #[test]
+    fn planner_still_skips_contained_leftover_turns() {
+        // A turn fully inside the previous span (below the diarizer's carve threshold or
+        // from an engine that doesn't carve) is skipped, not duplicated.
+        let turns = vec![turn(0, 10_000, 0), turn(4_000, 4_300, 1)];
+        let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
+        assert_eq!(spans, vec![(0, 10_000)]);
     }
 
     #[test]
@@ -637,6 +932,153 @@ mod tests {
         let turns = vec![turn(0, 10_000, 0), turn(9_800, 10_100, 1), turn(10_200, 15_000, 0)];
         let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
         assert_eq!(spans, vec![(0, 15_000)]);
+    }
+
+    #[test]
+    fn word_cut_keeps_only_in_span_words() {
+        use crate::gigaam_engine::TimedWord;
+        let w = |text: &str, start_ms: i64, end_ms: i64| TimedWord {
+            text: text.into(),
+            start_ms,
+            end_ms,
+        };
+        // Window = context(2s) + span [2000,3000) + context. Only "нет" (midpoint
+        // 2450) is inside; the neighbors' words on both sides are cut away.
+        let words = vec![
+            w("вопрос?", 1_500, 1_950),
+            w("нет,", 2_200, 2_700),
+            w("ладно.", 3_100, 3_600),
+        ];
+        assert_eq!(cut_words_to_span(&words, 2_000, 3_000), "нет,");
+        // Nothing in span → empty string (caller emits no row — hallucination guard).
+        assert_eq!(cut_words_to_span(&words, 4_000, 5_000), "");
+        // Boundary word: midpoint exactly at span start is kept, at span end is not.
+        let edge = vec![w("а", 2_000, 2_000), w("б", 3_000, 3_000)];
+        assert_eq!(cut_words_to_span(&edge, 2_000, 3_000), "а");
+        // Standalone dialogue dashes from the padded window are dropped.
+        let dashed = vec![w("—", 2_100, 2_150), w("да.", 2_200, 2_600)];
+        assert_eq!(cut_words_to_span(&dashed, 2_000, 3_000), "да.");
+    }
+
+    #[test]
+    fn sentence_fragments_rejoin_across_phantom_boundaries() {
+        // Real cases from the 2026-07-28 meeting review.
+        let rows = vec![
+            ("Понять,".to_string(), 1_638_000.0, 1_639_500.0),
+            (
+                "Нужно ли мне здесь ставить жёлтый?".to_string(),
+                1_640_000.0,
+                1_648_000.0,
+            ),
+            ("Он ещё".to_string(), 1_809_000.0, 1_810_000.0),
+            ("не готов.".to_string(), 1_810_200.0, 1_811_000.0),
+            ("Всё понял.".to_string(), 1_812_000.0, 1_813_000.0),
+        ];
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
+        let texts: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "Понять, Нужно ли мне здесь ставить жёлтый?",
+                "Он ещё не готов.",
+                "Всё понял.",
+            ]
+        );
+        // Merged rows span both time ranges.
+        assert_eq!(out[0].1, 1_638_000.0);
+        assert_eq!(out[0].2, 1_648_000.0);
+    }
+
+    #[test]
+    fn fragment_chains_merge_but_full_sentences_stay_separate() {
+        let rows = vec![
+            ("Не, я думаю,".to_string(), 0.0, 1_000.0),
+            ("что мы путаем статусы. Вот".to_string(), 1_500.0, 4_000.0),
+            ("важно разделять".to_string(), 4_200.0, 5_000.0),
+            ("Прототип готов, NVP не готов.".to_string(), 5_500.0, 9_000.0),
+        ];
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
+        let texts: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
+        // The lowercase chain merges; the capitalized full sentence stays its own row.
+        assert_eq!(
+            texts,
+            vec![
+                "Не, я думаю, что мы путаем статусы. Вот важно разделять",
+                "Прототип готов, NVP не готов.",
+            ]
+        );
+        // A completed sentence followed by a capitalized reply does NOT merge —
+        // genuine interruptions stay split.
+        let rows = vec![
+            ("Готовы к MVP?".to_string(), 0.0, 1_000.0),
+            ("Нет, нет.".to_string(), 1_100.0, 2_000.0),
+        ];
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 2);
+        // A long pause blocks merging even mid-sentence.
+        let rows = vec![
+            ("Осталось".to_string(), 0.0, 800.0),
+            ("совсем немного.".to_string(), 10_000.0, 12_000.0),
+        ];
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn genuine_unpunctuated_reply_never_merges_across_speakers() {
+        // A real short reply the model left unpunctuated («Да»), followed by ANOTHER
+        // speaker's new capitalized sentence. Bare-fragment merging is same-cluster
+        // only, so the two speakers' rows must stay separate.
+        let rows = vec![
+            ("Да".to_string(), 0.0, 500.0),
+            ("Давайте начнём со статусов.".to_string(), 700.0, 4_000.0),
+        ];
+        let cross_cluster = vec![turn(0, 500, 2), turn(700, 4_000, 0)];
+        let out = rejoin_sentence_fragments(rows.clone(), &cross_cluster, FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 2, "different speakers must not re-fuse");
+
+        // The same shape within ONE speaker's own turn is a split utterance — merge.
+        let same_cluster = vec![turn(0, 4_000, 2)];
+        let out = rejoin_sentence_fragments(rows, &same_cluster, FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0, "Да Давайте начнём со статусов.");
+
+        // Cross-cluster merging still happens on explicit mid-sentence evidence: a
+        // comma ending («Понять,») or a lowercase continuation («не готов.») — that is
+        // the phantom-micro-span shape this pass exists to repair.
+        let rows = vec![
+            ("Понять,".to_string(), 0.0, 1_500.0),
+            ("Нужно ли мне здесь ставить жёлтый?".to_string(), 2_000.0, 8_000.0),
+        ];
+        let cross = vec![turn(0, 1_500, 4), turn(2_000, 8_000, 1)];
+        let out = rejoin_sentence_fragments(rows, &cross, FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn span_word_bounds_rescue_gap_words_without_double_claim() {
+        // Isolated span: full rescue margin on both sides.
+        assert_eq!(span_word_bounds(2_000, 3_000, None, None), (1_300, 3_700));
+        // Neighbors far away: capped at GAP_RESCUE_MS.
+        assert_eq!(
+            span_word_bounds(2_000, 3_000, Some(0), Some(6_000)),
+            (1_300, 3_700)
+        );
+        // Close neighbors: shared gap splits at its midpoint — the previous span ends
+        // at 1600, so this span may reach back only to 1800.
+        assert_eq!(
+            span_word_bounds(2_000, 3_000, Some(1_600), Some(3_400)),
+            (1_800, 3_200)
+        );
+        // Touching neighbors: no rescue beyond the span itself.
+        assert_eq!(
+            span_word_bounds(2_000, 3_000, Some(2_000), Some(3_000)),
+            (2_000, 3_000)
+        );
+        // Two adjacent spans can never both claim a gap word: A's hi == B's lo.
+        let (_, a_hi) = span_word_bounds(1_000, 2_000, None, Some(2_400));
+        let (b_lo, _) = span_word_bounds(2_400, 3_000, Some(2_000), None);
+        assert!(a_hi <= b_lo);
     }
 
     fn row(text: &str, start: f64, end: f64, speaker: Option<(i64, &str)>) -> ExportRow {
